@@ -1,49 +1,33 @@
+use crate::browser_session::{
+    choose_debug_port, find_windows_browsers, launch_browser, open_or_find_page,
+    wait_for_debug_endpoint, CdpPage,
+};
+use crate::dashen_auth::{
+    build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
+    extract_role_id, is_signature_helper_missing,
+};
+use crate::login_flow::{LoginPhase, LoginProgress};
 use crate::models::{CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct DashenCredentials {
-    pub role_id: i64,
-    pub token: String,
-    pub dts: Option<String>,
-    pub server: i64,
-    pub saved_at: String,
-}
+pub use crate::browser_session::{select_browser, BrowserCandidate};
+pub use crate::credential_store::{
+    credential_status_for_path, redact_sensitive_text as redacted_login_error,
+    save_credentials_atomic, DashenCredentials,
+};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BrowserCandidate {
-    pub kind: String,
-    pub path: PathBuf,
-}
+const LOGIN_URL: &str =
+    "https://pay.ds.163.com/activity/ld5?addSkeleton=1&channel=yydc_cps10.cczx&setId=67b466a5b8cf7e3576aa3521";
+const SIGN_PAGE_URL: &str = "https://ds.163.com/";
+const LOGIN_TIMEOUT_SECONDS: u64 = 180;
+const SERVER_ID: i64 = 1;
 
-impl BrowserCandidate {
-    pub fn chrome(path: impl Into<PathBuf>) -> Self {
-        Self {
-            kind: "chrome".to_string(),
-            path: path.into(),
-        }
-    }
-
-    pub fn edge(path: impl Into<PathBuf>) -> Self {
-        Self {
-            kind: "edge".to_string(),
-            path: path.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CredentialLoginProgress {
-    phase: String,
-    message: String,
-}
+static LOGIN_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
     Ok(app.path().app_data_dir()?.join(".dashen_credentials.json"))
@@ -53,147 +37,52 @@ pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
     credential_status_for_path(&credential_path(app)?)
 }
 
-pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
-    if !path.exists() {
-        return Ok(CredentialStatus {
-            state: "missing".to_string(),
-            message: "尚未保存网易大神登录凭证。".to_string(),
-            exposes_secret: false,
-            role_id: None,
-            saved_at: None,
-        });
-    }
-    let text = std::fs::read_to_string(path)?;
-    let json: serde_json::Value = serde_json::from_str(&text)?;
-    let role_id = json.get("role_id").and_then(|item| {
-        item.as_i64()
-            .or_else(|| item.as_str().and_then(|text| text.parse().ok()))
-    });
-    let token = json
-        .get("token")
-        .and_then(|item| item.as_str())
-        .unwrap_or("");
-    let saved_at = json
-        .get("saved_at")
-        .and_then(|item| item.as_str())
-        .map(str::to_string);
-    let complete = role_id.is_some() && !token.trim().is_empty();
-    Ok(CredentialStatus {
-        state: if complete { "saved" } else { "incomplete" }.to_string(),
-        message: if complete {
-            "已保存网易大神登录凭证，可用于同步。".to_string()
-        } else {
-            "本地凭证不完整，请重新登录。".to_string()
-        },
-        exposes_secret: false,
-        role_id,
-        saved_at,
+pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult> {
+    LOGIN_CANCELLED.store(false, Ordering::SeqCst);
+
+    emit_login_progress(
+        &app,
+        LoginPhase::LocatingBrowser,
+        "正在查找 Chrome 或 Edge。",
+    );
+    let browser = select_browser(find_windows_browsers())?;
+    let port = choose_debug_port(std::process::id());
+    let profile_dir = app.path().app_data_dir()?.join("chrome-dashen-profile");
+
+    emit_login_progress(&app, LoginPhase::OpeningBrowser, "正在打开网易大神登录页。");
+    launch_browser(&browser, LOGIN_URL, port, &profile_dir)
+        .map_err(|error| anyhow!(redacted_login_error(&error.to_string())))?;
+
+    wait_for_debug_endpoint(port, Duration::from_secs(20)).await?;
+    emit_login_progress(
+        &app,
+        LoginPhase::WaitingForLogin,
+        "请在浏览器中完成登录，应用会自动识别登录状态。",
+    );
+
+    let credentials = fetch_credentials_from_browser(&app, port).await?;
+    emit_login_progress(&app, LoginPhase::Saving, "正在保存本地登录凭证。");
+    let path = credential_path(&app)?;
+    save_credentials_atomic(&path, &credentials)?;
+    emit_login_progress(&app, LoginPhase::Ready, "已保存登录凭证，可以开始同步。");
+
+    Ok(CredentialLoginResult {
+        status: credential_status_for_path(&path)?,
     })
 }
 
-pub fn save_credentials_atomic(path: &Path, credentials: &DashenCredentials) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    {
-        let mut file = std::fs::File::create(&tmp)?;
-        let text = serde_json::to_string_pretty(credentials)?;
-        file.write_all(text.as_bytes())?;
-        file.flush()?;
-        file.sync_all()?;
-    }
-    std::fs::rename(tmp, path)?;
-    Ok(())
-}
-
-pub fn select_browser(candidates: Vec<BrowserCandidate>) -> Result<BrowserCandidate> {
-    candidates
-        .iter()
-        .find(|item| item.kind == "chrome")
-        .cloned()
-        .or_else(|| candidates.into_iter().find(|item| item.kind == "edge"))
-        .ok_or_else(|| anyhow!("未找到 Chrome 或 Edge"))
-}
-
-pub fn find_windows_browsers() -> Vec<BrowserCandidate> {
-    let candidates = [
-        (
-            "chrome",
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        ),
-        (
-            "chrome",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        ),
-        (
-            "edge",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ),
-        (
-            "edge",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        ),
-    ];
-    candidates
-        .into_iter()
-        .filter_map(|(kind, path)| {
-            let path = PathBuf::from(path);
-            if path.exists() {
-                Some(if kind == "chrome" {
-                    BrowserCandidate::chrome(path)
-                } else {
-                    BrowserCandidate::edge(path)
-                })
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-pub fn redacted_login_error(message: &str) -> String {
-    let mut parts = Vec::new();
-    for part in message.split_whitespace() {
-        let lowered = part.to_ascii_lowercase();
-        if lowered.contains("token") || lowered.contains("cookie") {
-            let key = part.split_once('=').map(|(key, _)| key).unwrap_or(part);
-            parts.push(format!("{key}=***REDACTED***"));
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    parts.join(" ")
-}
-
-pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult> {
-    emit_login_progress(&app, "locating_browser", "正在查找 Chrome 或 Edge。");
-    let browser = select_browser(find_windows_browsers())?;
-    emit_login_progress(&app, "opening_browser", "正在打开网易大神登录页。");
-    let _child = std::process::Command::new(browser.path)
-        .arg("https://ds.163.com/")
-        .spawn()
-        .map_err(|error| anyhow!(redacted_login_error(&error.to_string())))?;
-    emit_login_progress(&app, "waiting_for_login", "请在浏览器完成登录。");
-    Err(anyhow!(
-        "浏览器登录已打开。自动提取 role_id/token 需要在后续版本完成 CDP 签名流程。"
-    ))
-}
-
 pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResult> {
+    LOGIN_CANCELLED.store(true, Ordering::SeqCst);
     Ok(CredentialLoginCancelResult {
         cancelled: true,
         message: "已取消登录等待。".to_string(),
     })
 }
 
-pub fn emit_login_progress(app: &AppHandle, phase: &str, message: &str) {
+pub fn emit_login_progress(app: &AppHandle, phase: LoginPhase, message: &str) {
     let _ = app.emit(
         "credential-login-progress",
-        CredentialLoginProgress {
-            phase: phase.to_string(),
-            message: message.to_string(),
-        },
+        LoginProgress::new(phase, message),
     );
 }
 
@@ -202,7 +91,100 @@ pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials 
         role_id,
         token,
         dts: None,
-        server: 1,
+        server: SERVER_ID,
         saved_at: Utc::now().to_rfc3339(),
     }
+}
+
+async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<DashenCredentials> {
+    let websocket_url = open_or_find_page(LOGIN_URL, port).await?;
+    let mut page = CdpPage::connect(&websocket_url).await?;
+    let deadline = Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECONDS);
+    let mut last_role_id: Option<String> = None;
+
+    while Instant::now() < deadline {
+        if LOGIN_CANCELLED.load(Ordering::SeqCst) {
+            emit_login_progress(app, LoginPhase::Cancelled, "已取消登录等待。");
+            return Err(anyhow!("已取消登录等待。"));
+        }
+
+        if let Some(role_id) = collect_role_id(&mut page).await {
+            if last_role_id.as_deref() != Some(role_id.as_str()) {
+                emit_login_progress(
+                    app,
+                    LoginPhase::RoleFound,
+                    "已识别玩家身份，正在换取同步凭证。",
+                );
+            }
+            last_role_id = Some(role_id);
+        }
+
+        if let Some(role_id) = &last_role_id {
+            let result = page
+                .evaluate(&build_get_report_token_script(role_id, SERVER_ID), true)
+                .await?;
+            if let Some(credentials) = credentials_from_report_result(
+                &result,
+                role_id,
+                SERVER_ID,
+                &Utc::now().to_rfc3339(),
+            )? {
+                return Ok(credentials);
+            }
+
+            if is_signature_helper_missing(&result) {
+                emit_login_progress(
+                    app,
+                    LoginPhase::LoadingSignPage,
+                    "正在打开签名页面以完成凭证换取。",
+                );
+                let script = format!(
+                    "location.href = {}; true",
+                    serde_json::to_string(SIGN_PAGE_URL)?
+                );
+                let _ = page.evaluate(&script, false).await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            } else {
+                let detail = result
+                    .get("error")
+                    .and_then(|item| item.as_str())
+                    .unwrap_or("凭证暂未就绪");
+                emit_login_progress(
+                    app,
+                    LoginPhase::TokenPending,
+                    &format!("凭证暂未就绪：{}", redacted_login_error(detail)),
+                );
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        } else {
+            emit_login_progress(
+                app,
+                LoginPhase::WaitingForLogin,
+                "请完成登录并进入守望先锋相关页面。",
+            );
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    }
+
+    emit_login_progress(app, LoginPhase::Failed, "登录超时，未能完成凭证换取。");
+    if last_role_id.is_some() {
+        Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
+    } else {
+        Err(anyhow!(
+            "登录超时，未能识别玩家身份。请确认已完成登录并打开网易大神守望先锋页面。"
+        ))
+    }
+}
+
+async fn collect_role_id(page: &mut CdpPage) -> Option<String> {
+    let candidates = page
+        .evaluate(&build_collect_candidates_script(), false)
+        .await
+        .ok()?;
+    let texts = candidates
+        .as_array()?
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    extract_role_id(&texts)
 }
