@@ -2,110 +2,112 @@
 
 ## Status
 
-This is the first confirmed design slice for Phase 4. The phase is expected to include more work than this document currently covers. Additional Phase 4 capabilities will be appended after user review.
+This design is the confirmed Phase 4 scope for the Windows-first productization pass. It replaces earlier partial notes and is ready to drive an implementation plan after the self-review in this document.
 
 ## Goal
 
-Phase 4 turns the current single-user Tauri desktop app into a Windows 11 installable product path: install, log in to NetEase Dashen through Chrome or Edge, save credentials locally without exposing secrets, sync the existing target season, and enter the already-built review and match analysis pages.
+Phase 4 turns the current single-user Tauri desktop app into a Windows 11 installable product path: install, log in to NetEase Dashen through Chrome or Edge, save credentials locally without exposing secrets, sync the current season, and use product-ready match, ranking, review, and analysis surfaces.
 
-The phase also productizes the core analysis surface after Phase 3:
+Phase 4 also consolidates the post-Phase-3 product surface:
 
-- Match details gain a Phase 3-style same-season average comparison.
-- A new ranking module exposes hero win-rate and map win-rate rankings.
-- The analytics module is simplified into a two-row dashboard: friend analysis above, map analysis below.
-- Filtering belongs only to the match module. Analytics pages should show season-level summaries without their own filter controls.
+- Match detail gains same-role, same-season average comparison.
+- A new top-level ranking module owns hero win-rate and map win-rate rankings.
+- The review module keeps personal season review, but removes its old map adaptability area.
+- The analysis module becomes an unfiltered season-level dashboard: friend analysis above map analysis.
+- The match module is the only filtering entry point.
 
 ## Explicit Non-Goals
 
-- Do not add multi-account support.
-- Do not add multi-player product flows.
-- Do not expand the product toward multi-season management beyond the current season input and sync path.
-- Do not port desktop functionality back into Astrbot command handlers.
-- Do not replace the browser-assisted login flow with an embedded Tauri WebView.
-- Do not remove the existing development workflow. `npm run dev`, backend tests, and helper scripts remain available for local debugging.
+- No multi-account support.
+- No multi-player product flows.
+- No Astrbot command or callback expansion.
+- No Astrbot backflow for desktop-only functionality.
+- No embedded Tauri WebView login.
+- No duplicate analytics filters outside the match module.
+- No ranking secondary detail pages for heroes or maps in Phase 4.
+- No manual sorting controls in ranking tables.
+- No removal of the development workflow. `npm run dev`, backend tests, and diagnostic Python scripts remain available.
 
 ## Current Context
 
-The active product is `apps/owstats-desktop`, a Tauri 2, React, TypeScript, Rust, and SQLite desktop app. Phase 2 implemented friend analytics. Phase 3 implemented personal season review and baseline comparison, including backend review aggregation and the `PersonalReviewPage` frontend.
+The product app is `apps/owstats-desktop`, using Tauri 2, React, TypeScript, Rust, and SQLite.
 
-The repository already contains browser-assisted Dashen credential extraction in `scripts/fetch_dashen_credentials.py`. The desktop sync backend already reads credentials from `data/.dashen_credentials.json`. The missing product link is the Tauri-first login experience: a user-facing button, progress events, safe credential storage, status refresh, and release validation.
+Relevant current boundaries:
 
-## Recommended Approach
+- Frontend routes live in `apps/owstats-desktop/src/App.tsx`.
+- Frontend API wrappers and DTOs live in `apps/owstats-desktop/src/shared/api.ts` and `apps/owstats-desktop/src/shared/types.ts`.
+- Match browsing and details live in `apps/owstats-desktop/src/pages/MatchesPage.tsx`, `apps/owstats-desktop/src/pages/MatchDetailPage.tsx`, and `apps/owstats-desktop/src/features/matches/FilterBar.tsx`.
+- Friend analysis currently lives in `apps/owstats-desktop/src/pages/FriendAnalyticsPage.tsx` and still has its own filters.
+- Personal review currently lives in `apps/owstats-desktop/src/pages/PersonalReviewPage.tsx` and still renders map adaptability from `PersonalSeasonReview.maps`.
+- Backend commands are exposed from `apps/owstats-desktop/src-tauri/src/commands.rs`.
+- Match, analytics, review, import, and schema logic live in `queries.rs`, `analytics.rs`, `review.rs`, `importer.rs`, and `db.rs`.
+- Browser-assisted Dashen credential extraction already exists in `scripts/fetch_dashen_credentials.py` and remains a development diagnostic path.
 
-Use the existing Chrome or Edge CDP login technique as the product login path, but implement the installed desktop flow in the Tauri backend rather than requiring users to run Python scripts. Python scripts stay as development and diagnostic tools.
+## Product Architecture
 
-The recommended first implementation route is to port the required CDP credential extraction behavior to Rust:
+The installed Windows app is Tauri-first. Browser-assisted Dashen login is exposed as a desktop button and implemented in the Tauri backend so the installer does not depend on a user-installed Python runtime.
 
-- The Windows installer should not depend on a user-installed Python runtime.
-- Rust-side commands can emit Tauri progress events directly.
-- Credentials can be written through the same backend path that reports credential status.
-- Error handling and redaction can reuse the desktop backend conventions.
+The Python credential script remains available for development and troubleshooting, but installed-product login must run through Tauri commands and events.
 
-If the Rust port proves unexpectedly large, a packaged helper executable is an acceptable fallback for the plan, but a raw Python script invocation is not the preferred installed-product design.
+Data stays local:
+
+- Credentials are stored locally and never displayed.
+- SQLite remains the source of product views after sync/import.
+- Ranking, analysis, review, and match detail all aggregate from the local SQLite data for the currently synced season.
 
 ## User Flow
 
 1. User installs and opens `OWStatsLocal` on Windows 11.
-2. The first setup page shows credential status, local data status, and season sync controls.
+2. The setup page shows credential status, local data status, and season sync controls.
 3. User clicks `登录网易大神`.
-4. Tauri backend starts a credential login task and opens Chrome or Edge with remote debugging enabled.
-5. User logs in to NetEase Dashen in the browser and reaches the OW-linked account/activity page.
+4. Tauri starts a credential login task and opens Chrome or Edge with remote debugging enabled.
+5. User logs in to NetEase Dashen in the browser.
 6. Backend detects `role_id`, requests the report token through the page signing helper, and receives `role_id/token`.
-7. Backend writes credentials to local storage and emits a success progress event.
-8. Frontend refreshes credential status and shows that credentials are saved. It never shows token, cookies, or customerToken.
+7. Backend writes credentials to local storage and emits success.
+8. Frontend refreshes credential status and shows that credentials are saved. It never shows token, cookies, customerToken, or raw credential content.
 9. User clicks `同步赛季`.
-10. Existing Rust sync reads the saved credentials, imports match data into SQLite, and emits sync progress.
-11. Once local data is readable, existing routes allow entering personal review, match list, match details, and friend analytics.
+10. Existing Rust sync reads saved credentials, imports match data into SQLite, and emits sync progress.
+11. After local data is readable, the app allows review, match list, match detail, ranking, and analysis entry.
 
-## Backend Design
+## Credential Login Design
 
-Create a focused credentials module under `apps/owstats-desktop/src-tauri/src/credentials.rs`.
+Create `apps/owstats-desktop/src-tauri/src/credentials.rs`.
 
 Responsibilities:
 
-- Locate the local credential file.
+- Resolve the credential file path for installed and development builds.
 - Read credential status without exposing secrets.
 - Start and cancel browser-assisted login.
-- Emit credential login progress events.
+- Locate Chrome or Edge on Windows.
+- Open the selected browser with a temporary remote-debugging profile.
+- Poll CDP for the Dashen login page and extract `role_id/token`.
 - Save credentials atomically.
-- Redact token-like data from all user-facing errors.
+- Emit redacted progress and error events.
 
-Keep existing module boundaries:
-
-- `sync.rs` continues to perform season sync and read existing credentials.
-- `review.rs` continues to compute onboarding data health and review readiness.
-- `commands.rs` exposes Tauri commands and delegates to modules.
-- `redaction.rs` remains the shared place for token/cookie/customerToken sanitization behavior.
-
-Proposed Tauri commands:
+Tauri commands:
 
 - `get_credential_status() -> CredentialStatus`
 - `start_dashen_login() -> CredentialLoginResult`
 - `cancel_dashen_login() -> CredentialLoginCancelResult`
 
-Optional command if lightweight upstream validation is practical:
+Progress event:
 
-- `validate_credentials() -> CredentialValidationStatus`
+- Event name: `credential-login-progress`
+- Phases: `locating_browser`, `opening_browser`, `waiting_for_login`, `role_id_found`, `requesting_token`, `saving_credentials`, `saved`, `failed`, `cancelled`
 
-`start_dashen_login` should run asynchronously and emit `credential-login-progress` events. It should not block the UI thread.
+Engineering defaults:
 
-Suggested progress phases:
-
-- `locating_browser`
-- `opening_browser`
-- `waiting_for_login`
-- `role_id_found`
-- `requesting_token`
-- `saving_credentials`
-- `saved`
-- `failed`
-- `cancelled`
+- Prefer Chrome, then Edge when both are installed.
+- Use a bounded login timeout of 10 minutes.
+- Cancellation stops polling and leaves any already saved valid credentials untouched.
+- Errors returned to UI always pass through `redaction.rs`.
+- The login task must not block the UI thread.
 
 ## Credential Storage
 
-The sync path currently reads `data/.dashen_credentials.json`. Phase 4 must make the desktop app use a writable local data directory for installed Windows builds while preserving the development path for `npm run dev`.
+Installed Windows builds store credentials in the app data directory. Development builds may continue reading and writing the existing repository-local diagnostic path when explicitly run through scripts.
 
-The stored JSON should contain only fields required for sync and diagnostics:
+Stored JSON contains only sync-required fields and non-secret diagnostics:
 
 ```json
 {
@@ -117,15 +119,15 @@ The stored JSON should contain only fields required for sync and diagnostics:
 }
 ```
 
-Frontend and logs may show:
+UI and logs may show:
 
-- whether credentials exist
-- whether required fields are present
+- credential existence
+- required-field completeness
 - `role_id`
 - `saved_at`
-- non-sensitive file location or directory when useful for troubleshooting
+- non-sensitive directory path for troubleshooting
 
-Frontend and logs must not show:
+UI and logs must not show:
 
 - token
 - cookie
@@ -133,117 +135,233 @@ Frontend and logs must not show:
 - raw credential file contents
 - browser profile contents
 
-Credential writes should be atomic: write a temporary file in the same directory, flush it, then replace the credential file.
+Writes are atomic: write a temporary file in the same directory, flush it, then replace the credential file.
 
-## Frontend Design
+## Onboarding and Sync UI
 
-Update `OnboardingPage.tsx` from an external credential notice into a first-run product setup flow.
+`OnboardingPage.tsx` becomes the first-run product setup flow.
 
 Credential section:
 
-- Shows one of: `未登录`, `登录中`, `已保存`, `可能失效`, `保存失败`.
-- Primary action is `登录网易大神`.
-- When credentials exist, the primary action becomes `重新登录`.
-- During login, show progress messages from `credential-login-progress`.
-- Provide a cancel action while waiting for login.
-- Never show or copy token values.
+- States: not logged in, logging in, saved, possibly invalid, save failed.
+- Primary action: `登录网易大神`.
+- If credentials already exist, primary action becomes `重新登录`.
+- Show progress messages from `credential-login-progress`.
+- Provide cancel while waiting for login.
+- Never show or copy secret values.
 
 Season sync section:
 
-- Keep the existing season number input, defaulting to the current project default of 22 until the product chooses another default.
+- Keep season input. Default remains the current project default, season 22, until changed by a later product decision.
 - Disable sync when credentials are missing or incomplete.
-- If sync fails with a credential-like failure, guide the user to log in again.
-- Keep existing sync progress display.
+- Credential-like sync failure tells the user to log in again.
+- Existing sync progress remains visible and redacted.
 
 Local data section:
 
-- Keep existing SQLite status: data source, preset/open match count, detail count, last updated value, freshness risk, and warnings.
-- Existing readable local data can still unlock review even when a fresh sync is not run in the current session.
-
-Review entry:
-
-- Enable `进入个人赛季复盘` when local data is readable.
-- Keep existing routes and pages unchanged unless they need credential-aware error copy.
+- Keep SQLite status: data source, season, preset/open match count, detail count, last synced/imported time, freshness risk, and warnings.
+- Existing readable local data can unlock the app even if no fresh sync ran in the current session.
 
 All user-facing frontend text remains Chinese.
 
-## Match Module Enhancements
+## Match Module
 
-The match module remains the only place with filters. Existing match list filters should continue to drive match browsing and match-detail entry. Phase 4 should not add duplicate filtering controls to review, ranking, or analytics pages.
+The match module is the only filtering entry point.
 
-Match detail should add a Phase 3 comparison block that compares the selected match against same-season averages. The goal is to answer: "这局比我这个赛季的常态强在哪里、弱在哪里?"
+Filter dimensions:
 
-Recommended comparison content:
+- Season
+- Hero
+- Map
+- Result
+- Mode
+- Date range
 
-- Core output: KDA, final blows, eliminations, damage, healing, deaths, and win/loss result where data is available.
-- Hero context: if the selected match has a dominant hero or known hero usage, compare that hero's match performance against the player's same-season average for that hero when practical; otherwise fall back to all-hero season average.
-- Map context: show the map and mode beside the comparison, but avoid turning match detail into a full map analytics page.
-- Visual treatment: compact metric rows or tiles using `高于均值`, `低于均值`, and neutral states. Avoid large marketing-style cards.
+Filter behavior:
 
-The comparison should tolerate missing fields. If an upstream field is absent or unreliable, the UI should omit that metric rather than show a misleading zero.
+- Non-date filter changes immediately refresh the match list.
+- Date range supports start date and end date.
+- Date shortcuts: last 7 days and last 30 days.
+- Date clear/all removes date limits.
+- Date inputs refresh after a valid selection or after edit completion, not on every partial keystroke.
+
+Existing date fields `dateFrom` and `dateTo` remain the frontend DTO names. Backend `MatchFilters.date_from` and `date_to` continue to receive ISO date strings in `YYYY-MM-DD` format.
+
+## Match Detail Same-Role Comparison
+
+Match detail appends a same-role season average comparison below existing detail content. It does not replace any existing match-detail feature.
+
+Role source:
+
+- Prefer raw upstream `roleType`.
+- Confirmed raw values: `tank`, `dps`, `healer`.
+- Frontend labels: `坦克`, `输出`, `支援`.
+- Diagnostics may show the raw English value.
+- Do not rewrite `healer` to `support` in storage.
+
+Storage/import requirement:
+
+- Preserve `roleType` from upstream payloads for current-player rows.
+- Add local schema support for raw role values where needed. The engineering default is `match_players.role_type TEXT` because same-role comparisons are player-row level, while match summary can continue to show hero and match fields.
+
+Comparison metrics:
+
+- Kills
+- Deaths
+- Damage
+- Healing
+
+Backend data contract:
+
+- Extend `MatchDetailView` with `sameRoleComparison`.
+- Return current match values and same-role season average values explicitly for kills, deaths, damage, and healing.
+- Return raw role and display role label.
+- Return `null` average for a metric when the backend cannot compute a reliable same-role average.
+- Do not require or expose sample count in the primary UI contract.
+
+Frontend behavior:
+
+- Frontend computes displayed deltas from backend current values and average values.
+- Display one row of four compact metric cards.
+- Each card shows only the signed delta versus same-role average.
+- Cards do not repeat the current match raw value.
+- If one metric lacks an average, hide only that card.
+- If all four metrics lack averages, hide the entire comparison block.
+- Use signed numbers and red/green color cues.
+- Death color semantics are inverted: fewer deaths than average is good, more deaths than average is bad.
 
 ## Ranking Module
 
-Add a new top-level ranking module. It should be a local season ranking surface, not a global leaderboard and not a multi-player feature.
+Add a top-level navigation entry: `排行`.
 
-Ranking tabs:
+Route defaults:
 
-- `英雄胜率`: list each hero with matches, wins, win rate, and supporting performance columns already available from local data. Include enough context to prevent tiny samples from looking authoritative.
-- `地图胜率`: move the current review module's map adaptability capability here, preserving the original map adaptability behavior while giving it a clearer home.
+- Default route opens hero win rate.
+- Tabs: `英雄胜率` and `地图胜率`.
+- Switching tabs keeps the search text and applies it to the active tab.
 
-Recommended hero ranking columns:
+Page behavior:
 
-- Hero name.
-- Matches.
-- Wins.
-- Win rate.
-- Average KDA or death pressure metric if already derivable.
-- Optional supporting columns such as average damage, healing, eliminations, or final blows when the local schema supports them reliably.
+- Ranking page uses normal full-page scrolling.
+- Do not implement an internally scrolling table region.
+- Name search filters the already loaded list in real time on the frontend.
+- Search does not issue backend queries per keystroke.
+- No manual sorting controls.
+- No hero or map secondary detail pages in Phase 4.
 
-Recommended map ranking columns:
+Hero win-rate columns:
 
-- Map name.
-- Mode when available.
-- Matches.
-- Wins.
-- Win rate.
-- The existing map adaptability result or label currently shown in review.
+- Hero name
+- Matches
+- Wins
+- Losses
+- Win rate
+- Play time
 
-Sorting defaults:
+Map win-rate columns:
 
-- Hero ranking defaults to win rate with a minimum-sample guard.
-- Map ranking defaults to win rate with a minimum-sample guard.
-- Users can sort by matches to inspect high-volume heroes or maps.
+- Map name
+- Matches
+- Wins
+- Losses
+- Win rate
+- Play time
 
-The ranking module should not introduce multi-season management. It uses the currently synced season data.
+Backend data contract:
 
-## Analytics Module Redesign
+- Add ranking DTOs that explicitly return `matches`, `wins`, `losses`, `win_rate`, and `play_time_hours`.
+- Frontend only displays these aggregates.
+- Frontend must not derive wins, losses, match count, win rate, or play time.
+- Win rate display uses one decimal place.
+- Play time display uses decimal hours with one fractional digit.
 
-The analysis module should remove its own filters. Any filtering workflow remains in the match module. Analytics should present season-level summaries for quick reading.
+Default sorting:
 
-Layout:
+1. Win rate descending.
+2. Matches descending.
+3. Play time descending.
+4. Name ascending as a stable final tie-breaker.
 
-- Keep the existing friend analysis as the top row.
-- Add map analysis as the bottom row.
-- Both rows use four summary items and align visually: same density, same card rhythm, same typography scale, and same responsive behavior.
-- On narrow screens, the eight items can stack while preserving row grouping: friend analysis first, map analysis second.
+Map adaptability migration:
 
-Friend analysis keeps its existing behavior and four-item structure.
+- Move the existing map adaptability capability out of review and into ranking's `地图胜率` tab.
+- Preserve the capability as a secondary indicator or supporting content on the map ranking list.
+- Do not create a map detail subpage.
+- Remove the old map adaptability section from `PersonalReviewPage.tsx` directly. Do not leave a placeholder, redirect block, or "moved to ranking" card.
 
-Map analysis adds four season-level summary items with names that match the app's light, playful tone:
+Ranking scope:
 
-- `王牌地图`: highest win-rate map among maps that pass the minimum-sample guard.
-- `翻车路段`: lowest win-rate map among maps that pass the minimum-sample guard.
-- `常驻战场`: map with the most matches.
-- `稀有来客`: map with the fewest matches among maps that have at least one match.
+- Ranking is local season ranking, not a global leaderboard.
+- Ranking uses the currently synced season.
+- Ranking does not introduce multi-season management.
 
-Minimum-sample handling:
+## Analysis Module
 
-- Win-rate best/worst should avoid over-celebrating or over-penalizing one-off maps. Use the same minimum-sample rule as the ranking module where possible.
-- If no map reaches the minimum sample, show an explicit insufficient-sample state instead of a fake winner or loser.
-- Most/least match counts can include all maps with at least one match.
+The analysis module removes its own filters. Filtering stays only in the match module.
 
-The map analysis row should link into the new ranking module's `地图胜率` tab for deeper inspection.
+Scope:
+
+- Uses the current synced season's full local data.
+- Does not split by mode.
+- Does not filter by hero, map, result, or date.
+- Friend analysis and map analysis read from the same full-season dataset.
+
+Top row:
+
+- Keep the existing friend analysis four items.
+- Keep original names, content, and behavior.
+- Remove the analysis page `FilterBar`.
+- Existing friend detail behavior can remain if it is already part of the friend analysis card behavior.
+
+Bottom row:
+
+- Add four map analysis cards:
+  - `王牌地图`: highest win-rate map with at least 5 matches.
+  - `翻车路段`: lowest win-rate map with at least 5 matches.
+  - `常驻战场`: map with the most matches.
+  - `稀有来客`: map with the fewest matches among maps with at least one match.
+
+Card display:
+
+- Map name
+- Win rate, formatted like ranking
+- Match count
+
+Tie-breaks:
+
+- `常驻战场`: if maps tie on match count, choose the most recently played map.
+- `稀有来客`: if maps tie on match count, choose the earliest played map.
+
+Insufficient samples:
+
+- `王牌地图` and `翻车路段` require at least 5 matches.
+- If no map reaches 5 matches, show an insufficient-sample state for those cards rather than a fake winner or loser.
+- `常驻战场` and `稀有来客` can use any map with at least one match.
+
+Navigation:
+
+- All four map analysis cards link to ranking's `地图胜率` tab.
+
+## Data Contracts and Formatting
+
+Backend remains authoritative for aggregation:
+
+- Ranking aggregates wins, losses, matches, win rate, and play time.
+- Analysis aggregates map card candidates and tie-break results.
+- Match detail returns current values and averages; frontend computes only deltas.
+
+Frontend formatting:
+
+- Win rate: one decimal percentage, e.g. `52.4%`.
+- Play time: one decimal hour value, e.g. `3.5 小时`.
+- Signed deltas: include `+` for positive values and `-` for negative values.
+
+Missing data:
+
+- Missing single metric average hides only that metric card.
+- Missing all comparison metric averages hides the whole comparison block.
+- Missing map-analysis eligible winner/loser shows an insufficient-sample state.
+- Ranking empty state explains that local season data is missing or has no qualifying rows.
 
 ## Error Handling
 
@@ -251,7 +369,7 @@ Expected failures and product responses:
 
 - Browser not found: ask the user to install Chrome or Edge, then retry.
 - DevTools port unavailable: explain that another automation browser may be running and ask the user to retry after closing it.
-- Timeout before login: tell the user the login window expired and provide a retry button.
+- Timeout before login: tell the user the login window expired and provide retry.
 - `role_id` found but token request failed: ask the user to confirm the Dashen account is logged in and bound to the OW account.
 - Credential save failed: show a non-sensitive local directory path and explain that the app could not write local data.
 - Sync rejects saved credentials: show a redacted error and guide the user to `重新登录`.
@@ -260,7 +378,7 @@ All backend errors that may contain upstream payloads pass through redaction bef
 
 ## Windows Release Acceptance
 
-Phase 4 release validation for this design slice:
+Phase 4 is accepted when:
 
 - Windows 11 installer builds successfully.
 - Installed app launches without the development server.
@@ -268,33 +386,53 @@ Phase 4 release validation for this design slice:
 - `登录网易大神` opens Chrome or Edge.
 - After user login, the app saves credentials and refreshes status.
 - Credential status does not expose token, cookies, or customerToken.
-- Season sync reads the saved credentials and imports data.
+- Season sync reads saved credentials and imports data.
 - Sync progress and failures remain visible and redacted.
 - Existing local data survives app restart.
-- Personal review and match list can be opened after sync or when readable local data already exists.
-- Match detail shows same-season average comparison when enough local data exists.
-- The ranking module exposes hero win-rate and map win-rate tabs.
-- The review module no longer owns map adaptability as its primary home; the behavior is preserved under ranking map win rate.
-- Analytics has no independent filters and shows friend analysis above map analysis, with four summary items per row.
-- `npm run dev` remains usable for development.
-- `cargo test --tests`, `npm run build`, and Tauri build are part of the release checklist.
+- Match list supports season, hero, map, result, mode, start date, end date, last 7 days, last 30 days, and all/clear filters.
+- Match detail shows same-role season deltas under the existing detail content when same-role averages exist.
+- The delta block hides unavailable metric cards and hides itself when all four metrics are unavailable.
+- Ranking appears as a top-level navigation item.
+- Ranking defaults to `英雄胜率`.
+- Hero ranking shows matches, wins, losses, win rate, and play time.
+- Map ranking shows matches, wins, losses, win rate, and play time.
+- Ranking uses backend-provided aggregates and default sorting only.
+- Ranking search filters the loaded tab list in real time and survives tab switches.
+- Review no longer renders the old map adaptability area.
+- Map adaptability behavior is available under ranking's map win-rate tab.
+- Analysis has no filters.
+- Analysis shows existing friend analysis above the four new map analysis cards.
+- Map analysis cards display map name, win rate, and match count, and link to ranking's map tab.
+- `npm run dev` remains usable.
+- Backend tests, frontend build, and Tauri build are part of the release checklist.
 
-## Documentation Updates
+## Documentation Updates After Implementation
 
-Update documentation after implementation:
-
-- README: Windows install, first login, season sync, and privacy notes.
+- README: Windows install, first login, season sync, ranking, analysis, and privacy notes.
 - `docs/windows-release.md`: release checklist, smoke test steps, and troubleshooting.
-- `AGENTS.md`: current Phase 4 shape, automatic login now belongs to the desktop onboarding flow, Python credential scripts remain diagnostic tools.
+- `AGENTS.md`: Phase 4 shape, desktop onboarding login, ranking ownership, and Python scripts as diagnostics.
 
-## Phase 4 Extension Points
+## Design Self-Review
 
-The confirmed slice above is not the full Phase 4. Additional Phase 4 features can be added if they preserve the agreed product direction:
+Coverage:
 
-- Windows-first desktop stability.
-- Single-user local app.
-- No multi-account, multi-player, or Astrbot command expansion.
-- No secret exposure.
-- No removal of local development and debugging paths.
+- All confirmed points are represented as explicit product behavior, data contract, or acceptance criteria.
+- Same-role comparison is appended below existing match detail, uses `roleType`, returns backend current/average values, and computes frontend deltas.
+- Ranking is a top-level module with the confirmed tabs, columns, formatting, sorting, search, and scroll behavior.
+- Review map adaptability is removed from review and moved into ranking without a placeholder.
+- Analysis removes filters, keeps friend analysis unchanged, and adds the four map analysis cards with confirmed sample and tie-break rules.
+- Match filters are the only filters and include the confirmed date range behavior.
 
-Candidate additions should be evaluated against the Windows release goal before entering the implementation plan.
+Conflict check:
+
+- No requirement introduces multi-account, multi-player, Astrbot backflow, or embedded WebView login.
+- Ranking and analysis both use local current-season data and do not introduce multi-season management.
+- Frontend derives only the match-detail deltas; backend remains authoritative for ranking and analysis aggregates.
+
+Placeholder check:
+
+- The design contains no unfinished placeholder, deferred decision, or open question.
+
+Scope check:
+
+- The scope is large but coherent for one Phase 4 plan because the subsystems share the same desktop data model and release target. The implementation plan should still break the work into independently testable tasks: credential login, match detail comparison, ranking, analysis redesign, review cleanup, docs, and release validation.
