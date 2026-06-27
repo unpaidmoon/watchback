@@ -8,6 +8,13 @@ This is the first confirmed design slice for Phase 4. The phase is expected to i
 
 Phase 4 turns the current single-user Tauri desktop app into a Windows 11 installable product path: install, log in to NetEase Dashen through Chrome or Edge, save credentials locally without exposing secrets, sync the existing target season, and enter the already-built review and match analysis pages.
 
+The phase also productizes the core analysis surface after Phase 3:
+
+- Match details gain a Phase 3-style same-season average comparison.
+- A new ranking module exposes hero win-rate and map win-rate rankings.
+- The analytics module is simplified into a two-row dashboard: friend analysis above, map analysis below.
+- Filtering belongs only to the match module. Analytics pages should show season-level summaries without their own filter controls.
+
 ## Explicit Non-Goals
 
 - Do not add multi-account support.
@@ -160,6 +167,84 @@ Review entry:
 
 All user-facing frontend text remains Chinese.
 
+## Match Module Enhancements
+
+The match module remains the only place with filters. Existing match list filters should continue to drive match browsing and match-detail entry. Phase 4 should not add duplicate filtering controls to review, ranking, or analytics pages.
+
+Match detail should add a Phase 3 comparison block that compares the selected match against same-season averages. The goal is to answer: "这局比我这个赛季的常态强在哪里、弱在哪里?"
+
+Recommended comparison content:
+
+- Core output: KDA, final blows, eliminations, damage, healing, deaths, and win/loss result where data is available.
+- Hero context: if the selected match has a dominant hero or known hero usage, compare that hero's match performance against the player's same-season average for that hero when practical; otherwise fall back to all-hero season average.
+- Map context: show the map and mode beside the comparison, but avoid turning match detail into a full map analytics page.
+- Visual treatment: compact metric rows or tiles using `高于均值`, `低于均值`, and neutral states. Avoid large marketing-style cards.
+
+The comparison should tolerate missing fields. If an upstream field is absent or unreliable, the UI should omit that metric rather than show a misleading zero.
+
+## Ranking Module
+
+Add a new top-level ranking module. It should be a local season ranking surface, not a global leaderboard and not a multi-player feature.
+
+Ranking tabs:
+
+- `英雄胜率`: list each hero with matches, wins, win rate, and supporting performance columns already available from local data. Include enough context to prevent tiny samples from looking authoritative.
+- `地图胜率`: move the current review module's map adaptability capability here, preserving the original map adaptability behavior while giving it a clearer home.
+
+Recommended hero ranking columns:
+
+- Hero name.
+- Matches.
+- Wins.
+- Win rate.
+- Average KDA or death pressure metric if already derivable.
+- Optional supporting columns such as average damage, healing, eliminations, or final blows when the local schema supports them reliably.
+
+Recommended map ranking columns:
+
+- Map name.
+- Mode when available.
+- Matches.
+- Wins.
+- Win rate.
+- The existing map adaptability result or label currently shown in review.
+
+Sorting defaults:
+
+- Hero ranking defaults to win rate with a minimum-sample guard.
+- Map ranking defaults to win rate with a minimum-sample guard.
+- Users can sort by matches to inspect high-volume heroes or maps.
+
+The ranking module should not introduce multi-season management. It uses the currently synced season data.
+
+## Analytics Module Redesign
+
+The analysis module should remove its own filters. Any filtering workflow remains in the match module. Analytics should present season-level summaries for quick reading.
+
+Layout:
+
+- Keep the existing friend analysis as the top row.
+- Add map analysis as the bottom row.
+- Both rows use four summary items and align visually: same density, same card rhythm, same typography scale, and same responsive behavior.
+- On narrow screens, the eight items can stack while preserving row grouping: friend analysis first, map analysis second.
+
+Friend analysis keeps its existing behavior and four-item structure.
+
+Map analysis adds four season-level summary items with names that match the app's light, playful tone:
+
+- `王牌地图`: highest win-rate map among maps that pass the minimum-sample guard.
+- `翻车路段`: lowest win-rate map among maps that pass the minimum-sample guard.
+- `常驻战场`: map with the most matches.
+- `稀有来客`: map with the fewest matches among maps that have at least one match.
+
+Minimum-sample handling:
+
+- Win-rate best/worst should avoid over-celebrating or over-penalizing one-off maps. Use the same minimum-sample rule as the ranking module where possible.
+- If no map reaches the minimum sample, show an explicit insufficient-sample state instead of a fake winner or loser.
+- Most/least match counts can include all maps with at least one match.
+
+The map analysis row should link into the new ranking module's `地图胜率` tab for deeper inspection.
+
 ## Error Handling
 
 Expected failures and product responses:
@@ -187,6 +272,10 @@ Phase 4 release validation for this design slice:
 - Sync progress and failures remain visible and redacted.
 - Existing local data survives app restart.
 - Personal review and match list can be opened after sync or when readable local data already exists.
+- Match detail shows same-season average comparison when enough local data exists.
+- The ranking module exposes hero win-rate and map win-rate tabs.
+- The review module no longer owns map adaptability as its primary home; the behavior is preserved under ranking map win rate.
+- Analytics has no independent filters and shows friend analysis above map analysis, with four summary items per row.
 - `npm run dev` remains usable for development.
 - `cargo test --tests`, `npm run build`, and Tauri build are part of the release checklist.
 
