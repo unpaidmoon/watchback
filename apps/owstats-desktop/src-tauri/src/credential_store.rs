@@ -9,6 +9,8 @@ use std::path::Path;
 pub struct DashenCredentials {
     pub role_id: i64,
     pub token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_token: Option<String>,
     pub dts: Option<String>,
     pub server: i64,
     pub saved_at: String,

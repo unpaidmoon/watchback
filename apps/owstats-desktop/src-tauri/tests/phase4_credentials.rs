@@ -29,6 +29,7 @@ fn save_credentials_writes_atomically_and_redacts_status() {
     let credentials = DashenCredentials {
         role_id: 42,
         token: "token-value".to_string(),
+        customer_token: Some("customer-token-value".to_string()),
         dts: None,
         server: 1,
         saved_at: "2026-06-27T00:00:00Z".to_string(),
@@ -37,9 +38,12 @@ fn save_credentials_writes_atomically_and_redacts_status() {
     save_credentials_atomic(&path, &credentials).unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("token-value"));
+    assert!(text.contains("customerToken"));
+    assert!(text.contains("customer-token-value"));
 
     let status = credential_status_for_path(&path).unwrap();
     assert!(!status.message.contains("token-value"));
+    assert!(!status.message.contains("customer-token-value"));
 }
 
 #[test]

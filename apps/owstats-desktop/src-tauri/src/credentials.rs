@@ -90,6 +90,7 @@ pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials 
     DashenCredentials {
         role_id,
         token,
+        customer_token: None,
         dts: None,
         server: SERVER_ID,
         saved_at: Utc::now().to_rfc3339(),

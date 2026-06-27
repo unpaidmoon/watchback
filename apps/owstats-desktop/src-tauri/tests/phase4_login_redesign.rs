@@ -76,7 +76,7 @@ fn token_script_builds_signed_request_without_embedding_existing_secret() {
     assert!(script.contains("\"roleId\":\"123456\""));
     assert!(script.contains("window.sig.default"));
     assert!(script.contains("GL-CheckSum"));
-    assert!(!script.contains("customerToken"));
+    assert!(script.contains("customerToken"));
 }
 
 #[test]
@@ -95,7 +95,8 @@ fn parses_successful_report_token_result_into_credentials() {
     let result = serde_json::json!({
         "ok": true,
         "role_id": "123456",
-        "token": "secret-token"
+        "token": "secret-token",
+        "customer_token": "customer-secret"
     });
 
     let credentials = credentials_from_report_result(&result, "111111", 1, "2026-06-27T00:00:00Z")
@@ -104,8 +105,32 @@ fn parses_successful_report_token_result_into_credentials() {
 
     assert_eq!(credentials.role_id, 123456);
     assert_eq!(credentials.token, "secret-token");
+    assert_eq!(
+        credentials.customer_token.as_deref(),
+        Some("customer-secret")
+    );
     assert_eq!(credentials.server, 1);
     assert_eq!(credentials.saved_at, "2026-06-27T00:00:00Z");
+}
+
+#[test]
+fn parses_camel_case_customer_token_from_report_result() {
+    let result = serde_json::json!({
+        "ok": true,
+        "roleId": "123456",
+        "token": "secret-token",
+        "customerToken": "customer-secret"
+    });
+
+    let credentials = credentials_from_report_result(&result, "111111", 1, "2026-06-27T00:00:00Z")
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(credentials.role_id, 123456);
+    assert_eq!(
+        credentials.customer_token.as_deref(),
+        Some("customer-secret")
+    );
 }
 
 #[test]
@@ -130,6 +155,7 @@ fn credential_status_and_progress_redact_secrets() {
         &DashenCredentials {
             role_id: 123456,
             token: "secret-token".to_string(),
+            customer_token: Some("customer-secret".to_string()),
             dts: None,
             server: 1,
             saved_at: "2026-06-27T00:00:00Z".to_string(),
@@ -141,6 +167,7 @@ fn credential_status_and_progress_redact_secrets() {
     assert_eq!(status.state, "saved");
     assert_eq!(status.role_id, Some(123456));
     assert!(!status.message.contains("secret-token"));
+    assert!(!status.message.contains("customer-secret"));
     assert_eq!(
         redact_sensitive_text("token=secret-token cookie=abc customerToken=def"),
         "token=***REDACTED*** cookie=***REDACTED*** customerToken=***REDACTED***"
