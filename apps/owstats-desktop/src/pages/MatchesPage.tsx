@@ -1,9 +1,8 @@
-import { Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchTimeline } from "../features/matches/MatchTimeline";
-import { getOverview, importBaselineS22, listMatchFilters, listMatchTimeline } from "../shared/api";
+import { getOverview, listMatchFilters, listMatchTimeline } from "../shared/api";
 import type { FilterOptions, ImportSummary, MatchFilters, MatchSummary, Overview } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
@@ -60,21 +59,6 @@ export function MatchesPage() {
     }
   }
 
-  async function importBaseline() {
-    setBusy(true);
-    setError(null);
-    try {
-      const nextSummary = await importBaselineS22();
-      setSummary(nextSummary);
-      setOptions(await listMatchFilters());
-      await loadMatches(filters);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function loadMatches(nextFilters: MatchFilters) {
     try {
       setMatches(await listMatchTimeline(nextFilters));
@@ -102,10 +86,6 @@ export function MatchesPage() {
           <span>当前胜率</span>
           <strong>{winRate}</strong>
         </div>
-        <button type="button" className="primaryButton" onClick={importBaseline} disabled={busy}>
-          <Upload size={18} />
-          导入 S22 JSON
-        </button>
       </section>
 
       {error && <div className="errorBanner">{error}</div>}

@@ -1,12 +1,12 @@
 use crate::importer::{default_database_path, existing_import_summary};
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
-    get_match_detail, import_full_season_payload, list_filter_options, list_matches,
-    sync_season_with_progress, CredentialLoginCancelResult, CredentialLoginResult,
-    CredentialStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail,
-    ImportSummary, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
-    OnboardingStatusRequest, OwDatabase, PersonalReviewRequest, PersonalSeasonReview,
-    RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
+    get_match_detail, list_filter_options, list_matches, sync_season_with_progress,
+    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
+    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, MatchDetailView,
+    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
+    PersonalReviewRequest, PersonalSeasonReview, RankingResponse, SeasonAnalysis, SyncRequest,
+    SyncSummary,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -17,16 +17,6 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct Overview {
     pub database_path: String,
     pub import_summary: Option<ImportSummary>,
-}
-
-#[tauri::command]
-pub fn import_baseline_s22(app: AppHandle) -> Result<ImportSummary, String> {
-    let db = app_database(&app)?;
-    let payload = project_root()?
-        .join("data")
-        .join("players")
-        .join("5479_s22_full_season.json");
-    import_full_season_payload(&db, payload).map_err(to_message)
 }
 
 #[tauri::command]

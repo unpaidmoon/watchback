@@ -6,7 +6,6 @@ import type {
   FriendAnalytics,
   FriendAnalyticsFilters,
   FriendDetail,
-  ImportSummary,
   MatchDetailView,
   MatchFilters,
   MatchSummary,
@@ -20,10 +19,6 @@ import type {
 
 export function getOverview() {
   return invoke<Overview>("get_overview");
-}
-
-export function importBaselineS22() {
-  return invoke<ImportSummary>("import_baseline_s22");
 }
 
 export function listMatchFilters() {

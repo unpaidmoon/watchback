@@ -20,8 +20,8 @@ Phase 4 also consolidates the post-Phase-3 product surface:
 
 - No multi-account support.
 - No multi-player product flows.
-- No Astrbot command or callback expansion.
-- No Astrbot backflow for desktop-only functionality.
+- No chatbot command or callback expansion.
+- No chatbot backflow for desktop-only functionality.
 - No embedded Tauri WebView login.
 - No duplicate analytics filters outside the match module.
 - No ranking secondary detail pages for heroes or maps in Phase 4.
@@ -41,7 +41,7 @@ Relevant current boundaries:
 - Personal review currently lives in `apps/owstats-desktop/src/pages/PersonalReviewPage.tsx` and still renders map adaptability from `PersonalSeasonReview.maps`.
 - Backend commands are exposed from `apps/owstats-desktop/src-tauri/src/commands.rs`.
 - Match, analytics, review, import, and schema logic live in `queries.rs`, `analytics.rs`, `review.rs`, `importer.rs`, and `db.rs`.
-- Browser-assisted Dashen credential extraction already exists in `scripts/fetch_dashen_credentials.py` and remains a development diagnostic path.
+- Browser-assisted Dashen credential extraction is owned by the Tauri backend. Removed Python helper scripts must not be reintroduced into the product path.
 
 ## Product Architecture
 
@@ -433,7 +433,7 @@ Coverage:
 
 Conflict check:
 
-- No requirement introduces multi-account, multi-player, Astrbot backflow, or embedded WebView login.
+- No requirement introduces multi-account, multi-player, chatbot backflow, or embedded WebView login.
 - Ranking and analysis both use local current-season data and do not introduce multi-season management.
 - Frontend derives only the match-detail deltas; backend remains authoritative for ranking and analysis aggregates.
 

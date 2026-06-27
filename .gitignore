@@ -1,7 +1,21 @@
-# 个人配置（包含敏感信息）
+# Personal configuration and secrets
 config.personal.py
 config.py
 .env
+
+# Local credential cache. Never commit role_id/token.
+data/.dashen_credentials.json
+
+# Local user data and generated artifacts
+data/chrome-dashen-profile/
+data/reports/
+data/playwright/
+data/assets/
+data/ow_config_cache.json
+output/
+
+# Keep local data folder documentation visible in Git.
+!data/README.md
 
 # Python
 __pycache__/
@@ -9,43 +23,42 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.pytest_cache/
 venv/
 env/
 
-# IDE
+# IDE / editor
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Claude Code
+# Codex / Superpowers local workspace state
 .claude/
 CLAUDE.md
+.superpowers/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# 构建产物
+# Build artifacts
+node_modules/
+target/
+apps/*/src-tauri/gen/
 *.zip
 *.tar.gz
+dist/
+build/
+*.spec
 
-# 测试数据
+# Test artifacts
 court_image_*.png
 court_result.json
 
-# Docker
+# Docker local deployment files
 docker-compose.yml
 docker-compose.yaml
 
-# Overstats 运行时缓存（打包时排除）
-Overstats/res/cache_img/
-Overstats/res/query_tool_assets/
-Overstats/src/modules/dashen_summary/runtime/cache/
-Overstats/ow_guess_assets/
-
-# Overstats 部署脚本
-Overstats/install.sh
-Overstats/uninstall.sh
-Overstats/overstats.service
-
+# Local logs
+*.log

@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const DASHEN_CUSTOMER_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool/customer";
 const CLIENT_TYPE: &str = "60";
@@ -23,8 +23,11 @@ const HTTP_TIMEOUT_SECONDS: u64 = 20;
 
 #[derive(Debug, Deserialize)]
 struct Credentials {
+    #[serde(alias = "roleId")]
     role_id: i64,
     token: String,
+    #[serde(default, alias = "customerToken")]
+    customer_token: Option<String>,
     dts: Option<i64>,
     server: Option<i64>,
 }
@@ -63,14 +66,21 @@ pub async fn sync_season_with_base_url(
         latest_errors: Vec::new(),
     });
     let credentials = read_credentials(project_root)?;
-    let cached_player = read_latest_player_cache(project_root)?;
-    let customer_token = string_field(&cached_player, "customer_token")
-        .or_else(|| {
-            cached_player
-                .pointer("/profile_card/data/customerToken")
-                .and_then(value_to_string)
-        })
-        .ok_or_else(|| anyhow!("no cached customer token found in data/players"))?;
+    let customer_token = credentials
+        .customer_token
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| credentials.token.clone());
+    let cached_player = json!({
+        "input_bnet": Value::Null,
+        "resolved_bnet": Value::Null,
+        "profile_card": {
+            "data": {
+                "roleId": credentials.role_id,
+                "customerToken": "***REDACTED***"
+            }
+        }
+    });
     let client = reqwest::Client::builder()
         .default_headers(auth_headers(&credentials)?)
         .user_agent(USER_AGENT)
@@ -275,36 +285,6 @@ fn read_credentials(project_root: &Path) -> Result<Credentials> {
         return Err(anyhow!("local credentials are incomplete"));
     }
     Ok(credentials)
-}
-
-fn read_latest_player_cache(project_root: &Path) -> Result<Value> {
-    let players_dir = project_root.join("data").join("players");
-    let mut candidates = std::fs::read_dir(&players_dir)
-        .with_context(|| "data/players is not readable")?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|item| item.to_str()) == Some("json"))
-        .collect::<Vec<PathBuf>>();
-    candidates.sort_by_key(|path| {
-        std::fs::metadata(path)
-            .and_then(|metadata| metadata.modified())
-            .ok()
-    });
-    candidates.reverse();
-    for path in candidates {
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&text) else {
-            continue;
-        };
-        if string_field(&value, "customer_token").is_some()
-            || value.pointer("/profile_card/data/customerToken").is_some()
-        {
-            return Ok(value);
-        }
-    }
-    Err(anyhow!("no player cache with customer token found"))
 }
 
 fn auth_headers(credentials: &Credentials) -> Result<HeaderMap> {
@@ -524,21 +504,6 @@ fn safe_error_message(message: &str) -> String {
         }
     }
     parts.join(" ").chars().take(240).collect()
-}
-
-fn value_to_string(item: &Value) -> Option<String> {
-    if let Some(text) = item.as_str() {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    } else if item.is_number() {
-        Some(item.to_string())
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]

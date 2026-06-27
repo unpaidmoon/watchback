@@ -16,7 +16,7 @@ mod sync;
 
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
-pub use importer::import_full_season_payload;
+pub use importer::{import_full_season_payload, import_payload_value};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches};
 pub use redaction::redact_sensitive_json;
@@ -29,7 +29,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            commands::import_baseline_s22,
             commands::get_overview,
             commands::list_match_filters,
             commands::list_match_timeline,

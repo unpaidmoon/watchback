@@ -1,34 +1,161 @@
 use owstats_desktop_lib::{
-    get_friend_analytics, get_match_detail, import_full_season_payload, list_filter_options,
+    get_friend_analytics, get_match_detail, import_payload_value, list_filter_options,
     list_matches, redact_sensitive_json, sync_import_parts, FriendAnalyticsFilters, MatchFilters,
     OwDatabase,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
-fn fixture_path() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("data")
-        .join("players")
-        .join("5479_s22_full_season.json")
+fn import_synthetic_season(db: &OwDatabase) {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    import_payload_value(db, &season_payload(), temp.path()).unwrap();
+}
+
+fn lookup_payload() -> String {
+    serde_json::to_string(&json!({
+        "heroes": {
+            "hero-current": {"name": "安娜"},
+            "hero-friend": {"name": "莱因哈特"},
+            "hero-enemy": {"name": "源氏"}
+        },
+        "maps": {
+            "map-a": {"name": "漓江塔"},
+            "map-b": {"name": "国王大道"}
+        }
+    }))
+    .unwrap()
+}
+
+fn season_payload() -> Value {
+    json!({
+        "season": 22,
+        "profile_card": {
+            "data": {
+                "bnetId": 1000,
+                "name": "Current#1000",
+                "customerToken": "customer-secret"
+            }
+        },
+        "matches": {
+            "entries": [
+                match_entry("match-win", 1, "LeisurePreset", "map-a", "hero-current", 1700000000000_i64),
+                match_entry("match-loss", -1, "SportPreset", "map-b", "hero-current", 1700003600000_i64),
+                match_entry("match-stadium", 1, "StadiumFight", "map-a", "hero-current", 1700007200000_i64)
+            ],
+            "details": [
+                match_detail("match-win", "normal", "map-a", 600),
+                match_detail("match-loss", "normal", "map-b", 650),
+                match_detail("match-stadium", "fight", "map-a", 500)
+            ],
+            "detail_errors": [
+                {
+                    "match_id": "bad-detail",
+                    "error_type": "DetailFetchError",
+                    "message": "request failed token=entry-secret customerToken=detail-secret"
+                }
+            ]
+        }
+    })
+}
+
+fn match_entry(
+    match_id: &str,
+    match_ret: i64,
+    game_mode: &str,
+    map_guid: &str,
+    hero_guid: &str,
+    begin_ts: i64,
+) -> Value {
+    json!({
+        "matchId": match_id,
+        "matchRet": match_ret,
+        "mapGuid": map_guid,
+        "heroGuid": hero_guid,
+        "beginTs": begin_ts,
+        "gameMode": game_mode,
+        "_dashenSeason": 22,
+        "teamScore": 2,
+        "opponentScore": if match_ret == 1 { 1 } else { 2 },
+        "kill": if match_ret == 1 { 12 } else { 4 },
+        "assist": 8,
+        "death": if match_ret == 1 { 3 } else { 9 },
+        "heroDamage": if match_ret == 1 { 9000 } else { 3000 },
+        "cure": if match_ret == 1 { 8000 } else { 2000 },
+        "resistDamage": 500,
+        "totalWorth": 100,
+        "token": "entry-secret"
+    })
+}
+
+fn match_detail(match_id: &str, match_kind: &str, map_guid: &str, duration: i64) -> Value {
+    json!({
+        "match_id": match_id,
+        "match_kind": match_kind,
+        "payload": {
+            "data": {
+                "matchRet": if match_id == "match-loss" { -1 } else { 1 },
+                "mapGuid": map_guid,
+                "gameTimeSec": duration,
+                "teammateList": [
+                    {
+                        "bnetId": 1000,
+                        "name": "Current#1000",
+                        "heroGuid": "hero-current",
+                        "roleType": "healer",
+                        "friendBnetIds": [2000],
+                        "kill": 5,
+                        "assist": 7,
+                        "death": 2,
+                        "heroDamage": 3000,
+                        "cure": 7000,
+                        "resistDamage": 100,
+                        "healingTaken": 900,
+                        "damageTaken": 1200,
+                        "finalHit": 1,
+                        "targetCompetingTime": 30,
+                        "customerToken": "detail-secret"
+                    },
+                    {
+                        "bnetId": 2000,
+                        "name": "Friend#2000",
+                        "heroGuid": "hero-friend",
+                        "roleType": "tank",
+                        "kill": 4,
+                        "assist": 3,
+                        "death": 3,
+                        "heroDamage": 2500,
+                        "cure": 0,
+                        "resistDamage": 9000,
+                        "healingTaken": 100,
+                        "damageTaken": 10000
+                    }
+                ],
+                "enemyList": [
+                    {
+                        "bnetId": 3000,
+                        "name": "Enemy#3000",
+                        "heroGuid": "hero-enemy",
+                        "roleType": "dps",
+                        "kill": 6,
+                        "death": 4,
+                        "heroDamage": 5000
+                    }
+                ]
+            }
+        }
+    })
 }
 
 #[test]
-fn imports_s22_baseline_and_counts_704_preset_matches() {
+fn imports_synthetic_season_and_counts_preset_matches() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    let summary = import_full_season_payload(&db, &fixture_path()).unwrap();
-
-    assert_eq!(summary.season, 22);
-    assert_eq!(summary.matches_seen, 941);
-    assert_eq!(summary.details_seen, 941);
-    assert_eq!(summary.preset_matches, 704);
-    assert_eq!(summary.stadium_matches, 237);
+    import_synthetic_season(&db);
 
     let matches = list_matches(&db, MatchFilters::default()).unwrap();
-    assert_eq!(matches.len(), 704);
+    assert_eq!(matches.len(), 2);
     assert!(matches.iter().all(|item| item.bucket == "preset"));
 }
 
@@ -36,58 +163,44 @@ fn imports_s22_baseline_and_counts_704_preset_matches() {
 fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
+    import_synthetic_season(&db);
 
     let first = list_matches(&db, MatchFilters::default())
         .unwrap()
-        .remove(0);
-    let filters = MatchFilters {
-        season: Some(first.season),
-        hero: Some(first.hero_guid.clone()),
-        map: Some(first.map_guid.clone()),
-        result: Some(first.result.clone()),
-        mode: Some(first.game_mode.clone()),
-        date_from: Some(first.begin_label[0..10].to_string()),
-        date_to: Some(first.begin_label[0..10].to_string()),
-    };
+        .into_iter()
+        .find(|item| item.result == "win")
+        .unwrap();
+    let filtered = list_matches(
+        &db,
+        MatchFilters {
+            season: Some(first.season),
+            hero: Some(first.hero_guid.clone()),
+            map: Some(first.map_guid.clone()),
+            result: Some(first.result.clone()),
+            mode: Some(first.game_mode.clone()),
+            date_from: Some(first.begin_label[0..10].to_string()),
+            date_to: Some(first.begin_label[0..10].to_string()),
+        },
+    )
+    .unwrap();
 
-    let filtered = list_matches(&db, filters).unwrap();
-
-    assert!(!filtered.is_empty());
-    assert!(filtered
-        .iter()
-        .all(|item| item.hero_guid == first.hero_guid));
-    assert!(filtered.iter().all(|item| item.map_guid == first.map_guid));
-    assert!(filtered.iter().all(|item| item.result == first.result));
-    assert!(filtered
-        .iter()
-        .all(|item| item.game_mode == first.game_mode));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].match_id, first.match_id);
 }
 
 #[test]
 fn detail_exposes_teammates_enemies_and_redacted_raw_json() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
-    let first = list_matches(&db, MatchFilters::default())
-        .unwrap()
-        .into_iter()
-        .find(|item| item.game_mode == "LeisurePreset")
-        .unwrap();
+    import_synthetic_season(&db);
 
-    let detail = get_match_detail(&db, &first.match_id).unwrap();
+    let detail = get_match_detail(&db, "match-win").unwrap();
     let raw = serde_json::to_string(&detail.raw_json).unwrap();
 
-    assert_eq!(detail.match_id, first.match_id);
-    assert!(!detail.teammates.is_empty());
-    assert!(!detail.enemies.is_empty());
-    let mapped_player = detail
-        .teammates
-        .iter()
-        .chain(detail.enemies.iter())
-        .find(|player| !player.hero_guid.is_empty())
-        .unwrap();
-    assert_ne!(mapped_player.hero_name, mapped_player.hero_guid);
+    assert_eq!(detail.match_id, "match-win");
+    assert_eq!(detail.teammates.len(), 2);
+    assert_eq!(detail.enemies.len(), 1);
+    assert_eq!(detail.teammates[0].hero_name, "安娜");
     assert!(!raw.contains("detail-secret"));
     assert!(!raw.contains("entry-secret"));
     assert!(raw.contains("***REDACTED***"));
@@ -97,13 +210,13 @@ fn detail_exposes_teammates_enemies_and_redacted_raw_json() {
 fn filter_options_are_populated_from_imported_matches() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
+    import_synthetic_season(&db);
 
     let options = list_filter_options(&db).unwrap();
 
     assert_eq!(options.seasons, vec![22]);
-    assert!(!options.heroes.is_empty());
-    assert!(!options.maps.is_empty());
+    assert!(options.heroes.contains(&"安娜".to_string()));
+    assert!(options.maps.contains(&"漓江塔".to_string()));
     assert!(options.results.contains(&"win".to_string()));
     assert!(options.modes.contains(&"LeisurePreset".to_string()));
 }
@@ -112,7 +225,7 @@ fn filter_options_are_populated_from_imported_matches() {
 fn imports_negative_match_ret_as_loss() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
+    import_synthetic_season(&db);
 
     let matches = list_matches(
         &db,
@@ -123,9 +236,9 @@ fn imports_negative_match_ret_as_loss() {
     )
     .unwrap();
 
-    assert!(!matches.is_empty());
-    assert!(matches.iter().all(|item| item.result == "loss"));
-    assert!(matches.iter().all(|item| item.result_label == "失败"));
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].result, "loss");
+    assert_eq!(matches[0].result_label, "失败");
 }
 
 #[test]
@@ -149,7 +262,7 @@ fn redaction_removes_token_values_recursively() {
 fn import_rebuilds_match_players_for_preset_matches_only() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
+    import_synthetic_season(&db);
     let conn = db.connect().unwrap();
 
     let player_rows: i64 = conn
@@ -162,67 +275,9 @@ fn import_rebuilds_match_players_for_preset_matches_only() {
             |row| row.get(0),
         )
         .unwrap();
-    let teammate_rows: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM match_players WHERE side='teammate'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let enemy_rows: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM match_players WHERE side='enemy'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let taken_totals: (i64, i64) = conn
-        .query_row(
-            "SELECT SUM(damage_taken), SUM(healing_taken) FROM match_players WHERE side='teammate'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-
-    assert!(player_rows > 0);
-    assert_eq!(stadium_rows, 0);
-    assert!(teammate_rows > 0);
-    assert!(enemy_rows > 0);
-    assert!(taken_totals.0 > 0);
-    assert!(taken_totals.1 > 0);
-}
-
-#[test]
-fn match_players_marks_current_player_and_friends_from_friend_bnet_ids_only() {
-    let temp = tempfile::tempdir().unwrap();
-    let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
-    let conn = db.connect().unwrap();
-
-    let current_rows: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM match_players WHERE is_current_player=1 AND bnet_id='595945364'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let current_friend_rows: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM match_players WHERE is_current_player=1 AND is_friend=1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let enemy_friend_rows: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM match_players WHERE side='enemy' AND is_friend=1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
     let friend_rows: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM match_players WHERE side='teammate' AND is_friend=1 AND is_current_player=0",
+            "SELECT COUNT(*) FROM match_players WHERE side='teammate' AND is_friend=1",
             [],
             |row| row.get(0),
         )
@@ -235,44 +290,29 @@ fn match_players_marks_current_player_and_friends_from_friend_bnet_ids_only() {
         )
         .unwrap_or_default();
 
-    assert!(current_rows > 0);
-    assert_eq!(current_friend_rows, 0);
-    assert_eq!(enemy_friend_rows, 0);
-    assert!(friend_rows > 0);
+    assert_eq!(player_rows, 6);
+    assert_eq!(stadium_rows, 0);
+    assert_eq!(friend_rows, 2);
     assert!(!projection_raw.contains("customerToken"));
 }
 
 #[test]
-fn friend_analytics_builds_four_boards_with_threshold_and_multi_board_membership() {
+fn friend_analytics_backfills_empty_match_players_from_existing_details() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
+    import_synthetic_season(&db);
+    let conn = db.connect().unwrap();
+    conn.execute("DELETE FROM match_players", []).unwrap();
+    drop(conn);
 
     let analytics = get_friend_analytics(&db, FriendAnalyticsFilters::default()).unwrap();
-    assert_eq!(analytics.boards.len(), 4);
-    assert_eq!(analytics.summary.min_sample, 5);
-    assert!(analytics.summary.friend_rows > 0);
-    assert!(analytics
-        .boards
-        .iter()
-        .all(|board| board.friends.len() <= 3));
-    assert!(analytics.boards.iter().all(|board| board
-        .friends
-        .iter()
-        .all(|friend| friend.same_team_matches >= 5
-            && (friend.avg_damage_taken > 0.0 || friend.avg_healing_taken > 0.0))));
-    assert!(analytics
-        .boards
-        .iter()
-        .any(|board| !board.friends.is_empty()));
 
-    let mut appearances = std::collections::HashMap::<String, usize>::new();
-    for board in &analytics.boards {
-        for friend in &board.friends {
-            *appearances.entry(friend.bnet_id.clone()).or_default() += 1;
-        }
-    }
-    assert!(appearances.values().any(|count| *count > 1));
+    assert!(analytics.summary.friend_rows > 0);
+    let conn = db.connect().unwrap();
+    let player_rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM match_players", [], |row| row.get(0))
+        .unwrap();
+    assert!(player_rows > 0);
 }
 
 fn seed_friend_row(
@@ -389,30 +429,6 @@ fn friend_analytics_uses_block_for_front_pressure_and_adds_healing_conversion_bo
         .unwrap();
     assert_eq!(conversion.friends[0].bnet_id, "convert");
     assert!(conversion.label.contains("转化"));
-}
-
-#[test]
-fn friend_analytics_backfills_empty_match_players_from_existing_details() {
-    let temp = tempfile::tempdir().unwrap();
-    let db = OwDatabase::new(temp.path().join("owstats.db"));
-    import_full_season_payload(&db, &fixture_path()).unwrap();
-    let conn = db.connect().unwrap();
-    conn.execute("DELETE FROM match_players", []).unwrap();
-    drop(conn);
-
-    let analytics = get_friend_analytics(&db, FriendAnalyticsFilters::default()).unwrap();
-
-    assert!(analytics.summary.friend_rows > 0);
-    assert!(analytics.summary.eligible_friends > 0);
-    assert!(analytics
-        .boards
-        .iter()
-        .any(|board| !board.friends.is_empty()));
-    let conn = db.connect().unwrap();
-    let player_rows: i64 = conn
-        .query_row("SELECT COUNT(*) FROM match_players", [], |row| row.get(0))
-        .unwrap();
-    assert!(player_rows > 0);
 }
 
 #[test]

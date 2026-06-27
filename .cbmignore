@@ -1,0 +1,6 @@
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.log
+.codebase-memory/

@@ -8,21 +8,10 @@ async fn rust_sync_client_imports_http_payloads_and_keeps_going_after_detail_fai
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let data_dir = root.join("data");
-    let players_dir = data_dir.join("players");
-    std::fs::create_dir_all(&players_dir).unwrap();
+    std::fs::create_dir_all(&data_dir).unwrap();
     std::fs::write(
         data_dir.join(".dashen_credentials.json"),
-        r#"{"role_id":123,"token":"dummy-auth-token","dts":2026,"server":1}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        players_dir.join("fixture.json"),
-        r#"{
-          "input_bnet":"Tester#1000",
-          "resolved_bnet":"Tester#1000",
-          "customer_token":"dummy-customer-token",
-          "profile_card":{"data":{"bnetId":1000,"name":"Tester#1000","customerToken":"dummy-customer-token"}}
-        }"#,
+        r#"{"role_id":123,"token":"dummy-auth-token","customer_token":"dummy-customer-token","dts":2026,"server":1}"#,
     )
     .unwrap();
     let base_url = spawn_fixture_server();

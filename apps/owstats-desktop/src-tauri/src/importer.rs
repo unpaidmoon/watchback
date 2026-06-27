@@ -39,6 +39,7 @@ pub fn import_payload_value(
     payload: &Value,
     project_root: &Path,
 ) -> Result<ImportSummary> {
+    db.initialize()?;
     let conn = db.connect()?;
     let season = payload.get("season").and_then(Value::as_i64).unwrap_or(0);
     let matches_block = payload.get("matches").unwrap_or(&Value::Null);
