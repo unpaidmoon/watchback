@@ -184,6 +184,14 @@ Filter behavior:
 - Date shortcuts: last 7 days and last 30 days.
 - Date clear/all removes date limits.
 - Date inputs refresh after a valid selection or after edit completion, not on every partial keystroke.
+- Filter state is reflected in route query parameters so returning to the match list restores the previous filters.
+- Filter query parameters prefer readable names such as `season`, `hero`, `map`, `result`, `mode`, `startDate`, and `endDate` rather than terse aliases.
+- Query parameters are for local navigation state restoration only. Phase 4 does not add a sharing feature.
+- Query parameters must not contain privacy-sensitive data, tokens, raw player identifiers, or credential-derived values.
+- Hero and map filters store stable IDs or GUIDs in query parameters while the UI displays localized names.
+- Mode filters store existing internal enum values in query parameters while the UI displays localized names.
+- Result filters store stable internal values such as `win` and `loss` in query parameters while the UI displays localized names.
+- Invalid or unknown query parameter values are ignored and removed on the next filter state update rather than causing an error page.
 
 Existing date fields `dateFrom` and `dateTo` remain the frontend DTO names. Backend `MatchFilters.date_from` and `date_to` continue to receive ISO date strings in `YYYY-MM-DD` format.
 
