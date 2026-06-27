@@ -103,10 +103,17 @@ pub struct ComparisonMetrics {
 #[serde(rename_all = "camelCase")]
 pub struct FilterOptions {
     pub seasons: Vec<i64>,
-    pub heroes: Vec<String>,
-    pub maps: Vec<String>,
+    pub heroes: Vec<FilterOption>,
+    pub maps: Vec<FilterOption>,
     pub results: Vec<String>,
     pub modes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterOption {
+    pub id: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

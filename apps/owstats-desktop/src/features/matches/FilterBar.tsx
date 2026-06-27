@@ -56,8 +56,8 @@ export function FilterBar({ filters, options, onChange }: Props) {
         <select value={filters.hero ?? ""} onChange={(event) => patch({ hero: emptyOrValue(event.target.value) })}>
           <option value="">全部</option>
           {options.heroes.map((hero) => (
-            <option key={hero} value={hero}>
-              {hero}
+            <option key={hero.id} value={hero.id}>
+              {hero.label}
             </option>
           ))}
         </select>
@@ -67,8 +67,8 @@ export function FilterBar({ filters, options, onChange }: Props) {
         <select value={filters.map ?? ""} onChange={(event) => patch({ map: emptyOrValue(event.target.value) })}>
           <option value="">全部</option>
           {options.maps.map((map) => (
-            <option key={map} value={map}>
-              {map}
+            <option key={map.id} value={map.id}>
+              {map.label}
             </option>
           ))}
         </select>

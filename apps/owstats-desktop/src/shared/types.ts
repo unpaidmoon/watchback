@@ -24,10 +24,15 @@ export type MatchFilters = {
 
 export type FilterOptions = {
   seasons: number[];
-  heroes: string[];
-  maps: string[];
+  heroes: FilterOption[];
+  maps: FilterOption[];
   results: string[];
   modes: string[];
+};
+
+export type FilterOption = {
+  id: string;
+  label: string;
 };
 
 export type CredentialStatus = {

@@ -215,8 +215,11 @@ fn filter_options_are_populated_from_imported_matches() {
     let options = list_filter_options(&db).unwrap();
 
     assert_eq!(options.seasons, vec![22]);
-    assert!(options.heroes.contains(&"安娜".to_string()));
-    assert!(options.maps.contains(&"漓江塔".to_string()));
+    assert!(options
+        .heroes
+        .iter()
+        .any(|option| option.id == "hero-current"));
+    assert!(options.maps.iter().any(|option| option.id == "map-a"));
     assert!(options.results.contains(&"win".to_string()));
     assert!(options.modes.contains(&"LeisurePreset".to_string()));
 }

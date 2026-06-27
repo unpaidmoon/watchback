@@ -43,6 +43,14 @@ export function MatchesPage() {
     setSearchParams(paramsFromFilters(filters), { replace: true });
   }, [filters]);
 
+  useEffect(() => {
+    if (!hasLoadedOptions(options)) return;
+    const cleaned = validateFilters(filters, options);
+    if (JSON.stringify(cleaned) !== JSON.stringify(filters)) {
+      setFilters(cleaned);
+    }
+  }, [options]);
+
   async function refreshAll() {
     setBusy(true);
     setError(null);
@@ -127,4 +135,24 @@ function paramsFromFilters(filters: MatchFilters) {
 
 function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function hasLoadedOptions(options: FilterOptions) {
+  return (
+    options.seasons.length > 0 ||
+    options.heroes.length > 0 ||
+    options.maps.length > 0 ||
+    options.results.length > 0 ||
+    options.modes.length > 0
+  );
+}
+
+function validateFilters(filters: MatchFilters, options: FilterOptions): MatchFilters {
+  const next = { ...filters };
+  if (next.season !== undefined && !options.seasons.includes(next.season)) delete next.season;
+  if (next.hero && !options.heroes.some((hero) => hero.id === next.hero)) delete next.hero;
+  if (next.map && !options.maps.some((map) => map.id === next.map)) delete next.map;
+  if (next.result && !options.results.includes(next.result)) delete next.result;
+  if (next.mode && !options.modes.includes(next.mode)) delete next.mode;
+  return next;
 }

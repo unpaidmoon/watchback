@@ -1,8 +1,8 @@
 use crate::db::OwDatabase;
 use crate::importer::{int_field, string_field};
 use crate::models::{
-    ComparisonMetrics, FilterOptions, MatchDetailView, MatchFilters, MatchSummary, PlayerRow,
-    SameRoleComparison,
+    ComparisonMetrics, FilterOption, FilterOptions, MatchDetailView, MatchFilters, MatchSummary,
+    PlayerRow, SameRoleComparison,
 };
 use crate::redaction::redact_sensitive_json;
 use anyhow::{Context, Result};
@@ -75,8 +75,8 @@ pub fn list_filter_options(db: &OwDatabase) -> Result<FilterOptions> {
     let conn = db.connect()?;
     Ok(FilterOptions {
         seasons: distinct_i64(&conn, "season")?,
-        heroes: distinct_text(&conn, "COALESCE(hero_name, hero_guid)")?,
-        maps: distinct_text(&conn, "COALESCE(map_name, map_guid)")?,
+        heroes: distinct_named_options(&conn, "hero_guid", "hero_name", "鏈煡鑻遍泟")?,
+        maps: distinct_named_options(&conn, "map_guid", "map_name", "鏈煡鍦板浘")?,
         results: distinct_text(&conn, "result")?,
         modes: distinct_text(&conn, "game_mode")?,
     })
@@ -179,13 +179,11 @@ fn append_filters(sql: &mut String, owned: &mut Vec<Box<dyn ToSql>>, filters: &M
         owned.push(Box::new(season));
     }
     if let Some(hero) = non_empty(&filters.hero) {
-        sql.push_str(" AND (hero_guid = ? OR hero_name = ?)");
-        owned.push(Box::new(hero.clone()));
+        sql.push_str(" AND hero_guid = ?");
         owned.push(Box::new(hero));
     }
     if let Some(map) = non_empty(&filters.map) {
-        sql.push_str(" AND (map_guid = ? OR map_name = ?)");
-        owned.push(Box::new(map.clone()));
+        sql.push_str(" AND map_guid = ?");
         owned.push(Box::new(map));
     }
     if let Some(result) = non_empty(&filters.result) {
@@ -269,6 +267,34 @@ fn distinct_text(conn: &rusqlite::Connection, expr: &str) -> Result<Vec<String>>
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
+fn distinct_named_options(
+    conn: &rusqlite::Connection,
+    id_column: &str,
+    label_column: &str,
+    fallback: &str,
+) -> Result<Vec<FilterOption>> {
+    let sql = format!(
+        r#"
+        SELECT {id_column}, COALESCE(MAX(NULLIF(TRIM({label_column}), '')), '')
+        FROM matches
+        WHERE bucket='preset' AND TRIM(COALESCE({id_column}, '')) <> ''
+        GROUP BY {id_column}
+        ORDER BY COALESCE(MAX(NULLIF(TRIM({label_column}), '')), {id_column})
+        "#
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let label: String = row.get(1)?;
+        Ok(FilterOption {
+            label: fallback_name(label, &id, fallback),
+            id,
+        })
+    })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
