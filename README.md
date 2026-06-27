@@ -1,5 +1,26 @@
 # astrbot_plugin_owstats777
 
+## OWStatsLocal Windows 桌面应用
+
+当前产品主线是 `apps/owstats-desktop` 下的 Windows 优先 Tauri 桌面应用。桌面端是单用户、本地 SQLite 数据路径，不做多账号、多玩家，也不把桌面功能回流到 Astrbot。
+
+首次使用流程：
+
+1. 打开桌面应用，进入“设置”。
+2. 点击“登录网易大神”，应用会调用 Tauri 后端打开 Chrome 或 Edge。
+3. 登录完成后，凭证只保存在本机应用数据目录；界面只显示状态、role_id 和保存时间，不显示 token、cookie、customerToken 或原始凭证内容。
+4. 选择赛季并点击“同步赛季”，同步结果进入本地 SQLite。
+
+主要功能：
+
+- “对局”是唯一筛选入口，支持赛季、英雄、地图、胜负、模式、开始日期、结束日期、近 7 天、近 30 天和全部清空；筛选状态写入本机 URL query。
+- “对局详情”在原详情下方显示同职责本赛季均值差值，职责使用上游 `roleType`：`tank`、`dps`、`healer`。
+- “排行”提供英雄胜率和地图胜率两个 tab，后端聚合场数、胜场、负场、胜率和游玩时长，前端只展示并支持名称搜索。
+- “分析”不再提供筛选，默认使用当前已同步赛季全量数据；上排保留好友分析，下排显示四张地图分析卡。
+- “复盘”保留个人赛季复盘，其旧地图适应性区域已迁移到排行的地图胜率模块。
+
+开发和诊断脚本仍保留：`scripts/fetch_dashen_credentials.py`、`scripts/fetch_player_data.py`、`scripts/download_ow_assets.py`。这些脚本只作为开发/排障工具，安装版产品路径优先使用 Tauri 后端。
+
 Astrbot 插件，封装 [Overstats](https://github.com/AddOneSecondL/Overstats) 本地 API，为 QQ/Telegram 等平台提供守望先锋数据查询功能。
 
 > Forked from [AddOneSecondL/Overstats](https://github.com/AddOneSecondL/Overstats)

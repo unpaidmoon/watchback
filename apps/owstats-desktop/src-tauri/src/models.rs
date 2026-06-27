@@ -1,0 +1,490 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSummary {
+    pub season: i64,
+    pub matches_seen: usize,
+    pub details_seen: usize,
+    pub preset_matches: i64,
+    pub stadium_matches: i64,
+    pub imported_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchFilters {
+    pub season: Option<i64>,
+    pub hero: Option<String>,
+    pub map: Option<String>,
+    pub result: Option<String>,
+    pub mode: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchSummary {
+    pub match_id: String,
+    pub season: i64,
+    pub bucket: String,
+    pub game_mode: String,
+    pub mode_label: String,
+    pub result: String,
+    pub result_label: String,
+    pub map_guid: String,
+    pub map_name: String,
+    pub hero_guid: String,
+    pub hero_name: String,
+    pub begin_ts: i64,
+    pub begin_label: String,
+    pub team_score: i64,
+    pub opponent_score: i64,
+    pub kills: i64,
+    pub assists: i64,
+    pub deaths: i64,
+    pub damage: i64,
+    pub healing: i64,
+    pub mitigation: i64,
+    pub duration_sec: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerRow {
+    pub side: String,
+    pub name: String,
+    pub bnet_id: String,
+    pub hero_guid: String,
+    pub hero_name: String,
+    pub kills: i64,
+    pub assists: i64,
+    pub deaths: i64,
+    pub damage: i64,
+    pub healing: i64,
+    pub mitigation: i64,
+    pub final_hits: i64,
+    pub target_time_sec: i64,
+    pub healing_taken: i64,
+    pub damage_taken: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchDetailView {
+    pub match_id: String,
+    pub teammates: Vec<PlayerRow>,
+    pub enemies: Vec<PlayerRow>,
+    pub same_role_comparison: Option<SameRoleComparison>,
+    pub raw_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SameRoleComparison {
+    pub raw_role: Option<String>,
+    pub role_label: Option<String>,
+    pub current: ComparisonMetrics,
+    pub average: ComparisonMetrics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ComparisonMetrics {
+    pub kills: Option<f64>,
+    pub deaths: Option<f64>,
+    pub damage: Option<f64>,
+    pub healing: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterOptions {
+    pub seasons: Vec<i64>,
+    pub heroes: Vec<String>,
+    pub maps: Vec<String>,
+    pub results: Vec<String>,
+    pub modes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendAnalyticsFilters {
+    pub season: Option<i64>,
+    pub hero: Option<String>,
+    pub map: Option<String>,
+    pub result: Option<String>,
+    pub mode: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendAnalyticsSummary {
+    pub season: Option<i64>,
+    pub preset_matches: i64,
+    pub friend_rows: i64,
+    pub eligible_friends: usize,
+    pub min_sample: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendAnalytics {
+    pub summary: FriendAnalyticsSummary,
+    pub boards: Vec<FriendBoard>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendBoard {
+    pub key: String,
+    pub label: String,
+    pub description: String,
+    pub friends: Vec<FriendBoardEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendBoardEntry {
+    pub bnet_id: String,
+    pub name: String,
+    pub board_key: String,
+    pub board_label: String,
+    pub same_team_matches: i64,
+    pub win_rate: f64,
+    pub avg_damage_taken: f64,
+    pub avg_healing_taken: f64,
+    pub avg_mitigation: f64,
+    pub avg_deaths: f64,
+    pub avg_kills: f64,
+    pub avg_assists: f64,
+    pub avg_damage: f64,
+    pub avg_healing: f64,
+    pub score: f64,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendDetail {
+    pub bnet_id: String,
+    pub name: String,
+    pub boards: Vec<FriendBoardEntry>,
+    pub common_heroes: Vec<FriendBreakdown>,
+    pub common_maps: Vec<FriendBreakdown>,
+    pub recent_matches: Vec<FriendRecentMatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendBreakdown {
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendRecentMatch {
+    pub match_id: String,
+    pub begin_label: String,
+    pub result: String,
+    pub map_name: String,
+    pub hero_name: String,
+    pub kills: i64,
+    pub assists: i64,
+    pub deaths: i64,
+    pub damage: i64,
+    pub healing: i64,
+    pub damage_taken: i64,
+    pub healing_taken: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRequest {
+    pub season: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSummary {
+    pub season: i64,
+    pub phase: String,
+    pub processed: usize,
+    pub total: usize,
+    pub current_match_id: Option<String>,
+    pub imported_matches: usize,
+    pub imported_details: usize,
+    pub skipped_duplicates: usize,
+    pub failed_details: usize,
+    pub latest_errors: Vec<String>,
+    pub import_summary: ImportSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    pub season: i64,
+    pub phase: String,
+    pub processed: usize,
+    pub total: usize,
+    pub current_match_id: Option<String>,
+    pub failed_details: usize,
+    pub latest_errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalReviewRequest {
+    pub season: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingStatusRequest {
+    pub season: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalSeasonReview {
+    pub summary: ReviewSummary,
+    pub baseline: SeasonBaseline,
+    pub top_conclusions: Vec<ReviewConclusion>,
+    pub personal_bests: Vec<PersonalBest>,
+    pub streaks: StreakSummary,
+    pub hero_pool: HeroPoolStability,
+    pub maps: MapAdaptability,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSummary {
+    pub season: Option<i64>,
+    pub total_matches: i64,
+    pub baseline_matches: i64,
+    pub wins: i64,
+    pub losses: i64,
+    pub win_rate: f64,
+    pub avg_kills: f64,
+    pub avg_deaths: f64,
+    pub avg_damage: f64,
+    pub avg_healing: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonBaseline {
+    pub match_count: i64,
+    pub excluded_total: i64,
+    pub short_match_threshold_sec: i64,
+    pub exclusion_reasons: Vec<BaselineExclusionReason>,
+    pub avg_kills: f64,
+    pub avg_deaths: f64,
+    pub avg_damage: f64,
+    pub avg_healing: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BaselineExclusionReason {
+    pub reason: String,
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewConclusion {
+    pub kind: String,
+    pub tone: String,
+    pub title: String,
+    pub body: String,
+    pub priority: i64,
+    pub evidence: EvidenceLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceLink {
+    pub kind: String,
+    pub label: String,
+    pub route: String,
+    pub match_id: Option<String>,
+    pub hero: Option<String>,
+    pub map: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalBest {
+    pub metric: String,
+    pub label: String,
+    pub value: i64,
+    pub match_id: String,
+    pub result: String,
+    pub result_label: String,
+    pub hero_name: String,
+    pub map_name: String,
+    pub evidence: EvidenceLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StreakSummary {
+    pub longest_win_streak: i64,
+    pub longest_loss_streak: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeroPoolStability {
+    pub label: String,
+    pub total_heroes: i64,
+    pub top1_share: f64,
+    pub top3_share: f64,
+    pub avg_heroes_per_match: f64,
+    pub switch_match_rate: f64,
+    pub main_heroes: Vec<HeroPoolHero>,
+    pub clues: Vec<ReviewConclusion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeroPoolHero {
+    pub hero: String,
+    pub matches: i64,
+    pub win_rate: f64,
+    pub evidence: EvidenceLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MapAdaptability {
+    pub min_sample: i64,
+    pub best_map: Option<MapReview>,
+    pub maps: Vec<MapReview>,
+    pub conclusions: Vec<ReviewConclusion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MapReview {
+    pub map: String,
+    pub matches: i64,
+    pub wins: i64,
+    pub win_rate: f64,
+    pub season_win_rate: f64,
+    pub sample_label: String,
+    pub avg_deaths_delta: f64,
+    pub avg_damage_delta: f64,
+    pub avg_healing_delta: f64,
+    pub support_match_id: Option<String>,
+    pub evidence: EvidenceLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingStatus {
+    pub selected_season: Option<i64>,
+    pub available_seasons: Vec<i64>,
+    pub can_enter_review: bool,
+    pub credential_status: CredentialStatus,
+    pub local_data: LocalDataStatus,
+    pub health: DataHealthStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialStatus {
+    pub state: String,
+    pub message: String,
+    pub exposes_secret: bool,
+    pub role_id: Option<i64>,
+    pub saved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialLoginResult {
+    pub status: CredentialStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialLoginCancelResult {
+    pub cancelled: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDataStatus {
+    pub data_source: String,
+    pub season: Option<i64>,
+    pub preset_matches: i64,
+    pub detail_matches: i64,
+    pub last_synced_or_imported_at: Option<String>,
+    pub freshness_risk: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DataHealthStatus {
+    pub readable: bool,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RankingResponse {
+    pub season: Option<i64>,
+    pub heroes: Vec<RankingRow>,
+    pub maps: Vec<RankingRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RankingRow {
+    pub key: String,
+    pub name: String,
+    pub matches: i64,
+    pub wins: i64,
+    pub losses: i64,
+    pub win_rate: f64,
+    pub play_time_hours: f64,
+    pub adaptability_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonAnalysis {
+    pub season: Option<i64>,
+    pub friend: FriendAnalytics,
+    pub map_cards: MapAnalysisCards,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MapAnalysisCards {
+    pub min_sample: i64,
+    pub ace_map: Option<MapAnalysisCard>,
+    pub throw_zone: Option<MapAnalysisCard>,
+    pub home_field: Option<MapAnalysisCard>,
+    pub rare_guest: Option<MapAnalysisCard>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MapAnalysisCard {
+    pub key: String,
+    pub title: String,
+    pub name: String,
+    pub matches: i64,
+    pub win_rate: f64,
+    pub route: String,
+}
