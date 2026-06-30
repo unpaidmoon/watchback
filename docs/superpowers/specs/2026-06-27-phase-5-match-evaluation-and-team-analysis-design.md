@@ -2,311 +2,316 @@
 
 ## Status
 
-This is a short draft for Phase 5. It captures the intended product direction after the competitor research on 王者营地 and should be expanded after product review.
+This spec is the current Phase 5 product direction for preset/open match evaluation, match-list tags, season review highlights, and grouped-play friend analysis.
 
-Phase 5 focuses on three confirmed directions:
+The detailed scoring rules are maintained in:
 
-- Per-match scoring and readable match tags.
-- Match-list tag display and tag-oriented browsing.
-- Friend/team analysis for grouped play, including friend hero habits and common lineup combinations.
+- `docs/phase-5-scoring-design.md`
+- `docs/phase-5-scoring-field-notes.md`
+
+Those two documents are authoritative for threshold details, tag wording, cache fields, and confirmed product decisions.
 
 ## Goal
 
-Phase 5 turns the match module from a historical record browser into a practical review surface. Each match should answer three questions quickly:
+Phase 5 turns the match module from a historical record browser into a lightweight review surface. Each preset/open match should quickly communicate:
 
-1. How did I perform in this match?
-2. Why does the system think that?
-3. What patterns appear when I play with specific friends or lineups?
+1. A grade and one readable judgment tag.
+2. Up to two compact evidence tags.
+3. Whether the player has notable streaks across adjacent matches.
+4. Which friends and hero combinations appear most often in grouped play.
 
-The product should keep the current local-first SQLite model and add explanation-oriented data contracts on top of existing match summaries, match details, and friend projections.
+The product goal is positive reinforcement and user delight. The scoring system should prefer reasonable positive interpretations when the data supports more than one explanation. Negative-facing tags require stronger evidence.
 
-## Explicit Non-Goals
+## Scope
 
-- No global leaderboard or public comparison.
-- No direct copy of 王者营地 scoring thresholds.
-- No blame-heavy wording such as public "背锅" labels in the first version.
-- No machine-learning model requirement for Phase 5; rule-based scoring is enough.
-- No social sharing surface in the first version.
-- No multi-account or cross-player product flow.
-- No change to credential sync ownership.
+Phase 5 covers only preset/open mode data.
 
-## Current Context
+Out of scope for this phase:
 
-The desktop product is `apps/owstats-desktop`, using Tauri 2, React, TypeScript, Rust, and SQLite.
+- stadium/fight scoring.
+- Global ranking or public comparison.
+- Full five-player lineup analysis as the default display.
+- AI-generated long-form review text.
+- Public 0-100 score display.
+- Credential, sync, or multi-account changes.
 
-Relevant current boundaries:
+preset/open use the same first-version scoring rules. The scoring cache keeps mode information so future versions can split rules by mode.
 
-- Match list lives in `apps/owstats-desktop/src/pages/MatchesPage.tsx`.
-- Match detail lives in `apps/owstats-desktop/src/pages/MatchDetailPage.tsx`.
-- Match timeline cards live in `apps/owstats-desktop/src/features/matches/MatchTimeline.tsx`.
-- Frontend DTOs live in `apps/owstats-desktop/src/shared/types.ts`.
-- Backend match queries live in `apps/owstats-desktop/src-tauri/src/queries.rs`.
-- Friend analytics live in `apps/owstats-desktop/src-tauri/src/analytics.rs` and related React pages.
-- `match_players` is a rebuildable projection from raw match details and already supports friend analysis.
+## Current Project Context
 
-Existing match data can already support a first scoring pass:
+The active desktop project is `apps/owstats-desktop`, using Tauri 2, React, TypeScript, Rust, and SQLite.
 
-- Match result, mode, map, hero, begin time, scores, duration.
-- Current-player kills, assists, deaths, damage, healing, mitigation.
-- Detail rows for teammates and enemies.
-- Friend rows via `friendBnetIds`.
-- Existing season review fields such as streaks, personal bests, hero pool, and evidence links.
+Relevant existing areas:
+
+- Match list: `apps/owstats-desktop/src/pages/MatchesPage.tsx`
+- Match detail: `apps/owstats-desktop/src/pages/MatchDetailPage.tsx`
+- Timeline cards: `apps/owstats-desktop/src/features/matches/MatchTimeline.tsx`
+- Frontend DTOs: `apps/owstats-desktop/src/shared/types.ts`
+- Backend queries: `apps/owstats-desktop/src-tauri/src/queries.rs`
+- Backend analytics: `apps/owstats-desktop/src-tauri/src/analytics.rs`
+- Local schema/import: `apps/owstats-desktop/src-tauri/src/db.rs` and importer modules
+
+Raw data references:
+
+- `docs/raw-match-fields.md`
+- `data/players/5479_s22_full_season.json`
 
 ## Product Architecture
 
-Add a backend-owned evaluation layer. The frontend displays evaluations but does not derive core score, tags, or friend-lineup aggregates.
+Add a backend-owned evaluation layer. The frontend renders cached evaluation output but does not derive core scoring decisions.
 
 Recommended backend units:
 
-- `match_evaluation.rs`: per-match score, tag, and reason generation.
-- `team_patterns.rs`: grouped-play friend hero usage and common lineup combinations.
-- Existing `queries.rs` and `analytics.rs` call these modules and expose DTOs through Tauri commands.
+- `match_evaluation.rs`: per-match grade, primary tag, evidence tags, confidence, and internal reasons.
+- `team_patterns.rs`: grouped-play friend common heroes and lineup combinations.
+- Existing query/import modules call these units and expose results through DTOs and Tauri commands.
 
 Recommended frontend ownership:
 
-- Match list shows compact tags on each match card.
-- Match detail shows a match evaluation panel above the raw JSON section.
-- Friend analysis gets a grouped-play section for friend hero habits and lineup combinations.
+- Match list displays grade, primary tag, and up to two evidence tags.
+- Match list supports single-select filtering for core primary tags.
+- Match detail displays labels only in the first version, not full scoring reasons.
+- Personal review consumes cached scoring tags for positive season highlights.
+- Friend analysis displays representative friend heroes and common grouped lineups.
 
-## Per-Match Evaluation
+## Match Evaluation Rules
 
-Each preset/open match receives a compact evaluation.
+Each evaluated match has:
 
-Backend DTO shape:
+- one grade: `S`, `A`, `B`, or `C`
+- one primary tag
+- zero or more evidence tags, with at most two displayed
+- confidence
+- internal reasons for testing and debugging
 
-```text
-MatchEvaluation {
-  matchId
-  score
-  gradeLabel
-  primaryTag
-  tags[]
-  reasons[]
-  evidence[]
-  confidence
-}
-```
+Primary tags:
 
-Score:
+| Condition | Tag |
+| --- | --- |
+| Win and strong personal data | `带飞局` |
+| Win and weak personal data | `躺赢局` |
+| Loss and strong personal data | `尽力局` |
+| Loss and weak personal data | `背锅局` |
+| Win and middle-state data | `顺风局` |
+| Loss and middle-state data | `惜败局` |
 
-- Use a 0-100 internal score.
-- Display can be numeric or grade-like, for example `86` or `A`.
-- Score is relative to local season context, not absolute global strength.
+Result-only fallbacks:
 
-Core inputs:
+- Win with insufficient detail: `胜利局`
+- Loss with insufficient detail: `失败局`
+- Draw or unknown result: no scoring label
 
-- Win/loss/draw.
-- KDA-like contribution.
-- Deaths relative to same season and similar role/hero when available.
-- Damage, healing, and mitigation relative to local baselines.
-- Duration-adjusted values for short or long matches.
-- Team-relative rank when full detail rows are available.
-- Streak context from adjacent matches.
+Strong personal data:
 
-Initial tags:
+- First among teammates in any core metric.
 
-- `带飞局`: win plus top-tier contribution.
-- `尽力局`: loss or close loss plus high contribution.
-- `躺赢局`: win plus low personal contribution relative to team/season.
-- `状态低迷`: low contribution or high deaths relative to context.
-- `实力局`: above-average but not dominant performance.
-- `伯仲局`: close score or close team performance.
-- `连胜中`: current match is part of a win streak.
-- `连败中`: current match is part of a loss streak.
-- `个人最佳`: this match sets or ties a tracked personal best.
+Weak personal data:
 
-Tone rules:
+- Not first among teammates in any core metric.
+- Unique highest death count among teammates.
 
-- Labels should be useful rather than punitive.
-- `状态低迷` is preferred over `背锅局`.
-- Every primary tag must have at least one reason string that explains the evidence.
+Core metrics:
 
-## Match List Tag Browsing
+- `heroDamage`
+- `kill`
+- `cure`
+- `resistDamage`
+- KDA = `(kill + assist) / max(death, 1)`
 
-Match list becomes the main browsing entry for evaluations.
+Death count of `0` uses denominator `1` for KDA.
 
-Card additions:
+## Evidence Tags
 
-- Primary tag chip.
-- Up to two secondary chips.
-- Compact score or grade.
-- One short reason, for example `伤害高于赛季均值 38%`.
+Personal honor evidence tags:
 
-Filters:
+- `KDA最高`
+- `击杀最多`
+- `伤害最高`
+- `治疗最高`
+- `格挡最多`
 
-- Add tag filter after the existing season, hero, map, result, mode, and date filters.
-- Tag filter uses stable internal tag keys in route query parameters.
-- Invalid tag query parameters are ignored.
+These compare only against teammates, not all players in the match.
 
-Sorting:
+Match-nature evidence tags:
 
-- Keep default recent-first sorting.
-- Do not add manual score sorting in the first version.
+- `翻盘局`: win where the player's team total kills are lower than enemy team total kills.
+- `伯仲局`: team total kill difference is 2 or less, and team total damage difference is within 10%.
 
-Empty states:
+Display priority:
 
-- If evaluation has not been computed, show the normal match list without fake tags.
-- If a selected tag has no matches, show a short empty state with a clear filter action.
+1. `KDA最高`
+2. `击杀最多`
+3. `伤害最高`
+4. `治疗最高`
+5. `格挡最多`
+6. `翻盘局`
+7. `伯仲局`
 
-## Match Detail Evaluation Panel
+`伯仲局` is low priority and should only appear when there is room after stronger tags.
 
-Match detail should explain the evaluation before showing raw data.
+## Grade Mapping
 
-Panel content:
+| Condition | Grade |
+| --- | --- |
+| `带飞局` or `尽力局` with at least 2 core evidence tags | `S` |
+| `带飞局` or `尽力局` with 1 core evidence tag | `A` |
+| `顺风局` or `惜败局` | `B` |
+| `躺赢局` or `背锅局` | `C` |
+| `胜利局` or `失败局` fallback | `B` |
 
-- Score/grade.
-- Primary tag and secondary tags.
-- Three to five evidence rows.
-- Current-player metrics versus local baseline.
-- Team rank if match details are available.
-- Link-like evidence anchors can point to existing player tables or raw detail sections.
+The first version does not show a public 0-100 score.
 
-Behavior:
+## Streak Labels
 
-- If detail data is missing, still show summary-based evaluation with lower confidence.
-- If a metric cannot be normalized reliably, omit that evidence row.
-- Raw JSON remains available for diagnostics but should not be the main review content.
+Streaks are list separators/status labels, not single-match tags.
 
-## Friend Grouped-Play Analysis
+Rules:
 
-Extend the existing friend analytics from "which friends correlate with outcomes" into "what happens when I play with this friend or lineup."
+- `连胜`: 3 or more consecutive wins.
+- `连败`: 3 or more consecutive losses.
+- Text is plain result text such as `3连胜` or `5连败`.
+- In reverse-chronological lists, place the streak label at the top of the streak segment. It means the matches below form this streak.
 
-Friend hero habits:
+## Match List Filtering
 
-- For each friend, show their most common heroes when grouped with the current player.
-- Include matches, win rate, and recent trend if available.
-- Support friend detail pages first; broad dashboard cards can come later.
+The first version supports single-select filtering for core primary tags only:
 
-Example display:
+- `带飞局`
+- `尽力局`
+- `躺赢局`
+- `背锅局`
 
-```text
-好友 A 常用英雄
-安娜: 18 场, 61.1% 胜率
-朱诺: 9 场, 55.6% 胜率
-雾子: 6 场, 50.0% 胜率
-```
+Display-only labels are not filter options:
 
-Common lineup combinations:
+- `顺风局`
+- `惜败局`
+- `胜利局`
+- `失败局`
 
-- Aggregate lineups from teammate detail rows in matches that include one or more known friends.
-- Start with hero-name combinations, not rigid role-lock assumptions.
-- Normalize lineup keys by sorted hero identifiers so the same set produces one aggregate.
-- Track the current player's hero plus known friends' heroes as the first version.
-- If full teammate rows are reliable, optionally include all five teammate heroes in a separate "完整阵容" section.
+Evidence tags are also display-only and not included in the first-version filter.
 
-Lineup DTO shape:
+## SQLite Cache
 
-```text
-FriendLineupCombo {
-  key
-  label
-  friendIds[]
-  heroes[]
-  matches
-  wins
-  winRate
-  lastPlayedAt
-  sampleLabel
-  evidenceMatchId
-}
-```
+Evaluation is cached in SQLite. It is not only computed transiently at read time.
 
-Lineup examples:
+Rules:
 
-- `你: 温斯顿 + 好友A: 安娜`
-- `你: 源氏 + 好友A: 安娜 + 好友B: 卢西奥`
-- `完整阵容: 温斯顿 / 猎空 / 黑影 / 安娜 / 卢西奥`
+- Compute cached scoring during import.
+- Scoring failure must not fail the whole import.
+- Matches with scoring failure are treated as unevaluated.
+- Unevaluated matches hide the scoring area in the UI.
+- Cached rows include a scoring rule version.
+- Opening the match list detects stale rule versions and recomputes them in the background.
 
-Minimum sample:
+First-version cache fields:
 
-- Friend hero habits can show at 2+ matches with an explicit small-sample label.
-- Lineup combinations should require at least 3 matches for ranking.
-- Combos below the threshold can appear only in recent history, not in "best lineup" ranking.
+- `match_id`
+- `mode`
+- `rule_version`
+- `grade`
+- `primary_tag`
+- `evidence_tags_json`
+- `reasons_json`
+- `confidence`
+- `computed_at`
 
-## Data Contracts
+## Friend Common Heroes
 
-Backend remains authoritative for:
+Friend common hero analysis only includes preset/open matches and only uses friends identified by `friendBnetIds`.
 
-- Evaluation score.
-- Primary and secondary tags.
-- Explanation reasons.
-- Evaluation confidence.
-- Friend hero aggregates.
-- Friend lineup aggregates.
-- Win-rate and sample labels.
+Display rules:
 
-Frontend may compute only presentation formatting:
+- Sort friends by grouped match count.
+- Show at most 5 friends.
+- A friend needs at least 3 grouped matches to appear.
+- Show one representative hero per friend.
+- Representative hero is chosen by match count.
+- If tied, choose the most recently used hero.
+- Win rate is supporting context, not the primary sort key.
 
-- Percent formatting.
-- Chip ordering if backend already provides priority.
-- Simple signed deltas when backend provides both current and baseline values.
-
-Evaluation data can be computed on demand in Phase 5. Persistent storage is optional for the first implementation, but the design should keep a future cache table possible:
+Example:
 
 ```text
-match_evaluations(match_id, version, score, primary_tag, tags_json, reasons_json, confidence, computed_at)
+好友A：安娜 18场 61%胜率
 ```
 
-Versioning matters because scoring rules will change.
+## Lineup Combinations
+
+Lineup analysis only uses current player plus one or more identified friends.
+
+Rules:
+
+- Do not default to full five-player lineups.
+- Prefer combinations that include multiple identified friends when available.
+- Sort by match count.
+- Show win rate as supporting context.
+- A combination needs at least 3 matches to enter the ranked list.
+- If no combination reaches 3 matches, hide the lineup module.
+
+Examples:
+
+```text
+你：源氏 + 好友A：安娜，12场，58%胜率
+你：温斯顿 + 好友A：安娜 + 好友B：卢西奥，5场，60%胜率
+```
+
+## Season Review Integration
+
+Personal season review consumes cached scoring output and focuses on positive highlights.
+
+Display:
+
+- `带飞局` count
+- `尽力局` count
+- `S` grade match count
+- longest win streak
+- `最常高光`
+
+`最常高光` only counts personal honor evidence tags:
+
+- `KDA最高`
+- `击杀最多`
+- `伤害最高`
+- `治疗最高`
+- `格挡最多`
+
+Do not foreground `躺赢局` or `背锅局` in the season review by default.
 
 ## Error Handling
 
-Expected partial-data cases:
-
-- Missing match details: return lower-confidence summary evaluation.
-- Missing teammate rows: omit team-rank evidence.
-- Missing friend identity data: hide grouped-play analysis and keep existing friend boards.
-- Small sample: show the aggregate with a small-sample label or hide it from ranking sections.
-- Unknown hero/map names: use existing GUID fallback rules.
-
-No evaluation failure should block the match list. If evaluation fails for a match, the UI should still show the base match card.
+- Missing details: use result-only fallback when possible, with lower confidence.
+- Missing teammate rows: skip teammate ranking, evidence tags, and lineup evidence.
+- Missing friend identity: hide friend grouped-play modules; do not infer friends.
+- Unknown hero name: fall back to hero GUID.
+- Scoring failure: keep match visible and hide scoring area.
+- Sensitive fields such as tokens, cookies, and credential cache content must never appear in UI or logs.
 
 ## Acceptance Criteria
 
 Phase 5 is accepted when:
 
-- Match list can display score/grade and tags for local preset/open matches.
-- Match list supports tag filtering without breaking existing filters.
-- Each displayed primary tag has at least one visible reason.
-- Match detail shows a readable evaluation panel above raw JSON.
-- Missing detail data degrades to lower-confidence summary evaluation.
-- Existing personal review and friend analytics still load.
-- Friend detail shows common heroes used by that friend when grouped with the current player.
-- Friend analysis exposes common lineup combinations with match count, win rate, and evidence match.
-- Small samples are labeled rather than presented as strong conclusions.
-- Backend tests cover tag assignment, score normalization, streak tags, friend hero habits, and lineup aggregation.
-- Frontend build passes.
-
-## Open Product Questions
-
-These are intentionally left for user review before implementation planning:
-
-- Whether the first UI should display numeric score, grade, or both.
-- Whether `躺赢局` should be shown as-is or softened to a more neutral phrase.
-- Whether friend lineup combinations should include only known friends or all teammates when full rows are available.
-- Whether tag filters should be single-select or multi-select.
-- Whether score/tag computation should be cached in SQLite in the first implementation.
+- preset/open import generates cached evaluation rows.
+- Match list shows grade, one primary tag, and at most two evidence tags.
+- Match list hides scoring for unevaluated matches.
+- Draw or unknown result shows no scoring label.
+- Primary tag filter is single-select and includes only `带飞局`, `尽力局`, `躺赢局`, and `背锅局`.
+- Streak labels appear for 3+ win/loss segments in the match list.
+- Friend common hero module shows at most 5 qualified friends, one hero per friend.
+- Lineup module shows current-player-plus-friend combinations with at least 3 matches.
+- Season review shows positive scoring highlights.
+- Scoring failures do not block import.
+- Rule-version mismatch triggers background recomputation from the match list.
+- Backend tests cover the scoring matrix, KDA zero-death handling, evidence priority, `翻盘局`, `伯仲局`, detail-missing fallback, cache versioning, friend common heroes, and lineup aggregation.
 
 ## Design Self-Review
 
-Coverage:
+This document is aligned with `docs/phase-5-scoring-design.md` and removes older draft assumptions that are no longer true:
 
-- The design covers the requested points 1, 2, and 5.
-- The friend analysis supplement includes friend common heroes and common lineup combinations.
-- The design uses existing match, detail, and friend projection data instead of adding external dependencies.
+- `背锅局` is now a valid primary tag.
+- `躺赢局` is displayed directly.
+- SQLite caching is required.
+- Details do not show full scoring reasons in the first version.
+- Streak labels are list segment labels, not single-match tags.
+- Friend common hero and lineup analysis are restricted to preset/open.
 
-Conflict check:
-
-- No requirement changes credential sync, multi-account behavior, or local-first storage.
-- Backend remains authoritative for analytics; frontend is presentation-focused.
-- Rule-based scoring is compatible with later AI summary work.
-
-Placeholder check:
-
-- The document has no implementation placeholders.
-- The open questions are explicit product decisions for later review, not missing design sections.
-
-Scope check:
-
-- Phase 5 is broad but coherent because all work centers on local match interpretation and grouped-play analysis.
-- The later implementation plan should split this into independent tasks: backend evaluation engine, match list DTO/UI, match detail panel, friend hero habits, lineup aggregation, tests, and docs.
+All first-version scoring decisions captured here are resolved.

@@ -6,6 +6,9 @@ export default defineConfig({
   clearScreen: false,
   server: {
     port: 1420,
-    strictPort: false
+    strictPort: false,
+    fs: {
+      allow: ["D:/Codex/OW_data/owstats-local/apps/owstats-desktop", "D:/Codex/OW_data/owstats-local/assets"]
+    }
   }
 });

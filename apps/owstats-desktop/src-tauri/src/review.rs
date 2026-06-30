@@ -81,6 +81,7 @@ pub fn get_personal_season_review(
     let hero_pool = hero_pool(&rows, &baseline_aggregate);
     let maps = map_adaptability(&rows, &baseline_aggregate);
     let top_conclusions = top_conclusions(&personal_bests, &hero_pool, &maps, &baseline);
+    let phase5_highlights = phase5_highlights(db, season, &streaks)?;
 
     Ok(PersonalSeasonReview {
         summary: ReviewSummary {
@@ -96,11 +97,81 @@ pub fn get_personal_season_review(
             avg_healing: round2(avg(total_aggregate.healing, total_aggregate.matches)),
         },
         baseline,
+        phase5_highlights,
         top_conclusions,
         personal_bests,
         streaks,
         hero_pool,
         maps,
+    })
+}
+
+fn phase5_highlights(
+    db: &OwDatabase,
+    season: Option<i64>,
+    streaks: &StreakSummary,
+) -> Result<Phase5ReviewHighlights> {
+    let conn = db.connect()?;
+    let mut sql = String::from(
+        r#"
+        SELECT e.primary_tag, e.grade, e.evidence_tags_json
+        FROM match_evaluations e
+        JOIN matches m ON m.match_id = e.match_id
+        WHERE m.bucket='preset'
+        "#,
+    );
+    let mut rows = if let Some(season) = season {
+        sql.push_str(" AND m.season=?");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![season], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    let carry_count = rows.iter().filter(|row| row.0 == "带飞局").count() as i64;
+    let try_hard_count = rows.iter().filter(|row| row.0 == "尽力局").count() as i64;
+    let s_grade_count = rows.iter().filter(|row| row.1 == "S").count() as i64;
+    let mut highlight_counts = HashMap::<String, i64>::new();
+    for (_, _, evidence_text) in rows.drain(..) {
+        for tag in serde_json::from_str::<Vec<String>>(&evidence_text).unwrap_or_default() {
+            if matches!(
+                tag.as_str(),
+                "KDA最高" | "击杀最多" | "伤害最高" | "治疗最高" | "格挡最多"
+            ) {
+                *highlight_counts.entry(tag).or_default() += 1;
+            }
+        }
+    }
+    let most_common_highlight = highlight_counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+        .map(|item| item.0);
+
+    Ok(Phase5ReviewHighlights {
+        carry_count,
+        try_hard_count,
+        s_grade_count,
+        longest_win_streak: streaks.longest_win_streak,
+        most_common_highlight,
     })
 }
 

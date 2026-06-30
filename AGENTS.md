@@ -10,6 +10,13 @@ Project root:
 D:\Codex\OW_data\owstats-local
 ```
 
+Before reading, editing, running commands, or starting a dev server, confirm the
+working directory is this project root or a deliberate subdirectory under it.
+Do not treat `D:\Codex\OW_data`, `D:\Workspace\OW数据`, or any old plugin checkout
+as the active project. If a command is run from outside the root, use
+`git -C D:\Codex\OW_data\owstats-local ...` or `cd D:\Codex\OW_data\owstats-local`
+first.
+
 The active product is the Tauri desktop app:
 
 ```text
@@ -76,7 +83,8 @@ npm run build
 
 ## Token-Saving Workflow
 
-- Start with `AGENTS.md`, then inspect only the files touched by the request.
+- Start with this `AGENTS.md`, confirm `D:\Codex\OW_data\owstats-local` is the
+  active project root, then inspect only the files touched by the request.
 - Prefer codebase-memory-mcp for code discovery when available.
 - Use `rg` over broad file reads.
 - For Tauri bugs, begin at `src-tauri/src/commands.rs`, then jump to the called module.

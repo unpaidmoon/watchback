@@ -1,7 +1,12 @@
-import { ArrowLeft } from "lucide-react";
+import { AlertCircle, ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMatchDetails } from "../shared/api";
+import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
+import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
+import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
+import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
+import { productErrorMessage } from "../shared/phase6Shell";
 import type { MatchDetailView, PlayerRow } from "../shared/types";
 
 export function MatchDetailPage() {
@@ -22,42 +27,104 @@ export function MatchDetailPage() {
     try {
       setDetail(await getMatchDetails(nextMatchId));
     } catch (err) {
-      setError(String(err));
+      setError(productErrorMessage(err));
     } finally {
       setLoading(false);
     }
   }
 
+  const detailMapName = detail?.mapName ?? "未知地图";
+
   return (
-    <section className="detailPage">
-      <header className="detailHero">
-        <button type="button" className="ghostButton" onClick={() => navigate("/matches")}>
-          <ArrowLeft size={18} />
-          返回列表
-        </button>
-        <div>
-          <span className="eyebrow">对局详情</span>
-          <h2>{matchId}</h2>
-        </div>
+    <section className="detailPage phase6DetailPage">
+      <header className={`detailHero phase6DetailHero ${detail?.result ?? "pending"}`}>
+        {detail ? (
+          <>
+            <button type="button" className="phase6DetailBackButton" onClick={() => navigate("/matches")}>
+              <ArrowLeft size={18} />
+              返回列表
+            </button>
+            <div className="phase6DetailBanner">
+              <MapPreview className="phase6DetailBannerMap" mapKey={detail.mapGuid ?? detail.mapName} name={detailMapName} />
+              <div className="phase6DetailResultPanel">
+                <strong>{detail.resultLabel ?? "未知"}</strong>
+                <span>{resultEnglishLabel(detail.result)}</span>
+              </div>
+              <div className="phase6DetailCornerAccent" />
+            </div>
+            <div className="phase6DetailSummary">
+              <h2>地图：{detailMapName}</h2>
+              <div className="phase6DetailFacts">
+                <span>
+                  <b>最终比分：</b>
+                  {formatFinalScore(detail)}
+                </span>
+                <span>
+                  <b>游戏时长：</b>
+                  {formatDetailDuration(detail.durationSec)}
+                </span>
+                <span>
+                  <b>游戏模式：</b>
+                  {detail.modeLabel ?? "-"}
+                </span>
+                <span>
+                  <b>对局开始时间：</b>
+                  {formatDetailStartTime(detail.beginTs)}
+                </span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="phase6DetailLoadingHeader">
+            <button type="button" className="ghostButton" onClick={() => navigate("/matches")}>
+              <ArrowLeft size={18} />
+              返回列表
+            </button>
+            <div>
+              <span className="phase6Eyebrow">对局报告</span>
+              <h2>{matchId}</h2>
+            </div>
+          </div>
+        )}
       </header>
 
-      {error && <div className="errorBanner">{error}</div>}
+      {error && (
+        <div className="errorBanner phase6RecoverableError">
+          <AlertCircle size={18} />
+          <span>{error}</span>
+        </div>
+      )}
       {loading && <div className="emptyState">正在读取对局详情...</div>}
       {!loading && !detail && !error && <div className="emptyState">未找到对局详情。</div>}
       {detail && (
         <div className="detailContent">
-          <div className="playerColumns">
-            <PlayerTable title="队友" players={detail.teammates} />
-            <PlayerTable title="对手" players={detail.enemies} />
-          </div>
+          <DetailEvaluation detail={detail} />
           <SameRoleComparison detail={detail} />
-          <section className="rawViewer">
-            <h3>已脱敏原始 JSON</h3>
-            <pre>{JSON.stringify(detail.rawJson, null, 2)}</pre>
-          </section>
+          <div className="playerColumns phase6PlayerColumns">
+            <PlayerTable title="队友" players={detail.teammates} tone="team" />
+            <div className="phase6VsDivider" aria-hidden="true">
+              <span>VS</span>
+            </div>
+            <PlayerTable title="对手" players={detail.enemies} tone="enemy" />
+          </div>
         </div>
       )}
     </section>
+  );
+}
+
+function DetailEvaluation({ detail }: { detail: MatchDetailView }) {
+  if (!detail.evaluation && detail.teamAwards.length === 0) return null;
+  return (
+    <GlassPanel className="roleComparison phase6ReportPanel" tone="solid">
+      <header>
+        <div>
+          <span className="phase6Eyebrow">对局表现</span>
+          <h3>评分与同队奖牌</h3>
+        </div>
+      </header>
+      <MatchPerformanceBadges evaluation={detail.evaluation} teamAwards={detail.teamAwards} />
+    </GlassPanel>
   );
 }
 
@@ -72,10 +139,12 @@ function SameRoleComparison({ detail }: { detail: MatchDetailView }) {
   ].filter((item): item is DeltaCard => item !== null);
   if (cards.length === 0) return null;
   return (
-    <section className="roleComparison">
+    <GlassPanel className="roleComparison phase6ReportPanel" tone="solid">
       <header>
-        <span className="eyebrow">同职责本赛季均值对比</span>
-        <h3>{comparison.roleLabel ?? comparison.rawRole ?? "未知职责"}</h3>
+        <div>
+          <span className="phase6Eyebrow">同职责赛季均值对比</span>
+          <h3>{comparison.roleLabel ?? "未知职责"}</h3>
+        </div>
       </header>
       <div className="deltaGrid">
         {cards.map((card) => (
@@ -85,7 +154,7 @@ function SameRoleComparison({ detail }: { detail: MatchDetailView }) {
           </div>
         ))}
       </div>
-    </section>
+    </GlassPanel>
   );
 }
 
@@ -123,34 +192,58 @@ function formatSigned(value: number) {
   return `${value > 0 ? "+" : ""}${rounded}`;
 }
 
-function PlayerTable({ title, players }: { title: string; players: PlayerRow[] }) {
+function PlayerTable({ title, players, tone }: { title: string; players: PlayerRow[]; tone: "team" | "enemy" }) {
+  const highlights = playerHighlightMap(players);
   return (
-    <section className="playerSection">
+    <GlassPanel className={`playerSection phase6PlayerSection ${tone}`} tone="solid">
       <h3>{title}</h3>
-      <div className="playerTable">
-        <div className="playerHead">
-          <span>玩家</span>
-          <span>英雄</span>
-          <span>击杀/助攻/死亡</span>
-          <span>伤害/治疗/格挡</span>
-          <span>承伤/受疗</span>
-        </div>
+      <div className="playerTable phase6PlayerTable" aria-label={`${title}玩家数据`}>
         {players.map((player, index) => (
-          <div className="playerLine" key={`${player.side}-${player.bnetId || player.name}-${index}`}>
-            <span>{player.name}</span>
-            <span>{player.heroName}</span>
-            <span>
-              {player.kills}/{player.assists}/{player.deaths}
-            </span>
-            <span>
-              {player.damage}/{player.healing}/{player.mitigation}
-            </span>
-            <span>
-              {player.damageTaken}/{player.healingTaken}
-            </span>
-          </div>
+          <PlayerCard player={player} index={index} highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()} key={playerKeyFor(player, index)} />
         ))}
       </div>
-    </section>
+    </GlassPanel>
   );
+}
+
+function PlayerCard({ player, highlights }: { player: PlayerRow; index: number; highlights: Set<HighlightMetric> }) {
+  return (
+    <article className="phase6PlayerCard">
+      <div className="phase6PlayerPortrait">
+        <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} />
+      </div>
+      <div className="phase6PlayerStats">
+        <header>
+          <strong>{player.name}</strong>
+          <span>{player.heroName}</span>
+        </header>
+        <div className="phase6PlayerMetricGrid">
+          <span>
+            <b>K/A/D</b>
+            <strong>
+              <Highlight value={player.kills} active={highlights.has("kills")} />/{player.assists}/{player.deaths}
+            </strong>
+          </span>
+          <span>
+            <b>伤害/治疗/抵挡</b>
+            <strong>
+              <Highlight value={player.damage} active={highlights.has("damage")} />/
+              <Highlight value={player.healing} active={highlights.has("healing")} />/
+              <Highlight value={player.mitigation} active={highlights.has("mitigation")} />
+            </strong>
+          </span>
+          <span>
+            <b>承伤/受疗</b>
+            <strong>
+              {player.damageTaken}/{player.healingTaken}
+            </strong>
+          </span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function Highlight({ value, active }: { value: number; active: boolean }) {
+  return <em className={active ? "phase6StatHighlight" : ""}>{value}</em>;
 }

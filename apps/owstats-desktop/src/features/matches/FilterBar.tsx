@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { modeLabel } from "../../shared/rankingUtils";
 import type { FilterOptions, MatchFilters } from "../../shared/types";
 
 type Props = {
@@ -12,6 +13,8 @@ const resultLabels: Record<string, string> = {
   loss: "失败",
   draw: "平局"
 };
+
+const primaryTags = ["带飞局", "尽力局", "躺赢局", "背锅局"];
 
 export function FilterBar({ filters, options, onChange }: Props) {
   const [dateFrom, setDateFrom] = useState(filters.dateFrom ?? "");
@@ -27,19 +30,8 @@ export function FilterBar({ filters, options, onChange }: Props) {
     patch({ dateFrom: emptyOrValue(nextFrom), dateTo: emptyOrValue(nextTo) });
   }
 
-  function shortcut(days: number) {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - (days - 1));
-    const nextFrom = toDateInput(start);
-    const nextTo = toDateInput(end);
-    setDateFrom(nextFrom);
-    setDateTo(nextTo);
-    patch({ dateFrom: nextFrom, dateTo: nextTo });
-  }
-
   return (
-    <section className="filterBar" aria-label="筛选">
+    <section className="filterBar phase6FilterBar" aria-label="对局筛选">
       <label>
         赛季
         <select value={filters.season ?? ""} onChange={(event) => patch({ season: numberOrUndefined(event.target.value) })}>
@@ -90,7 +82,18 @@ export function FilterBar({ filters, options, onChange }: Props) {
           <option value="">全部</option>
           {options.modes.map((mode) => (
             <option key={mode} value={mode}>
-              {mode}
+              {modeLabel(mode)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        复盘标签
+        <select value={filters.primaryTag ?? ""} onChange={(event) => patch({ primaryTag: emptyOrValue(event.target.value) })}>
+          <option value="">全部</option>
+          {primaryTags.map((tag) => (
+            <option key={tag} value={tag}>
+              {tag}
             </option>
           ))}
         </select>
@@ -119,17 +122,6 @@ export function FilterBar({ filters, options, onChange }: Props) {
           }}
         />
       </label>
-      <div className="filterActions">
-        <button type="button" className="ghostButton" onClick={() => shortcut(7)}>
-          近 7 天
-        </button>
-        <button type="button" className="ghostButton" onClick={() => shortcut(30)}>
-          近 30 天
-        </button>
-        <button type="button" className="ghostButton" onClick={() => onChange({})}>
-          全部
-        </button>
-      </div>
     </section>
   );
 }
@@ -144,11 +136,4 @@ function emptyOrValue(value: string) {
 
 function numberOrUndefined(value: string) {
   return value ? Number(value) : undefined;
-}
-
-function toDateInput(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }

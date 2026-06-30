@@ -7,6 +7,7 @@ pub mod dashen_auth;
 mod db;
 mod importer;
 pub mod login_flow;
+mod match_evaluation;
 mod models;
 mod queries;
 pub mod ranking;
@@ -17,6 +18,7 @@ mod sync;
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
 pub use importer::{import_full_season_payload, import_payload_value};
+pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSION};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches};
 pub use redaction::redact_sensitive_json;
@@ -33,6 +35,7 @@ pub fn run() {
             commands::list_match_filters,
             commands::list_match_timeline,
             commands::get_match_details,
+            commands::refresh_match_evaluations,
             commands::get_friend_analytics,
             commands::get_friend_details,
             commands::get_onboarding_status,

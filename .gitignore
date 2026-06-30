@@ -45,6 +45,7 @@ Thumbs.db
 # Build artifacts
 node_modules/
 target/
+apps/owstats-desktop/src-tauri/target-codex-test/
 apps/*/src-tauri/gen/
 *.zip
 *.tar.gz

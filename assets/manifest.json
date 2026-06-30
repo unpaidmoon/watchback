@@ -1,0 +1,1059 @@
+{
+  "source": "https://overfast-api.tekrop.fr/",
+  "heroes": [
+    {
+      "key": "ana",
+      "name": "Ana",
+      "cn_name": "安娜",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/985b06beae46b7ba3ca87d1512d0fc62ca7f206ceca58ef16fc44d43a1cc84ed.png",
+      "local_path": "data/assets/overwatch/heroes/ana.png"
+    },
+    {
+      "key": "anran",
+      "name": "Anran",
+      "cn_name": "安燃",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/2c38b41d79a1ce9a08b9ad8eb7edf3ff819bd448af16a5815be8c7fdb7203aa0.png",
+      "local_path": "data/assets/overwatch/heroes/anran.png"
+    },
+    {
+      "key": "ashe",
+      "name": "Ashe",
+      "cn_name": "艾什",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/4076bbaa2eb52a0bfe612434071e56e7702d5454473dbbea2f9e392a9d997a94.png",
+      "local_path": "data/assets/overwatch/heroes/ashe.png"
+    },
+    {
+      "key": "baptiste",
+      "name": "Baptiste",
+      "cn_name": "巴蒂斯特",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/d4e6f1ca45d9f88fa89260787397f141a6f007b14e5b26698883b6a17bab9680.png",
+      "local_path": "data/assets/overwatch/heroes/baptiste.png"
+    },
+    {
+      "key": "bastion",
+      "name": "Bastion",
+      "cn_name": "堡垒",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/4ede795c2a681aaccfa72d0c901cba0cb8a2c292fd6a97b2ba9faed161c2d184.png",
+      "local_path": "data/assets/overwatch/heroes/bastion.png"
+    },
+    {
+      "key": "brigitte",
+      "name": "Brigitte",
+      "cn_name": "布丽吉塔",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/795fba91376d87d441a7f359ae12a3175dfa95825ccc4414cc6b95b129fc4cb0.png",
+      "local_path": "data/assets/overwatch/heroes/brigitte.png"
+    },
+    {
+      "key": "cassidy",
+      "name": "Cassidy",
+      "cn_name": "卡西迪",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/9240cd64cc8ef58df9acbf55204ab1b5d8578f743fda5931f0dbccbd75ab841b.png",
+      "local_path": "data/assets/overwatch/heroes/cassidy.png"
+    },
+    {
+      "key": "domina",
+      "name": "Domina",
+      "cn_name": "金驭",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/1161c112292c56c052c0ae711792fcde06e3251b98bc9709e582dd7585b5dcd6.png",
+      "local_path": "data/assets/overwatch/heroes/domina.png"
+    },
+    {
+      "key": "doomfist",
+      "name": "Doomfist",
+      "cn_name": "末日铁拳",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/ff5c54f43ad253c7faeda9c4ed31d42582ea6b19205d197866f3dd0c0aa14c16.png",
+      "local_path": "data/assets/overwatch/heroes/doomfist.png"
+    },
+    {
+      "key": "dva",
+      "name": "D.Va",
+      "cn_name": "D.Va",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/df5a5532862d9292634fb3dc0e51a4705aa601de65e5e815513ccc663d84de56.png",
+      "local_path": "data/assets/overwatch/heroes/dva.png"
+    },
+    {
+      "key": "echo",
+      "name": "Echo",
+      "cn_name": "回声",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/d4f2d5b0c2b7e82d61353186c5f23152ccba9d3569b50839aa580dca3e9114ba.png",
+      "local_path": "data/assets/overwatch/heroes/echo.png"
+    },
+    {
+      "key": "emre",
+      "name": "Emre",
+      "cn_name": "埃姆雷",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/c51e2f698138861c0e3b6cfab3c3ca9d67fd709be175e7c397aa6f2649712a30.png",
+      "local_path": "data/assets/overwatch/heroes/emre.png"
+    },
+    {
+      "key": "freja",
+      "name": "Freja",
+      "cn_name": "弗蕾娅",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/811963897c352d9f178bec882d94bd0281074feee7c429c5145b6b8ea8ebe862.png",
+      "local_path": "data/assets/overwatch/heroes/freja.png"
+    },
+    {
+      "key": "genji",
+      "name": "Genji",
+      "cn_name": "源氏",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/156b12c20b1aea872c1eeb5bb37a7de1047b2ab30ecefd0663a8925badde1ea8.png",
+      "local_path": "data/assets/overwatch/heroes/genji.png"
+    },
+    {
+      "key": "hanzo",
+      "name": "Hanzo",
+      "cn_name": "半藏",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/78b61c3e806fb26b02b8980fba62189155074fc15bd865b0883268e546030be5.png",
+      "local_path": "data/assets/overwatch/heroes/hanzo.png"
+    },
+    {
+      "key": "hazard",
+      "name": "Hazard",
+      "cn_name": "骇灾",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/ca48b96dbae6ea7f58ce8a5e73513c8c62b1685bdbf258020fb78bb21a008b5f.png",
+      "local_path": "data/assets/overwatch/heroes/hazard.png"
+    },
+    {
+      "key": "illari",
+      "name": "Illari",
+      "cn_name": "伊拉锐",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/ce42d1455e03e79f321345fea84b27a8918b5db8bd7ab9b2ca9e569606ede9e4.png",
+      "local_path": "data/assets/overwatch/heroes/illari.png"
+    },
+    {
+      "key": "jetpack-cat",
+      "name": "Jetpack Cat",
+      "cn_name": "飞天猫",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/03a184cd0de27091e0099ac22635ad9615a8f6997881a5c25cc5f2444764f729.png",
+      "local_path": "data/assets/overwatch/heroes/jetpack-cat.png"
+    },
+    {
+      "key": "junker-queen",
+      "name": "Junker Queen",
+      "cn_name": "渣客女王",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/06eeecb359f311f43a8f5121d4f9f3a93c565d70b30e94ef543c05596c9a39dc.png",
+      "local_path": "data/assets/overwatch/heroes/junker-queen.png"
+    },
+    {
+      "key": "junkrat",
+      "name": "Junkrat",
+      "cn_name": "狂鼠",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/7660b9fc6f25f30858fdd8797fe0d52b2306f1e78fef99843f58a274e69af046.png",
+      "local_path": "data/assets/overwatch/heroes/junkrat.png"
+    },
+    {
+      "key": "juno",
+      "name": "Juno",
+      "cn_name": "朱诺",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/c0167d251e57b0aa2b1e16c37d87f0e7c77263db9dd0503d77b5f2589bf3e4a0.png",
+      "local_path": "data/assets/overwatch/heroes/juno.png"
+    },
+    {
+      "key": "kiriko",
+      "name": "Kiriko",
+      "cn_name": "雾子",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/408603fe037e8576078eaac5eab2fb251489ced4003b11f5f522776d43d0b83d.png",
+      "local_path": "data/assets/overwatch/heroes/kiriko.png"
+    },
+    {
+      "key": "lifeweaver",
+      "name": "Lifeweaver",
+      "cn_name": "生命之梭",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/3376515cebed0904012e67e956f6d1b9c12e03da642845eeaf787b7e4c7b339d.png",
+      "local_path": "data/assets/overwatch/heroes/lifeweaver.png"
+    },
+    {
+      "key": "lucio",
+      "name": "Lúcio",
+      "cn_name": "卢西奥",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/040bb13f5123ab93faad2f95627ba184608aef4b2469a4d3003859c7087df044.png",
+      "local_path": "data/assets/overwatch/heroes/lucio.png"
+    },
+    {
+      "key": "mauga",
+      "name": "Mauga",
+      "cn_name": "毛加",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/33d39bb439c08975197fc52eff4874716839711b5356c4fdc174f9c24bac1d0e.png",
+      "local_path": "data/assets/overwatch/heroes/mauga.png"
+    },
+    {
+      "key": "mei",
+      "name": "Mei",
+      "cn_name": "美",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/4a55ced3bd597fb08e0fde9dc007f8543ac616ba98ca3db9b0e4d871a8ae17f8.png",
+      "local_path": "data/assets/overwatch/heroes/mei.png"
+    },
+    {
+      "key": "mercy",
+      "name": "Mercy",
+      "cn_name": "天使",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/3bfb8bd8ec827e53d870f1238ab73d8aa1f5dbfbcfaaf7f96ffcd35b5c6102ab.png",
+      "local_path": "data/assets/overwatch/heroes/mercy.png"
+    },
+    {
+      "key": "mizuki",
+      "name": "Mizuki",
+      "cn_name": "瑞稀",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/a9733c2367e0cbd70b9316fd2e1e17028653ec56d0051ea6ff098531dc4f99fc.png",
+      "local_path": "data/assets/overwatch/heroes/mizuki.png"
+    },
+    {
+      "key": "moira",
+      "name": "Moira",
+      "cn_name": "莫伊拉",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/f48f8485056d5d00dad195859188d23e50f7126b8b08b5646f46ef1b42f5e1de.png",
+      "local_path": "data/assets/overwatch/heroes/moira.png"
+    },
+    {
+      "key": "orisa",
+      "name": "Orisa",
+      "cn_name": "奥丽莎",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/a73958a28551f5254f3ab3f97c5f5f8d698a95c0b6a515d1a2b1caac169205a6.png",
+      "local_path": "data/assets/overwatch/heroes/orisa.png"
+    },
+    {
+      "key": "pharah",
+      "name": "Pharah",
+      "cn_name": "法老之鹰",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/60ac2d5de4a6d34644d8872233da402f1436c87f804bb11a21661bb30bf4a51f.png",
+      "local_path": "data/assets/overwatch/heroes/pharah.png"
+    },
+    {
+      "key": "ramattra",
+      "name": "Ramattra",
+      "cn_name": "拉玛刹",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/ddef7c9fb8ce4256e8508196b486f81950efe7aaa6cf27fec4668beb4cd15774.png",
+      "local_path": "data/assets/overwatch/heroes/ramattra.png"
+    },
+    {
+      "key": "reaper",
+      "name": "Reaper",
+      "cn_name": "死神",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/dc6ff07ac790c00dc95a40882449617bb6e0e38906b353a630cffe0c815270a9.png",
+      "local_path": "data/assets/overwatch/heroes/reaper.png"
+    },
+    {
+      "key": "reinhardt",
+      "name": "Reinhardt",
+      "cn_name": "莱因哈特",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/551fbe070c16fdfcc17f7f1de63af22c53e7d2f1340fc2f3172441504527bc4e.png",
+      "local_path": "data/assets/overwatch/heroes/reinhardt.png"
+    },
+    {
+      "key": "roadhog",
+      "name": "Roadhog",
+      "cn_name": "路霸",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/89ddf07e4b619ed96169042e296a1b8856d102746f35add88284b44a9a5a6a03.png",
+      "local_path": "data/assets/overwatch/heroes/roadhog.png"
+    },
+    {
+      "key": "shion",
+      "name": "Shion",
+      "cn_name": "Shion",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/070481cf871590a2b45a51d1335f9fe3d65eb4e4d361ecdd998b34fae2ed65d5.png",
+      "local_path": "data/assets/overwatch/heroes/shion.png"
+    },
+    {
+      "key": "sierra",
+      "name": "Sierra",
+      "cn_name": "西拉",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/4bfd3d8b95844231115cb5bf4db03344c71bc3e865189c52403b2dc51438e63a.png",
+      "local_path": "data/assets/overwatch/heroes/sierra.png"
+    },
+    {
+      "key": "sigma",
+      "name": "Sigma",
+      "cn_name": "西格玛",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/a4c032fa466c9a6d9c6974747635d7ef910027f91cd58892af0c899db565f92d.png",
+      "local_path": "data/assets/overwatch/heroes/sigma.png"
+    },
+    {
+      "key": "sojourn",
+      "name": "Sojourn",
+      "cn_name": "索杰恩",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/82b8c1b8765dcb9a0ba16e343c3516bf324c771ac81e9878473280216e70a889.png",
+      "local_path": "data/assets/overwatch/heroes/sojourn.png"
+    },
+    {
+      "key": "soldier-76",
+      "name": "Soldier: 76",
+      "cn_name": "士兵：76",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/c93b5f0a528c40473188f77cc2a267aee7d5b6cf5c9e104105d634b4388674e2.png",
+      "local_path": "data/assets/overwatch/heroes/soldier-76.png"
+    },
+    {
+      "key": "sombra",
+      "name": "Sombra",
+      "cn_name": "黑影",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/47727b02a16e3bd7b2447d86ae1edf11587bc320b2aecb4f2f16a7ca4ad4e8a0.png",
+      "local_path": "data/assets/overwatch/heroes/sombra.png"
+    },
+    {
+      "key": "symmetra",
+      "name": "Symmetra",
+      "cn_name": "秩序之光",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/ebec57e8bd68b3d4383edfeb34f8f52dd0b94a6467d594c2fee722e8a97c32aa.png",
+      "local_path": "data/assets/overwatch/heroes/symmetra.png"
+    },
+    {
+      "key": "torbjorn",
+      "name": "Torbjörn",
+      "cn_name": "托比昂",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/ce17118cedc29b0d2ac1e059666bed36b9531c85079b0b894bb402d12c917ba9.png",
+      "local_path": "data/assets/overwatch/heroes/torbjorn.png"
+    },
+    {
+      "key": "tracer",
+      "name": "Tracer",
+      "cn_name": "猎空",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/4504f6f15cb3feaa92ecd38e01dcf751cb5abdac2e0bb52d0555727e53277502.png",
+      "local_path": "data/assets/overwatch/heroes/tracer.png"
+    },
+    {
+      "key": "vendetta",
+      "name": "Vendetta",
+      "cn_name": "斩仇",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/cf8ffb52b6f315546d5e94e9d6defad5a2c570798776956de23f47536f9529da.png",
+      "local_path": "data/assets/overwatch/heroes/vendetta.png"
+    },
+    {
+      "key": "venture",
+      "name": "Venture",
+      "cn_name": "探奇",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/dcab9123f5f55df22e54d4e797de43c71b917e0149dd059a7fd6136f48464cd0.png",
+      "local_path": "data/assets/overwatch/heroes/venture.png"
+    },
+    {
+      "key": "widowmaker",
+      "name": "Widowmaker",
+      "cn_name": "黑百合",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/6e4702b45f196aaf51555cf57327322721f45458b17f5f0643ed008a88378259.png",
+      "local_path": "data/assets/overwatch/heroes/widowmaker.png"
+    },
+    {
+      "key": "winston",
+      "name": "Winston",
+      "cn_name": "温斯顿",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/46a10db3aa908c590ddc4e7606376a88143d1f1306ecfbea043263040f9529a5.png",
+      "local_path": "data/assets/overwatch/heroes/winston.png"
+    },
+    {
+      "key": "wrecking-ball",
+      "name": "Wrecking Ball",
+      "cn_name": "破坏球",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/9ef1d58867136e0b26f928d896000b9dab216118f6e2f59e53f2e975e1e27afa.png",
+      "local_path": "data/assets/overwatch/heroes/wrecking-ball.png"
+    },
+    {
+      "key": "wuyang",
+      "name": "Wuyang",
+      "cn_name": "无漾",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/4959500b495b35c0908be2abda56b53f2601b2c5cc39a1cfde8df1bffd38d66d.png",
+      "local_path": "data/assets/overwatch/heroes/wuyang.png"
+    },
+    {
+      "key": "zarya",
+      "name": "Zarya",
+      "cn_name": "查莉娅",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/9b6f63cc66ddf9d5e0862173c733cc0d2e574c5c89357798d91b93b2f95a7080.png",
+      "local_path": "data/assets/overwatch/heroes/zarya.png"
+    },
+    {
+      "key": "zenyatta",
+      "name": "Zenyatta",
+      "cn_name": "禅雅塔",
+      "source_url": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/7d1546b1541a8afc39353f9337a408d6275a141b0432b7e560ef61579996b0fc.png",
+      "local_path": "data/assets/overwatch/heroes/zenyatta.png"
+    }
+  ],
+  "maps": [
+    {
+      "key": "aatlis",
+      "name": "Aatlis",
+      "cn_name": "Aatlis",
+      "gamemodes": [
+        "flashpoint"
+      ],
+      "location": "Morocco",
+      "country_code": "MA",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/aatlis.jpg",
+      "local_path": "data/assets/overwatch/maps/aatlis.jpg"
+    },
+    {
+      "key": "antarctic-peninsula",
+      "name": "Antarctic Peninsula",
+      "cn_name": "Antarctic Peninsula",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Antarctica",
+      "country_code": "AQ",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/antarctic-peninsula.jpg",
+      "local_path": "data/assets/overwatch/maps/antarctic-peninsula.jpg"
+    },
+    {
+      "key": "anubis",
+      "name": "Temple of Anubis",
+      "cn_name": "Temple of Anubis",
+      "gamemodes": [
+        "assault"
+      ],
+      "location": "Giza Plateau, Egypt",
+      "country_code": "EG",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/anubis.jpg",
+      "local_path": "data/assets/overwatch/maps/anubis.jpg"
+    },
+    {
+      "key": "arena-victoriae",
+      "name": "Arena Victoriae",
+      "cn_name": "Arena Victoriae",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Colosseo, Rome, Italy",
+      "country_code": "IT",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/arena-victoriae.jpg",
+      "local_path": "data/assets/overwatch/maps/arena-victoriae.jpg"
+    },
+    {
+      "key": "ayutthaya",
+      "name": "Ayutthaya",
+      "cn_name": "Ayutthaya",
+      "gamemodes": [
+        "capture-the-flag"
+      ],
+      "location": "Thailand",
+      "country_code": "TH",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/ayutthaya.jpg",
+      "local_path": "data/assets/overwatch/maps/ayutthaya.jpg"
+    },
+    {
+      "key": "black-forest",
+      "name": "Black Forest",
+      "cn_name": "Black Forest",
+      "gamemodes": [
+        "elimination"
+      ],
+      "location": "Germany",
+      "country_code": "DE",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/black-forest.jpg",
+      "local_path": "data/assets/overwatch/maps/black-forest.jpg"
+    },
+    {
+      "key": "blizzard-world",
+      "name": "Blizzard World",
+      "cn_name": "Blizzard World",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "Irvine, California, United States",
+      "country_code": "US",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/blizzard-world.jpg",
+      "local_path": "data/assets/overwatch/maps/blizzard-world.jpg"
+    },
+    {
+      "key": "busan",
+      "name": "Busan",
+      "cn_name": "Busan",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "South Korea",
+      "country_code": "KR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/busan.jpg",
+      "local_path": "data/assets/overwatch/maps/busan.jpg"
+    },
+    {
+      "key": "castillo",
+      "name": "Castillo",
+      "cn_name": "Castillo",
+      "gamemodes": [
+        "elimination"
+      ],
+      "location": "Mexico",
+      "country_code": "MX",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/castillo.jpg",
+      "local_path": "data/assets/overwatch/maps/castillo.jpg"
+    },
+    {
+      "key": "chateau-guillard",
+      "name": "Château Guillard",
+      "cn_name": "Château Guillard",
+      "gamemodes": [
+        "deathmatch",
+        "team-deathmatch"
+      ],
+      "location": "Annecy, France",
+      "country_code": "FR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/chateau-guillard.jpg",
+      "local_path": "data/assets/overwatch/maps/chateau-guillard.jpg"
+    },
+    {
+      "key": "circuit-royal",
+      "name": "Circuit Royal",
+      "cn_name": "Circuit Royal",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Monte Carlo, Monaco",
+      "country_code": "MC",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/circuit-royal.jpg",
+      "local_path": "data/assets/overwatch/maps/circuit-royal.jpg"
+    },
+    {
+      "key": "colosseo",
+      "name": "Colosseo",
+      "cn_name": "斗兽场",
+      "gamemodes": [
+        "push"
+      ],
+      "location": "Rome, Italy",
+      "country_code": "IT",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/colosseo.jpg",
+      "local_path": "data/assets/overwatch/maps/colosseo.jpg"
+    },
+    {
+      "key": "dorado",
+      "name": "Dorado",
+      "cn_name": "Dorado",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Mexico",
+      "country_code": "MX",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/dorado.jpg",
+      "local_path": "data/assets/overwatch/maps/dorado.jpg"
+    },
+    {
+      "key": "ecopoint-antarctica",
+      "name": "Ecopoint: Antarctica",
+      "cn_name": "Ecopoint: Antarctica",
+      "gamemodes": [
+        "elimination"
+      ],
+      "location": "Antarctica",
+      "country_code": "AQ",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/ecopoint-antarctica.jpg",
+      "local_path": "data/assets/overwatch/maps/ecopoint-antarctica.jpg"
+    },
+    {
+      "key": "eichenwalde",
+      "name": "Eichenwalde",
+      "cn_name": "Eichenwalde",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "Stuttgart, Germany",
+      "country_code": "DE",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/eichenwalde.jpg",
+      "local_path": "data/assets/overwatch/maps/eichenwalde.jpg"
+    },
+    {
+      "key": "esperanca",
+      "name": "Esperança",
+      "cn_name": "Esperança",
+      "gamemodes": [
+        "push"
+      ],
+      "location": "Portugal",
+      "country_code": "PT",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/esperanca.jpg",
+      "local_path": "data/assets/overwatch/maps/esperanca.jpg"
+    },
+    {
+      "key": "gogadoro",
+      "name": "Gogadoro",
+      "cn_name": "Gogadoro",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Busan, South Korea",
+      "country_code": "KR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/gogadoro.jpg",
+      "local_path": "data/assets/overwatch/maps/gogadoro.jpg"
+    },
+    {
+      "key": "hanamura",
+      "name": "Hanamura",
+      "cn_name": "Hanamura",
+      "gamemodes": [
+        "assault"
+      ],
+      "location": "Tokyo, Japan",
+      "country_code": "JP",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/hanamura.jpg",
+      "local_path": "data/assets/overwatch/maps/hanamura.jpg"
+    },
+    {
+      "key": "hanaoka",
+      "name": "Hanaoka",
+      "cn_name": "Hanaoka",
+      "gamemodes": [
+        "clash"
+      ],
+      "location": "Tokyo, Japan",
+      "country_code": "JP",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/hanaoka.jpg",
+      "local_path": "data/assets/overwatch/maps/hanaoka.jpg"
+    },
+    {
+      "key": "havana",
+      "name": "Havana",
+      "cn_name": "Havana",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Havana, Cuba",
+      "country_code": "CU",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/havana.jpg",
+      "local_path": "data/assets/overwatch/maps/havana.jpg"
+    },
+    {
+      "key": "hollywood",
+      "name": "Hollywood",
+      "cn_name": "Hollywood",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "Los Angeles, United States",
+      "country_code": "US",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/hollywood.jpg",
+      "local_path": "data/assets/overwatch/maps/hollywood.jpg"
+    },
+    {
+      "key": "horizon",
+      "name": "Horizon Lunar Colony",
+      "cn_name": "Horizon Lunar Colony",
+      "gamemodes": [
+        "assault"
+      ],
+      "location": "Earth's moon",
+      "country_code": "",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/horizon.jpg",
+      "local_path": "data/assets/overwatch/maps/horizon.jpg"
+    },
+    {
+      "key": "ilios",
+      "name": "Ilios",
+      "cn_name": "Ilios",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Greece",
+      "country_code": "GR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/ilios.jpg",
+      "local_path": "data/assets/overwatch/maps/ilios.jpg"
+    },
+    {
+      "key": "junkertown",
+      "name": "Junkertown",
+      "cn_name": "Junkertown",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Central Australia",
+      "country_code": "AU",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/junkertown.jpg",
+      "local_path": "data/assets/overwatch/maps/junkertown.jpg"
+    },
+    {
+      "key": "kanezaka",
+      "name": "Kanezaka",
+      "cn_name": "Kanezaka",
+      "gamemodes": [
+        "deathmatch",
+        "team-deathmatch"
+      ],
+      "location": "Tokyo, Japan",
+      "country_code": "JP",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/kanezaka.jpg",
+      "local_path": "data/assets/overwatch/maps/kanezaka.jpg"
+    },
+    {
+      "key": "kings-row",
+      "name": "King’s Row",
+      "cn_name": "King’s Row",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "London, United Kingdom",
+      "country_code": "UK",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/kings-row.jpg",
+      "local_path": "data/assets/overwatch/maps/kings-row.jpg"
+    },
+    {
+      "key": "lijiang-tower",
+      "name": "Lijiang Tower",
+      "cn_name": "Lijiang Tower",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "China",
+      "country_code": "CN",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/lijiang-tower.jpg",
+      "local_path": "data/assets/overwatch/maps/lijiang-tower.jpg"
+    },
+    {
+      "key": "malevento",
+      "name": "Malevento",
+      "cn_name": "Malevento",
+      "gamemodes": [
+        "deathmatch",
+        "team-deathmatch"
+      ],
+      "location": "Italy",
+      "country_code": "IT",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/malevento.jpg",
+      "local_path": "data/assets/overwatch/maps/malevento.jpg"
+    },
+    {
+      "key": "midtown",
+      "name": "Midtown",
+      "cn_name": "中城",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "New York, United States",
+      "country_code": "US",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/midtown.jpg",
+      "local_path": "data/assets/overwatch/maps/midtown.jpg"
+    },
+    {
+      "key": "necropolis",
+      "name": "Necropolis",
+      "cn_name": "Necropolis",
+      "gamemodes": [
+        "elimination"
+      ],
+      "location": "Egypt",
+      "country_code": "EG",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/necropolis.jpg",
+      "local_path": "data/assets/overwatch/maps/necropolis.jpg"
+    },
+    {
+      "key": "nepal",
+      "name": "Nepal",
+      "cn_name": "Nepal",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Nepal",
+      "country_code": "NP",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/nepal.jpg",
+      "local_path": "data/assets/overwatch/maps/nepal.jpg"
+    },
+    {
+      "key": "new-junk-city",
+      "name": "New Junk City",
+      "cn_name": "New Junk City",
+      "gamemodes": [
+        "flashpoint"
+      ],
+      "location": "Central Australia",
+      "country_code": "AU",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/new-junk-city.jpg",
+      "local_path": "data/assets/overwatch/maps/new-junk-city.jpg"
+    },
+    {
+      "key": "new-queen-street",
+      "name": "New Queen Street",
+      "cn_name": "New Queen Street",
+      "gamemodes": [
+        "push"
+      ],
+      "location": "Toronto, Canada",
+      "country_code": "CA",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/new-queen-street.jpg",
+      "local_path": "data/assets/overwatch/maps/new-queen-street.jpg"
+    },
+    {
+      "key": "numbani",
+      "name": "Numbani",
+      "cn_name": "Numbani",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "Numbani (near Nigeria)",
+      "country_code": "",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/numbani.jpg",
+      "local_path": "data/assets/overwatch/maps/numbani.jpg"
+    },
+    {
+      "key": "oasis",
+      "name": "Oasis",
+      "cn_name": "Oasis",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Iraq",
+      "country_code": "IQ",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/oasis.jpg",
+      "local_path": "data/assets/overwatch/maps/oasis.jpg"
+    },
+    {
+      "key": "paraiso",
+      "name": "Paraíso",
+      "cn_name": "Paraíso",
+      "gamemodes": [
+        "hybrid"
+      ],
+      "location": "Rio de Janeiro, Brazil",
+      "country_code": "BR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/paraiso.jpg",
+      "local_path": "data/assets/overwatch/maps/paraiso.jpg"
+    },
+    {
+      "key": "paris",
+      "name": "Paris",
+      "cn_name": "Paris",
+      "gamemodes": [
+        "assault"
+      ],
+      "location": "Paris, France",
+      "country_code": "FR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/paris.jpg",
+      "local_path": "data/assets/overwatch/maps/paris.jpg"
+    },
+    {
+      "key": "petra",
+      "name": "Petra",
+      "cn_name": "Petra",
+      "gamemodes": [
+        "deathmatch",
+        "team-deathmatch"
+      ],
+      "location": "Southern Jordan",
+      "country_code": "JO",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/petra.jpg",
+      "local_path": "data/assets/overwatch/maps/petra.jpg"
+    },
+    {
+      "key": "place-lacroix",
+      "name": "Place Lacroix",
+      "cn_name": "Place Lacroix",
+      "gamemodes": [
+        "push"
+      ],
+      "location": "Paris, France",
+      "country_code": "FR",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/place-lacroix.jpg",
+      "local_path": "data/assets/overwatch/maps/place-lacroix.jpg"
+    },
+    {
+      "key": "powder-keg-mine",
+      "name": "Powder Keg Mine",
+      "cn_name": "Powder Keg Mine",
+      "gamemodes": [
+        "payload-race"
+      ],
+      "location": "Deadlock Gorge, Arizona, United States",
+      "country_code": "US",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/powder-keg-mine.jpg",
+      "local_path": "data/assets/overwatch/maps/powder-keg-mine.jpg"
+    },
+    {
+      "key": "practice-range",
+      "name": "Practice Range",
+      "cn_name": "Practice Range",
+      "gamemodes": [
+        "practice-range"
+      ],
+      "location": "Swiss HQ",
+      "country_code": "CH",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/practice-range.jpg",
+      "local_path": "data/assets/overwatch/maps/practice-range.jpg"
+    },
+    {
+      "key": "redwood-dam",
+      "name": "Redwood Dam",
+      "cn_name": "Redwood Dam",
+      "gamemodes": [
+        "push"
+      ],
+      "location": "Gibraltar",
+      "country_code": "GI",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/redwood-dam.jpg",
+      "local_path": "data/assets/overwatch/maps/redwood-dam.jpg"
+    },
+    {
+      "key": "rialto",
+      "name": "Rialto",
+      "cn_name": "Rialto",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Venice, Italy",
+      "country_code": "IT",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/rialto.jpg",
+      "local_path": "data/assets/overwatch/maps/rialto.jpg"
+    },
+    {
+      "key": "route-66",
+      "name": "Route 66",
+      "cn_name": "Route 66",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Albuquerque, New Mexico, United States",
+      "country_code": "US",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/route-66.jpg",
+      "local_path": "data/assets/overwatch/maps/route-66.jpg"
+    },
+    {
+      "key": "runasapi",
+      "name": "Runasapi",
+      "cn_name": "鲁纳塞彼",
+      "gamemodes": [
+        "push"
+      ],
+      "location": "Peru",
+      "country_code": "PE",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/runasapi.jpg",
+      "local_path": "data/assets/overwatch/maps/runasapi.jpg"
+    },
+    {
+      "key": "samoa",
+      "name": "Samoa",
+      "cn_name": "Samoa",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Samoa",
+      "country_code": "WS",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/samoa.jpg",
+      "local_path": "data/assets/overwatch/maps/samoa.jpg"
+    },
+    {
+      "key": "shambali-monastery",
+      "name": "Shambali Monastery",
+      "cn_name": "Shambali Monastery",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Nepal",
+      "country_code": "NP",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/shambali-monastery.jpg",
+      "local_path": "data/assets/overwatch/maps/shambali-monastery.jpg"
+    },
+    {
+      "key": "suravasa",
+      "name": "Suravasa",
+      "cn_name": "Suravasa",
+      "gamemodes": [
+        "flashpoint"
+      ],
+      "location": "India",
+      "country_code": "IN",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/suravasa.jpg",
+      "local_path": "data/assets/overwatch/maps/suravasa.jpg"
+    },
+    {
+      "key": "thames-district",
+      "name": "Thames District",
+      "cn_name": "Thames District",
+      "gamemodes": [
+        "payload-race"
+      ],
+      "location": "London, United Kingdom",
+      "country_code": "UK",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/thames-district.jpg",
+      "local_path": "data/assets/overwatch/maps/thames-district.jpg"
+    },
+    {
+      "key": "throne-of-anubis",
+      "name": "Throne of Anubis",
+      "cn_name": "Throne of Anubis",
+      "gamemodes": [
+        "clash"
+      ],
+      "location": "Giza Plateau, Egypt",
+      "country_code": "EG",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/throne-of-anubis.jpg",
+      "local_path": "data/assets/overwatch/maps/throne-of-anubis.jpg"
+    },
+    {
+      "key": "volskaya",
+      "name": "Volskaya Industries",
+      "cn_name": "Volskaya Industries",
+      "gamemodes": [
+        "assault"
+      ],
+      "location": "St. Petersburg, Russia",
+      "country_code": "RU",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/volskaya.jpg",
+      "local_path": "data/assets/overwatch/maps/volskaya.jpg"
+    },
+    {
+      "key": "watchpoint-gibraltar",
+      "name": "Watchpoint: Gibraltar",
+      "cn_name": "监测站：直布罗陀",
+      "gamemodes": [
+        "escort"
+      ],
+      "location": "Gibraltar",
+      "country_code": "GI",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/watchpoint-gibraltar.jpg",
+      "local_path": "data/assets/overwatch/maps/watchpoint-gibraltar.jpg"
+    },
+    {
+      "key": "workshop-chamber",
+      "name": "Workshop Chamber",
+      "cn_name": "Workshop Chamber",
+      "gamemodes": [
+        "workshop"
+      ],
+      "location": "Earth",
+      "country_code": "",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/workshop-chamber.jpg",
+      "local_path": "data/assets/overwatch/maps/workshop-chamber.jpg"
+    },
+    {
+      "key": "workshop-expanse",
+      "name": "Workshop Expanse",
+      "cn_name": "Workshop Expanse",
+      "gamemodes": [
+        "workshop"
+      ],
+      "location": "Earth",
+      "country_code": "",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/workshop-expanse.jpg",
+      "local_path": "data/assets/overwatch/maps/workshop-expanse.jpg"
+    },
+    {
+      "key": "workshop-green-screen",
+      "name": "Workshop Green Screen",
+      "cn_name": "Workshop Green Screen",
+      "gamemodes": [
+        "workshop"
+      ],
+      "location": "Earth",
+      "country_code": "",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/workshop-green-screen.jpg",
+      "local_path": "data/assets/overwatch/maps/workshop-green-screen.jpg"
+    },
+    {
+      "key": "workshop-island",
+      "name": "Workshop Island",
+      "cn_name": "Workshop Island",
+      "gamemodes": [
+        "workshop"
+      ],
+      "location": "Earth",
+      "country_code": "",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/workshop-island.jpg",
+      "local_path": "data/assets/overwatch/maps/workshop-island.jpg"
+    },
+    {
+      "key": "wuxing-university",
+      "name": "Wuxing University",
+      "cn_name": "Wuxing University",
+      "gamemodes": [
+        "control"
+      ],
+      "location": "Chengdu, Sichuan, China",
+      "country_code": "CN",
+      "source_url": "https://overfast-api.tekrop.fr/static/maps/wuxing-university.jpg",
+      "local_path": "data/assets/overwatch/maps/wuxing-university.jpg"
+    }
+  ]
+}

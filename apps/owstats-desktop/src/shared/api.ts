@@ -33,6 +33,10 @@ export function getMatchDetails(matchId: string) {
   return invoke<MatchDetailView>("get_match_details", { matchId });
 }
 
+export function refreshMatchEvaluations() {
+  return invoke<void>("refresh_match_evaluations");
+}
+
 export function getFriendAnalytics(filters: FriendAnalyticsFilters) {
   return invoke<FriendAnalytics>("get_friend_analytics", { filters });
 }

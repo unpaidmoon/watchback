@@ -1,45 +1,86 @@
+import { forwardRef, Fragment } from "react";
+import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
+import { formatCompactStat, formatMatchBannerTitle, formatScoreLine } from "../../shared/matchListFormat";
+import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
 import type { MatchSummary } from "../../shared/types";
 
 type Props = {
   matches: MatchSummary[];
   onSelect: (matchId: string) => void;
+  onScroll?: () => void;
 };
 
-export function MatchTimeline({ matches, onSelect }: Props) {
+export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTimeline({ matches, onSelect, onScroll }, ref) {
   if (matches.length === 0) {
-    return <div className="emptyState">没有符合条件的预设/开放模式对局。</div>;
+    return <div className="emptyState">没有符合条件的预设 / 开放模式对局。</div>;
   }
 
+  const streakLabels = streakSegmentLabels(matches);
+
   return (
-    <div className="timeline" aria-label="对局时间线">
+    <div ref={ref} className="timeline phase6Timeline" aria-label="对局时间线" onScroll={onScroll}>
       {matches.map((match) => (
-        <button type="button" key={match.matchId} className={`matchRow ${match.result}`} onClick={() => onSelect(match.matchId)}>
-          <span className="resultPill">{match.resultLabel}</span>
-          <span className="matchMain">
-            <strong>{match.mapName}</strong>
-            <span>
-              {match.heroName} · {match.modeLabel}
+        <Fragment key={match.matchId}>
+          {streakLabels.get(match.matchId) && <div className="streakSeparator">{streakLabels.get(match.matchId)}</div>}
+          <button
+            type="button"
+            className={`matchRow phase6MatchRowReal ${match.result}`}
+            data-match-id={match.matchId}
+            onClick={() => onSelect(match.matchId)}
+          >
+            <span className="phase6MatchBanner">
+              <MapPreview mapKey={match.mapGuid || match.mapName} name={match.mapName} className="phase6MatchMapThumb" />
+              <span className="phase6MatchScoreSlab">{formatScoreLine(match)}</span>
+              <span className="phase6MatchMapTitle">{formatMatchBannerTitle(match)}</span>
             </span>
-          </span>
-          <span className="score">
-            {match.teamScore}-{match.opponentScore}
-          </span>
-          <span className="statLine">
-            消灭/助攻/死亡 {match.kills}/{match.assists}/{match.deaths}
-          </span>
-          <span className="statLine">
-            伤害 {formatNumber(match.damage)} · 治疗 {formatNumber(match.healing)} · 格挡 {formatNumber(match.mitigation)}
-          </span>
-          <time>{match.beginLabel}</time>
-        </button>
+            <span className="phase6MatchDataPanel">
+              <span className="phase6HeroStackCell">
+                <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
+                <span>{match.heroName}</span>
+              </span>
+              <span className="phase6MatchGrade">
+                <span>对局表现</span>
+                <MatchPerformanceBadges evaluation={match.evaluation} teamAwards={match.teamAwards} compact />
+              </span>
+              <MetricBlock label="K/A/D" value={`${match.kills}/${match.assists}/${match.deaths}`} />
+              <MetricBlock
+                label="伤害 / 治疗 / 抵挡"
+                value={`${formatCompactStat(match.damage)}/${formatCompactStat(match.healing)}/${formatCompactStat(match.mitigation)}`}
+              />
+              <span className="phase6MatchOpen">›</span>
+            </span>
+          </button>
+        </Fragment>
       ))}
     </div>
   );
+});
+
+function MetricBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="phase6MatchMetricBlock">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </span>
+  );
 }
 
-function formatNumber(value: number) {
-  if (value >= 10000) {
-    return `${(value / 10000).toFixed(1).replace(".0", "")}万`;
+function streakSegmentLabels(matches: MatchSummary[]) {
+  const labels = new Map<string, string>();
+  let index = 0;
+  while (index < matches.length) {
+    const result = matches[index].result;
+    if (result !== "win" && result !== "loss") {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (end < matches.length && matches[end].result === result) end += 1;
+    const length = end - index;
+    if (length >= 3) {
+      labels.set(matches[index].matchId, `${length}${result === "win" ? "连胜" : "连败"}`);
+    }
+    index = end;
   }
-  return String(value);
+  return labels;
 }

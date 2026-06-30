@@ -1,7 +1,8 @@
 use crate::importer::{default_database_path, existing_import_summary};
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
-    get_match_detail, list_filter_options, list_matches, sync_season_with_progress,
+    get_match_detail, list_filter_options, list_matches,
+    refresh_match_evaluations as refresh_evaluations, sync_season_with_progress,
     CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
     FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, MatchDetailView,
     MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
@@ -44,6 +45,11 @@ pub fn list_match_timeline(
 #[tauri::command]
 pub fn get_match_details(app: AppHandle, match_id: String) -> Result<MatchDetailView, String> {
     get_match_detail(&app_database(&app)?, &match_id).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn refresh_match_evaluations(app: AppHandle) -> Result<(), String> {
+    refresh_evaluations(&app_database(&app)?).map_err(to_message)
 }
 
 #[tauri::command]

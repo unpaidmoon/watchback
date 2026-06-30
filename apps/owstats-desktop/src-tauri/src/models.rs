@@ -20,11 +20,29 @@ pub struct MatchFilters {
     pub map: Option<String>,
     pub result: Option<String>,
     pub mode: Option<String>,
+    pub primary_tag: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchEvaluationSummary {
+    pub grade: String,
+    pub primary_tag: String,
+    pub evidence_tags: Vec<String>,
+    pub confidence: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchPerformanceAward {
+    pub code: String,
+    pub label: String,
+    pub tone: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchSummary {
     pub match_id: String,
@@ -49,6 +67,8 @@ pub struct MatchSummary {
     pub healing: i64,
     pub mitigation: i64,
     pub duration_sec: i64,
+    pub evaluation: Option<MatchEvaluationSummary>,
+    pub team_awards: Vec<MatchPerformanceAward>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,8 +95,23 @@ pub struct PlayerRow {
 #[serde(rename_all = "camelCase")]
 pub struct MatchDetailView {
     pub match_id: String,
+    pub game_mode: Option<String>,
+    pub mode_label: Option<String>,
+    pub result: Option<String>,
+    pub result_label: Option<String>,
+    pub map_guid: Option<String>,
+    pub map_name: Option<String>,
+    pub hero_guid: Option<String>,
+    pub hero_name: Option<String>,
+    pub begin_ts: Option<i64>,
+    pub begin_label: Option<String>,
+    pub team_score: Option<i64>,
+    pub opponent_score: Option<i64>,
+    pub duration_sec: Option<i64>,
     pub teammates: Vec<PlayerRow>,
     pub enemies: Vec<PlayerRow>,
+    pub evaluation: Option<MatchEvaluationSummary>,
+    pub team_awards: Vec<MatchPerformanceAward>,
     pub same_role_comparison: Option<SameRoleComparison>,
     pub raw_json: Value,
 }
@@ -143,6 +178,41 @@ pub struct FriendAnalyticsSummary {
 pub struct FriendAnalytics {
     pub summary: FriendAnalyticsSummary,
     pub boards: Vec<FriendBoard>,
+    pub common_friend_heroes: Vec<CommonFriendHero>,
+    pub lineup_combinations: Vec<LineupCombination>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommonFriendHero {
+    pub bnet_id: String,
+    pub name: String,
+    pub representative_hero_guid: String,
+    pub representative_hero_name: String,
+    pub matches: i64,
+    pub wins: i64,
+    pub win_rate: f64,
+    pub latest_begin_ts: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LineupCombination {
+    pub key: String,
+    pub members: Vec<LineupMember>,
+    pub matches: i64,
+    pub wins: i64,
+    pub win_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LineupMember {
+    pub bnet_id: Option<String>,
+    pub name: String,
+    pub hero_guid: String,
+    pub hero_name: String,
+    pub is_current_player: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -261,11 +331,22 @@ pub struct OnboardingStatusRequest {
 pub struct PersonalSeasonReview {
     pub summary: ReviewSummary,
     pub baseline: SeasonBaseline,
+    pub phase5_highlights: Phase5ReviewHighlights,
     pub top_conclusions: Vec<ReviewConclusion>,
     pub personal_bests: Vec<PersonalBest>,
     pub streaks: StreakSummary,
     pub hero_pool: HeroPoolStability,
     pub maps: MapAdaptability,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Phase5ReviewHighlights {
+    pub carry_count: i64,
+    pub try_hard_count: i64,
+    pub s_grade_count: i64,
+    pub longest_win_streak: i64,
+    pub most_common_highlight: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1,8 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
-import { CheckCircle2, Database, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, Clock3, Database, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { cancelDashenLogin, getOnboardingStatus, startDashenLogin, syncSeason } from "../shared/api";
+import { GlassPanel, MetricCard, StatusBadge } from "../shared/phase6Components";
+import { commandCenterMetrics, credentialLabel, credentialTone, hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import type { CredentialLoginProgress, OnboardingStatus, SyncProgress } from "../shared/types";
 
 export function OnboardingPage() {
@@ -16,6 +18,10 @@ export function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasDesktopBackend()) {
+      return;
+    }
+
     let unlistenSync: (() => void) | undefined;
     let unlistenLogin: (() => void) | undefined;
     void listen<SyncProgress>("sync-progress", (event) => setSyncProgress(event.payload)).then((handler) => {
@@ -39,7 +45,7 @@ export function OnboardingPage() {
     try {
       setStatus(await getOnboardingStatus(nextSeason));
     } catch (err) {
-      setError(String(err));
+      setError(productErrorMessage(err));
     }
   }
 
@@ -51,7 +57,7 @@ export function OnboardingPage() {
       setStatus((current) => (current ? { ...current, credentialStatus: result.status } : current));
       await loadStatus(season);
     } catch (err) {
-      setError(String(err));
+      setError(productErrorMessage(err));
       await loadStatus(season);
     } finally {
       setLoggingIn(false);
@@ -64,7 +70,7 @@ export function OnboardingPage() {
       await cancelDashenLogin();
       setLoginProgress({ phase: "cancelled", message: "已取消登录等待。" });
     } catch (err) {
-      setError(String(err));
+      setError(productErrorMessage(err));
     } finally {
       setLoggingIn(false);
     }
@@ -77,38 +83,62 @@ export function OnboardingPage() {
       await syncSeason(season);
       await loadStatus(season);
     } catch (err) {
-      setError(String(err));
+      setError(productErrorMessage(err));
     } finally {
       setSyncing(false);
     }
   }
 
   const credentialReady = status?.credentialStatus.state === "saved";
+  const metrics = useMemo(() => commandCenterMetrics(status), [status]);
+  const warnings = status?.health.warnings ?? [];
 
   return (
-    <section className="workspace onboardingWorkspace">
-      <header className="sectionHeader">
+    <section className="workspace onboardingWorkspace phase6CommandCenter">
+      <header className="phase6CommandCenterHero">
         <div>
-          <span className="eyebrow">首次设置</span>
-          <h2>登录、同步与本地数据</h2>
+          <span className="phase6Eyebrow">赛季指挥台</span>
+          <h2>登录、同步与本地数据状态</h2>
+          <p>确认账号状态，刷新赛季数据，然后进入对局、复盘、排行和分析模型。</p>
         </div>
-        <ShieldCheck size={22} />
+        <div className="phase6CommandStatus">
+          <StatusBadge tone={credentialTone(status?.credentialStatus.state)}>
+            <ShieldCheck size={15} /> {credentialLabel(status?.credentialStatus.state)}
+          </StatusBadge>
+          <StatusBadge tone={status?.canEnterReview ? "good" : "warn"}>
+            <Database size={15} /> {status?.canEnterReview ? "数据可用" : "等待数据"}
+          </StatusBadge>
+          <StatusBadge>
+            <Clock3 size={15} /> {status?.localData.lastSyncedOrImportedAt ?? "暂无同步时间"}
+          </StatusBadge>
+        </div>
       </header>
 
-      {error && <div className="errorBanner inline">{error}</div>}
+      {error && (
+        <div className="errorBanner inline phase6RecoverableError">
+          <AlertCircle size={18} />
+          <span>{error}</span>
+        </div>
+      )}
 
-      <div className="wizardGrid">
-        <section className="playerSection">
-          <h3>1. 网易大神登录</h3>
-          <p className="explainText">{status?.credentialStatus.message ?? "正在读取凭证状态..."}</p>
-          <div className="statusLine">
-            <CheckCircle2 size={18} />
-            <span>
-              {credentialReady ? `已保存：role_id ${status?.credentialStatus.roleId ?? "-"}` : "未显示 token、cookie、customerToken 或原始凭证内容。"}
-            </span>
+      <div className="phase6CommandMetrics">
+        {metrics.map((metric) => (
+          <MetricCard key={metric.label} label={metric.label} value={metric.value} meta={metric.meta} />
+        ))}
+      </div>
+
+      <div className="phase6CommandGridReal">
+        <GlassPanel className="phase6CommandPanel" tone="solid">
+          <div>
+            <span className="phase6Eyebrow">账号</span>
+            <h3>网易大神登录</h3>
+            <p>{status?.credentialStatus.message ?? "正在读取登录状态..."}</p>
           </div>
-          {status?.credentialStatus.savedAt && <p className="explainText">保存时间：{status.credentialStatus.savedAt}</p>}
-          {loginProgress && <p className="explainText">登录进度：{loginProgress.message}</p>}
+          <div className="phase6StatusLine">
+            <CheckCircle2 size={18} />
+            <span>{credentialReady ? `已保存账号角色：${status?.credentialStatus.roleId ?? "-"}` : "不会显示 token、cookie 或任何敏感凭据。"}</span>
+          </div>
+          {loginProgress && <p className="phase6ProgressText">登录进度：{loginProgress.message}</p>}
           <div className="buttonRow">
             <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn}>
               <LogIn size={18} />
@@ -121,11 +151,15 @@ export function OnboardingPage() {
               </button>
             )}
           </div>
-        </section>
+        </GlassPanel>
 
-        <section className="playerSection">
-          <h3>2. 赛季同步</h3>
-          <div className="syncPanel compactPanel">
+        <GlassPanel className="phase6CommandPanel" tone="solid">
+          <div>
+            <span className="phase6Eyebrow">同步</span>
+            <h3>赛季数据刷新</h3>
+            <p>{readableSyncProgress(syncProgress)}</p>
+          </div>
+          <div className="phase6SyncControl">
             <label>
               <span>赛季</span>
               <input type="number" min={1} value={season} onChange={(event) => setSeason(Number(event.target.value))} />
@@ -135,48 +169,42 @@ export function OnboardingPage() {
               {syncing ? "同步中" : "同步赛季"}
             </button>
           </div>
-          {!credentialReady && <p className="explainText">请先登录网易大神，再同步赛季数据。已有本地数据仍可进入功能页。</p>}
-        </section>
+          {!credentialReady && <p className="phase6ProgressText">请先完成登录。已有本地数据时，仍可进入下方分析页面。</p>}
+        </GlassPanel>
 
-        <section className="playerSection">
-          <h3>3. 本地数据</h3>
-          <div className="summaryGrid">
-            <Metric label="来源" value={status?.localData.dataSource ?? "-"} />
-            <Metric label="预设/开放" value={status?.localData.presetMatches ?? 0} />
-            <Metric label="详情" value={status?.localData.detailMatches ?? 0} />
-            <Metric label="最后更新" value={status?.localData.lastSyncedOrImportedAt ?? "-"} />
-            <Metric label="新鲜度风险" value={status?.localData.freshnessRisk ?? "-"} />
+        <GlassPanel className="phase6CommandPanel phase6CommandPanelWide" tone="solid">
+          <div>
+            <span className="phase6Eyebrow">本地数据</span>
+            <h3>可用数据状态</h3>
+            <p>本地数据库是所有页面的数据来源；这里仅展示产品可理解的状态和可恢复问题。</p>
           </div>
-        </section>
-
-        <section className="playerSection">
-          <h3>4. 数据健康</h3>
-          {status?.health.warnings.length ? (
+          <div className="phase6DataSummary">
+            <Metric label="数据来源" value={status?.localData.dataSource ?? "-"} />
+            <Metric label="赛季" value={status?.localData.season ? `S${status.localData.season}` : "-"} />
+            <Metric label="新鲜度" value={status?.localData.freshnessRisk ?? "-"} />
+          </div>
+          {warnings.length ? (
             <div className="safeErrors">
-              {status.health.warnings.map((warning) => (
+              {warnings.map((warning) => (
                 <span key={warning}>{warning}</span>
               ))}
             </div>
           ) : (
-            <p className="explainText">本地赛季数据可读。健康提示不作为进入复盘的硬门禁。</p>
+            <p className="phase6ProgressText">没有需要处理的数据问题。</p>
           )}
-          {syncProgress && (
-            <div className="summaryGrid topGap">
-              <Metric label="阶段" value={syncProgress.phase} />
-              <Metric label="进度" value={`${syncProgress.processed}/${syncProgress.total || "-"}`} />
-              <Metric label="失败详情" value={syncProgress.failedDetails} />
-            </div>
-          )}
-        </section>
+        </GlassPanel>
       </div>
 
-      <div className="reviewActions">
+      <div className="phase6CommandActions">
         <button type="button" className="ghostButton" onClick={() => navigate(`/matches?season=${season}`)} disabled={!status?.canEnterReview}>
           查看对局
         </button>
+        <button type="button" className="ghostButton" onClick={() => navigate("/ranking")} disabled={!status?.canEnterReview}>
+          查看排行
+        </button>
         <button type="button" className="primaryButton" onClick={() => navigate(`/review?season=${season}`)} disabled={!status?.canEnterReview}>
           <Database size={18} />
-          进入个人赛季复盘
+          进入个人复盘
         </button>
       </div>
     </section>

@@ -1,9 +1,9 @@
 use crate::db::OwDatabase;
 use crate::importer::rebuild_match_players_from_existing_details;
 use crate::models::{
-    FriendAnalytics, FriendAnalyticsFilters, FriendAnalyticsSummary, FriendBoard, FriendBoardEntry,
-    FriendBreakdown, FriendDetail, FriendRecentMatch, MapAnalysisCard, MapAnalysisCards,
-    SeasonAnalysis,
+    CommonFriendHero, FriendAnalytics, FriendAnalyticsFilters, FriendAnalyticsSummary, FriendBoard,
+    FriendBoardEntry, FriendBreakdown, FriendDetail, FriendRecentMatch, LineupCombination,
+    LineupMember, MapAnalysisCard, MapAnalysisCards, SeasonAnalysis,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
@@ -11,6 +11,7 @@ use rusqlite::ToSql;
 use std::collections::HashMap;
 
 const MIN_SAMPLE: i64 = 5;
+const PHASE5_MIN_SAMPLE: i64 = 3;
 
 #[derive(Debug, Clone)]
 struct FriendMatchRow {
@@ -20,6 +21,7 @@ struct FriendMatchRow {
     result: String,
     begin_ts: i64,
     map_name: String,
+    hero_guid: String,
     hero_name: String,
     kills: i64,
     assists: i64,
@@ -110,6 +112,8 @@ pub fn get_friend_analytics(
             min_sample: MIN_SAMPLE,
         },
         boards,
+        common_friend_heroes: common_friend_heroes(&rows),
+        lineup_combinations: lineup_combinations(db, &filters)?,
     })
 }
 
@@ -340,6 +344,7 @@ fn friend_rows(
             m.result,
             m.begin_ts,
             COALESCE(m.map_name, m.map_guid),
+            p.hero_guid,
             COALESCE(p.hero_name, p.hero_guid),
             p.kill,
             p.assist,
@@ -377,15 +382,221 @@ fn friend_rows(
             result: row.get(3)?,
             begin_ts: row.get(4)?,
             map_name: row.get(5)?,
+            hero_guid: row.get(6)?,
+            hero_name: row.get(7)?,
+            kills: row.get(8)?,
+            assists: row.get(9)?,
+            deaths: row.get(10)?,
+            damage: row.get(11)?,
+            healing: row.get(12)?,
+            mitigation: row.get(13)?,
+            damage_taken: row.get(14)?,
+            healing_taken: row.get(15)?,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
+fn common_friend_heroes(rows: &[FriendMatchRow]) -> Vec<CommonFriendHero> {
+    #[derive(Default)]
+    struct FriendState {
+        name: String,
+        matches: i64,
+        wins: i64,
+        latest_begin_ts: i64,
+        heroes: HashMap<String, HeroState>,
+    }
+    #[derive(Default)]
+    struct HeroState {
+        name: String,
+        matches: i64,
+        latest_begin_ts: i64,
+    }
+
+    let mut by_friend = HashMap::<String, FriendState>::new();
+    for row in rows {
+        let friend = by_friend.entry(row.bnet_id.clone()).or_default();
+        friend.name = row.name.clone();
+        friend.matches += 1;
+        friend.wins += if row.result == "win" { 1 } else { 0 };
+        friend.latest_begin_ts = friend.latest_begin_ts.max(row.begin_ts);
+        let hero = friend.heroes.entry(row.hero_guid.clone()).or_default();
+        hero.name = row.hero_name.clone();
+        hero.matches += 1;
+        hero.latest_begin_ts = hero.latest_begin_ts.max(row.begin_ts);
+    }
+
+    let mut items = by_friend
+        .into_iter()
+        .filter(|(_, friend)| friend.matches >= PHASE5_MIN_SAMPLE)
+        .filter_map(|(bnet_id, friend)| {
+            let (hero_guid, hero) = friend.heroes.into_iter().max_by(|a, b| {
+                a.1.matches
+                    .cmp(&b.1.matches)
+                    .then_with(|| a.1.latest_begin_ts.cmp(&b.1.latest_begin_ts))
+                    .then_with(|| b.0.cmp(&a.0))
+            })?;
+            Some(CommonFriendHero {
+                bnet_id,
+                name: friend.name,
+                representative_hero_guid: hero_guid,
+                representative_hero_name: hero.name,
+                matches: friend.matches,
+                wins: friend.wins,
+                win_rate: round2(ratio(friend.wins, friend.matches)),
+                latest_begin_ts: friend.latest_begin_ts,
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|a, b| {
+        b.matches
+            .cmp(&a.matches)
+            .then_with(|| b.latest_begin_ts.cmp(&a.latest_begin_ts))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    items.truncate(5);
+    items
+}
+
+#[derive(Debug, Clone)]
+struct LineupRow {
+    match_id: String,
+    result: String,
+    begin_ts: i64,
+    bnet_id: String,
+    name: String,
+    hero_guid: String,
+    hero_name: String,
+    is_current_player: bool,
+    is_friend: bool,
+}
+
+fn lineup_combinations(
+    db: &OwDatabase,
+    filters: &FriendAnalyticsFilters,
+) -> Result<Vec<LineupCombination>> {
+    let rows = lineup_rows(db, filters)?;
+    let mut by_match = HashMap::<String, Vec<LineupRow>>::new();
+    for row in rows {
+        by_match.entry(row.match_id.clone()).or_default().push(row);
+    }
+
+    #[derive(Default)]
+    struct ComboState {
+        members: Vec<LineupMember>,
+        matches: i64,
+        wins: i64,
+        latest_begin_ts: i64,
+    }
+
+    let mut combos = HashMap::<String, ComboState>::new();
+    for rows in by_match.into_values() {
+        let Some(current) = rows.iter().find(|row| row.is_current_player) else {
+            continue;
+        };
+        let friends = rows
+            .iter()
+            .filter(|row| row.is_friend && !row.is_current_player)
+            .collect::<Vec<_>>();
+        if friends.is_empty() {
+            continue;
+        }
+        let mut members = Vec::new();
+        members.push(LineupMember {
+            bnet_id: Some(current.bnet_id.clone()),
+            name: current.name.clone(),
+            hero_guid: current.hero_guid.clone(),
+            hero_name: current.hero_name.clone(),
+            is_current_player: true,
+        });
+        for friend in &friends {
+            members.push(LineupMember {
+                bnet_id: Some(friend.bnet_id.clone()),
+                name: friend.name.clone(),
+                hero_guid: friend.hero_guid.clone(),
+                hero_name: friend.hero_name.clone(),
+                is_current_player: false,
+            });
+        }
+        let key = members
+            .iter()
+            .map(|member| {
+                format!(
+                    "{}:{}",
+                    member.bnet_id.clone().unwrap_or_default(),
+                    member.hero_guid
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        let state = combos.entry(key).or_default();
+        state.members = members;
+        state.matches += 1;
+        state.wins += if current.result == "win" { 1 } else { 0 };
+        state.latest_begin_ts = state.latest_begin_ts.max(current.begin_ts);
+    }
+
+    let mut items = combos
+        .into_iter()
+        .filter(|(_, state)| state.matches >= PHASE5_MIN_SAMPLE)
+        .map(|(key, state)| LineupCombination {
+            key,
+            members: state.members,
+            matches: state.matches,
+            wins: state.wins,
+            win_rate: round2(ratio(state.wins, state.matches)),
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|a, b| {
+        b.matches
+            .cmp(&a.matches)
+            .then_with(|| b.members.len().cmp(&a.members.len()))
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    Ok(items)
+}
+
+fn lineup_rows(db: &OwDatabase, filters: &FriendAnalyticsFilters) -> Result<Vec<LineupRow>> {
+    let conn = db.connect()?;
+    let mut sql = String::from(
+        r#"
+        SELECT
+            p.match_id,
+            m.result,
+            m.begin_ts,
+            p.bnet_id,
+            p.player_name,
+            p.hero_guid,
+            COALESCE(p.hero_name, p.hero_guid),
+            p.is_current_player,
+            p.is_friend
+        FROM match_players p
+        JOIN matches m ON m.match_id = p.match_id
+        WHERE p.side='teammate'
+          AND m.bucket='preset'
+          AND (p.is_current_player=1 OR p.is_friend=1)
+        "#,
+    );
+    let mut owned: Vec<Box<dyn ToSql>> = Vec::new();
+    append_filters(&mut sql, &mut owned, filters);
+    sql.push_str(" ORDER BY m.begin_ts DESC, p.is_current_player DESC, p.bnet_id");
+    let params = owned
+        .iter()
+        .map(|item| item.as_ref() as &dyn ToSql)
+        .collect::<Vec<_>>();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok(LineupRow {
+            match_id: row.get(0)?,
+            result: row.get(1)?,
+            begin_ts: row.get(2)?,
+            bnet_id: row.get(3)?,
+            name: row.get(4)?,
+            hero_guid: row.get(5)?,
             hero_name: row.get(6)?,
-            kills: row.get(7)?,
-            assists: row.get(8)?,
-            deaths: row.get(9)?,
-            damage: row.get(10)?,
-            healing: row.get(11)?,
-            mitigation: row.get(12)?,
-            damage_taken: row.get(13)?,
-            healing_taken: row.get(14)?,
+            is_current_player: row.get::<_, i64>(7)? == 1,
+            is_friend: row.get::<_, i64>(8)? == 1,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()

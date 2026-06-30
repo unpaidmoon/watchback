@@ -53,6 +53,6 @@ npm run tauri:dev
 - `data/assets/`
 - `data/ow_config_cache.json`
 
-## 维护说明
+## 维护
 
-旧的聊天机器人插件主体、外部参考实现、Python 抓取脚本和实验性本地数据已经从当前维护线移除。后续开发以 `apps/owstats-desktop` 为准。
+长期维护流程见 [`docs/maintenance.md`](docs/maintenance.md)。发布前至少运行后端测试、前端测试、前端构建和 Tauri 打包。

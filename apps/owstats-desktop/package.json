@@ -8,7 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev"
+    "tauri:dev": "tauri dev",
+    "test:text": "node scripts/checkTextIntegrity.mjs",
+    "test": "tsx scripts/rankingUtils.test.ts && tsx scripts/filterBarUi.test.ts && tsx scripts/matchesPageCache.test.ts && tsx scripts/phase6Assets.test.ts && tsx scripts/phase6Shell.test.ts && tsx scripts/phase6QaFeedback.test.ts && tsx scripts/matchListFormat.test.ts && tsx scripts/matchDetailHeaderFormat.test.ts && tsx scripts/playerHighlights.test.ts && tsx scripts/matchPerformanceBadges.test.ts && tsx scripts/friendAnalyticsMetrics.test.ts && npm run test:text",
+    "check": "npm run test && npm run build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
     "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5"
+    "@types/react-dom": "^18.3.5",
+    "tsx": "^4.22.4"
   }
 }

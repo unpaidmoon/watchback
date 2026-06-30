@@ -18,8 +18,22 @@ export type MatchFilters = {
   map?: string;
   result?: string;
   mode?: string;
+  primaryTag?: string;
   dateFrom?: string;
   dateTo?: string;
+};
+
+export type MatchEvaluationSummary = {
+  grade: string;
+  primaryTag: string;
+  evidenceTags: string[];
+  confidence: number;
+};
+
+export type MatchPerformanceAward = {
+  code: "kill" | "damage" | "healing" | "mitigation" | "death";
+  label: string;
+  tone: "gold" | "danger";
 };
 
 export type FilterOptions = {
@@ -75,6 +89,8 @@ export type MatchSummary = {
   healing: number;
   mitigation: number;
   durationSec: number;
+  evaluation: MatchEvaluationSummary | null;
+  teamAwards: MatchPerformanceAward[];
 };
 
 export type PlayerRow = {
@@ -97,8 +113,23 @@ export type PlayerRow = {
 
 export type MatchDetailView = {
   matchId: string;
+  gameMode: string | null;
+  modeLabel: string | null;
+  result: string | null;
+  resultLabel: string | null;
+  mapGuid: string | null;
+  mapName: string | null;
+  heroGuid: string | null;
+  heroName: string | null;
+  beginTs: number | null;
+  beginLabel: string | null;
+  teamScore: number | null;
+  opponentScore: number | null;
+  durationSec: number | null;
   teammates: PlayerRow[];
   enemies: PlayerRow[];
+  evaluation: MatchEvaluationSummary | null;
+  teamAwards: MatchPerformanceAward[];
   sameRoleComparison: SameRoleComparison | null;
   rawJson: unknown;
 };
@@ -156,6 +187,35 @@ export type FriendBoard = {
 export type FriendAnalytics = {
   summary: FriendAnalyticsSummary;
   boards: FriendBoard[];
+  commonFriendHeroes: CommonFriendHero[];
+  lineupCombinations: LineupCombination[];
+};
+
+export type CommonFriendHero = {
+  bnetId: string;
+  name: string;
+  representativeHeroGuid: string;
+  representativeHeroName: string;
+  matches: number;
+  wins: number;
+  winRate: number;
+  latestBeginTs: number;
+};
+
+export type LineupMember = {
+  bnetId: string | null;
+  name: string;
+  heroGuid: string;
+  heroName: string;
+  isCurrentPlayer: boolean;
+};
+
+export type LineupCombination = {
+  key: string;
+  members: LineupMember[];
+  matches: number;
+  wins: number;
+  winRate: number;
 };
 
 export type FriendBreakdown = {
@@ -317,11 +377,20 @@ export type MapAdaptability = {
 export type PersonalSeasonReview = {
   summary: ReviewSummary;
   baseline: SeasonBaseline;
+  phase5Highlights: Phase5ReviewHighlights;
   topConclusions: ReviewConclusion[];
   personalBests: PersonalBest[];
   streaks: StreakSummary;
   heroPool: HeroPoolStability;
   maps: MapAdaptability;
+};
+
+export type Phase5ReviewHighlights = {
+  carryCount: number;
+  tryHardCount: number;
+  sGradeCount: number;
+  longestWinStreak: number;
+  mostCommonHighlight: string | null;
 };
 
 export type RankingRow = {

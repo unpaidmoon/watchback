@@ -160,6 +160,85 @@ fn imports_synthetic_season_and_counts_preset_matches() {
 }
 
 #[test]
+fn database_initialize_sets_schema_version_idempotently() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+
+    db.initialize().unwrap();
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+
+    assert_eq!(version, 2);
+}
+
+#[test]
+fn database_migrates_legacy_match_players_role_type() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let conn = db.connect().unwrap();
+    conn.execute_batch(
+        r#"
+        CREATE TABLE match_players (
+            match_id TEXT NOT NULL,
+            season INTEGER NOT NULL,
+            side TEXT NOT NULL,
+            bnet_id TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            hero_guid TEXT NOT NULL,
+            hero_name TEXT,
+            is_current_player INTEGER NOT NULL DEFAULT 0,
+            is_friend INTEGER NOT NULL DEFAULT 0,
+            kill INTEGER NOT NULL DEFAULT 0,
+            assist INTEGER NOT NULL DEFAULT 0,
+            death INTEGER NOT NULL DEFAULT 0,
+            hero_damage INTEGER NOT NULL DEFAULT 0,
+            cure INTEGER NOT NULL DEFAULT 0,
+            resist_damage INTEGER NOT NULL DEFAULT 0,
+            healing_taken INTEGER NOT NULL DEFAULT 0,
+            damage_taken INTEGER NOT NULL DEFAULT 0,
+            final_hit INTEGER NOT NULL DEFAULT 0,
+            target_competing_time INTEGER NOT NULL DEFAULT 0,
+            raw_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (match_id, side, bnet_id)
+        );
+        PRAGMA user_version = 1;
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let role_type_columns: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('match_players') WHERE name='role_type'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let role_index_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_index_list('match_players') WHERE name='idx_match_players_role'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(version, 2);
+    assert_eq!(role_type_columns, 1);
+    assert_eq!(role_index_count, 1);
+}
+
+#[test]
 fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
@@ -178,6 +257,7 @@ fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
             map: Some(first.map_guid.clone()),
             result: Some(first.result.clone()),
             mode: Some(first.game_mode.clone()),
+            primary_tag: None,
             date_from: Some(first.begin_label[0..10].to_string()),
             date_to: Some(first.begin_label[0..10].to_string()),
         },

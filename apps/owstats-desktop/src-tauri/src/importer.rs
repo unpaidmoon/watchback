@@ -1,4 +1,5 @@
 use crate::db::OwDatabase;
+use crate::match_evaluation::refresh_match_evaluations_conn;
 use crate::models::ImportSummary;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -214,6 +215,7 @@ pub fn import_payload_value(
         [],
         |row| row.get(0),
     )?;
+    let _ = refresh_match_evaluations_conn(&tx);
     tx.commit()?;
 
     Ok(ImportSummary {

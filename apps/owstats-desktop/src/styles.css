@@ -4,6 +4,27 @@
   font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --phase6-bg: #f6f8fb;
+  --phase6-ink: #18202d;
+  --phase6-muted: #5f6b7d;
+  --phase6-subtle: #eef3f8;
+  --phase6-panel: rgb(255 255 255 / 0.68);
+  --phase6-panel-solid: rgb(255 255 255 / 0.88);
+  --phase6-border: rgb(255 255 255 / 0.74);
+  --phase6-line: #dfe7f0;
+  --phase6-accent: #ff8a24;
+  --phase6-accent-strong: #d45f14;
+  --phase6-good: #16834a;
+  --phase6-warn: #b7791f;
+  --phase6-bad: #c23a3a;
+  --phase6-blue: #2f6eea;
+  --phase6-radius-lg: 22px;
+  --phase6-radius-md: 16px;
+  --phase6-radius-sm: 10px;
+  --phase6-content-max: 1760px;
+  --phase6-shadow-soft: 0 18px 50px rgb(50 60 78 / 0.13);
+  --phase6-shadow-tight: 0 10px 28px rgb(50 60 78 / 0.1);
+  --phase6-glass-blur: blur(18px);
 }
 
 * {
@@ -22,10 +43,356 @@ select {
   font: inherit;
 }
 
+.phase6GlassPanelShared,
+.phase6MetricCardShared {
+  border: 1px solid var(--phase6-border);
+  background: var(--phase6-panel);
+  box-shadow: var(--phase6-shadow-soft);
+  backdrop-filter: var(--phase6-glass-blur);
+  -webkit-backdrop-filter: var(--phase6-glass-blur);
+}
+
+.phase6GlassPanelShared {
+  min-width: 0;
+  border-radius: var(--phase6-radius-lg);
+}
+
+.phase6GlassPanelShared.solid {
+  border-color: var(--phase6-line);
+  background: var(--phase6-panel-solid);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.phase6MetricCardShared {
+  min-width: 0;
+  min-height: 118px;
+  padding: 16px;
+  border-radius: var(--phase6-radius-md);
+}
+
+.phase6MetricCardShared span,
+.phase6MetricCardShared small {
+  display: block;
+  color: var(--phase6-muted);
+}
+
+.phase6MetricCardShared strong {
+  display: block;
+  margin-top: 10px;
+  color: var(--phase6-ink);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.phase6MetricCardShared small {
+  margin-top: 10px;
+}
+
+.phase6StatusBadge {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--phase6-border);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.64);
+  color: #455166;
+  box-shadow: var(--phase6-shadow-tight);
+  white-space: nowrap;
+}
+
+.phase6StatusBadge.good {
+  color: var(--phase6-good);
+  background: rgb(236 253 243 / 0.72);
+}
+
+.phase6StatusBadge.warn {
+  color: var(--phase6-warn);
+  background: rgb(255 251 235 / 0.76);
+}
+
+.phase6StatusBadge.bad {
+  color: var(--phase6-bad);
+  background: rgb(255 241 242 / 0.76);
+}
+
+.phase6HeroAvatarShared {
+  flex: 0 0 auto;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--phase6-subtle);
+}
+
+.phase6HeroAvatarShared.sm {
+  width: 26px;
+  height: 26px;
+}
+
+.phase6HeroAvatarShared.md {
+  width: 34px;
+  height: 34px;
+}
+
+.phase6MapPreviewShared {
+  width: 100%;
+  object-fit: cover;
+  background: var(--phase6-subtle);
+}
+
+.phase6AssetFallback {
+  display: inline-block;
+  background:
+    linear-gradient(135deg, rgb(255 138 36 / 0.14), rgb(47 110 234 / 0.1)),
+    var(--phase6-subtle);
+}
+
 .appShell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+.phase6ProductShell {
+  color: var(--phase6-ink);
+  background:
+    radial-gradient(circle at 8% 0%, rgb(255 177 94 / 0.28), transparent 30%),
+    radial-gradient(circle at 88% 8%, rgb(47 110 234 / 0.12), transparent 32%),
+    linear-gradient(135deg, #fff7ed 0%, #f6f8fb 44%, #eef7f3 100%);
+}
+
+.phase6ProductTopBar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(360px, auto) minmax(190px, 0.7fr);
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.56);
+  background: rgb(255 255 255 / 0.48);
+  box-shadow: 0 12px 42px rgb(48 59 80 / 0.1);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.phase6ProductBrand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phase6ProductLogo {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #263241;
+  color: #fff;
+  box-shadow: 0 10px 24px rgb(38 50 65 / 0.18);
+}
+
+.phase6ProductBrand h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.phase6ProductBrand p {
+  margin: 4px 0 0;
+  color: var(--phase6-muted);
+  font-size: 12px;
+}
+
+.phase6QaRegion {
+  position: relative;
+  min-width: 0;
+}
+
+.phase6QaInlineRegion {
+  justify-self: center;
+}
+
+.phase6QaBadge {
+  position: absolute;
+  z-index: 80;
+  top: -10px;
+  right: -8px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgb(255 255 255 / 0.82);
+  border-radius: 999px;
+  background: #263241;
+  color: #fff;
+  box-shadow: 0 10px 24px rgb(38 50 65 / 0.22);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.phase6QaBadge:hover {
+  background: var(--phase6-accent);
+  color: #1f242b;
+}
+
+.phase6QaPanel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  width: min(340px, calc(100vw - 36px));
+  max-height: min(560px, calc(100vh - 36px));
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid rgb(255 255 255 / 0.78);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: 0 22px 70px rgb(31 41 55 / 0.2);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.phase6QaPanel header,
+.phase6QaPanel header span,
+.phase6QaPanel button {
+  display: flex;
+  align-items: center;
+}
+
+.phase6QaPanel header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.phase6QaPanel header span {
+  gap: 6px;
+  color: var(--phase6-ink);
+  font-weight: 900;
+}
+
+.phase6QaPanel header small,
+.phase6QaPanel p {
+  color: var(--phase6-muted);
+}
+
+.phase6QaPanel p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.phase6QaPanel > div {
+  display: grid;
+  gap: 8px;
+}
+
+.phase6QaPanel button {
+  min-width: 0;
+  min-height: 40px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dce5f0;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--phase6-ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.phase6QaPanel button span {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.phase6QaPanel button small {
+  min-width: 0;
+  flex: 1;
+  color: var(--phase6-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6QaPanel button:hover {
+  border-color: #f4bd7b;
+  background: #fff7ed;
+}
+
+.phase6QaPanel .phase6QaCloseHint {
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 999px;
+  background: #f3f6fb;
+  color: #4b5563;
+}
+
+.phase6ProductNav {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--phase6-border);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.66);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), var(--phase6-shadow-tight);
+}
+
+.phase6ProductNav a {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: #4c5869;
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.phase6ProductNav a.active {
+  background: var(--phase6-accent);
+  color: #1f242b;
+  box-shadow: 0 8px 20px rgb(242 139 36 / 0.28);
+}
+
+.phase6ShellStatus {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.phase6ShellIconButton {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--phase6-border);
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: rgb(255 255 255 / 0.72);
+  color: #485366;
+  cursor: pointer;
+}
+
+.phase6ProductSurface {
+  flex: 1;
+  min-height: 0;
 }
 
 .topBar {
@@ -136,8 +503,9 @@ select {
 
 .filterBar {
   display: grid;
-  grid-template-columns: repeat(7, minmax(110px, 1fr)) minmax(240px, 1.2fr);
+  grid-template-columns: repeat(8, minmax(104px, 1fr));
   gap: 10px;
+  justify-content: center;
   padding: 14px 24px;
   background: #edf2f7;
   border-bottom: 1px solid #d3dbe7;
@@ -167,16 +535,11 @@ select {
   color: #223047;
 }
 
-.buttonRow,
-.filterActions {
+.buttonRow {
   display: flex;
   align-items: end;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.filterActions .ghostButton {
-  min-width: 74px;
 }
 
 .iconOnlyButton {
@@ -226,7 +589,7 @@ select {
   background: #ffffff;
   color: #172033;
   display: grid;
-  grid-template-columns: 64px minmax(120px, 1.4fr) 64px minmax(92px, 0.7fr) minmax(180px, 1fr) 112px;
+  grid-template-columns: 64px minmax(120px, 1.2fr) 64px minmax(210px, 1.2fr) minmax(92px, 0.7fr) minmax(180px, 1fr) 112px;
   gap: 10px;
   align-items: center;
   text-align: left;
@@ -250,6 +613,143 @@ select {
   background: #edf2f7;
   text-align: center;
   font-weight: 700;
+}
+
+.evaluationPills {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.gradePill,
+.primaryTag,
+.evidenceTag {
+  min-width: 0;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.gradePill {
+  flex: 0 0 auto;
+  background: #172033;
+  color: #ffffff;
+}
+
+.gradeS {
+  background: linear-gradient(145deg, #ffe9a4, #f2bd2f);
+  color: #3b2708;
+}
+
+.gradeA {
+  background: linear-gradient(145deg, #d9ebff, #79b9ff);
+  color: #0b3b6f;
+}
+
+.gradeB,
+.gradeC {
+  background: #ece9ff;
+  color: #5b5684;
+}
+
+.gradeC {
+  background: #ece9ff;
+  color: #5b5684;
+}
+
+.primaryTag {
+  flex: 0 0 auto;
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.evidenceTag {
+  flex: 1 1 auto;
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.phase6PerformanceBadges {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.phase6PerformanceBadges.compact {
+  gap: 5px;
+}
+
+.phase6PerformanceBadges .primaryTag {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+
+.phase6PerformanceBadges .badgeTone-gold {
+  border-color: #d5a11e;
+  background: linear-gradient(145deg, #ffe9a4, #f2bd2f);
+  color: #3b2708;
+}
+
+.phase6PerformanceBadges .badgeTone-blue {
+  border-color: #7cb8f6;
+  background: linear-gradient(145deg, #d9ebff, #79b9ff);
+  color: #0b3b6f;
+}
+
+.phase6PerformanceBadges .badgeTone-muted {
+  border-color: #d8d2f5;
+  background: #ece9ff;
+  color: #5b5684;
+}
+
+.phase6AwardMedal {
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7), 0 3px 8px rgb(48 59 80 / 0.12);
+}
+
+.phase6AwardMedal.gold {
+  border: 1px solid #d5a11e;
+  background: linear-gradient(145deg, #ffe9a4, #f2bd2f);
+  color: #3b2708;
+}
+
+.phase6AwardMedal.danger {
+  border: 1px solid #d84b4b;
+  background: linear-gradient(145deg, #ffb7b7, #df3434);
+  color: #fff;
+  text-shadow: none;
+}
+
+.streakSeparator {
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: #253247;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .matchMain {
@@ -321,8 +821,7 @@ select {
   font-weight: 800;
 }
 
-.playerSection h3,
-.rawViewer h3 {
+.playerSection h3 {
   margin: 0;
 }
 
@@ -334,8 +833,7 @@ select {
   border-radius: 6px;
 }
 
-.playerSection h3,
-.rawViewer h3 {
+.playerSection h3 {
   font-size: 15px;
   margin-bottom: 8px;
 }
@@ -368,25 +866,6 @@ select {
 
 .playerLine span {
   overflow-wrap: anywhere;
-}
-
-.rawViewer pre {
-  max-height: 320px;
-  overflow: auto;
-  margin: 0;
-  padding: 12px;
-  border-radius: 6px;
-  background: #111827;
-  color: #d6e2f1;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.rawViewer {
-  padding: 16px;
-  background: #ffffff;
-  border: 1px solid #d7e0ec;
-  border-radius: 6px;
 }
 
 .roleComparison {
@@ -471,7 +950,7 @@ select {
 }
 
 .analyticsWorkspace {
-  max-width: 1440px;
+  max-width: var(--phase6-content-max);
   width: 100%;
 }
 
@@ -551,6 +1030,23 @@ select {
   background: #253247;
   color: #ffffff;
   font-weight: 800;
+}
+
+.rankingHead button {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rankingHead button.active {
+  color: #bfdbfe;
 }
 
 .rankingLine {
@@ -879,6 +1375,1044 @@ select {
   width: 100%;
 }
 
+.phase6CommandCenter {
+  max-width: var(--phase6-content-max);
+}
+
+.phase6CommandCenterHero {
+  min-height: 172px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--phase6-border);
+  border-radius: var(--phase6-radius-lg);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.74), rgb(255 255 255 / 0.42)),
+    radial-gradient(circle at 92% 10%, rgb(255 138 36 / 0.24), transparent 26%);
+  box-shadow: var(--phase6-shadow-soft);
+  backdrop-filter: var(--phase6-glass-blur);
+  -webkit-backdrop-filter: var(--phase6-glass-blur);
+}
+
+.phase6CommandCenterHero h2 {
+  margin: 4px 0 0;
+  font-size: 30px;
+  letter-spacing: 0;
+}
+
+.phase6CommandCenterHero p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--phase6-muted);
+  line-height: 1.6;
+}
+
+.phase6CommandStatus {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.phase6RecoverableError {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  border-radius: var(--phase6-radius-sm);
+}
+
+.phase6CommandMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.phase6CommandGridReal {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.phase6CommandPanel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.phase6CommandPanel h3 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+
+.phase6CommandPanel p {
+  margin: 8px 0 0;
+  color: var(--phase6-muted);
+  line-height: 1.55;
+}
+
+.phase6CommandPanelWide {
+  grid-column: 1 / -1;
+}
+
+.phase6StatusLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #3d4a5c;
+  font-size: 13px;
+}
+
+.phase6ProgressText {
+  color: var(--phase6-muted);
+  font-size: 13px;
+}
+
+.phase6SyncControl {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 160px;
+  gap: 12px;
+}
+
+.phase6SyncControl label {
+  display: grid;
+  gap: 6px;
+  color: var(--phase6-muted);
+  font-size: 12px;
+}
+
+.phase6SyncControl input {
+  min-height: 40px;
+  border: 1px solid var(--phase6-line);
+  border-radius: var(--phase6-radius-sm);
+  padding: 0 10px;
+  background: #fff;
+  color: var(--phase6-ink);
+}
+
+.phase6DataSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.phase6CommandActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.phase6SyncWorkspace {
+  max-width: 1180px;
+}
+
+.phase6SyncLauncher {
+  margin-top: 14px;
+}
+
+.phase6MatchMetrics.local {
+  width: 100%;
+  margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.phase6PageHeader {
+  max-width: var(--phase6-content-max);
+  width: calc(100% - 64px);
+  min-height: 148px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px auto 0;
+  padding: 24px;
+  border: 1px solid var(--phase6-border);
+  border-radius: var(--phase6-radius-lg);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.76), rgb(255 255 255 / 0.46)),
+    radial-gradient(circle at 88% 8%, rgb(47 110 234 / 0.16), transparent 28%);
+  box-shadow: var(--phase6-shadow-soft);
+  backdrop-filter: var(--phase6-glass-blur);
+  -webkit-backdrop-filter: var(--phase6-glass-blur);
+}
+
+.phase6PageHeader h2 {
+  margin: 4px 0 0;
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.phase6PageHeader p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--phase6-muted);
+  line-height: 1.6;
+}
+
+.phase6MatchMetrics {
+  max-width: var(--phase6-content-max);
+  width: calc(100% - 64px);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px auto 0;
+}
+
+.phase6FilterBar {
+  max-width: var(--phase6-content-max);
+  width: calc(100% - 64px);
+  margin: 14px auto 0;
+  border: 1px solid var(--phase6-border);
+  border-radius: var(--phase6-radius-lg);
+  background: rgb(255 255 255 / 0.7);
+  box-shadow: var(--phase6-shadow-tight);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.phase6ListWorkspace {
+  max-width: var(--phase6-content-max);
+  width: calc(100% - 64px);
+  margin: 0 auto;
+}
+
+.phase6Timeline {
+  gap: 16px;
+}
+
+.phase6MatchRowReal {
+  position: relative;
+  overflow: hidden;
+  min-height: 216px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0;
+  border: 1px solid #dfe7f0;
+  border-left-width: 0;
+  border-radius: 4px;
+  background: #f8fafc;
+  box-shadow: 0 16px 34px rgb(48 59 80 / 0.1);
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.phase6MatchRowReal:hover {
+  border-color: #f4bd7b;
+  box-shadow: 0 18px 42px rgb(48 59 80 / 0.14);
+  transform: translateY(-1px);
+}
+
+.phase6MatchBanner {
+  position: relative;
+  min-height: 96px;
+  display: grid;
+  align-items: stretch;
+  overflow: hidden;
+  background: #dfe7f0;
+}
+
+.phase6MatchMapThumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  filter: saturate(1.02) contrast(0.96);
+}
+
+.phase6MatchBanner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgb(15 23 42 / 0.12), rgb(15 23 42 / 0.28)),
+    linear-gradient(180deg, transparent, rgb(15 23 42 / 0.18));
+}
+
+.phase6MatchScoreSlab {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  min-width: 310px;
+  display: flex;
+  align-items: center;
+  padding: 0 34px;
+  color: #fff;
+  background: var(--phase6-accent);
+  clip-path: polygon(0 0, 91% 0, 100% 100%, 0% 100%);
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-shadow: 0 2px 8px rgb(120 48 8 / 0.18);
+}
+
+.phase6MatchRowReal.loss .phase6MatchScoreSlab {
+  background: #64748b;
+}
+
+.phase6MatchRowReal.draw .phase6MatchScoreSlab {
+  background: #7c8a9f;
+}
+
+.phase6MatchMapTitle {
+  position: absolute;
+  z-index: 2;
+  right: 28px;
+  top: 24px;
+  max-width: calc(100% - 360px);
+  color: #fff;
+  font-size: 28px;
+  font-weight: 800;
+  text-align: right;
+  text-shadow: 0 2px 10px rgb(15 23 42 / 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6MatchDataPanel {
+  min-height: 118px;
+  display: grid;
+  grid-template-columns: 118px minmax(190px, 0.95fr) minmax(120px, 0.55fr) minmax(230px, 1fr) 40px;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 26px;
+  background: rgb(255 255 255 / 0.93);
+}
+
+.phase6HeroStackCell,
+.phase6MatchMetricBlock,
+.phase6MatchGrade {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.phase6HeroStackCell {
+  justify-items: center;
+  color: var(--phase6-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.phase6MatchGrade {
+  justify-items: start;
+}
+
+.phase6HeroStackCell .phase6HeroAvatarShared {
+  width: 64px;
+  height: 64px;
+  border: 3px solid #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 18px rgb(48 59 80 / 0.16);
+}
+
+.phase6MatchMetricBlock > span,
+.phase6MatchGrade > span {
+  color: #7a8290;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.phase6MatchMetricBlock > strong {
+  color: #1f2937;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.phase6MatchGrade .gradePill {
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 15px;
+  font-style: normal;
+  text-shadow: none;
+}
+
+.phase6MatchGrade .primaryTag {
+  min-height: 27px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.phase6MatchGrade .phase6AwardMedal {
+  width: 27px;
+  height: 27px;
+  flex-basis: 27px;
+  font-size: 15px;
+}
+
+.phase6MatchOpen {
+  color: #9aa3af;
+  font-size: 54px;
+  font-weight: 300;
+  line-height: 1;
+  text-align: right;
+}
+
+.phase6MatchIdentity span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phase6DetailPage {
+  max-width: var(--phase6-content-max);
+  width: calc(100% - 64px);
+  margin: 0 auto;
+}
+
+.phase6DetailHero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 0;
+  padding: 0;
+  border: 1px solid #d8e4f2;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 18px 44px rgb(48 59 80 / 0.12);
+}
+
+.phase6DetailBackButton {
+  position: absolute;
+  z-index: 8;
+  top: 14px;
+  right: 14px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.68);
+  border-radius: 999px;
+  background: rgb(15 23 42 / 0.42);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.phase6DetailBanner {
+  position: relative;
+  min-height: 210px;
+  overflow: hidden;
+  background: #dfe7f0;
+}
+
+.phase6DetailBannerMap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  filter: saturate(1.04) contrast(0.94);
+}
+
+.phase6DetailBanner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgb(15 23 42 / 0.04), rgb(15 23 42 / 0.24)),
+    linear-gradient(180deg, transparent, rgb(15 23 42 / 0.16));
+}
+
+.phase6DetailResultPanel {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: min(430px, 43%);
+  display: grid;
+  align-content: center;
+  padding: 26px 52px;
+  color: #fff;
+  background: var(--phase6-accent);
+  clip-path: polygon(0 0, 82% 0, 100% 100%, 0% 100%);
+}
+
+.phase6DetailHero.loss .phase6DetailResultPanel {
+  background: #3d465c;
+}
+
+.phase6DetailHero.draw .phase6DetailResultPanel,
+.phase6DetailHero.pending .phase6DetailResultPanel {
+  background: #64748b;
+}
+
+.phase6DetailResultPanel strong {
+  font-size: 62px;
+  font-style: italic;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 0;
+  text-shadow: 0 3px 0 rgb(15 23 42 / 0.1);
+}
+
+.phase6DetailResultPanel span {
+  margin-top: 14px;
+  color: rgb(255 255 255 / 0.22);
+  font-size: 34px;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.phase6DetailCornerAccent {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  width: 86px;
+  height: 116px;
+  background: var(--phase6-accent);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+.phase6DetailHero.loss .phase6DetailCornerAccent {
+  background: #3d465c;
+}
+
+.phase6DetailSummary {
+  min-height: 210px;
+  padding: 42px 48px 38px;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.96), rgb(248 250 252 / 0.94)),
+    radial-gradient(circle at 88% 18%, rgb(226 232 240 / 0.62), transparent 28%);
+}
+
+.phase6DetailSummary h2 {
+  margin: 0 0 28px;
+  color: #2a2d37;
+  font-size: 42px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.phase6DetailFacts {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.85fr) minmax(300px, 1fr);
+  gap: 14px 56px;
+  max-width: 880px;
+}
+
+.phase6DetailFacts span {
+  min-width: 0;
+  color: #2f3440;
+  font-size: 26px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.phase6DetailFacts b {
+  margin-right: 8px;
+  font-weight: 500;
+}
+
+.phase6DetailLoadingHeader {
+  min-height: 138px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  background: rgb(255 255 255 / 0.72);
+}
+
+.phase6ReportPanel {
+  padding: 16px;
+}
+
+.phase6ReportPanel h3,
+.phase6PlayerSection h3 {
+  margin: 2px 0 0;
+}
+
+.phase6PlayerColumns {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.phase6VsDivider {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  padding: 10px 0;
+}
+
+.phase6VsDivider span {
+  position: relative;
+  width: min(360px, 72%);
+  height: 82px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: rgb(100 116 139 / 0.54);
+  font-size: 52px;
+  font-weight: 950;
+  letter-spacing: 0;
+  background:
+    linear-gradient(90deg, #dbe3ee 0 32%, transparent 32% 68%, #dbe3ee 68% 100%),
+    radial-gradient(circle, #fff 0 38%, transparent 39%);
+  text-shadow: 0 8px 18px rgb(100 116 139 / 0.2);
+}
+
+.phase6PlayerSection {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.phase6PlayerSection > h3 {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: #fff;
+  background: #1f86e5;
+  font-size: 16px;
+}
+
+.phase6PlayerSection.enemy > h3 {
+  background: #d9344f;
+}
+
+.phase6PlayerTable {
+  display: grid;
+  gap: 12px;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.phase6PlayerCard {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  min-height: 148px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #1688e8;
+  box-shadow: 0 16px 30px rgb(30 64 175 / 0.12);
+}
+
+.phase6PlayerSection.enemy .phase6PlayerCard {
+  background: #d9344f;
+  box-shadow: 0 16px 30px rgb(136 19 55 / 0.12);
+}
+
+.phase6PlayerPortrait {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #3c4773;
+}
+
+.phase6PlayerPortrait::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -14px;
+  width: 28px;
+  height: 28px;
+  margin-top: -14px;
+  background: #3c4773;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.phase6PlayerPortrait .phase6HeroAvatarShared {
+  width: 112px;
+  height: 112px;
+  border: 3px solid rgb(255 255 255 / 0.82);
+  border-radius: 4px;
+  box-shadow: 0 10px 20px rgb(15 23 42 / 0.18);
+}
+
+.phase6PlayerStats {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  padding: 18px 28px 16px 36px;
+  color: #fff;
+}
+
+.phase6PlayerStats header {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed rgb(255 255 255 / 0.24);
+}
+
+.phase6PlayerStats header strong {
+  min-width: 0;
+  color: #fff;
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6PlayerStats header span {
+  flex: 0 0 auto;
+  color: rgb(255 255 255 / 0.66);
+  font-size: 14px;
+}
+
+.phase6PlayerMetricGrid {
+  display: grid;
+  grid-template-columns: minmax(108px, 0.7fr) minmax(260px, 1fr) minmax(180px, 0.75fr);
+  gap: 24px;
+  padding-top: 14px;
+}
+
+.phase6PlayerMetricGrid span {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.phase6PlayerMetricGrid b {
+  color: rgb(255 255 255 / 0.66);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.phase6PlayerMetricGrid strong {
+  color: #fff;
+  font-size: 27px;
+  font-weight: 450;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phase6PlayerMetricGrid em {
+  font-style: normal;
+}
+
+.phase6StatHighlight {
+  color: #72f1d6;
+}
+
+.phase6PlayerSection.enemy .phase6StatHighlight {
+  color: #ffe98a;
+}
+
+.phase6RankingWorkspace {
+  max-width: var(--phase6-content-max);
+}
+
+.phase6RankingToolbar {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--phase6-border);
+  border-radius: var(--phase6-radius-lg);
+  background: rgb(255 255 255 / 0.68);
+  box-shadow: var(--phase6-shadow-tight);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.phase6SegmentedControl {
+  border-color: var(--phase6-border);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.72);
+}
+
+.phase6SegmentedControl button {
+  border-radius: 999px;
+}
+
+.phase6SegmentedControl button.active {
+  background: var(--phase6-accent);
+  color: #1f242b;
+}
+
+.phase6RankingSearch {
+  border-color: var(--phase6-line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.phase6RankingTable {
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.phase6RankingHead,
+.phase6RankingLine {
+  grid-template-columns: minmax(260px, 1.45fr) repeat(4, minmax(72px, 0.52fr)) minmax(116px, 0.72fr);
+  border-radius: var(--phase6-radius-md);
+}
+
+.phase6RankingHead {
+  border: 1px solid #d5e0ee;
+  background: #263241;
+}
+
+.phase6RankingLine {
+  min-height: 74px;
+  border-color: #dfe7f0;
+  background: rgb(255 255 255 / 0.9);
+  box-shadow: 0 10px 24px rgb(48 59 80 / 0.07);
+}
+
+.phase6RankName {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phase6RankName b {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #f3f6fb;
+  color: #566276;
+  font-size: 12px;
+}
+
+.phase6RankName strong {
+  min-width: 0;
+}
+
+.phase6RankMapPreview {
+  width: 76px;
+  height: 44px;
+  flex: 0 0 76px;
+  border-radius: 10px;
+}
+
+.phase6ReviewWorkspace,
+.phase6AnalyticsWorkspace {
+  max-width: var(--phase6-content-max);
+  width: calc(100% - 64px);
+}
+
+.phase6ReviewGrid {
+  margin-top: 14px;
+}
+
+.phase6ReviewPanel {
+  padding: 16px;
+}
+
+.phase6ReviewPanel > header {
+  margin-bottom: 12px;
+}
+
+.phase6ReviewPanel h3 {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+
+.phase6ConclusionList article,
+.phase6BestList article {
+  border-radius: var(--phase6-radius-md);
+  background: #fff;
+}
+
+.phase6BestList article {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.phase6EvidenceLink {
+  min-height: 34px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid #dce6f2;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #1d4ed8;
+}
+
+.phase6EvidenceLink span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6EvidenceMap {
+  width: 46px;
+  height: 26px;
+  flex: 0 0 46px;
+  border-radius: 999px;
+}
+
+.phase6InlineHeader {
+  margin-top: 18px;
+}
+
+.phase6FriendBoardGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.phase6FriendBoard {
+  min-height: 156px;
+  display: grid;
+  align-content: start;
+  padding: 12px;
+  border-radius: var(--phase6-radius-md);
+  box-shadow: 0 10px 24px rgb(48 59 80 / 0.08);
+}
+
+.phase6FriendCard {
+  min-height: 58px;
+  padding: 8px;
+  background: #fff;
+}
+
+.phase6FriendBoard > header {
+  min-height: 46px;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.phase6FriendBoard h3 {
+  font-size: 15px;
+}
+
+.phase6FriendBoard p {
+  display: none;
+}
+
+.phase6FriendBoard > header > span {
+  min-width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.phase6FriendBoard .friendCardList {
+  gap: 7px;
+  padding-top: 8px;
+}
+
+.phase6FriendCard strong {
+  font-size: 13px;
+}
+
+.phase6FriendCard .explainMetrics.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.phase6FriendCard .explainMetrics dt {
+  font-size: 10px;
+}
+
+.phase6FriendCard .explainMetrics dd {
+  font-size: 12px;
+}
+
+.phase6LineupList > div > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.phase6LineupMember {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 3px;
+  border-radius: 999px;
+  background: #f4f7fb;
+  white-space: nowrap;
+}
+
+.phase6MapAnalysisGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 12px;
+  gap: 12px;
+}
+
+.phase6MapAnalysisCard {
+  position: relative;
+  overflow: hidden;
+  min-height: 156px;
+  border-radius: var(--phase6-radius-md);
+  box-shadow: 0 10px 24px rgb(48 59 80 / 0.08);
+}
+
+.phase6MapAnalysisCard .phase6AnalysisMapPreview {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.phase6MapAnalysisCard > div {
+  position: relative;
+  z-index: 1;
+  min-height: 156px;
+  display: grid;
+  align-content: end;
+  padding: 14px;
+  color: #fff;
+  background: linear-gradient(180deg, transparent, rgb(15 23 42 / 0.64));
+}
+
+.phase6MapAnalysisCard > div span,
+.phase6MapAnalysisCard > div small {
+  color: rgb(255 255 255 / 0.84);
+}
+
+.phase6MiniMapPreview {
+  width: 46px;
+  height: 26px;
+  flex: 0 0 46px;
+  border-radius: 8px;
+}
+
+.phase6RecentMatchRow {
+  grid-template-columns: 130px minmax(180px, 1.2fr) minmax(120px, 0.9fr) 54px 70px 110px 110px;
+}
+
 .wizardGrid,
 .reviewGrid {
   display: grid;
@@ -1017,6 +2551,42 @@ select {
     min-width: 760px;
   }
 
+  .phase6ProductTopBar {
+    grid-template-columns: 1fr;
+  }
+
+  .phase6ProductNav,
+  .phase6ShellStatus {
+    justify-self: stretch;
+  }
+
+  .phase6ProductNav {
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+
+  .phase6ShellStatus {
+    justify-content: flex-start;
+  }
+
+  .phase6CommandCenterHero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .phase6CommandMetrics,
+  .phase6CommandGridReal,
+  .phase6DataSummary,
+  .phase6SyncControl,
+  .phase6MatchMetrics {
+    grid-template-columns: 1fr;
+  }
+
+  .phase6PageHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .controlBand,
   .filterBar,
   .playerColumns,
@@ -1035,6 +2605,91 @@ select {
     grid-template-columns: 60px 1fr 64px;
   }
 
+  .phase6MatchRowReal {
+    grid-template-columns: 1fr;
+  }
+
+  .phase6MatchScoreSlab {
+    min-width: 250px;
+    padding: 0 24px;
+    font-size: 32px;
+  }
+
+  .phase6MatchMapTitle {
+    right: 18px;
+    max-width: calc(100% - 280px);
+    font-size: 22px;
+  }
+
+  .phase6MatchDataPanel {
+    grid-template-columns: 96px minmax(110px, 0.7fr) minmax(170px, 1fr) minmax(92px, 0.55fr) 30px;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .phase6MatchMetricBlock > span,
+  .phase6MatchGrade > span {
+    font-size: 18px;
+  }
+
+  .phase6MatchMetricBlock > strong {
+    font-size: 24px;
+  }
+
+  .phase6PlayerColumns {
+    grid-template-columns: 1fr;
+  }
+
+  .phase6VsDivider {
+    min-height: auto;
+    padding: 14px 0;
+  }
+
+  .phase6VsDivider span {
+    position: static;
+    width: 86px;
+    height: 58px;
+    border-radius: 999px;
+    font-size: 32px;
+  }
+
+  .phase6PlayerCard {
+    grid-template-columns: 124px minmax(0, 1fr);
+  }
+
+  .phase6PlayerPortrait .phase6HeroAvatarShared {
+    width: 88px;
+    height: 88px;
+  }
+
+  .phase6PlayerMetricGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .phase6RankingToolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .phase6RankingHead,
+  .phase6RankingLine {
+    grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(72px, 0.4fr));
+  }
+
+  .phase6RankingHead button:nth-of-type(n + 3),
+  .phase6RankingLine > span:nth-of-type(n + 4) {
+    display: none;
+  }
+
+  .phase6RecentMatchRow {
+    grid-template-columns: 120px minmax(0, 1fr) minmax(100px, 0.8fr);
+  }
+
+  .phase6RecentMatchRow span:nth-child(n + 4) {
+    display: none;
+  }
+
+  .matchRow .evaluationPills,
   .matchRow .statLine,
   .matchRow time {
     grid-column: 2 / span 2;
@@ -1042,5 +2697,497 @@ select {
 
   .recentMatchRow {
     grid-template-columns: 120px 1fr 90px;
+  }
+}
+
+.phase6Board {
+  min-height: calc(100vh - 76px);
+  padding: 28px;
+  color: #18202d;
+  background:
+    radial-gradient(circle at 12% 8%, rgb(255 177 94 / 0.34), transparent 28%),
+    radial-gradient(circle at 86% 14%, rgb(102 126 234 / 0.18), transparent 30%),
+    linear-gradient(135deg, #fff7ed 0%, #f4f8ff 42%, #eef7f3 100%);
+}
+
+.phase6BoardHeader {
+  max-width: 1440px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.phase6BoardHeader h1,
+.phase6VariantIntro h2,
+.phase6StatusTop h2,
+.phase6CommandHeader h2 {
+  margin: 4px 0 0;
+  letter-spacing: 0;
+}
+
+.phase6BoardHeader h1 {
+  font-size: 30px;
+}
+
+.phase6BoardHeader p,
+.phase6VariantIntro p,
+.phase6GlassPanel p,
+.phase6CommandHero p {
+  margin: 8px 0 0;
+  max-width: 720px;
+  color: #5c6677;
+  line-height: 1.6;
+}
+
+.phase6Eyebrow {
+  color: #d56b1f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.phase6BoardStatus,
+.phase6StatusPills,
+.phase6HeroStack,
+.phase6CapsuleBar nav,
+.phase6BrandMark,
+.phase6SearchBox,
+.phase6EvidencePanel header,
+.phase6EvidencePanel article {
+  display: flex;
+  align-items: center;
+}
+
+.phase6BoardStatus,
+.phase6StatusPills {
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.phase6StatusPills span {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.74);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.58);
+  color: #455166;
+  box-shadow: 0 8px 24px rgb(34 45 66 / 0.08);
+}
+
+.phase6Variant {
+  max-width: 1440px;
+  margin: 0 auto 22px;
+  padding: 18px;
+  border: 1px solid rgb(255 255 255 / 0.72);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.42);
+  box-shadow: 0 24px 70px rgb(52 63 84 / 0.16);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.phase6CapsuleBar,
+.phase6StatusTop,
+.phase6CommandHeader {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 0.76);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.66);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7), 0 12px 34px rgb(39 48 66 / 0.1);
+}
+
+.phase6BrandMark,
+.phase6CapsuleBar nav,
+.phase6HeroStack {
+  gap: 8px;
+}
+
+.phase6BrandMark {
+  min-width: 170px;
+  font-weight: 900;
+}
+
+.phase6CapsuleBar nav {
+  padding: 4px;
+  border-radius: 999px;
+  background: rgb(239 243 249 / 0.84);
+}
+
+.phase6CapsuleBar button,
+.phase6IconGhost,
+.phase6Rail button,
+.phase6PrimaryAction {
+  border: 0;
+  cursor: pointer;
+}
+
+.phase6CapsuleBar nav button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: transparent;
+  color: #556070;
+}
+
+.phase6CapsuleBar nav button.active,
+.phase6Rail button.active {
+  background: #ff8a24;
+  color: #1f242b;
+  box-shadow: 0 8px 20px rgb(242 139 36 / 0.32);
+}
+
+.phase6IconGhost,
+.phase6Rail button {
+  display: inline-grid;
+  place-items: center;
+  color: #485366;
+  background: rgb(255 255 255 / 0.72);
+}
+
+.phase6IconGhost {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+}
+
+.phase6VariantIntro {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px 6px 16px;
+}
+
+.phase6PrimaryAction {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #ff8a24;
+  color: #1f242b;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.phase6MetricStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.phase6GlassPanel,
+.phase6EvidencePanel,
+.phase6CommandHero,
+.phase6MapCards article {
+  border: 1px solid rgb(255 255 255 / 0.74);
+  background: rgb(255 255 255 / 0.64);
+  box-shadow: 0 16px 40px rgb(48 59 80 / 0.11);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.phase6EvidencePanel span,
+.phase6MapCards span {
+  color: #637083;
+}
+
+.phase6MatchList {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.phase6MatchRow {
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: 112px minmax(170px, 1fr) minmax(230px, 0.8fr) 72px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgb(226 232 240 / 0.9);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.82);
+}
+
+.phase6MapThumb,
+.phase6WideMap,
+.phase6CardMap {
+  width: 100%;
+  object-fit: cover;
+  background: #e8edf4;
+}
+
+.phase6MapThumb {
+  height: 58px;
+  border-radius: 12px;
+}
+
+.phase6MatchRow strong,
+.phase6MatchRow span,
+.phase6MapCards strong,
+.phase6MapCards span,
+.phase6EvidencePanel strong,
+.phase6EvidencePanel span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6MatchRow b {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #17653a;
+  font-size: 12px;
+}
+
+.phase6HeroChip {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 999px;
+  background: #f5f7fb;
+}
+
+.phase6RailVariant {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.phase6Rail {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+  padding: 12px 8px;
+  border: 1px solid rgb(255 255 255 / 0.76);
+  border-radius: 24px;
+  background: rgb(255 255 255 / 0.62);
+}
+
+.phase6RailLogo,
+.phase6Rail button {
+  width: 42px;
+  height: 42px;
+  border-radius: 15px;
+}
+
+.phase6RailLogo {
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+  background: #263241;
+  color: #fff;
+}
+
+.phase6RailCanvas {
+  min-width: 0;
+}
+
+.phase6StatusTop {
+  border-radius: 20px;
+}
+
+.phase6RailGrid,
+.phase6CommandGrid,
+.phase6MapCards {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.phase6GlassPanel,
+.phase6EvidencePanel,
+.phase6CommandHero {
+  min-width: 0;
+  padding: 16px;
+  border-radius: 18px;
+}
+
+.phase6GlassPanel h3,
+.phase6CommandHero h3 {
+  margin: 8px 0 0;
+  font-size: 20px;
+}
+
+.phase6MapPanel {
+  position: relative;
+  min-height: 182px;
+  overflow: hidden;
+  display: grid;
+  align-content: end;
+  padding: 0;
+}
+
+.phase6WideMap {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+.phase6MapPanel::after,
+.phase6CardMap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgb(15 23 42 / 0.52));
+}
+
+.phase6MapPanel div {
+  position: relative;
+  z-index: 1;
+  padding: 18px;
+  color: #fff;
+}
+
+.phase6MapPanel span {
+  color: rgb(255 255 255 / 0.76);
+}
+
+.phase6CommandHeader {
+  border-radius: 22px;
+}
+
+.phase6SearchBox {
+  min-width: min(420px, 36vw);
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #f2f5fa;
+  color: #6b7484;
+}
+
+.phase6CommandGrid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+}
+
+.phase6CommandHero {
+  display: grid;
+  gap: 18px;
+}
+
+.phase6EvidencePanel {
+  display: grid;
+  gap: 10px;
+}
+
+.phase6EvidencePanel header {
+  justify-content: space-between;
+}
+
+.phase6EvidencePanel header span,
+.phase6EvidencePanel header b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phase6EvidencePanel header b {
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: #fff3e7;
+  color: #b55212;
+  font-size: 12px;
+}
+
+.phase6EvidencePanel article {
+  min-width: 0;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e4e9f1;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.78);
+}
+
+.phase6EvidencePanel article div {
+  min-width: 0;
+  flex: 1;
+}
+
+.phase6EvidencePanel small {
+  color: #1f7a4d;
+  white-space: nowrap;
+}
+
+.phase6MapCards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.phase6MapCards article {
+  position: relative;
+  min-height: 154px;
+  overflow: hidden;
+  display: grid;
+  align-content: end;
+  padding: 0;
+  border-radius: 18px;
+}
+
+.phase6CardMap {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+.phase6MapCards article div {
+  position: relative;
+  z-index: 1;
+  padding: 16px;
+  color: #fff;
+  background: linear-gradient(180deg, transparent, rgb(15 23 42 / 0.58));
+}
+
+.phase6MapCards span {
+  color: rgb(255 255 255 / 0.78);
+}
+
+@media (max-width: 1080px) {
+  .phase6BoardHeader,
+  .phase6VariantIntro,
+  .phase6CapsuleBar,
+  .phase6StatusTop,
+  .phase6CommandHeader {
+    align-items: stretch;
+    flex-direction: column;
+    border-radius: 22px;
+  }
+
+  .phase6MetricStrip,
+  .phase6RailGrid,
+  .phase6CommandGrid,
+  .phase6MapCards {
+    grid-template-columns: 1fr;
+  }
+
+  .phase6MatchRow {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .phase6MatchRow .phase6HeroStack,
+  .phase6MatchRow b {
+    grid-column: 2;
   }
 }

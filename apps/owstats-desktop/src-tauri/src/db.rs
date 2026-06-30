@@ -2,6 +2,8 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
+const CURRENT_SCHEMA_VERSION: i64 = 2;
+
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
     path: PathBuf,
@@ -119,6 +121,18 @@ pub fn initialize_connection(conn: &Connection) -> Result<()> {
             PRIMARY KEY (match_id, side, bnet_id)
         );
 
+        CREATE TABLE IF NOT EXISTS match_evaluations (
+            match_id TEXT PRIMARY KEY REFERENCES matches(match_id) ON DELETE CASCADE,
+            mode TEXT NOT NULL,
+            rule_version INTEGER NOT NULL,
+            grade TEXT NOT NULL,
+            primary_tag TEXT NOT NULL,
+            evidence_tags_json TEXT NOT NULL,
+            reasons_json TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            computed_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS hero_dict (
             guid TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -159,12 +173,9 @@ pub fn initialize_connection(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_matches_filters ON matches(season, hero_guid, map_guid, result, game_mode, begin_ts);
         CREATE INDEX IF NOT EXISTS idx_match_players_friend ON match_players(season, side, is_friend, is_current_player);
         CREATE INDEX IF NOT EXISTS idx_match_players_bnet ON match_players(bnet_id, season);
+        CREATE INDEX IF NOT EXISTS idx_match_evaluations_version ON match_evaluations(rule_version);
+        CREATE INDEX IF NOT EXISTS idx_match_evaluations_primary_tag ON match_evaluations(primary_tag);
         "#,
-    )?;
-    add_column_if_missing(conn, "match_players", "role_type", "TEXT")?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_match_players_role ON match_players(season, is_current_player, role_type)",
-        [],
     )?;
     conn.execute(
         r#"
@@ -179,6 +190,23 @@ pub fn initialize_connection(conn: &Connection) -> Result<()> {
         "#,
         [],
     )?;
+    run_migrations(conn)?;
+    Ok(())
+}
+
+fn run_migrations(conn: &Connection) -> Result<()> {
+    let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if current < 1 {
+        conn.pragma_update(None, "user_version", 1)?;
+    }
+    if current < 2 {
+        add_column_if_missing(conn, "match_players", "role_type", "TEXT")?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_match_players_role ON match_players(season, is_current_player, role_type)",
+            [],
+        )?;
+        conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
+    }
     Ok(())
 }
 
