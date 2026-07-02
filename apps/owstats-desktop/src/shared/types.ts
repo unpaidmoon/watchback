@@ -103,11 +103,13 @@ export type MatchSummary = {
   matchId: string;
   season: number;
   bucket: string;
+  matchKind?: string;
   gameMode: string;
   modeLabel: string;
   result: string;
   resultLabel: string;
   mapGuid: string;
+  mapPreviewGuid?: string | null;
   mapName: string;
   heroGuid: string;
   heroName: string;
@@ -130,6 +132,8 @@ export type PlayerRow = {
   side: "teammate" | "enemy";
   name: string;
   bnetId: string;
+  rankLabel: string | null;
+  rankKey: string | null;
   heroGuid: string;
   heroName: string;
   kills: number;
@@ -142,6 +146,16 @@ export type PlayerRow = {
   targetTimeSec: number;
   healingTaken: number;
   damageTaken: number;
+  worth: number | null;
+  endWorth: number | null;
+  worthMax: boolean;
+  modGuids: string[];
+  traitGuids: string[];
+  hasSourceMaxFlags: boolean;
+  killMax: boolean;
+  heroDamageMax: boolean;
+  cureMax: boolean;
+  resistDamageMax: boolean;
   perks: PlayerPerk[];
   heroStats: HeroStat[];
 };
@@ -173,10 +187,32 @@ export type MatchDetailView = {
   durationSec: number | null;
   teammates: PlayerRow[];
   enemies: PlayerRow[];
+  arenaDetail: ArenaMatchDetail | null;
   evaluation: MatchEvaluationSummary | null;
   teamAwards: MatchPerformanceAward[];
   sameRoleComparison: SameRoleComparison | null;
   rawJson: unknown;
+};
+
+export type ArenaMatchDetail = {
+  summary: ArenaDetailSlice;
+  rounds: ArenaDetailSlice[];
+};
+
+export type ArenaDetailSlice = {
+  key: string;
+  label: string;
+  result: string | null;
+  resultLabel: string | null;
+  teamScore: number | null;
+  opponentScore: number | null;
+  durationSec: number | null;
+  beginTs: number | null;
+  beginLabel: string | null;
+  mapGuid: string | null;
+  mapName: string | null;
+  teammates: PlayerRow[];
+  enemies: PlayerRow[];
 };
 
 export type ComparisonMetrics = {

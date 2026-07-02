@@ -1,0 +1,518 @@
+# OWStatsLocal Main Thread Log
+
+This document is the durable ledger for the OWStatsLocal main-thread workflow.
+Use it to recover decisions when a Codex session is compacted, restarted, or
+split into execution and verification threads.
+
+## Main Thread Charter
+
+The active main thread owns:
+
+- product direction and task scope
+- risk and priority decisions
+- execution-thread prompt generation
+- review of execution-thread evidence
+- decision to accept, request fixes, or open a verification thread
+- final task closeout and remaining-risk notes
+
+The main thread should avoid collecting long command logs or trial-and-error
+details. Execution threads bring back concise evidence instead.
+
+## Project Constants
+
+- Project root: `D:\Codex\OW_data\owstats-local`
+- Active product: `apps/owstats-desktop/`
+- Stack: Tauri 2, React, TypeScript, Rust, SQLite
+- Desktop onboarding owns NetEase Dashen login, credential status, and season
+  sync entry.
+- Installed-product login uses Tauri backend commands.
+- Match module is the only filter entry.
+- Ranking owns hero win-rate and map win-rate.
+
+## Hard Rules
+
+- Confirm commands run from `D:\Codex\OW_data\owstats-local` or a deliberate
+  subdirectory under it.
+- All user-facing frontend text must be Chinese.
+- Never print, commit, or expose `OW_DASHEN_TOKEN`, `customerToken`,
+  `data/.dashen_credentials.json`, cookies or browser storage under
+  `data/chrome-dashen-profile/`, or raw player privacy identifiers from local
+  API dumps.
+- Raw JSON viewers must redact token-like fields before display.
+- Do not touch generated artifacts, build output, `node_modules`, `target`,
+  browser profiles, or local data dumps.
+- Keep narrow tasks narrow. Do not reopen product direction for region-scoped
+  UI or bugfix work.
+
+## Split Criteria
+
+Use one session when the task is a small text, CSS, explanation, path lookup, or
+single-error investigation.
+
+Use main thread plus execution thread when the task changes a page region,
+backend command, ranking or match display logic, or a small frontend/backend
+contract.
+
+Use main thread plus execution and verification threads when the task touches
+Dashen login, credentials, tokens, cookies, raw JSON display, SQLite schema,
+season sync, Tauri commands, release packaging, `data/`, or privacy-sensitive
+fields.
+
+## Execution Thread Prompt Template
+
+```text
+You are an OWStatsLocal execution thread.
+
+Project root:
+D:\Codex\OW_data\owstats-local
+
+First confirm the current directory is the project root or a deliberate
+subdirectory under it.
+
+Background:
+[why this task exists]
+
+Concrete task:
+[what to complete this time]
+
+Allowed to modify:
+- [specific files or directories]
+
+Forbidden:
+- data/
+- data/.dashen_credentials.json
+- data/chrome-dashen-profile/
+- generated artifacts
+- build output
+- node_modules
+- target
+- unrelated docs or refactors
+
+Hard requirements:
+- All user-facing frontend text must be Chinese.
+- Do not print, commit, or expose OW_DASHEN_TOKEN, customerToken, local
+  credentials, cookies, browser storage, or raw player privacy identifiers.
+- Raw JSON/token-like fields must be redacted before display.
+- Keep the change local to the requested scope.
+
+Verification:
+- [task-specific commands]
+
+Deliver an evidence report with:
+1. Changed files
+2. Why each file changed
+3. Verification commands run
+4. Verification results
+5. Checks not run and why
+6. Remaining risks
+7. Whether a verification thread is recommended
+```
+
+## Verification Thread Prompt Template
+
+```text
+You are an OWStatsLocal verification thread. Review only; do not continue
+development.
+
+Project root:
+D:\Codex\OW_data\owstats-local
+
+First confirm the current directory is the project root or a deliberate
+subdirectory under it.
+
+Original task:
+[paste original task]
+
+Execution report:
+[paste execution-thread report]
+
+Review focus:
+- Does the result satisfy the original task?
+- Are there unrelated changes?
+- Did the work expose OW_DASHEN_TOKEN, customerToken, local credentials,
+  cookies, browser storage, or raw player privacy identifiers?
+- Is all user-facing frontend text Chinese?
+- Are raw JSON/token-like fields redacted before display?
+- Were reasonable verification commands run?
+- What risks remain before delivery?
+
+Return findings first, ordered by severity, with file and line references where
+possible. Do not fix code.
+```
+
+## Task Entry Template
+
+```markdown
+## YYYY-MM-DD Task Name
+
+Goal:
+
+Decision:
+
+Execution thread:
+
+Allowed scope:
+
+Forbidden scope:
+
+Acceptance criteria:
+
+Execution result:
+
+Verification:
+
+Remaining risks:
+
+Next step:
+```
+
+## 2026-07-02 Main Thread Established
+
+Goal:
+Establish the current Codex conversation as the OWStatsLocal main thread and
+create durable recovery notes for future sessions.
+
+Decision:
+Use this session for direction, scope, execution-thread prompt generation,
+report review, and final acceptance. Keep execution logs and large trial/error
+details in separate execution threads when tasks are complex or risky.
+
+Execution thread:
+Not needed for this setup task.
+
+Allowed scope:
+- `AGENTS.md`
+- `docs/superpowers/specs/main-thread-log.md`
+
+Forbidden scope:
+- `README.md` existing local changes
+- `data/`
+- app source code
+- generated artifacts
+
+Acceptance criteria:
+- Future sessions can find the main-thread workflow from `AGENTS.md`.
+- Durable prompt templates and task entry format exist in the project.
+- Sensitive-data and frontend-language constraints remain explicit.
+
+Execution result:
+Created this ledger and linked it from `AGENTS.md`.
+
+Verification:
+Manual file inspection is sufficient for this documentation-only setup.
+
+Remaining risks:
+This is a process document; it does not enforce behavior automatically.
+
+Next step:
+Use the main thread to generate execution-thread prompts for the next nontrivial
+OWStatsLocal task.
+
+## 2026-07-02 Phase 7 Arena Match Detail
+
+Goal:
+Adapt the match detail experience for arena/fight data before building broader
+arena analysis.
+
+Design doc:
+`docs/superpowers/specs/2026-07-02-phase-7-arena-match-detail-design.md`
+
+Status:
+Grilling in progress. No execution-thread prompt has been generated yet.
+
+Summary decisions:
+- Phase 7 starts with arena match detail, not a full arena statistics page.
+- The left match list is not redesigned; arena rows only need the small mode
+  subtitle to read `角斗领域`.
+- The right-side detail panel owns the arena adaptation.
+- Arena detail opens on `角斗汇总`, with round tabs at the top before the arena
+  banner.
+- Arena player rows are compact by default and expand to show economy,
+  abilities/traits, and equipment.
+- Multiple player rows may be expanded; switching summary/round collapses all.
+- Teammates and enemies keep the existing vertical sections separated by `VS`.
+- Normal preset/open match detail should remain functionally unchanged.
+
+Next step:
+Continue grilling Phase 7 details in the dedicated design doc, then produce an
+execution-thread prompt only after the design is approved.
+
+## 2026-07-02 Phase 7 Asset/Data Audit Review
+
+Goal:
+Review the first Phase 7 asset/data audit before allowing UI or DTO
+implementation to start.
+
+Decision:
+Accept the audit findings as useful design input, but do not accept the current
+work product as scope-clean. The execution report claimed only the audit report
+changed, while `git status --short` also showed `assets/stadium/` and
+`docs/superpowers/specs/2026-07-02-stadium-unmapped-manual-map.csv`.
+
+Execution thread:
+`docs/superpowers/specs/2026-07-02-phase-7-arena-asset-data-audit.md`
+
+Verification:
+A review-only thread found no critical issue and no sensitive value exposure,
+but confirmed important scope issues:
+- changed-files reporting is inaccurate
+- `assets/stadium/` is a substantive asset import, not just audit output
+- the manual unmapped CSV is also an unauthorized new artifact
+
+Accepted technical inputs:
+- `SportFight` is the main arena mode in the fixture.
+- `modGuids` is the strongest six-slot equipment/mod candidate.
+- `traitGuids` is the strongest four-slot ability/trait candidate.
+- Arena rounds do not have `matchRet`; adjacent cumulative score deltas are the
+  recommended first round-result source.
+- Competitive rank display should use `rankName + rankSubTier`.
+- Missing arena mappings must use Chinese fallback labels in UI; raw guid
+  display is not acceptable for release-facing UI.
+
+Next step:
+Send a narrow correction prompt to the execution thread. It must amend the audit
+report to list `assets/stadium/` and the CSV, explain their source and
+necessity, report file counts and privacy checks, and recommend whether the
+assets should be kept as a separate Phase 7 asset-import task. Do not start UI
+or DTO implementation until this is resolved.
+
+## 2026-07-02 Phase 7 Asset/Data Audit Correction Accepted
+
+Goal:
+Re-read the corrected Phase 7 asset/data audit and decide whether the correction
+unblocks the next main-thread decision.
+
+Decision:
+Accept the corrected audit report as scope-transparent. It now explicitly lists
+the audit report, `assets/stadium/`, and
+`docs/superpowers/specs/2026-07-02-stadium-unmapped-manual-map.csv` as changed
+artifacts and explains that the asset tree and CSV are asset-import candidates
+created outside the original audit-only scope.
+
+Verification:
+- Current `assets/stadium/` file count is 1095 files, matching the corrected
+  report.
+- UTF-8 reads confirm Chinese text in the report is valid; PowerShell display
+  may still render Chinese incorrectly.
+- `git diff --check` reported only existing line-ending warnings for
+  `AGENTS.md` and `README.md`.
+
+Accepted constraints for later implementation:
+- Release-facing UI must not display raw guid values.
+- Missing `modGuids` and `traitGuids` mappings must use Chinese fallback labels
+  or hidden items.
+- `SportFight` rank icons need a separate arena resolver and must not silently
+  reuse preset/open rank assets.
+
+Next step:
+Main thread must decide whether to keep `assets/stadium/` and the unmapped-id
+CSV as a dedicated Phase 7 asset-import scope. After that decision, generate the
+first UI/DTO execution-thread prompt.
+
+## 2026-07-02 Phase 7 Asset Import Accepted
+
+Goal:
+Decide whether to keep the asset files and unmapped-id CSV created during the
+Phase 7 audit correction flow.
+
+Decision:
+Keep `assets/stadium/` and
+`docs/superpowers/specs/2026-07-02-stadium-unmapped-manual-map.csv` as a
+dedicated Phase 7 asset-import preparation scope. They are accepted as useful
+inputs for arena rank, mod, and trait resolution, but they are not treated as
+part of the original audit-only task.
+
+Acceptance constraints:
+- Later implementation must add a dedicated arena resolver for
+  `assets/stadium/manifest.json`.
+- `SportFight` rank icons must not silently reuse preset/open rank assets.
+- Release-facing UI must not show raw guid values.
+- Missing arena mappings must use Chinese fallback labels or hidden slots.
+- The unmapped CSV remains a mapping worksheet, not a user-facing source.
+
+Next step:
+Generate the first UI/DTO execution-thread prompt for Phase 7 arena match detail,
+using the accepted audit findings and asset-import scope. Keep the first
+implementation slice narrow.
+
+## 2026-07-02 Phase 7 Arena Detail Slice 1 Executed
+
+Goal:
+Track the first narrow UI/DTO implementation slice for arena match detail.
+
+Execution result:
+Execution thread reports the first slice is complete:
+- backend `ArenaMatchDetail` / `ArenaDetailSlice` DTOs
+- fight detail parsing from `totalCount` and `roundCountList`
+- safe arena names via `nameMap`, with no raw player id fallback
+- fight `rawJson` returned as `null`
+- frontend arena detail branch in full and compact detail views
+- `角斗汇总` default selection and round switching
+- `LeisureFight` / `SportFight` Chinese labels
+- source-order teammate/enemy vertical sections with `VS`
+
+Reported verification:
+- targeted RED/GREEN Rust test for fight detail DTO
+- `cargo fmt --check`
+- `cargo test --tests`
+- `npm test`
+- `npm run build`
+
+Main-thread spot check:
+- Actual modified source files match the reported implementation files.
+- UTF-8 reads confirm added Chinese strings are valid; PowerShell rendering may
+  still show mojibake.
+- `git diff --check` reports only line-ending warnings on existing working-tree
+  files.
+
+Remaining risks:
+- No browser screenshot or Playwright pass has verified the selector layout.
+- Privacy boundary and normal match-detail regression need review-only
+  verification before acceptance.
+- Arena equipment, trait, ability, tooltip, and rank icon resolver work remains
+  intentionally out of scope.
+
+Next step:
+Open a verification thread for Slice 1. The thread must review only and focus on
+privacy boundaries, Chinese UI, normal match-detail regression, and compact
+arena interaction.
+
+## 2026-07-02 Phase 7 Arena Detail Slice 1 Verification
+
+Goal:
+Review Slice 1 before accepting the first arena detail implementation.
+
+Decision:
+Do not accept Slice 1 yet. The verification thread found an important privacy
+boundary issue that must be fixed before moving to the next feature slice.
+
+Findings accepted by main thread:
+- `arena_player_name(...)` filters inline `name`, but `nameMap` fallback is not
+  passed through `looks_like_private_id`; a numeric/private-looking `nameMap`
+  value could become user-facing text.
+- Arena summary fallback logic is incomplete: duration should fall back from
+  `totalCount.gameTimeSec` to the sum of round `gameTimeSec`, and start time
+  should fall back to the first round `startTime`.
+- Compact arena detail currently reuses the normal compact player row and shows
+  the `威能` / `未记录威能` area even though arena mod/trait tooltips are out of
+  scope for Slice 1.
+
+Required fixes:
+- Filter `nameMap` values with the same private-id guard before using them as
+  display names; fallback to `未知玩家` when unsafe.
+- Add regression coverage for private-looking `nameMap` values.
+- Add summary fallback coverage for missing `totalCount.gameTimeSec` and missing
+  match `beginTs`.
+- Hide or bypass the normal compact perk strip for arena player rows in this
+  slice.
+
+Next step:
+Send a narrow fix prompt to the execution thread. After fixes, run the same Rust
+and frontend verification commands and request another review.
+
+## 2026-07-02 Phase 7 Arena Detail Slice 1 Fixes
+
+Goal:
+Confirm the execution thread addressed Slice 1 verification findings without
+expanding scope.
+
+Decision:
+Accept the targeted fixes at the main-thread spot-check level. The privacy
+blocking issue is addressed in code and tests, but final Slice 1 acceptance
+still needs a visual/browser pass because no screenshot verification has been
+run yet.
+
+Fixes accepted:
+- `nameMap` fallback values are filtered with `looks_like_private_id` before
+  becoming arena display names, with unsafe values falling back to `未知玩家`.
+- Tests cover numeric/private-looking `nameMap` values and assert raw ids are
+  not used as display names.
+- `角斗汇总` duration falls back to summed round `gameTimeSec`; begin time falls
+  back to the first round `startTime`.
+- Compact arena player rows pass `showPerks={false}`, while normal compact rows
+  retain the existing perk display by default.
+
+Reported verification:
+- `cargo fmt --check`
+- `cargo test --tests`
+- `npm test`
+- `npm run build`
+- `git diff --check`
+
+Main-thread spot check:
+- The three reported files contain the expected fixes.
+- UTF-8 reads confirm Chinese strings are valid.
+- `git diff --check` reports only line-ending warnings and no whitespace errors.
+
+Remaining risk:
+No Playwright or browser screenshot has verified the arena selector and compact
+detail layout in a real viewport.
+
+Next step:
+Run a final visual/browser verification pass for Slice 1. If the selector and
+compact arena detail are visually acceptable and no privacy regression is found,
+accept Slice 1 and move to the next Phase 7 slice.
+
+## 2026-07-02 Phase 7 Slice 1 List Entry Gap
+
+Goal:
+Resolve the user's desktop acceptance blocker after visual verification reported
+Slice 1 acceptable.
+
+Decision:
+Do not fully accept Slice 1 yet. The detail implementation is usable through
+mocked visual verification, but the real desktop acceptance path is blocked
+because the match list was not adapted enough for arena/fight entries.
+
+Observed gap:
+- `list_matches(...)` still queries `WHERE m.bucket = 'preset'`.
+- `MatchTimeline` still renders the generic match banner.
+- `formatMatchBannerTitle(...)` still formats rows as `mapName \ modeLabel`.
+- The Phase 7 design required arena/fight rows to show `角斗快速` or `角斗竞技`
+  where the normal row shows the mode/map subtitle, and to use the last arena
+  round map preview as the row background.
+
+Next step:
+Generate a narrow execution-thread prompt for the match-list entry slice. The
+goal is to make arena/fight matches discoverable and selectable in the desktop
+match list without redesigning the whole list or changing the arena detail
+implementation.
+
+## 2026-07-02 Phase 7 List Entry Execution Review
+
+Goal:
+Review the match-list entry execution report after the user found the desktop
+acceptance path was still blocked.
+
+Decision:
+Do not accept this execution result. It appears to make arena/fight entries more
+discoverable from the match list, but it also widened beyond the requested list
+entry scope and changed accepted arena detail semantics.
+
+Blocking issues:
+- Arena detail summary now uses `last_arena_round(...)` / `summary_source` for
+  score, map, and player rows. This conflicts with the accepted design that
+  `角斗汇总` uses `totalCount` player data and final-match summary semantics.
+- `apps/owstats-desktop/src/shared/arenaDetailFormat.ts` returns
+  `VICTORY` / `DEFEAT` / `DRAW` for arena result sublabels, violating the hard
+  rule that all new user-facing frontend text must be Chinese.
+- The implementation went beyond the list-entry prompt by adding arena
+  expansion UI, arena asset resolvers, rank icons, player highlight changes,
+  package test-script changes, and several new tests. Those may be useful later
+  but are not acceptable as part of the narrow list-entry fix without explicit
+  scope approval.
+- Generated validation artifacts remain in the worktree:
+  `.playwright-cli/`, `test-results/`, and
+  `apps/owstats-desktop/test-results/`.
+
+What still looks directionally useful:
+- `list_matches(...)` no longer only relies on `m.bucket = 'preset'` and now
+  includes fight/game-mode conditions.
+- The list projection has a path for last-round map preview and fight row
+  display values.
+
+Required correction:
+Send a narrow correction prompt. Preserve the useful list-entry behavior, but
+restore `角斗汇总` detail semantics to `totalCount`, replace new English arena UI
+labels with Chinese, and either remove or explicitly quarantine unrelated
+scope-expansion changes for a later slice.

@@ -1,9 +1,9 @@
 use crate::db::OwDatabase;
 use crate::importer::{int_field, string_field};
 use crate::models::{
-    ComparisonMetrics, FilterOption, FilterOptions, HeroStat, MatchDetailView,
-    MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary, PlayerPerk,
-    PlayerRow, PlayerSearchOption, SameRoleComparison,
+    ArenaDetailSlice, ArenaMatchDetail, ComparisonMetrics, FilterOption, FilterOptions, HeroStat,
+    MatchDetailView, MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary,
+    PlayerPerk, PlayerRow, PlayerSearchOption, SameRoleComparison,
 };
 use crate::redaction::redact_sensitive_json;
 use anyhow::{Context, Result};
@@ -21,10 +21,11 @@ pub fn list_matches(db: &OwDatabase, filters: MatchFilters) -> Result<Vec<MatchS
             m.match_id, m.season, m.bucket, m.game_mode, m.result, m.map_guid, COALESCE(m.map_name, ''),
             m.hero_guid, COALESCE(m.hero_name, ''), m.begin_ts, m.team_score, m.opponent_score,
             m.kills, m.assists, m.deaths, m.damage, m.healing, m.mitigation, m.duration_sec,
-            e.grade, e.primary_tag, e.evidence_tags_json, e.confidence
+            e.grade, e.primary_tag, e.evidence_tags_json, e.confidence, m.match_kind, d.raw_detail_json
         FROM matches m
         LEFT JOIN match_evaluations e ON e.match_id = m.match_id
-        WHERE m.bucket = 'preset'
+        LEFT JOIN match_details d ON d.match_id = m.match_id
+        WHERE (m.bucket = 'preset' OR m.match_kind = 'fight' OR m.game_mode IN ('LeisureFight', 'SportFight'))
         "#,
     );
     let mut owned: Vec<Box<dyn ToSql>> = Vec::new();
@@ -45,29 +46,69 @@ pub fn list_matches(db: &OwDatabase, filters: MatchFilters) -> Result<Vec<MatchS
         let map_name: String = row.get(6)?;
         let hero_name: String = row.get(8)?;
         let match_id: String = row.get(0)?;
+        let match_kind: String = row.get(23)?;
+        let raw_detail_json: Option<String> = row.get(24)?;
+        let fight_projection = if match_kind == "fight" {
+            fight_list_projection(raw_detail_json.as_deref())
+        } else {
+            None
+        };
         Ok(MatchSummary {
             match_id: match_id.clone(),
             season: row.get(1)?,
             bucket: row.get(2)?,
+            match_kind: match_kind.clone(),
             mode_label: mode_label(&game_mode).to_string(),
             game_mode,
             result_label: result_label(&result).to_string(),
             result,
             map_guid: map_guid.clone(),
+            map_preview_guid: if match_kind == "fight" {
+                last_round_map_guid(raw_detail_json.as_deref())
+            } else {
+                None
+            },
             map_name: fallback_name(map_name, &map_guid, "未知地图"),
             hero_guid: hero_guid.clone(),
             hero_name: fallback_name(hero_name, &hero_guid, "未知英雄"),
             begin_ts,
             begin_label: format_begin_ts(begin_ts),
-            team_score: row.get(10)?,
-            opponent_score: row.get(11)?,
-            kills: row.get(12)?,
-            assists: row.get(13)?,
-            deaths: row.get(14)?,
-            damage: row.get(15)?,
-            healing: row.get(16)?,
-            mitigation: row.get(17)?,
-            duration_sec: row.get(18)?,
+            team_score: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.team_score)
+                .unwrap_or(row.get(10)?),
+            opponent_score: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.opponent_score)
+                .unwrap_or(row.get(11)?),
+            kills: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.kills)
+                .unwrap_or(row.get(12)?),
+            assists: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.assists)
+                .unwrap_or(row.get(13)?),
+            deaths: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.deaths)
+                .unwrap_or(row.get(14)?),
+            damage: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.damage)
+                .unwrap_or(row.get(15)?),
+            healing: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.healing)
+                .unwrap_or(row.get(16)?),
+            mitigation: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.mitigation)
+                .unwrap_or(row.get(17)?),
+            duration_sec: fight_projection
+                .as_ref()
+                .and_then(|projection| projection.duration_sec)
+                .unwrap_or(row.get(18)?),
             evaluation: evaluation_from_row(row, 19)?,
             team_awards: Vec::new(),
         })
@@ -140,6 +181,7 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
         team_score,
         opponent_score,
         duration_sec,
+        match_kind,
     ): (
         String,
         String,
@@ -153,6 +195,7 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
         Option<i64>,
         Option<i64>,
         Option<i64>,
+        String,
     ) = conn
         .query_row(
             r#"
@@ -168,7 +211,8 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
                 matches.begin_ts,
                 matches.team_score,
                 matches.opponent_score,
-                matches.duration_sec
+                matches.duration_sec,
+                match_details.match_kind
             FROM matches
             JOIN match_details ON match_details.match_id = matches.match_id
             WHERE matches.match_id = ?
@@ -188,6 +232,7 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
                     row.get(9)?,
                     row.get(10)?,
                     row.get(11)?,
+                    row.get(12)?,
                 ))
             },
         )
@@ -196,17 +241,36 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
     let detail: Value = serde_json::from_str(&detail_text)?;
     let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
     let hero_names = hero_lookup(&conn)?;
-    let teammates = player_rows(
-        player_rows_for_side(data, "teammateList"),
-        "teammate",
-        &hero_names,
-    );
-    let enemies = player_rows(
-        player_rows_for_side(data, "enemyList"),
-        "enemy",
-        &hero_names,
-    );
+    let map_names = map_lookup(&conn)?;
+    let arena_detail = if match_kind == "fight" {
+        build_arena_detail(data, result.as_deref(), begin_ts, &hero_names, &map_names)
+    } else {
+        None
+    };
+    let teammates = if let Some(arena) = &arena_detail {
+        arena.summary.teammates.clone()
+    } else {
+        player_rows(
+            player_rows_for_side(data, "teammateList"),
+            "teammate",
+            &hero_names,
+        )
+    };
+    let enemies = if let Some(arena) = &arena_detail {
+        arena.summary.enemies.clone()
+    } else {
+        player_rows(
+            player_rows_for_side(data, "enemyList"),
+            "enemy",
+            &hero_names,
+        )
+    };
     let team_awards = team_awards_from_match_players(&conn, match_id)?;
+    let raw_json = if match_kind == "fight" {
+        Value::Null
+    } else {
+        redact_sensitive_json(&json!({ "entry": entry, "detail": detail }))
+    };
     Ok(MatchDetailView {
         match_id: match_id.to_string(),
         mode_label: game_mode.as_deref().map(mode_label).map(str::to_string),
@@ -224,10 +288,11 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
         duration_sec,
         teammates,
         enemies,
+        arena_detail,
         evaluation: match_evaluation_summary(&conn, match_id)?,
         team_awards,
         same_role_comparison: same_role_comparison(&conn, match_id)?,
-        raw_json: redact_sensitive_json(&json!({ "entry": entry, "detail": detail })),
+        raw_json,
     })
 }
 
@@ -250,6 +315,8 @@ fn team_awards_from_match_players(
             side: row.get(0)?,
             name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             bnet_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            rank_label: None,
+            rank_key: None,
             hero_guid: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             hero_name: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
             kills: row.get(5)?,
@@ -262,6 +329,16 @@ fn team_awards_from_match_players(
             target_time_sec: row.get(12)?,
             healing_taken: row.get(13)?,
             damage_taken: row.get(14)?,
+            worth: None,
+            end_worth: None,
+            worth_max: false,
+            mod_guids: Vec::new(),
+            trait_guids: Vec::new(),
+            has_source_max_flags: false,
+            kill_max: false,
+            hero_damage_max: false,
+            cure_max: false,
+            resist_damage_max: false,
             perks: Vec::new(),
             hero_stats: Vec::new(),
         })
@@ -458,6 +535,57 @@ fn filterable_primary_tag(value: &str) -> bool {
     matches!(value, "带飞局" | "尽力局" | "躺赢局" | "背锅局")
 }
 
+fn last_round_map_guid(raw_detail_json: Option<&str>) -> Option<String> {
+    let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
+    detail
+        .pointer("/payload/data/roundCountList")
+        .and_then(Value::as_array)
+        .and_then(|rounds| {
+            rounds
+                .iter()
+                .rev()
+                .find_map(|round| string_field(round, "mapGuid"))
+        })
+}
+
+#[derive(Default)]
+struct FightListProjection {
+    team_score: Option<i64>,
+    opponent_score: Option<i64>,
+    kills: Option<i64>,
+    assists: Option<i64>,
+    deaths: Option<i64>,
+    damage: Option<i64>,
+    healing: Option<i64>,
+    mitigation: Option<i64>,
+    duration_sec: Option<i64>,
+}
+
+fn fight_list_projection(raw_detail_json: Option<&str>) -> Option<FightListProjection> {
+    let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
+    let last_round = detail
+        .pointer("/payload/data/roundCountList")
+        .and_then(Value::as_array)?
+        .iter()
+        .rev()
+        .find(|round| round.is_object())?;
+    let player = last_round
+        .get("teammateList")
+        .and_then(Value::as_array)
+        .and_then(|players| players.first());
+    Some(FightListProjection {
+        team_score: optional_i64(last_round, "teamScore"),
+        opponent_score: optional_i64(last_round, "opponentScore"),
+        kills: player.and_then(|item| optional_i64(item, "kill")),
+        assists: player.and_then(|item| optional_i64(item, "assist")),
+        deaths: player.and_then(|item| optional_i64(item, "death")),
+        damage: player.and_then(|item| optional_i64(item, "heroDamage")),
+        healing: player.and_then(|item| optional_i64(item, "cure")),
+        mitigation: player.and_then(|item| optional_i64(item, "resistDamage")),
+        duration_sec: optional_i64(last_round, "gameTimeSec"),
+    })
+}
+
 fn match_evaluation_summary(
     conn: &rusqlite::Connection,
     match_id: &str,
@@ -515,6 +643,8 @@ fn player_rows(
                             string_field(item, "bnetId").unwrap_or_else(|| "未知玩家".to_string())
                         }),
                         bnet_id: string_field(item, "bnetId").unwrap_or_default(),
+                        rank_label: None,
+                        rank_key: None,
                         hero_guid: hero_guid.clone(),
                         hero_name: hero_names.get(&hero_guid).cloned().unwrap_or_else(|| {
                             fallback_name(String::new(), &hero_guid, "未知英雄")
@@ -529,6 +659,16 @@ fn player_rows(
                         target_time_sec: int_field(item, "targetCompetingTime"),
                         healing_taken: int_field(item, "healingTaken"),
                         damage_taken: int_field(item, "damageTaken"),
+                        worth: None,
+                        end_worth: None,
+                        worth_max: false,
+                        mod_guids: Vec::new(),
+                        trait_guids: Vec::new(),
+                        has_source_max_flags: false,
+                        kill_max: false,
+                        hero_damage_max: false,
+                        cure_max: false,
+                        resist_damage_max: false,
                         perks: parse_player_perks(item),
                         hero_stats: parse_hero_stats(item),
                     })
@@ -547,6 +687,411 @@ fn player_rows_for_side<'a>(data: &'a Value, list_name: &str) -> Option<&'a Valu
                 .unwrap_or(false)
         })
         .or_else(|| data.get(list_name))
+}
+
+fn build_arena_detail(
+    data: &Value,
+    match_result: Option<&str>,
+    match_begin_ts: Option<i64>,
+    hero_names: &HashMap<String, String>,
+    map_names: &HashMap<String, String>,
+) -> Option<ArenaMatchDetail> {
+    let name_map = arena_name_map(data);
+    let total = data.get("totalCount").unwrap_or(&Value::Null);
+    let rounds_value = data.get("roundCountList");
+    let summary_begin_ts = match_begin_ts
+        .filter(|value| *value > 0)
+        .or_else(|| first_round_start_time(rounds_value))
+        .or_else(|| optional_i64(total, "startTime").map(normalize_timestamp));
+    let summary_duration_sec =
+        optional_i64(total, "gameTimeSec").or_else(|| round_duration_sum(rounds_value));
+    let summary_source = last_arena_round(rounds_value).unwrap_or(total);
+    let summary_map_guid = string_field(summary_source, "mapGuid")
+        .or_else(|| string_field(total, "mapGuid"))
+        .unwrap_or_else(|| "arena-victoriae".to_string());
+    let summary = ArenaDetailSlice {
+        key: "summary".to_string(),
+        label: "角斗汇总".to_string(),
+        result: match_result.map(str::to_string),
+        result_label: match_result.map(result_label).map(str::to_string),
+        team_score: optional_i64(summary_source, "teamScore")
+            .or_else(|| optional_i64(total, "teamScore")),
+        opponent_score: optional_i64(summary_source, "opponentScore")
+            .or_else(|| optional_i64(total, "opponentScore")),
+        duration_sec: summary_duration_sec,
+        begin_ts: summary_begin_ts,
+        begin_label: summary_begin_ts.map(format_begin_ts),
+        map_name: Some(
+            map_names
+                .get(&summary_map_guid)
+                .cloned()
+                .unwrap_or_else(|| "未知地图".to_string()),
+        ),
+        map_guid: Some(summary_map_guid),
+        teammates: arena_summary_player_rows(
+            summary_source,
+            total,
+            rounds_value,
+            "teammateList",
+            "teammate",
+            &name_map,
+            hero_names,
+        ),
+        enemies: arena_summary_player_rows(
+            summary_source,
+            total,
+            rounds_value,
+            "enemyList",
+            "enemy",
+            &name_map,
+            hero_names,
+        ),
+    };
+    let rounds = rounds_value
+        .and_then(Value::as_array)
+        .map(|items| {
+            let mut previous_team = 0;
+            let mut previous_opponent = 0;
+            items
+                .iter()
+                .enumerate()
+                .map(|(index, round)| {
+                    let team_score = optional_i64(round, "teamScore");
+                    let opponent_score = optional_i64(round, "opponentScore");
+                    let result = arena_round_result(
+                        team_score,
+                        opponent_score,
+                        previous_team,
+                        previous_opponent,
+                    );
+                    previous_team = team_score.unwrap_or(previous_team);
+                    previous_opponent = opponent_score.unwrap_or(previous_opponent);
+                    let begin_ts = optional_i64(round, "startTime").map(normalize_timestamp);
+                    let map_guid = string_field(round, "mapGuid");
+                    ArenaDetailSlice {
+                        key: format!("round-{}", index + 1),
+                        label: format!("回合 {}", index + 1),
+                        result: result.map(str::to_string),
+                        result_label: result.map(result_label).map(str::to_string),
+                        team_score,
+                        opponent_score,
+                        duration_sec: optional_i64(round, "gameTimeSec"),
+                        begin_ts,
+                        begin_label: begin_ts.map(format_begin_ts),
+                        map_name: map_guid.as_ref().map(|guid| {
+                            map_names
+                                .get(guid)
+                                .cloned()
+                                .unwrap_or_else(|| "未知地图".to_string())
+                        }),
+                        map_guid,
+                        teammates: arena_player_rows(
+                            round.get("teammateList"),
+                            "teammate",
+                            &name_map,
+                            hero_names,
+                        ),
+                        enemies: arena_player_rows(
+                            round.get("enemyList"),
+                            "enemy",
+                            &name_map,
+                            hero_names,
+                        ),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(ArenaMatchDetail { summary, rounds })
+}
+
+fn last_arena_round(rounds_value: Option<&Value>) -> Option<&Value> {
+    rounds_value
+        .and_then(Value::as_array)
+        .and_then(|items| items.last())
+}
+
+fn arena_summary_player_rows(
+    summary_source: &Value,
+    total: &Value,
+    rounds_value: Option<&Value>,
+    list_name: &str,
+    side: &str,
+    name_map: &HashMap<String, String>,
+    hero_names: &HashMap<String, String>,
+) -> Vec<PlayerRow> {
+    let source_list = summary_source
+        .get(list_name)
+        .filter(|value| {
+            value
+                .as_array()
+                .map(|items| !items.is_empty())
+                .unwrap_or(false)
+        })
+        .or_else(|| total.get(list_name));
+    let mut rows = arena_player_rows(source_list, side, name_map, hero_names);
+    let aggregates = arena_round_damage_healing_totals(rounds_value, list_name);
+    if let Some(items) = source_list.and_then(Value::as_array) {
+        for (row, item) in rows.iter_mut().zip(items) {
+            let Some(bnet_id) = string_field(item, "bnetId") else {
+                continue;
+            };
+            if let Some((damage_taken, healing_taken)) = aggregates.get(&bnet_id) {
+                row.damage_taken = *damage_taken;
+                row.healing_taken = *healing_taken;
+            }
+        }
+    }
+    rows
+}
+
+fn arena_round_damage_healing_totals(
+    rounds_value: Option<&Value>,
+    list_name: &str,
+) -> HashMap<String, (i64, i64)> {
+    let mut totals = HashMap::new();
+    let Some(rounds) = rounds_value.and_then(Value::as_array) else {
+        return totals;
+    };
+    for round in rounds {
+        let Some(players) = round.get(list_name).and_then(Value::as_array) else {
+            continue;
+        };
+        for player in players {
+            let Some(bnet_id) = string_field(player, "bnetId") else {
+                continue;
+            };
+            let entry = totals.entry(bnet_id).or_insert((0, 0));
+            entry.0 += int_field(player, "damageTaken");
+            entry.1 += int_field(player, "healingTaken");
+        }
+    }
+    totals
+}
+
+fn arena_player_rows(
+    value: Option<&Value>,
+    side: &str,
+    name_map: &HashMap<String, String>,
+    hero_names: &HashMap<String, String>,
+) -> Vec<PlayerRow> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    if !item.is_object() {
+                        return None;
+                    }
+                    let hero_guid = string_field(item, "heroGuid").unwrap_or_default();
+                    let bnet_id = string_field(item, "bnetId").unwrap_or_default();
+                    Some(PlayerRow {
+                        side: side.to_string(),
+                        name: arena_player_name(item, &bnet_id, name_map),
+                        bnet_id: String::new(),
+                        rank_label: arena_rank_label(item),
+                        rank_key: arena_rank_key(item),
+                        hero_guid: hero_guid.clone(),
+                        hero_name: hero_names
+                            .get(&hero_guid)
+                            .cloned()
+                            .unwrap_or_else(|| "未知英雄".to_string()),
+                        kills: int_field(item, "kill"),
+                        assists: int_field(item, "assist"),
+                        deaths: int_field(item, "death"),
+                        damage: int_field(item, "heroDamage"),
+                        healing: int_field(item, "cure"),
+                        mitigation: int_field(item, "resistDamage"),
+                        final_hits: int_field(item, "finalHit"),
+                        target_time_sec: int_field(item, "targetCompetingTime"),
+                        healing_taken: int_field(item, "healingTaken"),
+                        damage_taken: int_field(item, "damageTaken"),
+                        worth: optional_i64(item, "worth"),
+                        end_worth: optional_i64(item, "endWorth"),
+                        worth_max: bool_field(item, "worthMax"),
+                        mod_guids: string_array_field(item, "modGuids"),
+                        trait_guids: string_array_field(item, "traitGuids"),
+                        has_source_max_flags: true,
+                        kill_max: bool_field(item, "killMax"),
+                        hero_damage_max: bool_field(item, "heroDamageMax"),
+                        cure_max: bool_field(item, "cureMax"),
+                        resist_damage_max: bool_field(item, "resistDamageMax"),
+                        perks: Vec::new(),
+                        hero_stats: parse_hero_stats(item),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn arena_name_map(data: &Value) -> HashMap<String, String> {
+    data.get("nameMap")
+        .and_then(Value::as_object)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|(key, value)| {
+                    let name = value.as_str()?.trim();
+                    if key.trim().is_empty() || name.is_empty() {
+                        None
+                    } else {
+                        Some((key.to_string(), name.to_string()))
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn arena_player_name(item: &Value, bnet_id: &str, name_map: &HashMap<String, String>) -> String {
+    string_field(item, "name")
+        .filter(|name| !looks_like_private_id(name))
+        .or_else(|| {
+            name_map
+                .get(bnet_id)
+                .filter(|name| !looks_like_private_id(name))
+                .cloned()
+        })
+        .unwrap_or_else(|| "未知玩家".to_string())
+}
+
+fn first_round_start_time(value: Option<&Value>) -> Option<i64> {
+    value
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|round| optional_i64(round, "startTime"))
+        .map(normalize_timestamp)
+}
+
+fn round_duration_sum(value: Option<&Value>) -> Option<i64> {
+    let total = value
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|round| optional_i64(round, "gameTimeSec"))
+        .sum::<i64>();
+    if total > 0 {
+        Some(total)
+    } else {
+        None
+    }
+}
+
+fn arena_rank_label(item: &Value) -> Option<String> {
+    let rank = item.get("rankInfo")?;
+    let raw_name = string_field(rank, "rankName").or_else(|| string_field(rank, "rank_name"))?;
+    let name = rank_name_label(&raw_name)?;
+    let sub_tier =
+        optional_i64(rank, "rankSubTier").or_else(|| optional_i64(rank, "rank_sub_tier"));
+    Some(match sub_tier {
+        Some(value) if value > 0 => format!("{name} {value}"),
+        _ => name.to_string(),
+    })
+}
+
+fn arena_rank_key(item: &Value) -> Option<String> {
+    let rank = item.get("rankInfo")?;
+    let raw_name = string_field(rank, "rankName").or_else(|| string_field(rank, "rank_name"))?;
+    let key = normalize_rank_key(&raw_name)?;
+    Some(key.to_string())
+}
+
+fn normalize_rank_key(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "bronze" => Some("bronze"),
+        "silver" => Some("silver"),
+        "gold" => Some("gold"),
+        "platinum" => Some("platinum"),
+        "diamond" => Some("diamond"),
+        "master" => Some("master"),
+        "grandmaster" => Some("grandmaster"),
+        "champion" => Some("champion"),
+        "top 500" | "top500" => Some("top500"),
+        _ => None,
+    }
+}
+
+fn rank_name_label(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "bronze" => Some("青铜"),
+        "silver" => Some("白银"),
+        "gold" => Some("黄金"),
+        "platinum" => Some("白金"),
+        "diamond" => Some("钻石"),
+        "master" => Some("大师"),
+        "grandmaster" => Some("宗师"),
+        "champion" => Some("冠军"),
+        "top 500" | "top500" => Some("五百强"),
+        _ => None,
+    }
+}
+
+fn bool_field(value: &Value, key: &str) -> bool {
+    value
+        .get(key)
+        .and_then(|item| {
+            item.as_bool()
+                .or_else(|| item.as_i64().map(|number| number != 0))
+                .or_else(|| item.as_str().map(|text| matches!(text, "true" | "1")))
+        })
+        .unwrap_or(false)
+}
+
+fn string_array_field(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_string)
+                        .or_else(|| item.as_i64().map(|number| number.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn arena_round_result(
+    team_score: Option<i64>,
+    opponent_score: Option<i64>,
+    previous_team: i64,
+    previous_opponent: i64,
+) -> Option<&'static str> {
+    let team_delta = team_score.map(|score| score - previous_team);
+    let opponent_delta = opponent_score.map(|score| score - previous_opponent);
+    if team_delta.is_some_and(|delta| delta > 0) {
+        Some("win")
+    } else if opponent_delta.is_some_and(|delta| delta > 0) {
+        Some("loss")
+    } else {
+        None
+    }
+}
+
+fn optional_i64(value: &Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(|item| {
+        item.as_i64()
+            .or_else(|| item.as_f64().map(|value| value.round() as i64))
+            .or_else(|| item.as_str().and_then(|text| text.parse().ok()))
+    })
+}
+
+fn normalize_timestamp(value: i64) -> i64 {
+    if value > 10_000_000_000 {
+        value / 1000
+    } else {
+        value
+    }
+}
+
+fn looks_like_private_id(value: &str) -> bool {
+    value.chars().all(|item| item.is_ascii_digit()) && value.len() >= 4
 }
 
 fn parse_player_perks(item: &Value) -> Vec<PlayerPerk> {
@@ -595,6 +1140,13 @@ fn stat_value(value: &Value) -> Option<f64> {
 
 fn hero_lookup(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
     let mut stmt = conn.prepare("SELECT guid, name FROM hero_dict")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.collect::<rusqlite::Result<HashMap<_, _>>>()
+        .map_err(Into::into)
+}
+
+fn map_lookup(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
+    let mut stmt = conn.prepare("SELECT guid, name FROM map_dict")?;
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     rows.collect::<rusqlite::Result<HashMap<_, _>>>()
         .map_err(Into::into)
@@ -711,6 +1263,8 @@ fn result_label(result: &str) -> &'static str {
 
 fn mode_label(mode: &str) -> &str {
     match mode {
+        "LeisureFight" => "角斗快速",
+        "SportFight" => "角斗竞技",
         "LeisurePreset" => "快速预设",
         "Leisure6v6" => "快速 6v6",
         "SportPreset" => "竞技预设",

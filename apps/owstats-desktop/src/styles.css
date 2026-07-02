@@ -27,6 +27,72 @@
   --phase6-glass-blur: blur(18px);
 }
 
+.phase7ArenaSelector {
+  display: flex;
+  gap: 0;
+  margin: 0 0 12px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+}
+
+.phase7ArenaTab {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(13, 19, 32, 0.82);
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 104px;
+  width: 118px;
+  padding: 9px 20px 9px 22px;
+  text-align: left;
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 100%, 18px 100%);
+}
+
+.phase7ArenaTab.summary {
+  width: 132px;
+}
+
+.phase7ArenaTab + .phase7ArenaTab {
+  margin-left: -16px;
+}
+
+.phase7ArenaTab span {
+  font-size: 12px;
+}
+
+.phase7ArenaTab strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.phase7ArenaTab.active {
+  background: linear-gradient(135deg, rgba(242, 137, 49, 0.96), rgba(173, 74, 31, 0.96));
+  border-color: rgba(255, 196, 107, 0.78);
+  color: #fff;
+}
+
+.phase7ArenaTab.loss.active {
+  background: linear-gradient(135deg, rgba(91, 111, 137, 0.96), rgba(45, 59, 78, 0.96));
+  border-color: rgba(160, 178, 202, 0.65);
+}
+
+.phase7ArenaTab.win:not(.active) strong {
+  color: #ffbd78;
+}
+
+.phase7ArenaTab.loss:not(.active) strong {
+  color: #b8c4d6;
+}
+
+.phase6EmbeddedDetailPage .phase7ArenaSelector {
+  margin: 0 0 10px;
+  padding-left: 0;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -2498,6 +2564,10 @@ select {
   gap: 8px;
 }
 
+.phase7CompactArenaDetail {
+  grid-template-rows: auto 124px minmax(0, 1fr);
+}
+
 .phase6CompactDetailScroll {
   min-height: 0;
   display: grid;
@@ -2772,6 +2842,21 @@ select {
 .phase6CompactPlayerName {
   padding: 10px 0;
   border-bottom: 1px dashed rgb(255 255 255 / 0.2);
+}
+
+.phase7CompactPlayerNameLine {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phase7CompactPlayerNameLine strong {
+  flex: 1 1 auto;
+}
+
+.phase7CompactPlayerNameLine .phase7CompactRankBadge {
+  flex: 0 0 auto;
 }
 
 .phase6CompactPlayerMetric small {
@@ -3305,13 +3390,30 @@ select {
 
 .phase6PlayerCard {
   min-width: 0;
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  display: block;
   min-height: 148px;
   overflow: hidden;
   border-radius: 6px;
   background: #1688e8;
   box-shadow: 0 16px 30px rgb(30 64 175 / 0.12);
+}
+
+.phase7PlayerCardMain {
+  width: 100%;
+  min-width: 0;
+  min-height: 148px;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  text-align: left;
+}
+
+.phase7PlayerCardMain[aria-expanded] {
+  cursor: pointer;
 }
 
 .phase6PlayerSection.enemy .phase6PlayerCard {
@@ -3364,6 +3466,101 @@ select {
   border-bottom: 1px dashed rgb(255 255 255 / 0.24);
 }
 
+.phase7ArenaRankBadge,
+.phase7CompactRankBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.phase7ArenaRankBadge img,
+.phase7CompactRankBadge img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.phase6PlayerStats header .phase7ArenaRankBadge,
+.phase6CompactPlayerRow .phase7CompactRankBadge {
+  color: #fff;
+}
+
+.phase7ExpandIcon {
+  margin-left: auto;
+  display: inline-flex;
+  color: rgb(255 255 255 / 0.68);
+}
+
+.phase7ArenaExpansion {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(190px, 1fr) minmax(260px, 1.4fr);
+  gap: 14px;
+  padding: 0 22px 20px 204px;
+  color: #fff;
+}
+
+.phase7ArenaEconomy,
+.phase7ArenaSlotGroup {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.phase7ArenaEconomy > span,
+.phase7ArenaSlotGroup > span {
+  color: rgb(255 255 255 / 0.68);
+  font-size: 13px;
+}
+
+.phase7ArenaEconomy strong {
+  width: max-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgb(15 23 42 / 0.24);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phase7ArenaSlots {
+  display: grid;
+  grid-template-columns: repeat(var(--phase7-slot-count, 6), 32px);
+  gap: 7px;
+}
+
+.phase7ArenaSlotGroup:nth-child(2) .phase7ArenaSlots {
+  --phase7-slot-count: 4;
+}
+
+.phase7ArenaSlot {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+}
+
+.phase7ArenaSlot.filled {
+  background: rgb(15 23 42 / 0.32);
+  outline: 1px solid rgb(255 255 255 / 0.14);
+}
+
+.phase7ArenaSlot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.phase7ArenaSlot:hover .phase6PerkTooltipPanel,
+.phase7ArenaSlot:focus-within .phase6PerkTooltipPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 .phase6PlayerStats header strong {
   min-width: 0;
   color: #fff;
@@ -3373,6 +3570,13 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.phase7PlayerNameLine {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .phase6PlayerStats header span {
@@ -3417,11 +3621,11 @@ select {
 }
 
 .phase6StatHighlight {
-  color: #72f1d6;
+  color: #ffe08a;
 }
 
 .phase6PlayerSection.enemy .phase6StatHighlight {
-  color: #ffe98a;
+  color: #93eadb;
 }
 
 .phase6RankingWorkspace {

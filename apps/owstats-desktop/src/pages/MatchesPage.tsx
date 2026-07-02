@@ -4,9 +4,11 @@ import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchTimeline } from "../features/matches/MatchTimeline";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
-import { resolvePerkInfo } from "../shared/assets";
+import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
+import { arenaRankAssetUrl, resolvePerkInfo } from "../shared/assets";
 import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
+import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
 import {
   canHydrateMatchesPageCache,
   chooseInitialMatchFilters,
@@ -22,7 +24,7 @@ import { HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
-import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, PlayerRow } from "../shared/types";
+import type { ArenaDetailSlice, FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, PlayerRow } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
   seasons: [],
@@ -287,6 +289,7 @@ function CompactMatchDetail({ detail, loading, error, matchId }: { detail: Match
   }
   if (loading && !detail) return <div className="emptyState phase6WorkbenchEmpty">正在读取对局详情...</div>;
   if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情：{matchId}</div>;
+  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} />;
 
   const mapName = detail.mapName ?? "未知地图";
   const compactPlayers = [...detail.teammates.slice(0, 6), ...detail.enemies.slice(0, 6)];
@@ -340,6 +343,76 @@ function CompactMatchDetail({ detail, loading, error, matchId }: { detail: Match
   );
 }
 
+function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; loading: boolean }) {
+  const arena = detail.arenaDetail;
+  const [selectedKey, setSelectedKey] = useState("summary");
+
+  useEffect(() => {
+    setSelectedKey("summary");
+  }, [detail.matchId]);
+
+  if (!arena) return null;
+
+  const selected =
+    selectedKey === "summary"
+      ? arena.summary
+      : arena.rounds.find((round) => round.key === selectedKey) ?? arena.summary;
+  return (
+    <section className={`phase6CompactDetail phase7CompactArenaDetail ${selected.result ?? detail.result ?? "pending"}`}>
+      <nav className="phase7ArenaSelector" aria-label="角斗回合切换">
+        <button
+          type="button"
+          className={`phase7ArenaTab summary ${selected.key === arena.summary.key ? "active" : ""}`}
+          onClick={() => setSelectedKey(arena.summary.key)}
+        >
+          <span>{arena.summary.label}</span>
+        </button>
+        {arena.rounds.map((round) => (
+          <button
+            type="button"
+            className={`phase7ArenaTab ${round.result ?? "neutral"} ${selected.key === round.key ? "active" : ""}`}
+            onClick={() => setSelectedKey(round.key)}
+            key={round.key}
+          >
+            <span>{formatArenaTabLabel(round)}</span>
+            <strong>{formatArenaScore(round)}</strong>
+          </button>
+        ))}
+      </nav>
+
+      <header className="phase6CompactHero">
+        <MapPreview className="phase6CompactHeroMap" mapKey={arenaHeaderMapKey(selected)} name={selected.mapName ?? "未知地图"} />
+        <div className="phase6CompactResult">
+          <strong>{selected.resultLabel ?? "未知"}</strong>
+          <span>{arenaResultSubLabel(selected.result ?? detail.result)}</span>
+        </div>
+        <div className="phase6CompactHeroText">
+          <span>{arenaHeaderTitle(selected)}</span>
+          <strong>{formatArenaScore(selected)}</strong>
+          <small>{formatDetailDuration(selected.durationSec)} / {formatDetailStartTime(selected.beginTs)}</small>
+        </div>
+      </header>
+
+      <div className="phase6CompactDetailScroll">
+        {loading && <div className="emptyState">正在刷新角斗详情...</div>}
+        <div className="phase6CompactFacts">
+          <CompactFact label="比分" value={formatArenaScore(selected)} />
+          <CompactFact label="游戏时长" value={formatDetailDuration(selected.durationSec)} />
+          {selected.key !== "summary" && <CompactFact label="游戏模式" value={detail.modeLabel ?? "-"} />}
+          <CompactFact label="开始时间" value={formatDetailStartTime(selected.beginTs)} />
+        </div>
+
+        <div className="phase6CompactPlayers" aria-label="角斗双方玩家数据" key={selected.key}>
+          <CompactTeam title="队友" tone="team" players={selected.teammates} showPerks={false} />
+          <div className="phase6CompactVs">VS</div>
+          <CompactTeam title="对手" tone="enemy" players={selected.enemies} showPerks={false} />
+        </div>
+        {selected.teammates.length + selected.enemies.length === 0 && <div className="emptyState">该回合暂无玩家明细。</div>}
+      </div>
+    </section>
+  );
+}
+
 function CompactFact({ label, value }: { label: string; value: string }) {
   return (
     <span>
@@ -353,11 +426,14 @@ function CompactTeam({
   title,
   players,
   tone,
+  showPerks = true,
 }: {
   title: string;
   players: PlayerRow[];
   tone: "team" | "enemy";
+  showPerks?: boolean;
 }) {
+  const highlights = playerHighlightMap(players);
   return (
     <section className={`phase6CompactTeam ${tone}`}>
       <h3>{title}</h3>
@@ -366,7 +442,7 @@ function CompactTeam({
           const key = compactPlayerKey(player, index);
           return (
             <div className="phase6CompactPlayerBlock" key={key}>
-              <CompactPlayerRow player={player} />
+              <CompactPlayerRow player={player} showPerks={showPerks} highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()} />
             </div>
           );
         })}
@@ -375,41 +451,61 @@ function CompactTeam({
   );
 }
 
-function CompactPlayerRow({ player }: { player: PlayerRow }) {
-  const perks = player.perks.flatMap((perk) => {
-    const info = resolvePerkInfo(perk.guid);
-    return info ? [info] : [];
-  });
+function CompactPlayerRow({ player, showPerks = true, highlights }: { player: PlayerRow; showPerks?: boolean; highlights: Set<HighlightMetric> }) {
+  const rankIcon = arenaRankAssetUrl(player.rankKey);
+  const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
+  const perks = showPerks
+    ? player.perks.flatMap((perk) => {
+        const info = resolvePerkInfo(perk.guid);
+        return info ? [info] : [];
+      })
+    : [];
   return (
     <article className="phase6CompactPlayerRow">
       <span className="phase6CompactAvatarPlate">
         <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
       </span>
       <span className="phase6CompactPlayerName">
-        <strong>{player.name}</strong>
-        <span className="phase6CompactPerkStrip" aria-label="威能">
-          {perks.length > 0 ? (
-            perks.slice(0, 2).map((perk) => (
-              <span className="phase6PerkTooltip" key={perk.id}>
-                <img className="phase6CompactPerkIcon" src={perk.iconUrl ?? undefined} alt={perk.name} />
-                <span className="phase6PerkTooltipPanel" role="tooltip">
-                  <strong>{perk.name}</strong>
-                  <small>{perk.description ?? "暂无释义"}</small>
-                </span>
-              </span>
-            ))
-          ) : (
-            <span className="phase6CompactPerkEmpty">未记录威能</span>
+        <span className="phase7CompactPlayerNameLine">
+          <strong>{player.name}</strong>
+          {(rankIcon || rankTierLabel) && (
+            <small className="phase7CompactRankBadge">
+              {rankIcon && <img src={rankIcon} alt="" />}
+              {rankTierLabel}
+            </small>
           )}
         </span>
+        {showPerks && (
+          <span className="phase6CompactPerkStrip" aria-label="威能">
+            {perks.length > 0 ? (
+              perks.slice(0, 2).map((perk) => (
+                <span className="phase6PerkTooltip" key={perk.id}>
+                  <img className="phase6CompactPerkIcon" src={perk.iconUrl ?? undefined} alt={perk.name} />
+                  <span className="phase6PerkTooltipPanel" role="tooltip">
+                    <strong>{perk.name}</strong>
+                    <small>{perk.description ?? "暂无释义"}</small>
+                  </span>
+                </span>
+              ))
+            ) : (
+              <span className="phase6CompactPerkEmpty">未记录威能</span>
+            )}
+          </span>
+        )}
       </span>
       <span className="phase6CompactPlayerMetric">
         <small>K/A/D</small>
-        <strong>{player.kills}/{player.assists}/{player.deaths}</strong>
+        <strong>
+          <CompactHighlight value={player.kills} active={highlights.has("kills")} />/{player.assists}/{player.deaths}
+        </strong>
       </span>
       <span className="phase6CompactPlayerMetric phase6CompactPlayerMetricWide">
         <small>伤/疗/挡</small>
-        <strong>{player.damage}/{player.healing}/{player.mitigation}</strong>
+        <strong>
+          <CompactHighlight value={player.damage} active={highlights.has("damage")} />/
+          <CompactHighlight value={player.healing} active={highlights.has("healing")} />/
+          <CompactHighlight value={player.mitigation} active={highlights.has("mitigation")} />
+        </strong>
       </span>
       <span className="phase6CompactPlayerMetric">
         <small>承伤/受疗</small>
@@ -421,6 +517,10 @@ function CompactPlayerRow({ player }: { player: PlayerRow }) {
       </span>
     </article>
   );
+}
+
+function CompactHighlight({ value, active }: { value: number; active: boolean }) {
+  return <em className={active ? "phase6StatHighlight" : ""}>{value}</em>;
 }
 
 function compactPlayerKey(player: PlayerRow, index: number) {

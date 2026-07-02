@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use owstats_desktop_lib::{
     get_friend_analytics, get_match_detail, import_payload_value, list_filter_options,
     list_matches, redact_sensitive_json, sync_import_parts, FriendAnalyticsFilters, MatchFilters,
@@ -155,8 +157,116 @@ fn imports_synthetic_season_and_counts_preset_matches() {
     import_synthetic_season(&db);
 
     let matches = list_matches(&db, MatchFilters::default()).unwrap();
-    assert_eq!(matches.len(), 2);
-    assert!(matches.iter().all(|item| item.bucket == "preset"));
+    assert_eq!(matches.len(), 3);
+    assert!(matches.iter().any(|item| item.match_id == "match-stadium"));
+    assert!(matches
+        .iter()
+        .filter(|item| item.match_id != "match-stadium")
+        .all(|item| item.bucket == "preset"));
+}
+
+#[test]
+fn list_matches_includes_fight_rows_and_uses_last_round_map_preview() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let mut arena_entry = match_entry(
+        "match-arena",
+        1,
+        "SportFight",
+        "map-a",
+        "hero-current",
+        1700003600000_i64,
+    );
+    arena_entry["teamScore"] = json!(9);
+    arena_entry["opponentScore"] = json!(8);
+    arena_entry["kill"] = json!(99);
+    arena_entry["assist"] = json!(88);
+    arena_entry["death"] = json!(77);
+    arena_entry["heroDamage"] = json!(99999);
+    arena_entry["cure"] = json!(88888);
+    arena_entry["resistDamage"] = json!(77777);
+    let payload = json!({
+        "season": 22,
+        "profile_card": { "data": { "bnetId": 1000, "name": "Current#1000" } },
+        "matches": {
+            "entries": [
+                match_entry("match-normal", 1, "LeisurePreset", "map-a", "hero-current", 1700000000000_i64),
+                arena_entry
+            ],
+            "details": [
+                match_detail("match-normal", "normal", "map-a", 600),
+                {
+                    "match_id": "match-arena",
+                    "match_kind": "fight",
+                    "payload": {
+                        "data": {
+                            "matchRet": 1,
+                            "totalCount": {"mapGuid": "map-a", "teamScore": 9, "opponentScore": 8, "teammateList": [], "enemyList": []},
+                            "roundCountList": [
+                                {"mapGuid": "map-a", "teamScore": 1, "opponentScore": 0, "teammateList": [], "enemyList": []},
+                                {
+                                    "mapGuid": "map-b",
+                                    "teamScore": 2,
+                                    "opponentScore": 0,
+                                    "gameTimeSec": 222,
+                                    "teammateList": [
+                                        {
+                                            "bnetId": 1000,
+                                            "name": "Current#1000",
+                                            "heroGuid": "hero-current",
+                                            "kill": 7,
+                                            "assist": 6,
+                                            "death": 5,
+                                            "heroDamage": 7000,
+                                            "cure": 6000,
+                                            "resistDamage": 5000
+                                        }
+                                    ],
+                                    "enemyList": []
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let matches = list_matches(&db, MatchFilters::default()).unwrap();
+    let arena = matches
+        .iter()
+        .find(|item| item.match_id == "match-arena")
+        .expect("fight row in list");
+
+    assert_eq!(arena.bucket, "stadium");
+    assert_eq!(arena.mode_label, "角斗竞技");
+    assert_eq!(arena.map_guid, "map-a");
+    assert_eq!(arena.map_preview_guid.as_deref(), Some("map-b"));
+    assert_eq!(arena.team_score, 2);
+    assert_eq!(arena.opponent_score, 0);
+    assert_eq!(arena.kills, 7);
+    assert_eq!(arena.assists, 6);
+    assert_eq!(arena.deaths, 5);
+    assert_eq!(arena.damage, 7000);
+    assert_eq!(arena.healing, 6000);
+    assert_eq!(arena.mitigation, 5000);
+    assert_eq!(arena.duration_sec, 222);
+
+    let filtered = list_matches(
+        &db,
+        MatchFilters {
+            mode: Some("SportFight".to_string()),
+            ..MatchFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].match_id, "match-arena");
 }
 
 #[test]
@@ -225,6 +335,281 @@ fn import_prefers_total_count_player_rows_for_full_stat_maps() {
     assert_eq!(player.final_hits, 12);
     assert_eq!(player.target_time_sec, 417);
     assert_eq!(player.hero_stats.len(), 2);
+}
+
+#[test]
+fn fight_detail_exposes_arena_summary_rounds_and_safe_names() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 22,
+        "profile_card": { "data": { "bnetId": 1000, "name": "Current#1000" } },
+        "matches": {
+            "entries": [
+                match_entry("match-arena", 1, "SportFight", "map-b", "hero-current", 1700000000000_i64)
+            ],
+            "details": [
+                {
+                    "match_id": "match-arena",
+                    "match_kind": "fight",
+                    "payload": {
+                        "data": {
+                            "matchRet": 1,
+                            "nameMap": {
+                                "1000": "我方一号",
+                                "2000": "我方二号",
+                                "3000": "对手一号",
+                                "4000": "4000"
+                            },
+                            "totalCount": {
+                                "mapGuid": "map-a",
+                                "gameTimeSec": 901,
+                                "startTime": 1700000010,
+                                "teamScore": 2,
+                                "opponentScore": 1,
+                                "teammateList": [
+                                    {
+                                        "bnetId": 1000,
+                                        "heroGuid": "hero-current",
+                                        "kill": 8,
+                                        "assist": 4,
+                                        "death": 1,
+                                        "heroDamage": 3200,
+                                        "cure": 100,
+                                        "resistDamage": 80,
+                                        "worth": 17000,
+                                        "endWorth": 17250,
+                                        "worthMax": true,
+                                        "modGuids": ["mod-a", "mod-b"],
+                                        "traitGuids": ["trait-a"],
+                                        "killMax": true,
+                                        "heroDamageMax": true,
+                                        "cureMax": false,
+                                        "resistDamageMax": false,
+                                        "rankInfo": {"rankName": "Master", "rankSubTier": 2}
+                                    },
+                                    {"bnetId": 2000, "heroGuid": "hero-friend", "kill": 3}
+                                ],
+                                "enemyList": [
+                                    {"bnetId": 3000, "heroGuid": "hero-enemy", "kill": 5},
+                                    {"bnetId": 4000, "heroGuid": "hero-enemy", "kill": 2}
+                                ]
+                            },
+                            "roundCountList": [
+                                {
+                                    "mapGuid": "map-a",
+                                    "gameTimeSec": 301,
+                                    "startTime": 1700000010,
+                                    "teamScore": 1,
+                                    "opponentScore": 0,
+                                    "teammateList": [{"bnetId": 2000, "heroGuid": "hero-friend", "kill": 2}],
+                                    "enemyList": [{"bnetId": 3000, "heroGuid": "hero-enemy", "kill": 1}]
+                                },
+                                {
+                                    "mapGuid": "map-b",
+                                    "gameTimeSec": 310,
+                                    "startTime": 1700000330,
+                                    "teamScore": 1,
+                                    "opponentScore": 1,
+                                    "teammateList": [
+                                        {
+                                            "bnetId": 1000,
+                                            "heroGuid": "hero-current",
+                                            "kill": 4,
+                                            "damageTaken": 100,
+                                            "healingTaken": 200
+                                        }
+                                    ],
+                                    "enemyList": [{"bnetId": 4000, "heroGuid": "hero-enemy", "kill": 3}]
+                                },
+                                {
+                                    "mapGuid": "map-a",
+                                    "gameTimeSec": 290,
+                                    "startTime": 1700000650,
+                                    "teamScore": 2,
+                                    "opponentScore": 1,
+                                    "teammateList": [
+                                        {
+                                            "bnetId": 1000,
+                                            "heroGuid": "hero-current",
+                                            "kill": 22,
+                                            "assist": 5,
+                                            "death": 2,
+                                            "heroDamage": 9000,
+                                            "cure": 1200,
+                                            "resistDamage": 700,
+                                            "finalHit": 6,
+                                            "damageTaken": 300,
+                                            "healingTaken": 400,
+                                            "worth": 900,
+                                            "endWorth": 1500,
+                                            "worthMax": true,
+                                            "modGuids": ["mod-last"],
+                                            "traitGuids": ["trait-last"],
+                                            "killMax": true,
+                                            "heroDamageMax": true,
+                                            "cureMax": false,
+                                            "resistDamageMax": true,
+                                            "rankInfo": {"rankName": "Master", "rankSubTier": 2}
+                                        },
+                                        {
+                                            "bnetId": 2000,
+                                            "heroGuid": "hero-friend",
+                                            "kill": 7,
+                                            "damageTaken": 50,
+                                            "healingTaken": 60
+                                        }
+                                    ],
+                                    "enemyList": [
+                                        {
+                                            "bnetId": 3000,
+                                            "heroGuid": "hero-enemy",
+                                            "kill": 2,
+                                            "damageTaken": 30,
+                                            "healingTaken": 40
+                                        },
+                                        {
+                                            "bnetId": 4000,
+                                            "heroGuid": "hero-enemy",
+                                            "kill": 1,
+                                            "damageTaken": 70,
+                                            "healingTaken": 80
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let detail = get_match_detail(&db, "match-arena").unwrap();
+    assert!(detail.raw_json.is_null());
+    let arena = detail.arena_detail.expect("arena detail");
+
+    assert_eq!(detail.mode_label.as_deref(), Some("角斗竞技"));
+    assert_eq!(arena.summary.label, "角斗汇总");
+    assert_eq!(arena.summary.team_score, Some(2));
+    assert_eq!(arena.summary.opponent_score, Some(1));
+    assert_eq!(arena.summary.duration_sec, Some(901));
+    assert_eq!(arena.summary.begin_ts, Some(1700000000));
+    assert_eq!(arena.summary.map_guid.as_deref(), Some("map-a"));
+    assert_eq!(arena.summary.teammates[0].name, "我方一号");
+    assert_eq!(arena.summary.teammates[1].name, "我方二号");
+    assert_eq!(arena.summary.enemies[0].name, "对手一号");
+    assert_eq!(arena.summary.enemies[1].name, "未知玩家");
+    assert_eq!(
+        arena.summary.teammates[0].rank_label.as_deref(),
+        Some("大师 2")
+    );
+    assert_eq!(arena.summary.teammates[0].kills, 22);
+    assert_eq!(arena.summary.teammates[0].damage, 9000);
+    assert_eq!(arena.summary.teammates[0].damage_taken, 400);
+    assert_eq!(arena.summary.teammates[0].healing_taken, 600);
+    assert_eq!(arena.summary.teammates[1].damage_taken, 50);
+    assert_eq!(arena.summary.teammates[1].healing_taken, 60);
+    assert_eq!(arena.summary.enemies[1].damage_taken, 70);
+    assert_eq!(arena.summary.enemies[1].healing_taken, 80);
+    assert_eq!(arena.summary.teammates[0].worth, Some(900));
+    assert_eq!(arena.summary.teammates[0].end_worth, Some(1500));
+    assert!(arena.summary.teammates[0].worth_max);
+    assert_eq!(arena.summary.teammates[0].mod_guids, vec!["mod-last"]);
+    assert_eq!(arena.summary.teammates[0].trait_guids, vec!["trait-last"]);
+    assert!(arena.summary.teammates[0].kill_max);
+    assert!(arena.summary.teammates[0].hero_damage_max);
+    assert!(arena.summary.teammates[0].resist_damage_max);
+    assert!(arena
+        .summary
+        .teammates
+        .iter()
+        .chain(arena.summary.enemies.iter())
+        .all(|player| !["1000", "2000", "3000", "4000"].contains(&player.name.as_str())));
+    assert_eq!(arena.rounds.len(), 3);
+    assert_eq!(arena.rounds[0].label, "回合 1");
+    assert_eq!(arena.rounds[0].result.as_deref(), Some("win"));
+    assert_eq!(arena.rounds[1].result.as_deref(), Some("loss"));
+    assert_eq!(arena.rounds[2].result.as_deref(), Some("win"));
+    assert_eq!(arena.rounds[0].teammates[0].name, "我方二号");
+    assert_eq!(arena.rounds[1].enemies[0].name, "未知玩家");
+}
+
+#[test]
+fn fight_summary_falls_back_to_round_duration_sum_and_first_round_start() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 22,
+        "profile_card": { "data": { "bnetId": 1000, "name": "Current#1000" } },
+        "matches": {
+            "entries": [
+                {
+                    "matchId": "match-arena-fallback",
+                    "matchRet": 1,
+                    "mapGuid": "map-a",
+                    "heroGuid": "hero-current",
+                    "gameMode": "SportFight",
+                    "_dashenSeason": 22,
+                    "teamScore": 2,
+                    "opponentScore": 0
+                }
+            ],
+            "details": [
+                {
+                    "match_id": "match-arena-fallback",
+                    "match_kind": "fight",
+                    "payload": {
+                        "data": {
+                            "matchRet": 1,
+                            "nameMap": {},
+                            "totalCount": {
+                                "mapGuid": "map-a",
+                                "teamScore": 2,
+                                "opponentScore": 0,
+                                "teammateList": [],
+                                "enemyList": []
+                            },
+                            "roundCountList": [
+                                {
+                                    "mapGuid": "map-a",
+                                    "gameTimeSec": 111,
+                                    "startTime": 1700000100,
+                                    "teamScore": 1,
+                                    "opponentScore": 0,
+                                    "teammateList": [],
+                                    "enemyList": []
+                                },
+                                {
+                                    "mapGuid": "map-b",
+                                    "gameTimeSec": 222,
+                                    "startTime": 1700000300,
+                                    "teamScore": 2,
+                                    "opponentScore": 0,
+                                    "teammateList": [],
+                                    "enemyList": []
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let detail = get_match_detail(&db, "match-arena-fallback").unwrap();
+    let arena = detail.arena_detail.expect("arena detail");
+
+    assert_eq!(arena.summary.duration_sec, Some(333));
+    assert_eq!(arena.summary.begin_ts, Some(1700000100));
 }
 
 #[test]

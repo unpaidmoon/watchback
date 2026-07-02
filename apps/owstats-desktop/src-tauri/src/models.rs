@@ -49,11 +49,13 @@ pub struct MatchSummary {
     pub match_id: String,
     pub season: i64,
     pub bucket: String,
+    pub match_kind: String,
     pub game_mode: String,
     pub mode_label: String,
     pub result: String,
     pub result_label: String,
     pub map_guid: String,
+    pub map_preview_guid: Option<String>,
     pub map_name: String,
     pub hero_guid: String,
     pub hero_name: String,
@@ -78,6 +80,8 @@ pub struct PlayerRow {
     pub side: String,
     pub name: String,
     pub bnet_id: String,
+    pub rank_label: Option<String>,
+    pub rank_key: Option<String>,
     pub hero_guid: String,
     pub hero_name: String,
     pub kills: i64,
@@ -90,6 +94,16 @@ pub struct PlayerRow {
     pub target_time_sec: i64,
     pub healing_taken: i64,
     pub damage_taken: i64,
+    pub worth: Option<i64>,
+    pub end_worth: Option<i64>,
+    pub worth_max: bool,
+    pub mod_guids: Vec<String>,
+    pub trait_guids: Vec<String>,
+    pub has_source_max_flags: bool,
+    pub kill_max: bool,
+    pub hero_damage_max: bool,
+    pub cure_max: bool,
+    pub resist_damage_max: bool,
     pub perks: Vec<PlayerPerk>,
     pub hero_stats: Vec<HeroStat>,
 }
@@ -127,10 +141,36 @@ pub struct MatchDetailView {
     pub duration_sec: Option<i64>,
     pub teammates: Vec<PlayerRow>,
     pub enemies: Vec<PlayerRow>,
+    pub arena_detail: Option<ArenaMatchDetail>,
     pub evaluation: Option<MatchEvaluationSummary>,
     pub team_awards: Vec<MatchPerformanceAward>,
     pub same_role_comparison: Option<SameRoleComparison>,
     pub raw_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArenaMatchDetail {
+    pub summary: ArenaDetailSlice,
+    pub rounds: Vec<ArenaDetailSlice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArenaDetailSlice {
+    pub key: String,
+    pub label: String,
+    pub result: Option<String>,
+    pub result_label: Option<String>,
+    pub team_score: Option<i64>,
+    pub opponent_score: Option<i64>,
+    pub duration_sec: Option<i64>,
+    pub begin_ts: Option<i64>,
+    pub begin_label: Option<String>,
+    pub map_guid: Option<String>,
+    pub map_name: Option<String>,
+    pub teammates: Vec<PlayerRow>,
+    pub enemies: Vec<PlayerRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

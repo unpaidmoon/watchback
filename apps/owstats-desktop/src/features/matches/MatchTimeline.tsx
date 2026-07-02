@@ -1,5 +1,5 @@
 import { forwardRef, Fragment } from "react";
-import { formatCompactStat, formatMatchBannerTitle, formatScoreLine } from "../../shared/matchListFormat";
+import { formatCompactStat, formatMatchBannerTitle, formatMatchPreviewKey, formatScoreLine } from "../../shared/matchListFormat";
 import { primaryTagBadgeTone } from "../../shared/matchPerformanceBadges";
 import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
 import type { MatchSummary } from "../../shared/types";
@@ -31,7 +31,7 @@ export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTim
             onClick={() => onSelect(match.matchId)}
           >
             <span className="phase6MatchBanner">
-              <MapPreview mapKey={match.mapGuid || match.mapName} name={match.mapName} className="phase6MatchMapThumb" />
+              <MapPreview mapKey={formatMatchPreviewKey(match)} name={match.mapName} className="phase6MatchMapThumb" />
               <span className="phase6MatchScoreSlab">{formatScoreLine(match)}</span>
               <span className="phase6MatchMapTitle">{formatMatchBannerTitle(match)}</span>
             </span>

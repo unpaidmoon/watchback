@@ -1,4 +1,4 @@
-import { heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, rankAssetUrl } from "../src/shared/assets.ts";
+import { arenaRankAssetUrl, heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, rankAssetUrl } from "../src/shared/assets.ts";
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
   if (actual !== expected) {
@@ -93,4 +93,14 @@ assertEqual(
   rankAssetUrl("missing-rank"),
   "/@fs/D:/Codex/OW_data/owstats-local/assets/ranks/unranked.png",
   "unknown rank falls back to unranked",
+);
+assertEqual(
+  arenaRankAssetUrl("master"),
+  "/@fs/D:/Codex/OW_data/owstats-local/assets/stadium/ranks/fight/6-master.png",
+  "arena rank asset URL uses the full fight rank icon",
+);
+assertEqual(
+  arenaRankAssetUrl("master")?.includes("pure"),
+  false,
+  "arena rank asset URL should not use pure fight rank icons",
 );

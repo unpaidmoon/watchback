@@ -53,7 +53,8 @@ assert.equal(matchesPageSource.includes("player.damageTaken"), true, "compact de
 assert.equal(matchesPageSource.includes("player.healingTaken"), true, "compact detail player rows should render healing taken");
 assert.equal(matchesPageSource.includes("player.finalHits"), true, "compact detail player rows should render final hits");
 assert.equal(matchesPageSource.includes("最后一击"), true, "compact detail player rows should label final hits in Chinese");
-assert.equal(matchesPageSource.includes("<strong>{player.damage}/{player.healing}/{player.mitigation}</strong>"), true, "compact detail should not compact mitigation values in player rows");
+assert.equal(matchesPageSource.includes("player.mitigation"), true, "compact detail should render raw mitigation values in player rows");
+assert.equal(matchesPageSource.includes("formatCompactNumber(player.mitigation)"), false, "compact detail should not compact mitigation values in player rows");
 assert.equal(styleSource.includes("minmax(96px, 0.34fr)"), true, "player rows should reserve a compact final-hit column");
 
 assert.equal(matchesPageSource.includes("compactHeroStats"), false, "compact detail should remove hero stat card helpers");

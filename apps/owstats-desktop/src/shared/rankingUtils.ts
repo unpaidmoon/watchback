@@ -9,6 +9,8 @@ export type RankingSort = {
 };
 
 const modeLabels: Record<string, string> = {
+  LeisureFight: "角斗快速",
+  SportFight: "角斗竞技",
   preset: "预设 / 开放",
   open: "预设 / 开放",
   stadium: "体育场",

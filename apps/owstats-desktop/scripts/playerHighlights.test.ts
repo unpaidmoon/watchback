@@ -14,6 +14,15 @@ assert.deepEqual([...highlights.get(playerKeyFor(players[0], 0)) ?? []], []);
 assert.deepEqual([...highlights.get(playerKeyFor(players[1], 1)) ?? []].sort(), ["assists", "healing", "mitigation"]);
 assert.deepEqual([...highlights.get(playerKeyFor(players[2], 2)) ?? []].sort(), ["damage", "kills"]);
 
+const sourceFlagPlayers = [
+  player("ana", { kills: 1, damage: 1, healing: 1, mitigation: 1, killMax: true, heroDamageMax: false, cureMax: false, resistDamageMax: true }),
+  player("winston", { kills: 99, damage: 99, healing: 99, mitigation: 99, killMax: false, heroDamageMax: true, cureMax: true, resistDamageMax: false }),
+];
+const sourceFlagHighlights = playerHighlightMap(sourceFlagPlayers);
+
+assert.deepEqual([...sourceFlagHighlights.get(playerKeyFor(sourceFlagPlayers[0], 0)) ?? []].sort(), ["kills", "mitigation"]);
+assert.deepEqual([...sourceFlagHighlights.get(playerKeyFor(sourceFlagPlayers[1], 1)) ?? []].sort(), ["damage", "healing"]);
+
 function player(heroName: string, stats: Partial<PlayerRow>): PlayerRow {
   return {
     side: "teammate",

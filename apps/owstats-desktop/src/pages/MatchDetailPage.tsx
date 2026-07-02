@@ -1,13 +1,15 @@
-import { AlertCircle, ArrowLeft } from "lucide-react";
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMatchDetails } from "../shared/api";
 import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
+import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
+import { arenaRankAssetUrl, resolveArenaModTraitInfo } from "../shared/assets";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
 import { productErrorMessage } from "../shared/phase6Shell";
-import type { MatchDetailView, PlayerRow } from "../shared/types";
+import type { ArenaDetailSlice, MatchDetailView, PlayerRow } from "../shared/types";
 
 export function MatchDetailPage() {
   const { matchId } = useParams();
@@ -54,6 +56,85 @@ type MatchDetailReportProps = {
 };
 
 export function MatchDetailReport({ detail, loading, error, matchId, onBack, embedded = false }: MatchDetailReportProps) {
+  const [selectedArenaKey, setSelectedArenaKey] = useState("summary");
+  const arenaDetail = detail?.arenaDetail ?? null;
+
+  useEffect(() => {
+    setSelectedArenaKey("summary");
+  }, [detail?.matchId]);
+
+  if (detail && arenaDetail) {
+    const selectedArena =
+      selectedArenaKey === "summary"
+        ? arenaDetail.summary
+        : arenaDetail.rounds.find((round) => round.key === selectedArenaKey) ?? arenaDetail.summary;
+    return (
+      <section className={`detailPage phase6DetailPage ${embedded ? "phase6EmbeddedDetailPage" : ""}`}>
+        <ArenaSelector
+          summary={arenaDetail.summary}
+          rounds={arenaDetail.rounds}
+          selectedKey={selectedArena.key}
+          onSelect={setSelectedArenaKey}
+        />
+        <header className={`detailHero phase6DetailHero phase7ArenaHero ${selectedArena.result ?? detail.result ?? "pending"}`}>
+          {onBack && (
+            <button type="button" className="phase6DetailBackButton" onClick={onBack}>
+              <ArrowLeft size={18} />
+              返回列表
+            </button>
+          )}
+          <div className="phase6DetailBanner">
+            <MapPreview className="phase6DetailBannerMap" mapKey={arenaHeaderMapKey(selectedArena)} name={selectedArena.mapName ?? "未知地图"} />
+            <div className="phase6DetailResultPanel">
+              <strong>{selectedArena.resultLabel ?? "未知"}</strong>
+              <span>{arenaResultSubLabel(selectedArena.result ?? detail.result)}</span>
+            </div>
+            <div className="phase6DetailCornerAccent" />
+          </div>
+          <div className="phase6DetailSummary">
+            <h2>{arenaHeaderTitle(selectedArena)}</h2>
+            <div className="phase6DetailFacts">
+              <span>
+                <b>比分：</b>
+                {formatArenaScore(selectedArena)}
+              </span>
+              <span>
+                <b>游戏时长：</b>
+                {formatDetailDuration(selectedArena.durationSec)}
+              </span>
+              {selectedArena.key !== "summary" && (
+                <span>
+                  <b>游戏模式：</b>
+                  {detail.modeLabel ?? "-"}
+                </span>
+              )}
+              <span>
+                <b>开始时间：</b>
+                {formatDetailStartTime(selectedArena.beginTs)}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        {error && (
+          <div className="errorBanner phase6RecoverableError">
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+        {loading && <div className="emptyState">正在读取对局详情...</div>}
+        <div className="detailContent">
+          <div className="playerColumns phase6PlayerColumns" key={selectedArena.key}>
+            <PlayerTable title="队友" players={selectedArena.teammates} tone="team" />
+            <div className="phase6VsDivider" aria-hidden="true">
+              <span>VS</span>
+            </div>
+            <PlayerTable title="对手" players={selectedArena.enemies} tone="enemy" />
+          </div>
+        </div>
+      </section>
+    );
+  }
   const detailMapName = detail?.mapName ?? "未知地图";
 
   return (
@@ -135,6 +216,41 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
         </div>
       )}
     </section>
+  );
+}
+
+function ArenaSelector({
+  summary,
+  rounds,
+  selectedKey,
+  onSelect,
+}: {
+  summary: ArenaDetailSlice;
+  rounds: ArenaDetailSlice[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <nav className="phase7ArenaSelector" aria-label="角斗回合切换">
+      <button
+        type="button"
+        className={`phase7ArenaTab summary ${selectedKey === summary.key ? "active" : ""}`}
+        onClick={() => onSelect(summary.key)}
+      >
+        <span>{summary.label}</span>
+      </button>
+      {rounds.map((round) => (
+        <button
+          type="button"
+          className={`phase7ArenaTab ${round.result ?? "neutral"} ${selectedKey === round.key ? "active" : ""}`}
+          onClick={() => onSelect(round.key)}
+          key={round.key}
+        >
+          <span>{formatArenaTabLabel(round)}</span>
+          <strong>{formatArenaScore(round)}</strong>
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -232,41 +348,115 @@ function PlayerTable({ title, players, tone }: { title: string; players: PlayerR
 }
 
 function PlayerCard({ player, highlights }: { player: PlayerRow; index: number; highlights: Set<HighlightMetric> }) {
+  const [expanded, setExpanded] = useState(false);
+  const expandable = hasArenaExpansion(player);
+  const rankIcon = arenaRankAssetUrl(player.rankKey);
+  const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
   return (
-    <article className="phase6PlayerCard">
-      <div className="phase6PlayerPortrait">
-        <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} />
-      </div>
-      <div className="phase6PlayerStats">
-        <header>
-          <strong>{player.name}</strong>
-          <span>{player.heroName}</span>
-        </header>
-        <div className="phase6PlayerMetricGrid">
-          <span>
-            <b>K/A/D</b>
-            <strong>
-              <Highlight value={player.kills} active={highlights.has("kills")} />/{player.assists}/{player.deaths}
-            </strong>
+    <article className={`phase6PlayerCard ${expanded ? "phase7PlayerExpanded" : ""}`}>
+      <button
+        type="button"
+        className="phase7PlayerCardMain"
+        onClick={() => expandable && setExpanded((value) => !value)}
+        aria-expanded={expandable ? expanded : undefined}
+      >
+        <span className="phase6PlayerPortrait">
+          <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} />
+        </span>
+        <span className="phase6PlayerStats">
+          <header>
+            <span className="phase7PlayerNameLine">
+              <strong>{player.name}</strong>
+              {(rankIcon || rankTierLabel) && (
+                <span className="phase7ArenaRankBadge">
+                  {rankIcon && <img src={rankIcon} alt="" />}
+                  {rankTierLabel}
+                </span>
+              )}
+            </span>
+            <span>
+              {player.heroName}
+            </span>
+            {expandable && <span className="phase7ExpandIcon">{expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</span>}
+          </header>
+          <span className="phase6PlayerMetricGrid">
+            <span>
+              <b>K/A/D</b>
+              <strong>
+                <Highlight value={player.kills} active={highlights.has("kills")} />/{player.assists}/{player.deaths}
+              </strong>
+            </span>
+            <span>
+              <b>伤害/治疗/抵挡</b>
+              <strong>
+                <Highlight value={player.damage} active={highlights.has("damage")} />/
+                <Highlight value={player.healing} active={highlights.has("healing")} />/
+                <Highlight value={player.mitigation} active={highlights.has("mitigation")} />
+              </strong>
+            </span>
+            <span>
+              <b>承伤/受疗</b>
+              <strong>
+                {player.damageTaken}/{player.healingTaken}
+              </strong>
+            </span>
           </span>
-          <span>
-            <b>伤害/治疗/抵挡</b>
-            <strong>
-              <Highlight value={player.damage} active={highlights.has("damage")} />/
-              <Highlight value={player.healing} active={highlights.has("healing")} />/
-              <Highlight value={player.mitigation} active={highlights.has("mitigation")} />
-            </strong>
-          </span>
-          <span>
-            <b>承伤/受疗</b>
-            <strong>
-              {player.damageTaken}/{player.healingTaken}
-            </strong>
-          </span>
-        </div>
-      </div>
+        </span>
+      </button>
+      {expanded && <ArenaPlayerExpansion player={player} />}
     </article>
   );
+}
+
+function ArenaPlayerExpansion({ player }: { player: PlayerRow }) {
+  return (
+    <div className="phase7ArenaExpansion">
+      <div className="phase7ArenaEconomy">
+        <span>经济</span>
+        <strong className={player.worthMax ? "phase6StatHighlight" : ""}>{formatEconomy(player)}</strong>
+      </div>
+      <ArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} fallbackName="待补充特质" />
+      <ArenaSlotGroup title="装备" guids={player.modGuids} slots={6} fallbackName="待补充异能" />
+    </div>
+  );
+}
+
+function ArenaSlotGroup({ title, guids, slots, fallbackName }: { title: string; guids: string[]; slots: number; fallbackName: string }) {
+  return (
+    <div className="phase7ArenaSlotGroup">
+      <span>{title}</span>
+      <div className="phase7ArenaSlots">
+        {Array.from({ length: slots }).map((_, index) => {
+          const guid = guids[index];
+          const info = resolveArenaModTraitInfo(guid);
+          return (
+            <span className={`phase7ArenaSlot ${guid ? "filled" : ""}`} key={`${title}-${index}`}>
+              {guid && info?.iconUrl && <img src={info.iconUrl} alt={info.name} />}
+              {guid && (
+                <span className="phase6PerkTooltipPanel" role="tooltip">
+                  <strong>{info?.name ?? fallbackName}</strong>
+                  {info?.description && <small>{info.description}</small>}
+                </span>
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function hasArenaExpansion(player: PlayerRow): boolean {
+  return player.worth !== null || player.endWorth !== null || player.modGuids.length > 0 || player.traitGuids.length > 0;
+}
+
+function formatEconomy(player: PlayerRow): string {
+  if (player.worth !== null && player.endWorth !== null && player.worth !== player.endWorth) {
+    return `${player.worth} -> ${player.endWorth}`;
+  }
+  if (player.endWorth !== null) return String(player.endWorth);
+  if (player.worth !== null) return String(player.worth);
+  return "-";
 }
 
 function Highlight({ value, active }: { value: number; active: boolean }) {

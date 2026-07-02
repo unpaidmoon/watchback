@@ -28,7 +28,21 @@ apps/owstats-desktop/src-tauri/tests/
 apps/owstats-desktop/src/
 docs/windows-release.md
 docs/superpowers/specs/
+docs/superpowers/specs/main-thread-log.md
 ```
+
+## Main Thread Workflow
+
+This project uses a main-thread workflow for complex Codex work.
+
+- The current main-thread session owns direction, scope, risk decisions, task
+  prompts for execution threads, and final acceptance.
+- Execution threads should receive narrow prompts with allowed paths,
+  forbidden paths, verification commands, and a required evidence report.
+- Verification threads are used for risky changes and should review only; they
+  should not continue development.
+- Record durable decisions and handoff prompts in
+  `docs/superpowers/specs/main-thread-log.md`.
 
 product shape:
 
