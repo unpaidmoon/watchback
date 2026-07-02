@@ -21,6 +21,7 @@ pub struct MatchFilters {
     pub result: Option<String>,
     pub mode: Option<String>,
     pub primary_tag: Option<String>,
+    pub player_name: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
 }
@@ -71,7 +72,7 @@ pub struct MatchSummary {
     pub team_awards: Vec<MatchPerformanceAward>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerRow {
     pub side: String,
@@ -89,6 +90,22 @@ pub struct PlayerRow {
     pub target_time_sec: i64,
     pub healing_taken: i64,
     pub damage_taken: i64,
+    pub perks: Vec<PlayerPerk>,
+    pub hero_stats: Vec<HeroStat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerPerk {
+    pub guid: String,
+    pub perk_level: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeroStat {
+    pub guid: String,
+    pub value: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +168,14 @@ pub struct FilterOption {
     pub label: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSearchOption {
+    pub player_name: String,
+    pub matches: i64,
+    pub latest_begin_ts: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FriendAnalyticsFilters {
@@ -193,6 +218,7 @@ pub struct CommonFriendHero {
     pub wins: i64,
     pub win_rate: f64,
     pub latest_begin_ts: i64,
+    pub intimacy_score: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -331,12 +357,27 @@ pub struct OnboardingStatusRequest {
 pub struct PersonalSeasonReview {
     pub summary: ReviewSummary,
     pub baseline: SeasonBaseline,
+    pub role_summaries: Vec<RoleRankSummary>,
     pub phase5_highlights: Phase5ReviewHighlights,
     pub top_conclusions: Vec<ReviewConclusion>,
     pub personal_bests: Vec<PersonalBest>,
     pub streaks: StreakSummary,
     pub hero_pool: HeroPoolStability,
     pub maps: MapAdaptability,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleRankSummary {
+    pub role_type: String,
+    pub role_label: String,
+    pub matches: i64,
+    pub wins: i64,
+    pub win_rate: f64,
+    pub kda: f64,
+    pub rank_level: i64,
+    pub rank_sub_tier: i64,
+    pub rank_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -511,6 +552,48 @@ pub struct CredentialLoginCancelResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct LogoutResult {
+    pub credential_cleared: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerProfile {
+    pub role_id: Option<i64>,
+    pub player_id: Option<String>,
+    pub avatar_url: Option<String>,
+    pub endorsement_level: Option<i64>,
+    pub play_time_hours: Option<f64>,
+    pub title: Option<String>,
+    pub refreshed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettings {
+    pub theme: String,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            theme: "system".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    pub status: String,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalDataStatus {
     pub data_source: String,
     pub season: Option<i64>,
@@ -541,10 +624,12 @@ pub struct RankingRow {
     pub key: String,
     pub name: String,
     pub matches: i64,
-    pub wins: i64,
-    pub losses: i64,
     pub win_rate: f64,
     pub play_time_hours: f64,
+    pub kda: f64,
+    pub rating: Option<String>,
+    pub best_hero_guid: Option<String>,
+    pub best_hero_name: Option<String>,
     pub adaptability_label: Option<String>,
 }
 

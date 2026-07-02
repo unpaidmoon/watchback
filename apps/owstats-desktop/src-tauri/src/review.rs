@@ -2,9 +2,16 @@ use crate::db::OwDatabase;
 use crate::models::*;
 use anyhow::{Context, Result};
 use rusqlite::params;
+use serde_json::Value;
 use std::collections::HashMap;
 
 const MAP_MIN_SAMPLE: i64 = 2;
+const ROLE_ORDER: [(&str, &str); 4] = [
+    ("tank", "重装"),
+    ("dps", "输出"),
+    ("healer", "支援"),
+    ("open", "开放"),
+];
 
 #[derive(Debug, Clone)]
 struct ReviewMatch {
@@ -82,6 +89,7 @@ pub fn get_personal_season_review(
     let maps = map_adaptability(&rows, &baseline_aggregate);
     let top_conclusions = top_conclusions(&personal_bests, &hero_pool, &maps, &baseline);
     let phase5_highlights = phase5_highlights(db, season, &streaks)?;
+    let role_summaries = role_summaries(db, season)?;
 
     Ok(PersonalSeasonReview {
         summary: ReviewSummary {
@@ -97,6 +105,7 @@ pub fn get_personal_season_review(
             avg_healing: round2(avg(total_aggregate.healing, total_aggregate.matches)),
         },
         baseline,
+        role_summaries,
         phase5_highlights,
         top_conclusions,
         personal_bests,
@@ -104,6 +113,272 @@ pub fn get_personal_season_review(
         hero_pool,
         maps,
     })
+}
+
+#[derive(Debug, Clone, Default)]
+struct RoleAggregate {
+    matches: i64,
+    wins: i64,
+    kills: i64,
+    assists: i64,
+    deaths: i64,
+    latest_begin_ts: i64,
+    rank_score: i64,
+    rank_sub_tier: i64,
+}
+
+fn role_summaries(db: &OwDatabase, season: Option<i64>) -> Result<Vec<RoleRankSummary>> {
+    let from_matches = role_summaries_from_matches(db, season)?;
+    if from_matches.values().any(|item| item.matches > 0) {
+        return Ok(build_role_summaries(from_matches));
+    }
+
+    role_summaries_from_match_players(db, season).map(build_role_summaries)
+}
+
+fn role_summaries_from_matches(
+    db: &OwDatabase,
+    season: Option<i64>,
+) -> Result<HashMap<String, RoleAggregate>> {
+    let conn = db.connect()?;
+    let mut sql = String::from(
+        r#"
+        SELECT
+            game_mode,
+            result,
+            kills,
+            assists,
+            deaths,
+            begin_ts,
+            raw_entry_json
+        FROM matches
+        WHERE bucket = 'preset'
+        "#,
+    );
+    if season.is_some() {
+        sql.push_str(" AND season = ?");
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let mapper = |row: &rusqlite::Row<'_>| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+        ))
+    };
+    let rows = if let Some(value) = season {
+        stmt.query_map(params![value], mapper)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    } else {
+        stmt.query_map([], mapper)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let mut by_role = HashMap::<String, RoleAggregate>::new();
+    for (game_mode, result, kills, assists, deaths, begin_ts, raw_json) in rows {
+        let parsed = serde_json::from_str::<Value>(&raw_json).unwrap_or(Value::Null);
+        let role = role_type_from_match_entry(&game_mode, &parsed);
+        if role.is_empty() {
+            continue;
+        }
+        add_role_match(
+            &mut by_role,
+            role,
+            &result,
+            kills,
+            assists,
+            deaths,
+            begin_ts,
+            &raw_json,
+        );
+    }
+    Ok(by_role)
+}
+
+fn role_summaries_from_match_players(
+    db: &OwDatabase,
+    season: Option<i64>,
+) -> Result<HashMap<String, RoleAggregate>> {
+    let conn = db.connect()?;
+    let mut sql = String::from(
+        r#"
+        SELECT
+            COALESCE(mp.role_type, ''),
+            m.result,
+            mp.kill,
+            mp.assist,
+            mp.death,
+            m.begin_ts,
+            mp.raw_json
+        FROM match_players mp
+        JOIN matches m ON m.match_id = mp.match_id
+        WHERE mp.is_current_player = 1
+          AND m.bucket = 'preset'
+        "#,
+    );
+    if season.is_some() {
+        sql.push_str(" AND m.season = ?");
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let mapper = |row: &rusqlite::Row<'_>| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+        ))
+    };
+    let rows = if let Some(value) = season {
+        stmt.query_map(params![value], mapper)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    } else {
+        stmt.query_map([], mapper)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let mut by_role = HashMap::<String, RoleAggregate>::new();
+    for (raw_role, result, kills, assists, deaths, begin_ts, raw_json) in rows {
+        let role = normalize_role_type(&raw_role);
+        if !ROLE_ORDER.iter().any(|(key, _)| *key == role) {
+            continue;
+        }
+        add_role_match(
+            &mut by_role,
+            role,
+            &result,
+            kills,
+            assists,
+            deaths,
+            begin_ts,
+            &raw_json,
+        );
+    }
+
+    Ok(by_role)
+}
+
+fn build_role_summaries(by_role: HashMap<String, RoleAggregate>) -> Vec<RoleRankSummary> {
+    ROLE_ORDER
+        .iter()
+        .map(|(role_type, role_label)| {
+            let item = by_role.get(*role_type).cloned().unwrap_or_default();
+            let rank_level = rank_level_for_score(item.rank_score);
+            RoleRankSummary {
+                role_type: (*role_type).to_string(),
+                role_label: (*role_label).to_string(),
+                matches: item.matches,
+                wins: item.wins,
+                win_rate: round2(ratio(item.wins, item.matches)),
+                kda: round2((item.kills + item.assists) as f64 / item.deaths.max(1) as f64),
+                rank_level,
+                rank_sub_tier: if rank_level > 0 {
+                    item.rank_sub_tier
+                } else {
+                    0
+                },
+                rank_key: rank_key_for_level(rank_level).to_string(),
+            }
+        })
+        .collect()
+}
+
+fn add_role_match(
+    by_role: &mut HashMap<String, RoleAggregate>,
+    role: &str,
+    result: &str,
+    kills: i64,
+    assists: i64,
+    deaths: i64,
+    begin_ts: i64,
+    raw_json: &str,
+) {
+    let item = by_role.entry(role.to_string()).or_default();
+    item.matches += 1;
+    item.wins += if result == "win" { 1 } else { 0 };
+    item.kills += kills;
+    item.assists += assists;
+    item.deaths += deaths;
+    let (rank_score, rank_sub_tier) = parse_rank_info(raw_json);
+    if rank_score > 0 && begin_ts >= item.latest_begin_ts {
+        item.latest_begin_ts = begin_ts;
+        item.rank_score = rank_score;
+        item.rank_sub_tier = rank_sub_tier;
+    }
+}
+
+fn role_type_from_match_entry(game_mode: &str, raw_entry: &Value) -> &'static str {
+    if game_mode == "SportOpen" {
+        return "open";
+    }
+
+    if game_mode == "SportPreset" {
+        return normalize_role_type(
+            raw_entry
+                .get("roleType")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        );
+    }
+
+    ""
+}
+
+fn normalize_role_type(role_type: &str) -> &'static str {
+    match role_type.trim().to_ascii_lowercase().as_str() {
+        "tank" => "tank",
+        "dps" | "damage" => "dps",
+        "healer" | "support" => "healer",
+        "open" => "open",
+        _ => "",
+    }
+}
+
+fn parse_rank_info(raw_json: &str) -> (i64, i64) {
+    let parsed = serde_json::from_str::<Value>(raw_json).unwrap_or(Value::Null);
+    let rank_info = parsed.get("rankInfo").unwrap_or(&Value::Null);
+    (
+        json_i64(rank_info.get("rankScore")),
+        json_i64(rank_info.get("rankSubTier")),
+    )
+}
+
+fn json_i64(value: Option<&Value>) -> i64 {
+    value
+        .and_then(|item| {
+            item.as_i64()
+                .or_else(|| item.as_f64().map(|value| value.round() as i64))
+                .or_else(|| item.as_str().and_then(|text| text.parse().ok()))
+        })
+        .unwrap_or(0)
+}
+
+fn rank_level_for_score(rank_score: i64) -> i64 {
+    if rank_score <= 0 {
+        0
+    } else {
+        ((rank_score / 100) + 1).clamp(1, 8)
+    }
+}
+
+fn rank_key_for_level(rank_level: i64) -> &'static str {
+    match rank_level {
+        1 => "bronze",
+        2 => "silver",
+        3 => "gold",
+        4 => "platinum",
+        5 => "diamond",
+        6 => "master",
+        7 => "grandmaster",
+        8 => "champion",
+        _ => "unranked",
+    }
 }
 
 fn phase5_highlights(

@@ -38,8 +38,13 @@ assert.equal(primaryTagBadgeTone("背锅局"), "blue", "blame tag should share t
 
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
 const heroIndex = timelineSource.indexOf("phase6HeroStackCell");
-const gradeIndex = timelineSource.indexOf("phase6MatchGrade");
-assert.ok(heroIndex > -1 && gradeIndex > -1 && heroIndex < gradeIndex, "hero identity should remain left of match performance in the row layout");
+const verticalTagIndex = timelineSource.indexOf("phase6VerticalPerformanceTag");
+const statsIndex = timelineSource.indexOf("phase6MatchListStats");
+assert.ok(
+  heroIndex > -1 && verticalTagIndex > heroIndex && statsIndex > verticalTagIndex,
+  "match list should keep the hero avatar first, then show the vertical performance tag before stats",
+);
+assert.equal(timelineSource.includes("phase6MatchGrade"), false, "match list should not render the old horizontal match performance block");
 
 const badgesSource = readFileSync(new URL("../src/shared/PerformanceBadgesView.tsx", import.meta.url), "utf8");
 const primaryTagIndex = badgesSource.indexOf("primaryTagBadgeTone(evaluation.primaryTag)");

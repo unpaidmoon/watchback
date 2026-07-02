@@ -52,6 +52,96 @@ fn seed_match(
     .unwrap();
 }
 
+fn seed_ranked_match_entry(
+    db: &OwDatabase,
+    id: &str,
+    game_mode: &str,
+    role_type: Option<&str>,
+    result: &str,
+    begin_ts: i64,
+    rank_score: i64,
+    rank_sub_tier: i64,
+    kills: i64,
+    assists: i64,
+    deaths: i64,
+) {
+    let conn = db.connect().unwrap();
+    let mut raw_entry = serde_json::json!({
+        "gameMode": game_mode,
+        "rankInfo": {
+            "rankName": "Diamond",
+            "rankScore": rank_score,
+            "rankSubTier": rank_sub_tier
+        }
+    });
+    if let Some(role_type) = role_type {
+        raw_entry["roleType"] = serde_json::json!(role_type);
+    }
+    conn.execute(
+        r#"
+        INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+            hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+            deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+        )
+        VALUES (?1, 22, 'preset', ?2, 'normal', ?3, 'Ilios', 'Ilios', 'hero', 'Hero', ?4,
+            CASE WHEN ?3 = 'win' THEN 2 ELSE 1 END,
+            CASE WHEN ?3 = 'win' THEN 1 ELSE 2 END,
+            ?5, ?6, ?7, 1000, 100, 100, 0, 620, ?8, '2026-06-27T00:00:00Z')
+        "#,
+        rusqlite::params![
+            id,
+            game_mode,
+            result,
+            begin_ts,
+            kills,
+            assists,
+            deaths,
+            raw_entry.to_string()
+        ],
+    )
+    .unwrap();
+}
+
+fn seed_current_player_role(
+    db: &OwDatabase,
+    match_id: &str,
+    role_type: &str,
+    rank_score: i64,
+    rank_sub_tier: i64,
+) {
+    let conn = db.connect().unwrap();
+    conn.execute(
+        r#"
+        INSERT INTO match_players (
+            match_id, season, side, bnet_id, player_name, hero_guid, hero_name,
+            is_current_player, is_friend, kill, assist, death, hero_damage, cure,
+            resist_damage, healing_taken, damage_taken, final_hit, target_competing_time,
+            role_type, raw_json, updated_at
+        )
+        SELECT
+            match_id, season, 'teammate', 'self', 'Self', hero_guid, hero_name,
+            1, 0, kills, assists, deaths, damage, healing,
+            mitigation, 0, 0, 0, 0, ?2, ?3, updated_at
+        FROM matches
+        WHERE match_id = ?1
+        "#,
+        rusqlite::params![
+            match_id,
+            role_type,
+            serde_json::json!({
+                "roleType": role_type,
+                "rankInfo": {
+                    "rankScore": rank_score,
+                    "rankSubTier": rank_sub_tier
+                }
+            })
+            .to_string()
+        ],
+    )
+    .unwrap();
+}
+
 #[test]
 fn personal_review_exposes_baseline_exclusions_without_hiding_matches() {
     let temp = tempfile::tempdir().unwrap();
@@ -158,4 +248,227 @@ fn onboarding_status_allows_existing_readable_local_data() {
     assert_eq!(status.local_data.preset_matches, 1);
     assert!(status.local_data.data_source.contains("本地"));
     assert!(!status.credential_status.exposes_secret);
+}
+
+#[test]
+fn personal_review_exposes_four_role_rank_summaries() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("phase3.sqlite3"));
+    db.initialize().unwrap();
+    seed_match(
+        &db,
+        "tank-1",
+        "win",
+        "Ilios",
+        "Reinhardt",
+        100,
+        16,
+        4,
+        9_000,
+        100,
+        8_000,
+        620,
+    );
+    seed_match(
+        &db,
+        "tank-2",
+        "loss",
+        "Ilios",
+        "Reinhardt",
+        200,
+        8,
+        6,
+        6_000,
+        100,
+        6_000,
+        620,
+    );
+    seed_match(
+        &db, "dps-1", "win", "Dorado", "Tracer", 300, 22, 3, 14_000, 0, 200, 620,
+    );
+
+    seed_current_player_role(&db, "tank-1", "tank", 305, 5);
+    seed_current_player_role(&db, "tank-2", "tank", 306, 4);
+    seed_current_player_role(&db, "dps-1", "dps", 710, 2);
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    assert_eq!(review.role_summaries.len(), 4);
+    let tank = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "tank")
+        .unwrap();
+    assert_eq!(tank.matches, 2);
+    assert_eq!(tank.wins, 1);
+    assert_eq!(tank.rank_level, 4);
+    assert_eq!(tank.rank_sub_tier, 4);
+    assert_eq!(tank.rank_key, "platinum");
+    assert_eq!(tank.kda, 3.0);
+
+    let dps = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "dps")
+        .unwrap();
+    assert_eq!(dps.rank_key, "champion");
+
+    let support = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "healer")
+        .unwrap();
+    assert_eq!(support.matches, 0);
+    assert_eq!(support.rank_key, "unranked");
+}
+
+#[test]
+fn personal_review_uses_match_entry_rank_and_role_when_player_role_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("phase3.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_ranked_match_entry(
+        &db,
+        "preset-tank",
+        "SportPreset",
+        Some("tank"),
+        "win",
+        100,
+        496,
+        4,
+        10,
+        5,
+        5,
+    );
+    seed_ranked_match_entry(
+        &db,
+        "preset-tank-no-rank",
+        "SportPreset",
+        Some("tank"),
+        "loss",
+        300,
+        0,
+        0,
+        6,
+        2,
+        3,
+    );
+    seed_ranked_match_entry(
+        &db,
+        "open-latest",
+        "SportOpen",
+        Some("dps"),
+        "loss",
+        200,
+        595,
+        5,
+        20,
+        2,
+        4,
+    );
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    let tank = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "tank")
+        .unwrap();
+    assert_eq!(tank.matches, 2);
+    assert_eq!(tank.rank_key, "diamond");
+    assert_eq!(tank.rank_sub_tier, 4);
+
+    let open = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "open")
+        .unwrap();
+    assert_eq!(open.matches, 1);
+    assert_eq!(open.rank_key, "master");
+    assert_eq!(open.rank_sub_tier, 5);
+    assert_eq!(open.kda, 5.5);
+}
+
+#[test]
+fn role_rank_summary_counts_only_matching_competitive_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("phase3.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_ranked_match_entry(
+        &db,
+        "preset-tank",
+        "SportPreset",
+        Some("tank"),
+        "win",
+        100,
+        496,
+        4,
+        10,
+        1,
+        5,
+    );
+    seed_ranked_match_entry(
+        &db,
+        "open-tank",
+        "SportOpen",
+        Some("tank"),
+        "loss",
+        200,
+        595,
+        5,
+        20,
+        2,
+        4,
+    );
+    seed_ranked_match_entry(
+        &db,
+        "stadium-no-role",
+        "SportFight",
+        None,
+        "win",
+        300,
+        698,
+        2,
+        30,
+        3,
+        3,
+    );
+    seed_ranked_match_entry(
+        &db,
+        "leisure-tank",
+        "LeisurePreset",
+        Some("tank"),
+        "loss",
+        400,
+        798,
+        1,
+        40,
+        4,
+        4,
+    );
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    let tank = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "tank")
+        .unwrap();
+    assert_eq!(tank.matches, 1);
+    assert_eq!(tank.wins, 1);
+    assert_eq!(tank.rank_key, "diamond");
+
+    let open = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "open")
+        .unwrap();
+    assert_eq!(open.matches, 1);
+    assert_eq!(open.wins, 0);
+    assert_eq!(open.rank_key, "master");
 }

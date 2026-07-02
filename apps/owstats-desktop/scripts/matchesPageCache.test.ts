@@ -23,6 +23,7 @@ assert.deepEqual(getMatchesPageCache()?.filters, cachedFilters, "cache keeps mat
 assert.equal(getMatchesPageCache()?.scrollTop, 420, "cache keeps scroll position in memory");
 
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("qa=1")), false, "qa query does not override cached filters");
 
 assert.deepEqual(
@@ -41,6 +42,11 @@ assert.equal(
   matchFiltersKey({ result: "win", hero: "ana" }),
   matchFiltersKey({ hero: "ana", result: "win" }),
   "filter cache key is stable regardless of object insertion order",
+);
+assert.notEqual(
+  matchFiltersKey({ hero: "ana" }),
+  matchFiltersKey({ hero: "ana", playerName: "是糖三分毒#5811" }),
+  "playerName participates in the loaded filter cache key",
 );
 
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), false, "cache does not hydrate before first successful load");

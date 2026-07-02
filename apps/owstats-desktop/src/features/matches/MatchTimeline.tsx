@@ -1,6 +1,6 @@
 import { forwardRef, Fragment } from "react";
-import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
 import { formatCompactStat, formatMatchBannerTitle, formatScoreLine } from "../../shared/matchListFormat";
+import { primaryTagBadgeTone } from "../../shared/matchPerformanceBadges";
 import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
 import type { MatchSummary } from "../../shared/types";
 
@@ -8,9 +8,10 @@ type Props = {
   matches: MatchSummary[];
   onSelect: (matchId: string) => void;
   onScroll?: () => void;
+  selectedMatchId?: string | null;
 };
 
-export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTimeline({ matches, onSelect, onScroll }, ref) {
+export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTimeline({ matches, onSelect, onScroll, selectedMatchId }, ref) {
   if (matches.length === 0) {
     return <div className="emptyState">没有符合条件的预设 / 开放模式对局。</div>;
   }
@@ -24,8 +25,9 @@ export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTim
           {streakLabels.get(match.matchId) && <div className="streakSeparator">{streakLabels.get(match.matchId)}</div>}
           <button
             type="button"
-            className={`matchRow phase6MatchRowReal ${match.result}`}
+            className={`matchRow phase6MatchRowReal ${match.result} ${selectedMatchId === match.matchId ? "phase6MatchRowSelected" : ""}`}
             data-match-id={match.matchId}
+            aria-current={selectedMatchId === match.matchId ? "true" : undefined}
             onClick={() => onSelect(match.matchId)}
           >
             <span className="phase6MatchBanner">
@@ -34,19 +36,23 @@ export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTim
               <span className="phase6MatchMapTitle">{formatMatchBannerTitle(match)}</span>
             </span>
             <span className="phase6MatchDataPanel">
-              <span className="phase6HeroStackCell">
-                <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
-                <span>{match.heroName}</span>
+              <span className="phase6MatchListHeroLine">
+                <span className="phase6HeroStackCell">
+                  <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
+                  {match.evaluation ? (
+                    <strong className={`phase6VerticalPerformanceTag badgeTone-${listPerformanceTone(match.evaluation.primaryTag)}`}>{match.evaluation.primaryTag}</strong>
+                  ) : (
+                    <strong className="phase6VerticalPerformanceTag badgeTone-blue">常规</strong>
+                  )}
+                </span>
+                <span className="phase6MatchListStats">
+                  <MetricBlock label="K/A/D" value={`${match.kills}/${match.assists}/${match.deaths}`} />
+                  <MetricBlock
+                    label="伤害 / 治疗 / 抵挡"
+                    value={`${formatCompactStat(match.damage)}/${formatCompactStat(match.healing)}/${formatCompactStat(match.mitigation)}`}
+                  />
+                </span>
               </span>
-              <span className="phase6MatchGrade">
-                <span>对局表现</span>
-                <MatchPerformanceBadges evaluation={match.evaluation} teamAwards={match.teamAwards} compact />
-              </span>
-              <MetricBlock label="K/A/D" value={`${match.kills}/${match.assists}/${match.deaths}`} />
-              <MetricBlock
-                label="伤害 / 治疗 / 抵挡"
-                value={`${formatCompactStat(match.damage)}/${formatCompactStat(match.healing)}/${formatCompactStat(match.mitigation)}`}
-              />
               <span className="phase6MatchOpen">›</span>
             </span>
           </button>
@@ -55,6 +61,12 @@ export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTim
     </div>
   );
 });
+
+function listPerformanceTone(primaryTag: string) {
+  if (primaryTagBadgeTone(primaryTag) === "gold") return "gold";
+  if (primaryTag === "躺赢局" || primaryTag === "背锅局") return "danger";
+  return "blue";
+}
 
 function MetricBlock({ label, value }: { label: string; value: string }) {
   return (

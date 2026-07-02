@@ -160,6 +160,74 @@ fn imports_synthetic_season_and_counts_preset_matches() {
 }
 
 #[test]
+fn import_prefers_total_count_player_rows_for_full_stat_maps() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 22,
+        "profile_card": { "data": { "bnetId": 1000, "name": "Current#1000" } },
+        "matches": {
+            "entries": [
+                match_entry("match-total-count", 1, "LeisurePreset", "map-a", "hero-current", 1700000000000_i64)
+            ],
+            "details": [
+                {
+                    "match_id": "match-total-count",
+                    "match_kind": "normal",
+                    "payload": {
+                        "data": {
+                            "matchRet": 1,
+                            "mapGuid": "map-a",
+                            "gameTimeSec": 600,
+                            "teammateList": [
+                                {
+                                    "bnetId": 1000,
+                                    "name": "Current#1000",
+                                    "heroGuid": "hero-current",
+                                    "kill": 5,
+                                    "finalHit": 1,
+                                    "targetCompetingTime": 30
+                                }
+                            ],
+                            "enemyList": [],
+                            "totalCount": {
+                                "teammateList": [
+                                    {
+                                        "bnetId": 1000,
+                                        "name": "Current#1000",
+                                        "heroGuid": "hero-current",
+                                        "kill": 25,
+                                        "finalHit": 12,
+                                        "targetCompetingTime": 417.4,
+                                        "statMap": {
+                                            "603482350067646507": 12,
+                                            "603482350067648534": 417.4
+                                        }
+                                    }
+                                ],
+                                "enemyList": []
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let detail = get_match_detail(&db, "match-total-count").unwrap();
+    let player = detail.teammates.first().expect("teammate row");
+
+    assert_eq!(player.kills, 25);
+    assert_eq!(player.final_hits, 12);
+    assert_eq!(player.target_time_sec, 417);
+    assert_eq!(player.hero_stats.len(), 2);
+}
+
+#[test]
 fn database_initialize_sets_schema_version_idempotently() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
@@ -232,7 +300,6 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-
     assert_eq!(version, 2);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
@@ -258,6 +325,7 @@ fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
             result: Some(first.result.clone()),
             mode: Some(first.game_mode.clone()),
             primary_tag: None,
+            player_name: None,
             date_from: Some(first.begin_label[0..10].to_string()),
             date_to: Some(first.begin_label[0..10].to_string()),
         },
@@ -377,6 +445,26 @@ fn import_rebuilds_match_players_for_preset_matches_only() {
     assert_eq!(stadium_rows, 0);
     assert_eq!(friend_rows, 2);
     assert!(!projection_raw.contains("customerToken"));
+}
+
+#[test]
+fn import_persists_profile_card_for_command_center() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    import_payload_value(&db, &season_payload(), temp.path()).unwrap();
+    let conn = db.connect().unwrap();
+
+    let raw_json: String = conn
+        .query_row(
+            "SELECT raw_json FROM players WHERE bnet_id = '1000'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert!(raw_json.contains("\"name\":\"Current#1000\""));
+    assert!(raw_json.contains("***REDACTED***"));
+    assert!(!raw_json.contains("customer-secret"));
 }
 
 #[test]
@@ -512,6 +600,56 @@ fn friend_analytics_uses_block_for_front_pressure_and_adds_healing_conversion_bo
         .unwrap();
     assert_eq!(conversion.friends[0].bnet_id, "convert");
     assert!(conversion.label.contains("转化"));
+}
+
+#[test]
+fn friend_boards_use_review_names_and_return_only_two_friends() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    db.initialize().unwrap();
+
+    let friends = [
+        ("front-a", "Front A", 3, 3, 9000, 100, 9000),
+        ("front-b", "Front B", 3, 3, 9000, 100, 9000),
+        ("front-c", "Front C", 3, 3, 9000, 100, 9000),
+        ("low", "Low", 2, 1, 100, 100, 1000),
+        ("care", "Care", 1, 8, 100, 9000, 3000),
+        ("middle", "Middle", 2, 3, 200, 1000, 2500),
+    ];
+    for (friend_index, (bnet_id, name, kills, deaths, mitigation, healing_taken, damage_taken)) in
+        friends.iter().enumerate()
+    {
+        for match_index in 0..5 {
+            seed_friend_row(
+                &db,
+                &format!("review-board-{friend_index}-{match_index}"),
+                bnet_id,
+                name,
+                (friend_index * 10 + match_index) as i64,
+                *kills,
+                *deaths,
+                *mitigation,
+                *healing_taken,
+                *damage_taken,
+            );
+        }
+    }
+
+    let analytics = get_friend_analytics(&db, FriendAnalyticsFilters::default()).unwrap();
+    let front = analytics
+        .boards
+        .iter()
+        .find(|board| board.key == "front_pressure")
+        .unwrap();
+    assert_eq!(front.friends.len(), 2);
+    assert!(analytics
+        .boards
+        .iter()
+        .any(|board| board.key == "low_resource_partner" && board.label == "在世华佗"));
+    assert!(analytics
+        .boards
+        .iter()
+        .any(|board| board.key == "priority_care" && board.label == "资源黑洞"));
 }
 
 #[test]

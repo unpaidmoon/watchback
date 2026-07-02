@@ -4,15 +4,8 @@ Short handoff for future Codex sessions. Keep this file small.
 
 ## Current Shape
 
-Project root:
-
-```text
-D:\Codex\OW_data\owstats-local
-```
-
 Before reading, editing, running commands, or starting a dev server, confirm the
 working directory is this project root or a deliberate subdirectory under it.
-Do not treat `D:\Codex\OW_data`, `D:\Workspace\OW数据`, or any old plugin checkout
 as the active project. If a command is run from outside the root, use
 `git -C D:\Codex\OW_data\owstats-local ...` or `cd D:\Codex\OW_data\owstats-local`
 first.
@@ -25,8 +18,6 @@ apps/owstats-desktop/
 
 Stack: Tauri 2, React, TypeScript, Rust, SQLite.
 
-The old chatbot plugin path, external reference tree, Python helper scripts, and local raw player data are no longer part of the maintained codebase.
-
 ## Useful Context
 
 Read these first only when relevant:
@@ -36,16 +27,19 @@ apps/owstats-desktop/src-tauri/src/
 apps/owstats-desktop/src-tauri/tests/
 apps/owstats-desktop/src/
 docs/windows-release.md
-docs/superpowers/specs/2026-06-27-phase-4-windows-productization-design.md
+docs/superpowers/specs/
 ```
 
-Phase-4 product shape:
+product shape:
 
 - Desktop onboarding owns NetEase Dashen login, credential status, and season sync entry.
 - Installed-product login uses Tauri backend commands.
 - Match module is the only filter entry.
 - Ranking owns hero win-rate and map win-rate.
-- Analysis is full-season by default: friend analysis above map analysis.
+
+Data fixture:
+
+- `data/players/5479_s22_full_season.json` is the original anonymized full-season JSON data file.
 
 ## Frontend Language
 

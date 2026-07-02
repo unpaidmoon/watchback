@@ -14,6 +14,30 @@ data/players/5479_s22_full_season.json
 - `matches.detail_errors[]`: detail fetch failures; must not contain token-like values.
 - `friendBnetIds`: friend identity source. Do not infer friends from repeated teammates.
 
+## Field Dictionary Reference
+
+The Overwatch config dictionary is stored in:
+
+```text
+docs/reference/ow_config_cache.json
+```
+
+It currently contains:
+
+- `heroes`: hero GUID to Chinese hero name and role type.
+- `maps`: map GUID to Chinese map name and mode label.
+- `attrs`: stat/attribute GUID to Chinese display text and category.
+
+Use this file as the local source of truth when translating raw GUID fields into product-facing Chinese labels.
+
+For the full reference inventory, see:
+
+```text
+docs/reference/INDEX.md
+```
+
+That index documents `res/query_tool.json`, including `heroPerkList`, `perkList`, ranks, behavior icons, and the decimal raw perk GUID to hex dictionary ID conversion rule.
+
 ## Match Summary Fields
 
 - `matchId`: stable match id.
@@ -40,6 +64,7 @@ Rows may include:
 - `heroDamage`, `cure`, `resistDamage`
 - `damageTaken`, `healingTaken`
 - `finalHit`, `targetCompetingTime`
+- `perks`: selected hero perk records. Raw rows use decimal perk GUIDs and `perkLevel`.
 - `statMap`
 
 `damageTaken` and `healingTaken` can arrive as JSON floats such as `17133.0`; import code must parse integers and floats.

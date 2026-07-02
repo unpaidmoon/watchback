@@ -23,7 +23,7 @@ export type MatchScrollAnchorCandidate = {
   bottom: number;
 };
 
-const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "startDate", "endDate"];
+const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"];
 
 let matchesPageCache: MatchesPageCache | null = null;
 let preloadPromise: Promise<MatchesPageCache> | null = null;

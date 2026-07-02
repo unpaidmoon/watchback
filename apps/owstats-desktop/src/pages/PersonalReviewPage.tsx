@@ -1,17 +1,47 @@
-import { AlertCircle, BarChart3, ExternalLink, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  BarChart3,
+  ExternalLink,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { getPersonalSeasonReview } from "../shared/api";
-import { GlassPanel, HeroAvatar, MapPreview, MetricCard, StatusBadge } from "../shared/phase6Components";
+import { SeasonAnalysisModules } from "./FriendAnalyticsPage";
+import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
+import { achievementBadgeUrl, rankAssetUrl } from "../shared/assets";
+import { GlassPanel, HeroAvatar, MapPreview, StatusBadge } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { formatWinRate } from "../shared/rankingUtils";
-import type { EvidenceLink, PersonalSeasonReview } from "../shared/types";
+import { buildReviewAchievements as buildSharedReviewAchievements } from "../shared/reviewAchievements";
+import type { EvidenceLink, PersonalSeasonReview, RoleRankSummary, SeasonAnalysis } from "../shared/types";
+
+type ReviewAchievement = {
+  key: AchievementKey;
+  title: string;
+  metric: string;
+  detail: string;
+  value: number;
+  thresholds: readonly [number, number, number];
+  unit: string;
+  currentLevel: 0 | 1 | 2 | 3;
+  progress: number;
+  evidence?: EvidenceLink;
+};
+
+type AchievementKey = "win-streak" | "win-rate" | "s-grade" | "carry" | "signature" | "peak" | "hero-focus" | "switching";
+
+const romanLevels = ["I", "II", "III"] as const;
 
 export function PersonalReviewPage() {
   const [params] = useSearchParams();
   const season = Number(params.get("season") || 22);
   const [review, setReview] = useState<PersonalSeasonReview | null>(null);
+  const [analysis, setAnalysis] = useState<SeasonAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedAchievement, setSelectedAchievement] = useState<ReviewAchievement | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -19,6 +49,15 @@ export function PersonalReviewPage() {
       .then(setReview)
       .catch((err) => setError(productErrorMessage(err)));
   }, [season]);
+
+  useEffect(() => {
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    void getSeasonAnalysis()
+      .then(setAnalysis)
+      .catch((err) => setAnalysisError(productErrorMessage(err)))
+      .finally(() => setAnalysisLoading(false));
+  }, []);
 
   if (error) {
     return (
@@ -29,128 +68,296 @@ export function PersonalReviewPage() {
     );
   }
 
-  if (!review) return <section className="workspace">正在加载个人赛季复盘...</section>;
+  if (!review) return <section className="workspace">正在加载个人赛季战报...</section>;
+
+  const achievements = buildSharedReviewAchievements(review);
+  const analytics = analysis?.friend ?? null;
 
   return (
     <section className="workspace reviewWorkspace phase6ReviewWorkspace">
-      <header className="phase6PageHeader">
-        <div>
-          <span className="phase6Eyebrow">个人复盘</span>
-          <h2>S{review.summary.season ?? season} 赛季报告</h2>
-          <p>把赛季表现、关键结论和证据对局集中成一份可行动报告。</p>
+      <GlassPanel className="phase6RoleReport" tone="solid">
+        <div className="phase6RoleReportHeader">
+          <div>
+            <span className="phase6Eyebrow">战报</span>
+            <h2>S{review.summary.season ?? season} 赛季表现报告</h2>
+            <p>按职责汇总当前段位、胜率、样本和 KDA，下面保留可追溯的复盘证据。</p>
+          </div>
+          <div className="phase6CommandStatus">
+            <StatusBadge tone="good">
+              <BarChart3 size={15} /> {review.summary.totalMatches} 场
+            </StatusBadge>
+            <StatusBadge>
+              <Sparkles size={15} /> {review.phase5Highlights.sGradeCount} 场 S 级
+            </StatusBadge>
+          </div>
         </div>
-        <div className="phase6CommandStatus">
-          <StatusBadge tone="good">
-            <BarChart3 size={15} /> {review.summary.totalMatches} 场
-          </StatusBadge>
-          <StatusBadge>
-            <Sparkles size={15} /> {review.phase5Highlights.sGradeCount} 场 S 级
-          </StatusBadge>
-        </div>
-      </header>
 
-      <section className="phase6MatchMetrics">
-        <MetricCard label="预设 / 开放" value={String(review.summary.totalMatches)} meta="赛季总样本" />
-        <MetricCard label="胜率" value={formatWinRate(review.summary.winRate, 0)} meta={`${review.summary.wins} 胜 / ${review.summary.losses} 负`} />
-        <MetricCard label="带飞局" value={String(review.phase5Highlights.carryCount)} meta="高价值正向表现" />
-        <MetricCard label="最长连胜" value={String(review.phase5Highlights.longestWinStreak)} meta={review.phase5Highlights.mostCommonHighlight ?? "暂无高频高光"} />
-      </section>
-
-      <GlassPanel className="phase6ReviewPanel" tone="solid">
-        <header>
-          <span className="phase6Eyebrow">核心结论</span>
-          <h3>赛季重点发现</h3>
-        </header>
-        <div className="conclusionList phase6ConclusionList">
-          {review.topConclusions.map((item) => (
-            <article key={`${item.kind}-${item.title}`}>
-              <strong>{item.title}</strong>
-              <p>{item.body}</p>
-              <Evidence evidence={item.evidence} />
-            </article>
+        <div className="phase6RoleRankGrid">
+          {review.roleSummaries.map((role) => (
+            <RoleRankCard key={role.roleType} role={role} />
           ))}
         </div>
       </GlassPanel>
 
-      <div className="reviewGrid phase6ReviewGrid">
-        <GlassPanel className="phase6ReviewPanel" tone="solid">
-          <header>
-            <span className="phase6Eyebrow">赛季基准</span>
-            <h3>稳定表现底线</h3>
-          </header>
-          <div className="explainMetrics">
-            <Metric label="场次" value={review.baseline.matchCount} />
-            <Metric label="击杀" value={review.baseline.avgKills.toFixed(1)} />
-            <Metric label="死亡" value={review.baseline.avgDeaths.toFixed(1)} />
-            <Metric label="伤害" value={Math.round(review.baseline.avgDamage)} />
+      <GlassPanel className="phase6AchievementPanel" tone="solid">
+        <header className="phase6AchievementHeader">
+          <div>
+            <h3>成就墙</h3>
           </div>
-          <p className="explainText">短局阈值：{review.baseline.shortMatchThresholdSec} 秒。基准用于复盘判断，不影响对局列表保留。</p>
-        </GlassPanel>
+        </header>
+        <div className="phase6AchievementWall">
+          {achievements.map((achievement) => (
+            <AchievementCard key={achievement.key} achievement={achievement} onOpen={() => setSelectedAchievement(achievement)} />
+          ))}
+        </div>
+      </GlassPanel>
 
-        <GlassPanel className="phase6ReviewPanel" tone="solid">
-          <header>
-            <span className="phase6Eyebrow">个人最佳</span>
-            <h3>有证据的高光场次</h3>
-          </header>
-          <div className="bestList phase6BestList">
-            {review.personalBests.map((best) => (
-              <article key={best.metric}>
-                <HeroAvatar heroKey={best.heroName} name={best.heroName} size="sm" />
-                <div>
-                  <strong>
-                    {best.label}: {best.value}
-                  </strong>
-                  <span>
-                    {best.resultLabel} / {best.heroName} / {best.mapName}
-                  </span>
-                  <Evidence evidence={best.evidence} />
-                </div>
-              </article>
-            ))}
-          </div>
-        </GlassPanel>
-      </div>
+      {selectedAchievement ? (
+        <AchievementDialog achievement={selectedAchievement} onClose={() => setSelectedAchievement(null)} />
+      ) : null}
 
-      <div className="reviewGrid phase6ReviewGrid">
-        <GlassPanel className="phase6ReviewPanel" tone="solid">
-          <header>
-            <span className="phase6Eyebrow">英雄池</span>
-            <h3>{review.heroPool.label}</h3>
-          </header>
-          <div className="summaryGrid">
-            <Metric label="英雄数" value={review.heroPool.totalHeroes} />
-            <Metric label="第一英雄占比" value={formatWinRate(review.heroPool.top1Share, 0)} />
-            <Metric label="前三英雄占比" value={formatWinRate(review.heroPool.top3Share, 0)} />
-            <Metric label="切换率" value={formatWinRate(review.heroPool.switchMatchRate, 0)} />
-          </div>
-          <div className="breakdownList topGap">
-            {review.heroPool.mainHeroes.map((hero) => (
-              <div key={hero.hero}>
-                <span className="phase6HeroCell">
-                  <HeroAvatar heroKey={hero.hero} name={hero.hero} size="sm" />
-                  {hero.hero}
-                </span>
-                <strong>
-                  {hero.matches} 场 / {formatWinRate(hero.winRate, 0)}
-                </strong>
-              </div>
-            ))}
-          </div>
-        </GlassPanel>
-
-        <GlassPanel className="phase6ReviewPanel" tone="solid">
-          <header>
-            <span className="phase6Eyebrow">连续表现</span>
-            <h3>胜负节奏</h3>
-          </header>
-          <div className="summaryGrid">
-            <Metric label="最长连胜" value={review.streaks.longestWinStreak} />
-            <Metric label="最长连败" value={review.streaks.longestLossStreak} />
-          </div>
-          <p className="explainText">连败只作为复盘背景，不进入顶部核心摘要。</p>
-        </GlassPanel>
-      </div>
+      <SeasonAnalysisModules analysis={analysis} analytics={analytics} loading={analysisLoading} error={analysisError} />
     </section>
+  );
+}
+
+function RoleRankCard({ role }: { role: RoleRankSummary }) {
+  const tierLabel = role.rankSubTier > 0 ? String(role.rankSubTier) : "";
+
+  return (
+    <article className="phase6RoleRankCard">
+      <div className="phase6RoleRankName">{role.roleLabel}</div>
+      <div className="phase6RoleRankIconWrap">
+        <img className="phase6RoleRankIcon" src={rankAssetUrl(role.rankKey)} alt={`${role.roleLabel} ${role.rankKey}`} />
+        {tierLabel ? <span className="phase6RoleRankTier">{tierLabel}</span> : null}
+      </div>
+      <div className="phase6RoleRankStats">
+        <Metric label="胜率" value={formatWinRate(role.winRate, 0)} />
+        <Metric label="场次" value={role.matches} />
+        <Metric label="KDA" value={role.matches > 0 ? role.kda.toFixed(2) : "-"} />
+      </div>
+    </article>
+  );
+}
+
+function buildReviewAchievements(review: PersonalSeasonReview): ReviewAchievement[] {
+  const peakBest = review.personalBests[0];
+  const mainHero = review.heroPool.mainHeroes[0];
+  const winRatePercent = review.summary.winRate * 100;
+  const mainHeroSharePercent = review.heroPool.top1Share * 100;
+  const signatureCount = review.phase5Highlights.mostCommonHighlight ? Math.max(1, review.phase5Highlights.sGradeCount) : 0;
+  const peakValue = peakBest?.value ?? 0;
+
+  return [
+    buildAchievement({
+      key: "win-streak",
+      title: "常胜将军",
+      metric: `最长连胜 ${review.streaks.longestWinStreak} 局`,
+      detail: "连续表现奖章",
+      value: review.streaks.longestWinStreak,
+      thresholds: [3, 5, 8],
+      unit: "局",
+    }),
+    buildAchievement({
+      key: "win-rate",
+      title: "胜率机器",
+      metric: `${formatWinRate(review.summary.winRate, 0)} 胜率`,
+      detail: `${review.summary.wins} 胜 / ${review.summary.losses} 负`,
+      value: winRatePercent,
+      thresholds: [50, 55, 60],
+      unit: "%",
+    }),
+    buildAchievement({
+      key: "s-grade",
+      title: "高光制造者",
+      metric: `S 级表现 ${review.phase5Highlights.sGradeCount} 场`,
+      detail: `${review.summary.totalMatches} 场样本中的峰值表现`,
+      value: review.phase5Highlights.sGradeCount,
+      thresholds: [5, 15, 30],
+      unit: "场 S",
+    }),
+    buildAchievement({
+      key: "carry",
+      title: "战局核心",
+      metric: `带飞局 ${review.phase5Highlights.carryCount} 场`,
+      detail: "高价值正向表现",
+      value: review.phase5Highlights.carryCount,
+      thresholds: [5, 12, 25],
+      unit: "场",
+    }),
+    buildAchievement({
+      key: "signature",
+      title: "招牌打法",
+      metric: review.phase5Highlights.mostCommonHighlight ?? "暂无高频高光",
+      detail: "出现最多的个人高光标签",
+      value: signatureCount,
+      thresholds: [3, 8, 15],
+      unit: "次",
+    }),
+    buildAchievement({
+      key: "peak",
+      title: "巅峰一战",
+      metric: peakBest ? `${peakBest.label} ${peakBest.value}` : "暂无单场峰值",
+      detail: peakBest ? `${peakBest.resultLabel} / ${peakBest.heroName} / ${peakBest.mapName}` : "需要更多对局样本",
+      value: peakValue,
+      thresholds: buildPeakThresholds(peakValue),
+      unit: "",
+      evidence: peakBest?.evidence,
+    }),
+    buildAchievement({
+      key: "hero-focus",
+      title: "本命专精",
+      metric: `第一英雄占比 ${formatWinRate(review.heroPool.top1Share, 0)}`,
+      detail: mainHero ? `${mainHero.hero} ${mainHero.matches} 场` : "暂无主力英雄",
+      value: mainHeroSharePercent,
+      thresholds: [25, 40, 55],
+      unit: "%",
+      evidence: mainHero?.evidence,
+    }),
+    buildAchievement({
+      key: "switching",
+      title: "战术变阵",
+      metric: `使用 ${review.heroPool.totalHeroes} 名英雄`,
+      detail: `切换率 ${formatWinRate(review.heroPool.switchMatchRate, 0)}`,
+      value: review.heroPool.totalHeroes,
+      thresholds: [5, 10, 15],
+      unit: "名英雄",
+    }),
+  ];
+}
+
+function buildAchievement(input: Omit<ReviewAchievement, "currentLevel" | "progress">): ReviewAchievement {
+  return {
+    ...input,
+    currentLevel: achievementLevel(input.value, input.thresholds),
+    progress: achievementProgress(input.value, input.thresholds),
+  };
+}
+
+function achievementLevel(value: number, thresholds: readonly [number, number, number]): 0 | 1 | 2 | 3 {
+  if (value >= thresholds[2]) return 3;
+  if (value >= thresholds[1]) return 2;
+  if (value >= thresholds[0]) return 1;
+  return 0;
+}
+
+function achievementProgress(value: number, thresholds: readonly [number, number, number]) {
+  if (value >= thresholds[2]) return 100;
+  const nextThreshold = thresholds.find((threshold) => value < threshold) ?? thresholds[2];
+  return Math.max(0, Math.min(100, (value / nextThreshold) * 100));
+}
+
+function buildPeakThresholds(value: number): [number, number, number] {
+  const base = Math.max(1, value);
+  return [1, Math.max(2, Math.ceil(base * 0.8)), Math.max(3, Math.ceil(base * 1.05))];
+}
+
+function activeBadgeLevel(achievement: ReviewAchievement): 1 | 2 | 3 {
+  if (achievement.currentLevel === 2) return 2;
+  if (achievement.currentLevel === 3) return 3;
+  return 1;
+}
+
+function formatThreshold(value: number, unit: string) {
+  if (unit === "%") return `${value}%`;
+  if (!unit) return `${value}`;
+  return `${value} ${unit}`;
+}
+
+function AchievementCard({ achievement, onOpen }: { achievement: ReviewAchievement; onOpen: () => void }) {
+  const activeLevel = activeBadgeLevel(achievement);
+  const nextLevel = achievement.currentLevel === 0 ? "I" : achievement.currentLevel === 1 ? "II" : achievement.currentLevel === 2 ? "III" : "III";
+  const nextThreshold = achievement.thresholds[Math.min(achievement.currentLevel, 2)];
+
+  return (
+    <article className="phase6AchievementCard">
+      <button className="phase6AchievementCardButton" type="button" onClick={onOpen}>
+        <img
+          className={`phase6AchievementMedalImage ${achievement.currentLevel === 0 ? "locked" : ""}`}
+          src={achievementBadgeUrl(achievement.key, activeLevel)}
+          alt={`${achievement.title} ${romanLevels[activeLevel - 1]}`}
+        />
+        <div className="phase6AchievementCopy">
+          <strong>
+            {achievement.title}
+            <span>{achievement.currentLevel > 0 ? romanLevels[achievement.currentLevel - 1] : "未激活"}</span>
+          </strong>
+          <span>{achievement.metric}</span>
+          <small>{achievement.detail}</small>
+        </div>
+        <div className="phase6AchievementProgress" aria-label={`成就进度 ${Math.round(achievement.progress)}%`}>
+          <span style={{ width: `${achievement.progress}%` }} />
+        </div>
+        <div className="phase6AchievementTierRail" aria-hidden="true">
+          {romanLevels.map((level, index) => {
+            const tier = (index + 1) as 1 | 2 | 3;
+            const unlocked = achievement.currentLevel >= tier;
+            const active = achievement.currentLevel === tier;
+            return (
+              <span key={level} className={`${unlocked ? "unlocked" : "locked"} ${active ? "active" : ""}`}>
+                {level}
+              </span>
+            );
+          })}
+        </div>
+        <small className="phase6AchievementNext">
+          {achievement.currentLevel >= 3 ? "已达成最高等级" : `下一等级 ${nextLevel}：${formatThreshold(nextThreshold, achievement.unit)}`}
+        </small>
+      </button>
+      {achievement.evidence ? <Evidence evidence={achievement.evidence} /> : null}
+    </article>
+  );
+}
+
+function AchievementDialog({ achievement, onClose }: { achievement: ReviewAchievement; onClose: () => void }) {
+  const nextThreshold = achievement.thresholds[Math.min(achievement.currentLevel, 2)];
+
+  return (
+    <div className="phase6AchievementModalBackdrop" role="presentation" onClick={onClose}>
+      <section
+        className="phase6AchievementModal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${achievement.title} 详情`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="phase6AchievementModalHeader">
+          <div>
+            <span className="phase6Eyebrow">成就详情</span>
+            <h3>{achievement.title}</h3>
+            <p>{achievement.detail}</p>
+          </div>
+          <button className="phase6IconButton" type="button" onClick={onClose} aria-label="关闭成就详情">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="phase6AchievementBadgeTrack">
+          {romanLevels.map((level, index) => {
+            const tier = (index + 1) as 1 | 2 | 3;
+            const unlocked = achievement.currentLevel >= tier;
+            const active = achievement.currentLevel === tier || (achievement.currentLevel === 0 && tier === 1);
+            return (
+              <div key={level} className={`phase6AchievementBadgeStage ${unlocked ? "unlocked" : "locked"} ${active ? "active" : ""}`}>
+                <img src={achievementBadgeUrl(achievement.key, tier)} alt={`${achievement.title} ${level}`} />
+                <strong>{level}</strong>
+                <span>{formatThreshold(achievement.thresholds[index], achievement.unit)}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="phase6AchievementModalStats">
+          <Metric label="当前" value={achievement.metric} />
+          <Metric label="当前等级" value={achievement.currentLevel > 0 ? romanLevels[achievement.currentLevel - 1] : "未激活"} />
+          <Metric label={achievement.currentLevel >= 3 ? "最高等级" : "下一等级"} value={achievement.currentLevel >= 3 ? "III" : formatThreshold(nextThreshold, achievement.unit)} />
+        </div>
+
+        <div className="phase6AchievementModalProgress">
+          <span style={{ width: `${achievement.progress}%` }} />
+        </div>
+      </section>
+    </div>
   );
 }
 

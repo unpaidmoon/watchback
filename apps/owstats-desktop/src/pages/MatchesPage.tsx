@@ -1,9 +1,12 @@
-import { AlertCircle, ListFilter, RefreshCw } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchTimeline } from "../features/matches/MatchTimeline";
-import { getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
+import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
+import { resolvePerkInfo } from "../shared/assets";
+import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
+import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
 import {
   canHydrateMatchesPageCache,
   chooseInitialMatchFilters,
@@ -15,11 +18,11 @@ import {
   selectMatchScrollAnchor,
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
-import { MetricCard, StatusBadge } from "../shared/phase6Components";
+import { HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
-import type { FilterOptions, ImportSummary, MatchFilters, MatchSummary, Overview } from "../shared/types";
+import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, PlayerRow } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
   seasons: [],
@@ -30,7 +33,6 @@ const emptyOptions: FilterOptions = {
 };
 
 export function MatchesPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const cachedPage = useMemo(() => getMatchesPageCache(), []);
   const hasExplicitFilters = useMemo(() => hasExplicitMatchFilterParams(searchParams), []);
@@ -48,14 +50,12 @@ export function MatchesPage() {
   const [options, setOptions] = useState<FilterOptions>(canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions);
   const [filters, setFilters] = useState<MatchFilters>(initialFilters);
   const [matches, setMatches] = useState<MatchSummary[]>(canHydrateCache ? cachedPage?.matches ?? [] : []);
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() => searchParams.get("matchId"));
+  const [selectedDetail, setSelectedDetail] = useState<MatchDetailView | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const winRate = useMemo(() => {
-    if (matches.length === 0) return "0%";
-    const wins = matches.filter((match) => match.result === "win").length;
-    return `${Math.round((wins / matches.length) * 100)}%`;
-  }, [matches]);
 
   useEffect(() => {
     if (canHydrateCache) return;
@@ -70,14 +70,52 @@ export function MatchesPage() {
   useEffect(() => {
     rememberScroll();
     updateMatchesPageCache({ filters });
-    setSearchParams(preserveQaParam(searchParams, paramsFromFilters(filters)), { replace: true });
+    setSearchParams(preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId)), { replace: true });
     if (skipInitialFilterLoadRef.current) {
       skipInitialFilterLoadRef.current = false;
       return;
     }
     if (matchFiltersKey(filters) === loadedFilterKeyRef.current) return;
     void loadMatches(filters);
-  }, [filters]);
+  }, [filters, selectedMatchId]);
+
+  useEffect(() => {
+    if (matches.length === 0) {
+      if (selectedMatchId !== null) setSelectedMatchId(null);
+      return;
+    }
+    if (!selectedMatchId || !matches.some((match) => match.matchId === selectedMatchId)) {
+      setSelectedMatchId(matches[0].matchId);
+    }
+  }, [matches, selectedMatchId]);
+
+  useEffect(() => {
+    if (!selectedMatchId) {
+      setSelectedDetail(null);
+      setDetailError(null);
+      setDetailLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetailError(null);
+    void getMatchDetails(selectedMatchId)
+      .then((detail) => {
+        if (!cancelled) setSelectedDetail(detail);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSelectedDetail(null);
+          setDetailError(productErrorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMatchId]);
 
   useEffect(() => {
     updateMatchesPageCache({ overview, summary, options, filters, matches, loadedFilterKey: loadedFilterKeyRef.current });
@@ -202,29 +240,6 @@ export function MatchesPage() {
 
   return (
     <>
-      <section className="phase6PageHeader phase6MatchesHeader">
-        <div>
-          <span className="phase6Eyebrow">对局</span>
-          <h2>赛季对局工作台</h2>
-          <p>在这里筛选比赛、查看评分标签，并进入单场复盘报告。</p>
-        </div>
-        <div className="phase6CommandStatus">
-          <StatusBadge>
-            <ListFilter size={15} /> {activeFilterCount(filters)} 个筛选
-          </StatusBadge>
-          <StatusBadge tone={busy ? "warn" : "good"}>
-            <RefreshCw size={15} /> {busy ? "刷新中" : "列表就绪"}
-          </StatusBadge>
-        </div>
-      </section>
-
-      <section className="phase6MatchMetrics">
-        <MetricCard label="本地赛季库" value={summary ? `S${summary.season}` : "-"} meta={overview?.databasePath ? "本地数据已连接" : "等待桌面后端"} />
-        <MetricCard label="预设 / 开放" value={String(summary?.presetMatches ?? matches.length)} meta="用于复盘与分析" />
-        <MetricCard label="当前列表" value={String(matches.length)} meta="筛选后的对局数" />
-        <MetricCard label="当前胜率" value={winRate} meta="按当前列表计算" />
-      </section>
-
       {error && (
         <div className="errorBanner phase6RecoverableError">
           <AlertCircle size={18} />
@@ -234,28 +249,189 @@ export function MatchesPage() {
 
       <FilterBar filters={filters} options={options} onChange={setFilters} />
 
-      <section className="workspace listWorkspace phase6ListWorkspace">
-        <QaRegion id="MAT-LIST">
-          <MatchTimeline
-            ref={timelineRef}
-            matches={matches}
-            onScroll={rememberScroll}
-            onSelect={(matchId) => {
-              rememberScroll();
-              navigate(`/matches/${matchId}`);
-            }}
-          />
-        </QaRegion>
+      <section className="workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench">
+        <div className="phase6WorkbenchList">
+          <QaRegion id="MAT-LIST">
+            <MatchTimeline
+              ref={timelineRef}
+              matches={matches}
+              selectedMatchId={selectedMatchId}
+              onScroll={rememberScroll}
+              onSelect={(matchId) => {
+                rememberScroll();
+                setSelectedMatchId(matchId);
+              }}
+            />
+          </QaRegion>
+        </div>
+        <aside className="phase6WorkbenchDetail" aria-label="对局详情">
+          {selectedMatchId ? (
+            <CompactMatchDetail detail={selectedDetail} loading={detailLoading} error={detailError} matchId={selectedMatchId} />
+          ) : (
+            <div className="emptyState phase6WorkbenchEmpty">选择左侧对局查看详情。</div>
+          )}
+        </aside>
       </section>
     </>
   );
+}
+
+function CompactMatchDetail({ detail, loading, error, matchId }: { detail: MatchDetailView | null; loading: boolean; error: string | null; matchId: string }) {
+  if (error) {
+    return (
+      <div className="errorBanner phase6RecoverableError">
+        <AlertCircle size={18} />
+        <span>{error}</span>
+      </div>
+    );
+  }
+  if (loading && !detail) return <div className="emptyState phase6WorkbenchEmpty">正在读取对局详情...</div>;
+  if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情：{matchId}</div>;
+
+  const mapName = detail.mapName ?? "未知地图";
+  const compactPlayers = [...detail.teammates.slice(0, 6), ...detail.enemies.slice(0, 6)];
+  return (
+    <section className={`phase6CompactDetail ${detail.result ?? "pending"}`}>
+      <header className="phase6CompactHero">
+        <MapPreview className="phase6CompactHeroMap" mapKey={detail.mapGuid ?? detail.mapName} name={mapName} />
+        <div className="phase6CompactResult">
+          <strong>{detail.resultLabel ?? "未知"}</strong>
+          <span>{resultEnglishLabel(detail.result)}</span>
+        </div>
+        <div className="phase6CompactHeroText">
+          <span>{mapName}</span>
+          <strong>{formatFinalScore(detail)}</strong>
+          <small>{detail.modeLabel ?? "-"} · {formatDetailDuration(detail.durationSec)} · {formatDetailStartTime(detail.beginTs)}</small>
+        </div>
+      </header>
+
+      <div className="phase6CompactDetailScroll">
+        <div className="phase6CompactFacts">
+          <CompactFact label="最终比分" value={formatFinalScore(detail)} />
+          <CompactFact label="游戏模式" value={detail.modeLabel ?? "-"} />
+          <CompactFact label="游戏时长" value={formatDetailDuration(detail.durationSec)} />
+          <CompactFact label="开始时间" value={formatDetailStartTime(detail.beginTs)} />
+        </div>
+
+        <div className="phase6CompactPerformance">
+          <div>
+            <span className="phase6Eyebrow">对局表现</span>
+            <strong>评分与同队奖牌</strong>
+          </div>
+          <MatchPerformanceBadges evaluation={detail.evaluation} teamAwards={detail.teamAwards} />
+        </div>
+
+        <div className="phase6CompactPlayers" aria-label="双方玩家数据">
+          <CompactTeam
+            title="队友"
+            tone="team"
+            players={detail.teammates.slice(0, 6)}
+          />
+          <div className="phase6CompactVs">VS</div>
+          <CompactTeam
+            title="对手"
+            tone="enemy"
+            players={detail.enemies.slice(0, 6)}
+          />
+        </div>
+        {compactPlayers.length === 0 && <div className="emptyState">该对局暂无玩家明细。</div>}
+      </div>
+    </section>
+  );
+}
+
+function CompactFact({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function CompactTeam({
+  title,
+  players,
+  tone,
+}: {
+  title: string;
+  players: PlayerRow[];
+  tone: "team" | "enemy";
+}) {
+  return (
+    <section className={`phase6CompactTeam ${tone}`}>
+      <h3>{title}</h3>
+      <div className="phase6CompactPlayerRows">
+        {players.map((player, index) => {
+          const key = compactPlayerKey(player, index);
+          return (
+            <div className="phase6CompactPlayerBlock" key={key}>
+              <CompactPlayerRow player={player} />
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CompactPlayerRow({ player }: { player: PlayerRow }) {
+  const perks = player.perks.flatMap((perk) => {
+    const info = resolvePerkInfo(perk.guid);
+    return info ? [info] : [];
+  });
+  return (
+    <article className="phase6CompactPlayerRow">
+      <span className="phase6CompactAvatarPlate">
+        <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
+      </span>
+      <span className="phase6CompactPlayerName">
+        <strong>{player.name}</strong>
+        <span className="phase6CompactPerkStrip" aria-label="威能">
+          {perks.length > 0 ? (
+            perks.slice(0, 2).map((perk) => (
+              <span className="phase6PerkTooltip" key={perk.id}>
+                <img className="phase6CompactPerkIcon" src={perk.iconUrl ?? undefined} alt={perk.name} />
+                <span className="phase6PerkTooltipPanel" role="tooltip">
+                  <strong>{perk.name}</strong>
+                  <small>{perk.description ?? "暂无释义"}</small>
+                </span>
+              </span>
+            ))
+          ) : (
+            <span className="phase6CompactPerkEmpty">未记录威能</span>
+          )}
+        </span>
+      </span>
+      <span className="phase6CompactPlayerMetric">
+        <small>K/A/D</small>
+        <strong>{player.kills}/{player.assists}/{player.deaths}</strong>
+      </span>
+      <span className="phase6CompactPlayerMetric phase6CompactPlayerMetricWide">
+        <small>伤/疗/挡</small>
+        <strong>{player.damage}/{player.healing}/{player.mitigation}</strong>
+      </span>
+      <span className="phase6CompactPlayerMetric">
+        <small>承伤/受疗</small>
+        <strong>{player.damageTaken}/{player.healingTaken}</strong>
+      </span>
+      <span className="phase6CompactPlayerMetric phase6CompactPlayerMetricFinal">
+        <small>最后一击</small>
+        <strong>{player.finalHits}</strong>
+      </span>
+    </article>
+  );
+}
+
+function compactPlayerKey(player: PlayerRow, index: number) {
+  return `${player.side}-${player.bnetId || player.name}-${player.heroGuid || player.heroName}-${index}`;
 }
 
 function filtersFromParams(params: URLSearchParams): MatchFilters {
   const filters: MatchFilters = {};
   const season = params.get("season");
   if (season && Number.isFinite(Number(season))) filters.season = Number(season);
-  for (const key of ["hero", "map", "result", "mode", "primaryTag", "startDate", "endDate"] as const) {
+  for (const key of ["hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"] as const) {
     const value = params.get(key);
     if (!value) continue;
     if (key === "startDate") filters.dateFrom = validDate(value) ? value : undefined;
@@ -265,21 +441,19 @@ function filtersFromParams(params: URLSearchParams): MatchFilters {
   return filters;
 }
 
-function paramsFromFilters(filters: MatchFilters) {
+function paramsFromFilters(filters: MatchFilters, selectedMatchId?: string | null) {
   const params = new URLSearchParams();
+  if (selectedMatchId) params.set("matchId", selectedMatchId);
   if (filters.season) params.set("season", String(filters.season));
   if (filters.hero) params.set("hero", filters.hero);
   if (filters.map) params.set("map", filters.map);
   if (filters.result) params.set("result", filters.result);
   if (filters.mode) params.set("mode", filters.mode);
   if (filters.primaryTag) params.set("primaryTag", filters.primaryTag);
+  if (filters.playerName) params.set("playerName", filters.playerName);
   if (filters.dateFrom) params.set("startDate", filters.dateFrom);
   if (filters.dateTo) params.set("endDate", filters.dateTo);
   return params;
-}
-
-function activeFilterCount(filters: MatchFilters) {
-  return Object.values(filters).filter(Boolean).length;
 }
 
 function validDate(value: string) {

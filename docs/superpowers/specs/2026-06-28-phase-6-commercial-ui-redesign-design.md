@@ -22,37 +22,6 @@ It should feel like a product that a player can open repeatedly to review
 matches, compare heroes/maps, and understand season performance without needing
 developer context.
 
-## Collaboration Workflow
-
-Phase 6 will use live-preview collaboration rather than screenshot handoff.
-
-1. Codex starts the local frontend dev server under `apps/owstats-desktop`.
-2. The user opens the local URL in the Codex/browser environment.
-3. The user gives feedback against the live page using concise annotations:
-   - Page
-   - Area
-   - Problem
-   - Expected result
-   - Priority when needed
-4. Codex applies focused UI changes while keeping the dev server available.
-5. The user refreshes and reviews the real interface.
-6. Each iteration handles a bounded surface, such as app shell, match list, match
-   detail, ranking, or review.
-
-Example feedback format:
-
-```text
-Page: Match list
-Area: Top filters
-Problem: Too many controls compete for attention.
-Expected: Show season, hero, and result first. Put advanced filters behind an
-expandable control.
-Priority: High
-```
-
-Screenshots may still be used for final records or bug reports, but they are not
-the primary collaboration method.
-
 ## Visual Reference
 
 Primary visual reference:
@@ -379,7 +348,7 @@ Mitigations:
 
 Recommended order:
 
-1. Build a live Phase 6 style board or app-shell prototype with 2-3 shell
+1. Build a Phase 6 style board or app-shell prototype with 2-3 shell
    variants based on the Botrix-inspired direction.
 2. User chooses the preferred shell and glass intensity.
 3. Add design tokens and shared components.
@@ -389,8 +358,7 @@ Recommended order:
 7. Redesign ranking.
 8. Redesign personal review and friend analysis.
 9. Remove debug/raw JSON/data-health product UI.
-10. Run build verification and live visual review across key desktop window
-    sizes.
+10. Run build verification.
 
 ## Acceptance Criteria
 
@@ -421,8 +389,6 @@ Phase 6 is accepted when:
 - No cloud storage.
 - No monetization or license enforcement UI.
 - No exact copy of the Botrix reference layout.
-- No Figma-level annotation system inside the app; live-preview text feedback is
-  the agreed collaboration model.
 
 ## Design Self-Review
 

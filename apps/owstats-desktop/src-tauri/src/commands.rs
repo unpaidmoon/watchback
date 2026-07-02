@@ -2,12 +2,13 @@ use crate::importer::{default_database_path, existing_import_summary};
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
-    refresh_match_evaluations as refresh_evaluations, sync_season_with_progress,
-    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
-    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, MatchDetailView,
-    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
-    PersonalReviewRequest, PersonalSeasonReview, RankingResponse, SeasonAnalysis, SyncRequest,
-    SyncSummary,
+    refresh_match_evaluations as refresh_evaluations, search_match_players,
+    sync_season_with_progress, CredentialLoginCancelResult, CredentialLoginResult,
+    CredentialStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail,
+    ImportSummary, LogoutResult, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
+    OnboardingStatusRequest, OwDatabase, PersonalReviewRequest, PersonalSeasonReview,
+    PlayerProfile, PlayerSearchOption, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
+    UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -40,6 +41,14 @@ pub fn list_match_timeline(
     filters: MatchFilters,
 ) -> Result<Vec<MatchSummary>, String> {
     list_matches(&app_database(&app)?, filters).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn search_match_player_options(
+    app: AppHandle,
+    query: String,
+) -> Result<Vec<PlayerSearchOption>, String> {
+    search_match_players(&app_database(&app)?, &query).map_err(to_message)
 }
 
 #[tauri::command]
@@ -95,6 +104,51 @@ pub fn get_credential_status(app: AppHandle) -> Result<CredentialStatus, String>
 }
 
 #[tauri::command]
+pub fn get_player_profile(app: AppHandle) -> Result<PlayerProfile, String> {
+    let role_id = crate::credentials::get_credential_status(&app)
+        .map_err(to_message)?
+        .role_id;
+    crate::settings::get_player_profile_with_project_root(
+        &app_database(&app)?,
+        &player_profile_path(&app)?,
+        role_id,
+        &project_root()?,
+    )
+    .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_user_settings(app: AppHandle) -> Result<UserSettings, String> {
+    crate::settings::get_user_settings_for_path(&user_settings_path(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn save_user_settings(app: AppHandle, settings: UserSettings) -> Result<UserSettings, String> {
+    crate::settings::save_user_settings_for_path(&user_settings_path(&app)?, settings)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn logout(app: AppHandle) -> Result<LogoutResult, String> {
+    let cleared = crate::credentials::clear_credentials(&app).map_err(to_message)?;
+    Ok(LogoutResult {
+        credential_cleared: cleared,
+        message: if cleared {
+            "已退出登录，本地凭证已清除。".to_string()
+        } else {
+            "当前没有可清除的本地凭证。".to_string()
+        },
+    })
+}
+
+#[tauri::command]
+pub fn check_app_update() -> Result<UpdateCheckResult, String> {
+    Ok(crate::settings::check_app_update_result(env!(
+        "CARGO_PKG_VERSION"
+    )))
+}
+
+#[tauri::command]
 pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult, String> {
     crate::credentials::start_dashen_login(app)
         .await
@@ -131,6 +185,22 @@ pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSum
 fn app_database(app: &AppHandle) -> Result<OwDatabase, String> {
     let data_dir = app.path().app_data_dir().map_err(to_message)?;
     Ok(OwDatabase::new(default_database_path(data_dir)))
+}
+
+fn player_profile_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(to_message)?
+        .join("player_profile.json"))
+}
+
+fn user_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(to_message)?
+        .join("user_settings.json"))
 }
 
 fn project_root() -> Result<PathBuf, String> {

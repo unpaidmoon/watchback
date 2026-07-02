@@ -1,0 +1,92 @@
+{
+  "ranks": [
+    {
+      "key": "unranked",
+      "level": 0,
+      "name": "Unranked",
+      "file": "unranked.png",
+      "source": "generated-local"
+    },
+    {
+      "key": "bronze",
+      "level": 1,
+      "name": "Bronze",
+      "file": "bronze.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_1_Bronze.png",
+      "wideFile": "wide/bronze.png"
+    },
+    {
+      "key": "silver",
+      "level": 2,
+      "name": "Silver",
+      "file": "silver.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_2_Silver.png",
+      "wideFile": "wide/silver.png"
+    },
+    {
+      "key": "gold",
+      "level": 3,
+      "name": "Gold",
+      "file": "gold.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_3_Gold.png",
+      "wideFile": "wide/gold.png"
+    },
+    {
+      "key": "platinum",
+      "level": 4,
+      "name": "Platinum",
+      "file": "platinum.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_4_Platinum.png",
+      "wideFile": "wide/platinum.png"
+    },
+    {
+      "key": "diamond",
+      "level": 5,
+      "name": "Diamond",
+      "file": "diamond.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_5_Diamond.png",
+      "wideFile": "wide/diamond.png"
+    },
+    {
+      "key": "master",
+      "level": 6,
+      "name": "Master",
+      "file": "master.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_6_Master.png",
+      "wideFile": "wide/master.png"
+    },
+    {
+      "key": "grandmaster",
+      "level": 7,
+      "name": "Grandmaster",
+      "file": "grandmaster.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_7_Grandmaster.png",
+      "wideFile": "wide/grandmaster.png"
+    },
+    {
+      "key": "champion",
+      "level": 8,
+      "name": "Champion",
+      "file": "champion.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_8_Champion.png",
+      "wideFile": "wide/champion-local-candidate.png"
+    },
+    {
+      "key": "top500",
+      "level": 9,
+      "name": "Top 500",
+      "file": "top500.png",
+      "source": "https://overwatch.fandom.com/wiki/File:Badge_9_Top_500.png",
+      "wideFile": "wide/top500.png"
+    }
+  ],
+  "openWideFiles": [
+    "open-wide/c1.png",
+    "open-wide/c2.png",
+    "open-wide/c3.png",
+    "open-wide/c4.png",
+    "open-wide/c5.png",
+    "open-wide/c6.png",
+    "open-wide/c7.png"
+  ]
+}

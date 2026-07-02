@@ -151,7 +151,10 @@ fn match_list_and_detail_return_current_player_performance_awards() {
     let matches = list_matches(&db, MatchFilters::default()).unwrap();
     let awards = &matches[0].team_awards;
     assert_eq!(
-        awards.iter().map(|award| award.code.as_str()).collect::<Vec<_>>(),
+        awards
+            .iter()
+            .map(|award| award.code.as_str())
+            .collect::<Vec<_>>(),
         vec!["kill", "damage", "healing", "mitigation", "death"]
     );
     assert_eq!(awards[0].tone, "gold");

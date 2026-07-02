@@ -1,8 +1,8 @@
-import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Map, Search, Trophy } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
-import { HeroAvatar, MapPreview, MetricCard, StatusBadge } from "../shared/phase6Components";
+import { HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import {
   defaultRankingSort,
@@ -16,12 +16,16 @@ import type { RankingResponse, RankingRow } from "../shared/types";
 
 type RankingTab = "heroes" | "maps";
 
+const heroSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
+const mapSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
+
 const sortLabels: Record<RankingSortKey, string> = {
+  bestHero: "最佳英雄",
   matches: "场数",
-  wins: "胜场",
-  losses: "负场",
   winRate: "胜率",
   playTimeHours: "时长",
+  kda: "K/D/A",
+  rating: "英雄评分",
 };
 
 export function RankingPage() {
@@ -51,12 +55,16 @@ export function RankingPage() {
   const rows = useMemo(() => {
     const source = tab === "maps" ? ranking?.maps ?? [] : ranking?.heroes ?? [];
     const keyword = search.trim().toLowerCase();
-    const filtered = keyword ? source.filter((row) => row.name.toLowerCase().includes(keyword)) : source;
+    const filtered = keyword
+      ? source.filter((row) => {
+          const haystack = tab === "maps" ? `${row.name} ${row.bestHeroName ?? ""}` : row.name;
+          return haystack.toLowerCase().includes(keyword);
+        })
+      : source;
     return sortRankingRows(filtered, sort);
   }, [ranking, search, sort, tab]);
 
   const sourceCount = tab === "maps" ? ranking?.maps.length ?? 0 : ranking?.heroes.length ?? 0;
-  const topRow = rows[0] ?? null;
 
   function switchTab(next: RankingTab) {
     setTab(next);
@@ -70,29 +78,6 @@ export function RankingPage() {
 
   return (
     <section className="workspace rankingWorkspace phase6RankingWorkspace">
-      <header className="phase6PageHeader phase6RankingHeader">
-        <div>
-          <span className="phase6Eyebrow">本地赛季排行</span>
-          <h2>{tab === "maps" ? "地图表现排行" : "英雄表现排行"}</h2>
-          <p>基于本地赛季数据聚合胜率、场数、胜负和游玩时长，用于定位稳定优势和薄弱地图。</p>
-        </div>
-        <div className="phase6CommandStatus">
-          <StatusBadge tone={loading ? "warn" : "good"}>
-            <Trophy size={15} /> {loading ? "计算中" : "排行就绪"}
-          </StatusBadge>
-          <StatusBadge>
-            <Map size={15} /> {ranking?.season ? `S${ranking.season}` : "本地赛季"}
-          </StatusBadge>
-        </div>
-      </header>
-
-      <section className="phase6MatchMetrics">
-        <MetricCard label={tab === "maps" ? "地图数量" : "英雄数量"} value={String(sourceCount)} meta="当前赛季样本" />
-        <MetricCard label="当前列表" value={String(rows.length)} meta={search ? "搜索结果" : "完整排行"} />
-        <MetricCard label="榜首胜率" value={topRow ? formatWinRate(topRow.winRate) : "0.0%"} meta={topRow?.name ?? "暂无样本"} />
-        <MetricCard label="榜首场数" value={String(topRow?.matches ?? 0)} meta={topRow ? formatPlayTimeHours(topRow.playTimeHours) : "暂无时长"} />
-      </section>
-
       {error && (
         <div className="errorBanner phase6RecoverableError">
           <AlertCircle size={18} />
@@ -111,8 +96,11 @@ export function RankingPage() {
         </div>
         <label className="searchBox phase6RankingSearch">
           <Search size={16} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "maps" ? "搜索地图或英雄" : "搜索英雄"} />
         </label>
+        <span className="phase6RankingCount">
+          {ranking?.season ? `S${ranking.season}` : "本地赛季"} · {sourceCount} 项 · 当前 {rows.length} 项
+        </span>
       </div>
 
       {loading && <div className="emptyState">正在计算排行...</div>}
@@ -133,22 +121,16 @@ function RankingTable({
   sort: RankingSort;
   onSort: (key: RankingSortKey) => void;
 }) {
+  const sortKeys = tab === "maps" ? mapSortKeys : heroSortKeys;
   return (
-    <div className="rankingTable phase6RankingTable">
+    <div className={`rankingTable phase6RankingTable ${tab}`}>
       <div className="rankingHead phase6RankingHead">
         <span>{tab === "maps" ? "地图" : "英雄"}</span>
-        {(Object.keys(sortLabels) as RankingSortKey[]).map((key) => (
-          <button
-            type="button"
-            className={sort.key === key ? "active" : ""}
-            key={key}
-            onClick={() => onSort(key)}
-            title={`按${sortLabels[key]}排序`}
-          >
-            {sortLabels[key]}
-            {sort.key === key ? sort.direction === "desc" ? <ArrowDown size={14} /> : <ArrowUp size={14} /> : <ArrowUpDown size={14} />}
-          </button>
+        {tab === "maps" && <span>最佳英雄</span>}
+        {sortKeys.map((key) => (
+          <SortButton key={key} sortKey={key} activeSort={sort} tab={tab} onSort={onSort} />
         ))}
+        <span>{tab === "maps" ? "地图评分" : "英雄评分"}</span>
       </div>
       {rows.map((row, index) => (
         <div className="rankingLine phase6RankingLine" key={`${tab}-${row.key}`}>
@@ -161,14 +143,59 @@ function RankingTable({
             )}
             <strong>{row.name}</strong>
           </span>
+          {tab === "maps" && <BestHeroCell row={row} />}
           <span>{row.matches}</span>
-          <span>{row.wins}</span>
-          <span>{row.losses}</span>
           <span>{formatWinRate(row.winRate)}</span>
           <span>{formatPlayTimeHours(row.playTimeHours)}</span>
-          {tab === "maps" && row.adaptabilityLabel && <em>{row.adaptabilityLabel}</em>}
+          <span>{formatKda(row.kda)}</span>
+          <span>{formatRating(row.rating)}</span>
         </div>
       ))}
     </div>
   );
+}
+
+function SortButton({
+  sortKey,
+  activeSort,
+  tab,
+  onSort,
+}: {
+  sortKey: RankingSortKey;
+  activeSort: RankingSort;
+  tab: RankingTab;
+  onSort: (key: RankingSortKey) => void;
+}) {
+  const label = sortKey === "rating" && tab === "maps" ? "地图评分" : sortLabels[sortKey];
+  return (
+    <button
+      type="button"
+      className={activeSort.key === sortKey ? "active" : ""}
+      onClick={() => onSort(sortKey)}
+      title={`按${label}排序`}
+    >
+      {label}
+      {activeSort.key === sortKey ? activeSort.direction === "desc" ? <ArrowDown size={14} /> : <ArrowUp size={14} /> : <ArrowUpDown size={14} />}
+    </button>
+  );
+}
+
+function BestHeroCell({ row }: { row: RankingRow }) {
+  if (!row.bestHeroName) {
+    return <span className="phase6RankBestHero">-</span>;
+  }
+  return (
+    <span className="phase6RankBestHero">
+      <HeroAvatar heroKey={row.bestHeroGuid || row.bestHeroName} name={row.bestHeroName} />
+      <strong>{row.bestHeroName}</strong>
+    </span>
+  );
+}
+
+function formatKda(value: number) {
+  return value.toFixed(2);
+}
+
+function formatRating(value: string | null) {
+  return value ?? "-";
 }

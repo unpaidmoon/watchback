@@ -9,7 +9,6 @@ import { OnboardingPage } from "./pages/OnboardingPage";
 import { Phase6StyleBoardPage } from "./pages/Phase6StyleBoardPage";
 import { PersonalReviewPage } from "./pages/PersonalReviewPage";
 import { RankingPage } from "./pages/RankingPage";
-import { SyncPage } from "./pages/SyncPage";
 import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
 import { StatusBadge } from "./shared/phase6Components";
 import { phase6NavItems } from "./shared/phase6Shell";
@@ -65,7 +64,6 @@ export function App() {
             <Route path="/ranking" element={<RankingPage />} />
             <Route path="/analytics/friends" element={<FriendAnalyticsPage />} />
             <Route path="/analytics/friends/:bnetId" element={<FriendDetailPage />} />
-            <Route path="/sync" element={<SyncPage />} />
           </Routes>
         </div>
       </main>

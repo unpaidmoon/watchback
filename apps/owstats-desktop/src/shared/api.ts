@@ -12,9 +12,14 @@ import type {
   OnboardingStatus,
   Overview,
   PersonalSeasonReview,
+  PlayerProfile,
+  PlayerSearchOption,
   RankingResponse,
   SeasonAnalysis,
-  SyncSummary
+  SyncSummary,
+  LogoutResult,
+  UpdateCheckResult,
+  UserSettings
 } from "./types";
 
 export function getOverview() {
@@ -27,6 +32,10 @@ export function listMatchFilters() {
 
 export function listMatchTimeline(filters: MatchFilters) {
   return invoke<MatchSummary[]>("list_match_timeline", { filters });
+}
+
+export function searchMatchPlayerOptions(query: string) {
+  return invoke<PlayerSearchOption[]>("search_match_player_options", { query });
 }
 
 export function getMatchDetails(matchId: string) {
@@ -59,6 +68,26 @@ export function getPersonalSeasonReview(season?: number) {
 
 export function getCredentialStatus() {
   return invoke<CredentialStatus>("get_credential_status");
+}
+
+export function getPlayerProfile() {
+  return invoke<PlayerProfile>("get_player_profile");
+}
+
+export function getUserSettings() {
+  return invoke<UserSettings>("get_user_settings");
+}
+
+export function saveUserSettings(settings: UserSettings) {
+  return invoke<UserSettings>("save_user_settings", { settings });
+}
+
+export function logout() {
+  return invoke<LogoutResult>("logout");
+}
+
+export function checkAppUpdate() {
+  return invoke<UpdateCheckResult>("check_app_update");
 }
 
 export function startDashenLogin() {

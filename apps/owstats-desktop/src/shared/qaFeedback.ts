@@ -17,9 +17,9 @@ export const phase6QaPages: QaPageDefinition[] = [
     label: "指挥台",
     regions: [
       NAV_REGION,
-      { id: "CMD-HEADER", label: "指挥台总览" },
-      { id: "CMD-STATUS", label: "登录与数据状态" },
-      { id: "CMD-ACTIONS", label: "同步入口" },
+      { id: "CMD-PROFILE", label: "账号信息" },
+      { id: "CMD-DATA", label: "数据操作" },
+      { id: "CMD-SETTINGS", label: "设置选项" },
     ],
   },
   {
@@ -47,10 +47,10 @@ export const phase6QaPages: QaPageDefinition[] = [
     label: "复盘",
     regions: [
       NAV_REGION,
-      { id: "REV-HEADER", label: "复盘总览" },
-      { id: "REV-SUMMARY", label: "赛季摘要" },
-      { id: "REV-EVIDENCE", label: "复盘证据" },
-      { id: "REV-MAP-CARD", label: "地图分析卡片" },
+      { id: "REV-RANKS", label: "职责段位总览" },
+      { id: "FRD-BOARDS", label: "模型榜单" },
+      { id: "FRD-LINEUP", label: "常见阵容" },
+      { id: "FRD-MAPS", label: "地图分析" },
     ],
   },
   {
@@ -58,20 +58,8 @@ export const phase6QaPages: QaPageDefinition[] = [
     label: "排行",
     regions: [
       NAV_REGION,
-      { id: "RANK-HEADER", label: "排行头部" },
       { id: "RANK-TOOLS", label: "排行工具栏" },
       { id: "RANK-TABLE", label: "排行表格" },
-    ],
-  },
-  {
-    key: "/analytics/friends",
-    label: "分析模型",
-    regions: [
-      NAV_REGION,
-      { id: "FRD-HEADER", label: "分析模型总览" },
-      { id: "FRD-BOARDS", label: "模型榜单" },
-      { id: "FRD-LINEUP", label: "常见阵容" },
-      { id: "FRD-MAPS", label: "地图分析" },
     ],
   },
   {
@@ -82,16 +70,6 @@ export const phase6QaPages: QaPageDefinition[] = [
       { id: "FDT-HEADER", label: "队友详情头部" },
       { id: "FDT-HEROES", label: "常用英雄" },
       { id: "FDT-MATCHES", label: "近期共同对局" },
-    ],
-  },
-  {
-    key: "/sync",
-    label: "同步",
-    regions: [
-      NAV_REGION,
-      { id: "SYNC-HEADER", label: "同步头部" },
-      { id: "SYNC-CONTROL", label: "同步控制" },
-      { id: "SYNC-STATUS", label: "同步状态" },
     ],
   },
 ];

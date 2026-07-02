@@ -1,6 +1,7 @@
 use crate::db::OwDatabase;
 use crate::match_evaluation::refresh_match_evaluations_conn;
 use crate::models::ImportSummary;
+use crate::redaction::redact_sensitive_json;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -66,6 +67,7 @@ pub fn import_payload_value(
     let tx = conn.unchecked_transaction()?;
     upsert_dictionary(&tx, "hero_dict", &lookups.heroes, &now)?;
     upsert_dictionary(&tx, "map_dict", &lookups.maps, &now)?;
+    upsert_profile_card(&tx, payload, &now)?;
 
     for entry in &entries {
         let match_id = string_field(entry, "matchId")
@@ -304,13 +306,15 @@ fn rebuild_match_players_for_season(
             continue;
         }
         let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
-        let friend_ids = current_player_friend_ids(data.get("teammateList"), &current_bnet);
+        let teammate_rows = player_rows_for_side(data, "teammateList");
+        let enemy_rows = player_rows_for_side(data, "enemyList");
+        let friend_ids = current_player_friend_ids(teammate_rows, &current_bnet);
         insert_player_rows(
             tx,
             &match_id,
             season,
             "teammate",
-            data.get("teammateList"),
+            teammate_rows,
             &current_bnet,
             &friend_ids,
             lookups,
@@ -321,13 +325,59 @@ fn rebuild_match_players_for_season(
             &match_id,
             season,
             "enemy",
-            data.get("enemyList"),
+            enemy_rows,
             &current_bnet,
             &HashSet::new(),
             lookups,
             now,
         )?;
     }
+    Ok(())
+}
+
+fn player_rows_for_side<'a>(data: &'a Value, list_name: &str) -> Option<&'a Value> {
+    data.pointer(&format!("/totalCount/{list_name}"))
+        .filter(|value| {
+            value
+                .as_array()
+                .map(|items| !items.is_empty())
+                .unwrap_or(false)
+        })
+        .or_else(|| data.get(list_name))
+}
+
+fn upsert_profile_card(tx: &rusqlite::Transaction<'_>, payload: &Value, now: &str) -> Result<()> {
+    let Some(profile) = payload
+        .pointer("/profile_card/data")
+        .filter(|value| value.is_object())
+    else {
+        return Ok(());
+    };
+    let bnet_id =
+        value_to_string(profile.get("bnetId").unwrap_or(&Value::Null)).unwrap_or_default();
+    if bnet_id.is_empty() {
+        return Ok(());
+    }
+    let display_name = string_field(profile, "name").unwrap_or_else(|| bnet_id.clone());
+    let redacted = redact_sensitive_json(profile);
+    tx.execute(
+        r#"
+        INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(player_id) DO UPDATE SET
+            bnet_id=excluded.bnet_id,
+            display_name=excluded.display_name,
+            raw_json=excluded.raw_json,
+            updated_at=excluded.updated_at
+        "#,
+        params![
+            bnet_id,
+            bnet_id,
+            display_name,
+            serde_json::to_string(&redacted)?,
+            now
+        ],
+    )?;
     Ok(())
 }
 
@@ -354,7 +404,8 @@ fn infer_current_bnet(details: &[Value]) -> Option<String> {
             continue;
         }
         let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
-        let Some(items) = data.get("teammateList").and_then(Value::as_array) else {
+        let Some(items) = player_rows_for_side(data, "teammateList").and_then(Value::as_array)
+        else {
             continue;
         };
         for item in items {

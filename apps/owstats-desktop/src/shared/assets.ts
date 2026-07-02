@@ -1,20 +1,77 @@
 import assetManifest from "../../../../assets/manifest.json";
+import rankManifest from "../../../../assets/ranks/manifest.json";
+import owConfigCache from "../../../../docs/reference/ow_config_cache.json";
+import queryToolConfig from "../../../../docs/reference/res/query_tool.json";
 
 const repoAssetRoot = "/@fs/D:/Codex/OW_data/owstats-local/assets";
+const rankAssetRoot = `${repoAssetRoot}/ranks`;
+const achievementAssetRoot = `${repoAssetRoot}/achievements/token-style`;
 
 type ManifestEntry = {
   key: string;
   name?: string;
   cn_name?: string;
   aliases?: string[];
+  source_url?: string;
+  local_path?: string;
 };
 
 type AssetManifest = {
   heroes: ManifestEntry[];
   maps: ManifestEntry[];
+  perks?: ManifestEntry[];
+};
+
+type RankManifest = {
+  ranks: { key: string; file: string | null }[];
 };
 
 const manifest = assetManifest as AssetManifest;
+const ranks = rankManifest as RankManifest;
+const rankFiles = new Map(ranks.ranks.filter((rank) => rank.file).map((rank) => [rank.key, rank.file as string]));
+
+type QueryToolPerk = {
+  id?: string;
+  guid?: string;
+  name?: string;
+  icon?: string;
+  desc?: string;
+};
+
+type QueryToolConfig = {
+  heroPerkList?: Record<string, QueryToolPerk[]>;
+  perkList?: QueryToolPerk[];
+  heroAttrList?: QueryToolHeroAttr[];
+};
+
+type OwConfigCache = {
+  attrs?: Record<string, { text?: string; type?: string }>;
+};
+
+export type PerkInfo = {
+  id: string;
+  guid: string;
+  name: string;
+  description: string | null;
+  iconUrl: string | null;
+};
+
+type QueryToolHeroAttr = {
+  heroGuid?: string;
+  heroName?: string;
+  valueGuid?: string;
+  valueText?: string;
+  valueType?: string;
+};
+
+export type HeroStatInfo = {
+  guid: string;
+  label: string;
+  type: string | null;
+};
+
+const queryTool = queryToolConfig as QueryToolConfig;
+const owConfig = owConfigCache as OwConfigCache;
 
 const localizedMapAliases: Record<string, string> = {
   阿特利斯: "aatlis",
@@ -72,6 +129,9 @@ function manifestLookup(entries: ManifestEntry[]) {
 
 const heroLookup = manifestLookup(manifest.heroes);
 const mapLookup = new Map([...manifestLookup(manifest.maps), ...Object.entries(localizedMapAliases).map(([name, key]) => [name.toLowerCase(), key] as const)]);
+const perkIconLookup = buildPerkIconLookup(manifest.perks ?? []);
+const perkLookup = buildPerkLookup(queryTool, perkIconLookup);
+const heroStatLookup = buildHeroStatLookup(queryTool, owConfig);
 
 export function normalizeAssetKey(value: string | null | undefined): string | null {
   const normalized = value
@@ -117,4 +177,164 @@ export function mapAssetUrl(mapKey: string | null | undefined): string | null {
 
 export function mapAssetUrls(values: Array<string | null | undefined>): string[] {
   return uniqueUrls(values, mapLookup, "maps", "jpg");
+}
+
+export function rankAssetUrl(rankKey: string | null | undefined): string {
+  const key = normalizeAssetKey(rankKey) ?? "unranked";
+  const file = rankFiles.get(key) ?? rankFiles.get("unranked") ?? "unranked.png";
+  return `${rankAssetRoot}/${file}`;
+}
+
+export function achievementBadgeUrl(achievementKey: string, level: 1 | 2 | 3): string {
+  return `${achievementAssetRoot}/${achievementKey}-token-tier-${level}.png`;
+}
+
+export function resolvePerkInfo(rawGuid: string | number | null | undefined): PerkInfo | null {
+  const keys = perkLookupKeys(rawGuid);
+  for (const key of keys) {
+    const perk = perkLookup.get(key);
+    if (perk) return perk;
+  }
+  return null;
+}
+
+export function perkAssetUrls(values: Array<string | number | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const value of values) {
+    const iconUrl = resolvePerkInfo(value)?.iconUrl;
+    if (!iconUrl || seen.has(iconUrl)) continue;
+    seen.add(iconUrl);
+    urls.push(iconUrl);
+  }
+  return urls;
+}
+
+export function resolveHeroStatInfo(guid: string | number | null | undefined): HeroStatInfo | null {
+  const key = guid == null ? "" : String(guid).trim();
+  if (!key) return null;
+  return heroStatLookup.get(key) ?? null;
+}
+
+function buildPerkLookup(config: QueryToolConfig, iconLookup: Map<string, string>) {
+  const lookup = new Map<string, PerkInfo>();
+  const addPerk = (item: QueryToolPerk) => {
+    const id = normalizeHexId(item.id);
+    const guid = item.guid?.trim() || (id ? decimalStringFromHex(id) : "");
+    if (!id && !guid) return;
+    const parsedName = splitPerkName(item.name, item.desc);
+    const perk: PerkInfo = {
+      id: id ?? guid,
+      guid,
+      name: parsedName.name,
+      description: parsedName.description,
+      iconUrl: localPerkIconUrl(id, guid, iconLookup),
+    };
+    for (const key of [id, guid, guid ? hexStringFromDecimal(guid) : null]) {
+      if (key) lookup.set(key.toLowerCase(), perk);
+    }
+  };
+
+  for (const perks of Object.values(config.heroPerkList ?? {})) {
+    for (const perk of perks) addPerk(perk);
+  }
+  for (const perk of config.perkList ?? []) addPerk(perk);
+  return lookup;
+}
+
+function buildHeroStatLookup(config: QueryToolConfig, cache: OwConfigCache) {
+  const lookup = new Map<string, HeroStatInfo>();
+  for (const [guid, item] of Object.entries(cache.attrs ?? {})) {
+    const label = item.text?.trim();
+    if (!guid || !label) continue;
+    lookup.set(guid, {
+      guid,
+      label,
+      type: item.type?.trim() || null,
+    });
+  }
+  for (const item of config.heroAttrList ?? []) {
+    const guid = item.valueGuid?.trim();
+    const label = item.valueText?.trim();
+    if (!guid || !label) continue;
+    if (!lookup.has(guid)) {
+      lookup.set(guid, {
+        guid,
+        label,
+        type: item.valueType?.trim() || null,
+      });
+    }
+  }
+  return lookup;
+}
+
+function buildPerkIconLookup(entries: ManifestEntry[]) {
+  const lookup = new Map<string, string>();
+  for (const entry of entries) {
+    const url = `${repoAssetRoot}/perks/${entry.key}.png`;
+    for (const key of [entry.key, entry.name, entry.cn_name, entry.source_url, ...(entry.aliases ?? [])]) {
+      if (!key) continue;
+      lookup.set(key.trim().toLowerCase(), url);
+    }
+    const guid = entry.local_path ? entry.local_path.match(/(0x[0-9a-f]+)\.png/i)?.[1] : null;
+    if (guid) lookup.set(guid.toLowerCase(), url);
+  }
+  return lookup;
+}
+
+function localPerkIconUrl(id: string | null, guid: string, iconLookup: Map<string, string>) {
+  for (const key of [id, guid, guid ? hexStringFromDecimal(guid) : null]) {
+    if (!key) continue;
+    const url = iconLookup.get(key.toLowerCase());
+    if (url) return url;
+  }
+  return null;
+}
+
+function perkLookupKeys(rawGuid: string | number | null | undefined) {
+  const raw = rawGuid == null ? "" : String(rawGuid).trim();
+  if (!raw) return [];
+  const keys = [raw.toLowerCase()];
+  const hex = raw.startsWith("0x") || raw.startsWith("0X") ? normalizeHexId(raw) : hexStringFromDecimal(raw);
+  if (hex) keys.push(hex.toLowerCase());
+  return keys;
+}
+
+function splitPerkName(rawName: string | undefined, rawDescription: string | undefined) {
+  const [namePart, descriptionPart] = (rawName ?? "").split(/<br\s*\/?>/i);
+  const name = stripHtml(namePart).trim() || "未知威能";
+  const description = stripHtml(rawDescription ?? descriptionPart ?? "").trim();
+  return { name, description: description || null };
+}
+
+function stripHtml(value: string) {
+  return value.replace(/<[^>]*>/g, "");
+}
+
+function normalizeHexId(value: string | undefined) {
+  const raw = value?.trim();
+  if (!raw) return null;
+  if (!raw.startsWith("0x") && !raw.startsWith("0X")) return null;
+  try {
+    return `0x${BigInt(raw).toString(16).toUpperCase().padStart(16, "0")}`;
+  } catch {
+    return raw;
+  }
+}
+
+function hexStringFromDecimal(value: string) {
+  if (!/^\d+$/.test(value)) return null;
+  try {
+    return `0x${BigInt(value).toString(16).toUpperCase().padStart(16, "0")}`;
+  } catch {
+    return null;
+  }
+}
+
+function decimalStringFromHex(value: string) {
+  try {
+    return BigInt(value).toString(10);
+  } catch {
+    return "";
+  }
 }

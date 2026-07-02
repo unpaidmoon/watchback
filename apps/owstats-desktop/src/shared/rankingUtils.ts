@@ -1,6 +1,6 @@
 import type { RankingRow } from "./types";
 
-export type RankingSortKey = "matches" | "wins" | "losses" | "winRate" | "playTimeHours";
+export type RankingSortKey = "bestHero" | "matches" | "winRate" | "playTimeHours" | "kda" | "rating";
 export type SortDirection = "asc" | "desc";
 
 export type RankingSort = {
@@ -45,8 +45,13 @@ export function toggleRankingSort(current: RankingSort, key: RankingSortKey): Ra
 export function sortRankingRows(rows: RankingRow[], sort: RankingSort) {
   const direction = sort.direction === "desc" ? -1 : 1;
   return [...rows].sort((a, b) => {
-    const valueCompare = compareNumber(a[sort.key], b[sort.key]) * direction;
-    if (valueCompare !== 0) return valueCompare;
+    if (sort.key === "bestHero") {
+      const valueCompare = (a.bestHeroName ?? "").localeCompare(b.bestHeroName ?? "", "zh-Hans-CN") * direction;
+      if (valueCompare !== 0) return valueCompare;
+    } else {
+      const valueCompare = compareSortValue(a, b, sort.key) * direction;
+      if (valueCompare !== 0) return valueCompare;
+    }
     const matchTiebreak = compareNumber(a.matches, b.matches) * -1;
     if (matchTiebreak !== 0) return matchTiebreak;
     const winRateTiebreak = compareNumber(a.winRate, b.winRate) * -1;
@@ -57,4 +62,19 @@ export function sortRankingRows(rows: RankingRow[], sort: RankingSort) {
 
 function compareNumber(a: number, b: number) {
   return a === b ? 0 : a > b ? 1 : -1;
+}
+
+function compareSortValue(a: RankingRow, b: RankingRow, key: Exclude<RankingSortKey, "bestHero">) {
+  if (key === "rating") {
+    return compareNumber(gradeRank(a.rating), gradeRank(b.rating));
+  }
+  return compareNumber(a[key], b[key]);
+}
+
+function gradeRank(grade: string | null) {
+  if (grade === "S") return 4;
+  if (grade === "A") return 3;
+  if (grade === "B") return 2;
+  if (grade === "C") return 1;
+  return 0;
 }

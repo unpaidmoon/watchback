@@ -1,8 +1,9 @@
 use crate::db::OwDatabase;
 use crate::importer::{int_field, string_field};
 use crate::models::{
-    ComparisonMetrics, FilterOption, FilterOptions, MatchDetailView, MatchEvaluationSummary,
-    MatchFilters, MatchPerformanceAward, MatchSummary, PlayerRow, SameRoleComparison,
+    ComparisonMetrics, FilterOption, FilterOptions, HeroStat, MatchDetailView,
+    MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary, PlayerPerk,
+    PlayerRow, PlayerSearchOption, SameRoleComparison,
 };
 use crate::redaction::redact_sensitive_json;
 use anyhow::{Context, Result};
@@ -91,6 +92,38 @@ pub fn list_filter_options(db: &OwDatabase) -> Result<FilterOptions> {
     })
 }
 
+pub fn search_match_players(db: &OwDatabase, query: &str) -> Result<Vec<PlayerSearchOption>> {
+    db.initialize()?;
+    let needle = query.trim();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = db.connect()?;
+    let pattern = format!("%{}%", escape_like(needle));
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT mp.player_name, COUNT(DISTINCT mp.match_id) AS matches, MAX(m.begin_ts) AS latest_begin_ts
+        FROM match_players mp
+        JOIN matches m ON m.match_id = mp.match_id
+        WHERE m.bucket = 'preset'
+          AND TRIM(mp.player_name) <> ''
+          AND mp.player_name LIKE ? ESCAPE '\'
+        GROUP BY mp.player_name
+        ORDER BY matches DESC, latest_begin_ts DESC, mp.player_name
+        LIMIT 10
+        "#,
+    )?;
+    let rows = stmt.query_map(params![pattern], |row| {
+        Ok(PlayerSearchOption {
+            player_name: row.get(0)?,
+            matches: row.get(1)?,
+            latest_begin_ts: row.get(2)?,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
 pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailView> {
     db.initialize()?;
     let conn = db.connect()?;
@@ -163,8 +196,16 @@ pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailVi
     let detail: Value = serde_json::from_str(&detail_text)?;
     let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
     let hero_names = hero_lookup(&conn)?;
-    let teammates = player_rows(data.get("teammateList"), "teammate", &hero_names);
-    let enemies = player_rows(data.get("enemyList"), "enemy", &hero_names);
+    let teammates = player_rows(
+        player_rows_for_side(data, "teammateList"),
+        "teammate",
+        &hero_names,
+    );
+    let enemies = player_rows(
+        player_rows_for_side(data, "enemyList"),
+        "enemy",
+        &hero_names,
+    );
     let team_awards = team_awards_from_match_players(&conn, match_id)?;
     Ok(MatchDetailView {
         match_id: match_id.to_string(),
@@ -221,6 +262,8 @@ fn team_awards_from_match_players(
             target_time_sec: row.get(12)?,
             healing_taken: row.get(13)?,
             damage_taken: row.get(14)?,
+            perks: Vec::new(),
+            hero_stats: Vec::new(),
         })
     })?;
     let players = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -232,11 +275,51 @@ fn team_awards_from_players(players: &[PlayerRow]) -> Vec<MatchPerformanceAward>
         return Vec::new();
     };
     let mut awards = Vec::new();
-    push_award_if_highest(&mut awards, "kill", "击杀最多", "gold", current.kills, players.iter().map(|player| player.kills), true);
-    push_award_if_highest(&mut awards, "damage", "伤害最高", "gold", current.damage, players.iter().map(|player| player.damage), true);
-    push_award_if_highest(&mut awards, "healing", "治疗最高", "gold", current.healing, players.iter().map(|player| player.healing), true);
-    push_award_if_highest(&mut awards, "mitigation", "格挡最多", "gold", current.mitigation, players.iter().map(|player| player.mitigation), true);
-    push_award_if_highest(&mut awards, "death", "死亡最多", "danger", current.deaths, players.iter().map(|player| player.deaths), false);
+    push_award_if_highest(
+        &mut awards,
+        "kill",
+        "击杀最多",
+        "gold",
+        current.kills,
+        players.iter().map(|player| player.kills),
+        true,
+    );
+    push_award_if_highest(
+        &mut awards,
+        "damage",
+        "伤害最高",
+        "gold",
+        current.damage,
+        players.iter().map(|player| player.damage),
+        true,
+    );
+    push_award_if_highest(
+        &mut awards,
+        "healing",
+        "治疗最高",
+        "gold",
+        current.healing,
+        players.iter().map(|player| player.healing),
+        true,
+    );
+    push_award_if_highest(
+        &mut awards,
+        "mitigation",
+        "格挡最多",
+        "gold",
+        current.mitigation,
+        players.iter().map(|player| player.mitigation),
+        true,
+    );
+    push_award_if_highest(
+        &mut awards,
+        "death",
+        "死亡最多",
+        "danger",
+        current.deaths,
+        players.iter().map(|player| player.deaths),
+        false,
+    );
     awards
 }
 
@@ -252,7 +335,11 @@ fn push_award_if_highest(
     if require_positive && value <= 0 {
         return;
     }
-    if values.max().map(|max| value >= max && max > 0).unwrap_or(false) {
+    if values
+        .max()
+        .map(|max| value >= max && max > 0)
+        .unwrap_or(false)
+    {
         awards.push(MatchPerformanceAward {
             code: code.to_string(),
             label: label.to_string(),
@@ -351,6 +438,12 @@ fn append_filters(sql: &mut String, owned: &mut Vec<Box<dyn ToSql>>, filters: &M
         sql.push_str(" AND e.primary_tag = ?");
         owned.push(Box::new(primary_tag));
     }
+    if let Some(player_name) = non_empty(&filters.player_name) {
+        sql.push_str(
+            " AND EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = m.match_id AND mp.player_name = ?)",
+        );
+        owned.push(Box::new(player_name));
+    }
     if let Some(from) = non_empty(&filters.date_from).and_then(|date| begin_bound(&date, false)) {
         sql.push_str(" AND m.begin_ts >= ?");
         owned.push(Box::new(from));
@@ -436,11 +529,68 @@ fn player_rows(
                         target_time_sec: int_field(item, "targetCompetingTime"),
                         healing_taken: int_field(item, "healingTaken"),
                         damage_taken: int_field(item, "damageTaken"),
+                        perks: parse_player_perks(item),
+                        hero_stats: parse_hero_stats(item),
                     })
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn player_rows_for_side<'a>(data: &'a Value, list_name: &str) -> Option<&'a Value> {
+    data.pointer(&format!("/totalCount/{list_name}"))
+        .filter(|value| {
+            value
+                .as_array()
+                .map(|items| !items.is_empty())
+                .unwrap_or(false)
+        })
+        .or_else(|| data.get(list_name))
+}
+
+fn parse_player_perks(item: &Value) -> Vec<PlayerPerk> {
+    item.get("perks")
+        .and_then(Value::as_array)
+        .map(|perks| {
+            perks
+                .iter()
+                .filter_map(|perk| {
+                    let guid = string_field(perk, "guid")?;
+                    Some(PlayerPerk {
+                        guid,
+                        perk_level: int_field(perk, "perkLevel"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_hero_stats(item: &Value) -> Vec<HeroStat> {
+    item.get("statMap")
+        .and_then(Value::as_object)
+        .map(|stats| {
+            let mut rows = stats
+                .iter()
+                .filter_map(|(guid, value)| {
+                    stat_value(value).map(|number| HeroStat {
+                        guid: guid.clone(),
+                        value: number,
+                    })
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| a.guid.cmp(&b.guid));
+            rows
+        })
+        .unwrap_or_default()
+}
+
+fn stat_value(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|number| number as f64))
+        .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
 }
 
 fn hero_lookup(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
@@ -501,6 +651,13 @@ fn non_empty(value: &Option<String>) -> Option<String> {
         .as_ref()
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn begin_bound(date: &str, end_of_day: bool) -> Option<i64> {

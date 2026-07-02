@@ -33,17 +33,40 @@ export function MatchDetailPage() {
     }
   }
 
+  return (
+    <MatchDetailReport
+      detail={detail}
+      loading={loading}
+      error={error}
+      matchId={matchId}
+      onBack={() => navigate("/matches")}
+    />
+  );
+}
+
+type MatchDetailReportProps = {
+  detail: MatchDetailView | null;
+  loading: boolean;
+  error: string | null;
+  matchId?: string | null;
+  onBack?: () => void;
+  embedded?: boolean;
+};
+
+export function MatchDetailReport({ detail, loading, error, matchId, onBack, embedded = false }: MatchDetailReportProps) {
   const detailMapName = detail?.mapName ?? "未知地图";
 
   return (
-    <section className="detailPage phase6DetailPage">
+    <section className={`detailPage phase6DetailPage ${embedded ? "phase6EmbeddedDetailPage" : ""}`}>
       <header className={`detailHero phase6DetailHero ${detail?.result ?? "pending"}`}>
         {detail ? (
           <>
-            <button type="button" className="phase6DetailBackButton" onClick={() => navigate("/matches")}>
-              <ArrowLeft size={18} />
-              返回列表
-            </button>
+            {onBack && (
+              <button type="button" className="phase6DetailBackButton" onClick={onBack}>
+                <ArrowLeft size={18} />
+                返回列表
+              </button>
+            )}
             <div className="phase6DetailBanner">
               <MapPreview className="phase6DetailBannerMap" mapKey={detail.mapGuid ?? detail.mapName} name={detailMapName} />
               <div className="phase6DetailResultPanel">
@@ -76,10 +99,12 @@ export function MatchDetailPage() {
           </>
         ) : (
           <div className="phase6DetailLoadingHeader">
-            <button type="button" className="ghostButton" onClick={() => navigate("/matches")}>
-              <ArrowLeft size={18} />
-              返回列表
-            </button>
+            {onBack && (
+              <button type="button" className="ghostButton" onClick={onBack}>
+                <ArrowLeft size={18} />
+                返回列表
+              </button>
+            )}
             <div>
               <span className="phase6Eyebrow">对局报告</span>
               <h2>{matchId}</h2>

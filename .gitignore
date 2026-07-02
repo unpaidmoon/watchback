@@ -46,6 +46,7 @@ Thumbs.db
 node_modules/
 target/
 apps/owstats-desktop/src-tauri/target-codex-test/
+apps/owstats-desktop/src-tauri/target-codex-review/
 apps/*/src-tauri/gen/
 *.zip
 *.tar.gz
@@ -56,6 +57,11 @@ build/
 # Test artifacts
 court_image_*.png
 court_result.json
+apps/owstats-desktop/.playwright-cli/
+
+# Local reference/data dumps
+data/players/
+docs/reference/
 
 # Docker local deployment files
 docker-compose.yml

@@ -20,10 +20,14 @@ assert.equal(qaPageForPath("/analytics/friends/123").label, "队友详情");
 
 assert.deepEqual(
   qaRegionsForPath("/review").map((region) => region.id),
-  ["NAV-CAPSULE", "REV-HEADER", "REV-SUMMARY", "REV-EVIDENCE", "REV-MAP-CARD"],
+  ["NAV-CAPSULE", "REV-RANKS", "FRD-BOARDS", "FRD-LINEUP", "FRD-MAPS"],
+);
+assert.deepEqual(
+  qaRegionsForPath("/ranking").map((region) => region.id),
+  ["NAV-CAPSULE", "RANK-TOOLS", "RANK-TABLE"],
 );
 
 assert.equal(
-  formatQaFeedbackText({ pageLabel: "复盘", regionId: "REV-EVIDENCE", regionLabel: "复盘证据" }),
-  ["页面：复盘", "区域：REV-EVIDENCE（复盘证据）", "问题：", "期望：", "优先级：P1"].join("\n"),
+  formatQaFeedbackText({ pageLabel: "复盘", regionId: "REV-RANKS", regionLabel: "职责段位总览" }),
+  ["页面：复盘", "区域：REV-RANKS（职责段位总览）", "问题：", "期望：", "优先级：P1"].join("\n"),
 );

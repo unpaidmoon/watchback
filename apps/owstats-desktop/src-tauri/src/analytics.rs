@@ -31,6 +31,7 @@ struct FriendMatchRow {
     mitigation: i64,
     damage_taken: i64,
     healing_taken: i64,
+    group_size: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,7 @@ pub fn get_friend_analytics(
         rows = friend_rows(db, &filters, None)?;
     }
     let aggregates = aggregate_rows(&rows);
+    let intimacy_map = compute_intimacy_scores(&rows);
     let eligible: Vec<FriendAggregate> = aggregates
         .into_iter()
         .filter(|item| item.same_team_matches >= MIN_SAMPLE)
@@ -112,7 +114,7 @@ pub fn get_friend_analytics(
             min_sample: MIN_SAMPLE,
         },
         boards,
-        common_friend_heroes: common_friend_heroes(&rows),
+        common_friend_heroes: common_friend_heroes(&rows, &intimacy_map),
         lineup_combinations: lineup_combinations(db, &filters)?,
     })
 }
@@ -353,7 +355,11 @@ fn friend_rows(
             p.cure,
             p.resist_damage,
             p.damage_taken,
-            p.healing_taken
+            p.healing_taken,
+            (SELECT COUNT(*) FROM match_players sp
+             WHERE sp.match_id = p.match_id
+               AND sp.side = 'teammate'
+               AND (sp.is_current_player = 1 OR sp.is_friend = 1)) AS group_size
         FROM match_players p
         JOIN matches m ON m.match_id = p.match_id
         WHERE p.side = 'teammate'
@@ -392,13 +398,17 @@ fn friend_rows(
             mitigation: row.get(13)?,
             damage_taken: row.get(14)?,
             healing_taken: row.get(15)?,
+            group_size: row.get(16)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
 
-fn common_friend_heroes(rows: &[FriendMatchRow]) -> Vec<CommonFriendHero> {
+fn common_friend_heroes(
+    rows: &[FriendMatchRow],
+    intimacy: &HashMap<String, i64>,
+) -> Vec<CommonFriendHero> {
     #[derive(Default)]
     struct FriendState {
         name: String,
@@ -437,6 +447,7 @@ fn common_friend_heroes(rows: &[FriendMatchRow]) -> Vec<CommonFriendHero> {
                     .then_with(|| a.1.latest_begin_ts.cmp(&b.1.latest_begin_ts))
                     .then_with(|| b.0.cmp(&a.0))
             })?;
+            let intimacy_score = intimacy.get(&bnet_id).copied().unwrap_or(0);
             Some(CommonFriendHero {
                 bnet_id,
                 name: friend.name,
@@ -446,12 +457,14 @@ fn common_friend_heroes(rows: &[FriendMatchRow]) -> Vec<CommonFriendHero> {
                 wins: friend.wins,
                 win_rate: round2(ratio(friend.wins, friend.matches)),
                 latest_begin_ts: friend.latest_begin_ts,
+                intimacy_score,
             })
         })
         .collect::<Vec<_>>();
     items.sort_by(|a, b| {
-        b.matches
-            .cmp(&a.matches)
+        b.intimacy_score
+            .cmp(&a.intimacy_score)
+            .then_with(|| b.matches.cmp(&a.matches))
             .then_with(|| b.latest_begin_ts.cmp(&a.latest_begin_ts))
             .then_with(|| a.name.cmp(&b.name))
     });
@@ -715,6 +728,21 @@ fn aggregate_rows(rows: &[FriendMatchRow]) -> Vec<FriendAggregate> {
     values
 }
 
+fn compute_intimacy_scores(rows: &[FriendMatchRow]) -> HashMap<String, i64> {
+    let mut scores = HashMap::<String, i64>::new();
+    for row in rows {
+        let weight = match row.group_size {
+            2 => 5,
+            3 => 3,
+            4 => 2,
+            5 | 6 => 1,
+            _ => 0,
+        };
+        *scores.entry(row.bnet_id.clone()).or_default() += weight;
+    }
+    scores
+}
+
 fn build_boards(eligible: &[FriendAggregate], bands: &Bands) -> Vec<FriendBoard> {
     vec![
         board(
@@ -727,7 +755,7 @@ fn build_boards(eligible: &[FriendAggregate], bands: &Bands) -> Vec<FriendBoard>
         ),
         board(
             "low_resource_partner",
-            "省资源搭子",
+            "在世华佗",
             "平均受到治疗量低，平均死亡数也低。",
             eligible,
             |item| bands.low_healing(item) && bands.low_deaths(item),
@@ -738,7 +766,7 @@ fn build_boards(eligible: &[FriendAggregate], bands: &Bands) -> Vec<FriendBoard>
         ),
         board(
             "priority_care",
-            "重点照顾对象",
+            "资源黑洞",
             "平均受到治疗量高，平均死亡数也高。",
             eligible,
             |item| bands.high_healing_taken(item) && bands.high_deaths(item),
@@ -747,7 +775,7 @@ fn build_boards(eligible: &[FriendAggregate], bands: &Bands) -> Vec<FriendBoard>
         board(
             "healing_conversion",
             "受疗转化手",
-            "平均受到治疗量不低，同时每 1000 点受疗带来的消灭更高。",
+            "受疗不低，千疗击杀更高。",
             eligible,
             |item| bands.high_healing_taken(item) && bands.high_healing_to_kill(item),
             |item| item.healing_to_kill_rate() * 1000.0 + item.avg_kills() * 100.0,
@@ -775,7 +803,7 @@ fn board(
             .then_with(|| b.same_team_matches.cmp(&a.same_team_matches))
             .then_with(|| a.name.cmp(&b.name))
     });
-    friends.truncate(3);
+    friends.truncate(2);
     FriendBoard {
         key: key.to_string(),
         label: label.to_string(),

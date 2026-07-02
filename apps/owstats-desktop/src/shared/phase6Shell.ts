@@ -17,10 +17,8 @@ export type CommandMetric = {
 export const phase6NavItems: Phase6NavItem[] = [
   { label: "指挥台", path: "/onboarding", title: "登录、同步与数据状态" },
   { label: "对局", path: "/matches", title: "浏览和筛选对局" },
-  { label: "复盘", path: "/review", title: "个人赛季复盘" },
+  { label: "战报", path: "/review", title: "个人赛季战报" },
   { label: "排行", path: "/ranking", title: "英雄与地图排行" },
-  { label: "分析", path: "/analytics/friends", title: "分析模型" },
-  { label: "同步", path: "/sync", title: "赛季同步" },
 ];
 
 export function credentialTone(state: string | null | undefined): StatusTone {

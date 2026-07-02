@@ -19,6 +19,7 @@ export type MatchFilters = {
   result?: string;
   mode?: string;
   primaryTag?: string;
+  playerName?: string;
   dateFrom?: string;
   dateTo?: string;
 };
@@ -49,6 +50,12 @@ export type FilterOption = {
   label: string;
 };
 
+export type PlayerSearchOption = {
+  playerName: string;
+  matches: number;
+  latestBeginTs: number | null;
+};
+
 export type CredentialStatus = {
   state: string;
   message: string;
@@ -59,6 +66,32 @@ export type CredentialStatus = {
 
 export type CredentialLoginResult = {
   status: CredentialStatus;
+};
+
+export type PlayerProfile = {
+  roleId: number | null;
+  playerId: string | null;
+  avatarUrl: string | null;
+  endorsementLevel: number | null;
+  playTimeHours: number | null;
+  title: string | null;
+  refreshedAt: string | null;
+};
+
+export type UserSettings = {
+  theme: "system" | "light" | "dark";
+};
+
+export type LogoutResult = {
+  credentialCleared: boolean;
+  message: string;
+};
+
+export type UpdateCheckResult = {
+  status: string;
+  currentVersion: string;
+  latestVersion: string | null;
+  message: string;
 };
 
 export type CredentialLoginProgress = {
@@ -109,6 +142,18 @@ export type PlayerRow = {
   targetTimeSec: number;
   healingTaken: number;
   damageTaken: number;
+  perks: PlayerPerk[];
+  heroStats: HeroStat[];
+};
+
+export type PlayerPerk = {
+  guid: string;
+  perkLevel: number;
+};
+
+export type HeroStat = {
+  guid: string;
+  value: number;
 };
 
 export type MatchDetailView = {
@@ -200,6 +245,7 @@ export type CommonFriendHero = {
   wins: number;
   winRate: number;
   latestBeginTs: number;
+  intimacyScore: number;
 };
 
 export type LineupMember = {
@@ -377,12 +423,25 @@ export type MapAdaptability = {
 export type PersonalSeasonReview = {
   summary: ReviewSummary;
   baseline: SeasonBaseline;
+  roleSummaries: RoleRankSummary[];
   phase5Highlights: Phase5ReviewHighlights;
   topConclusions: ReviewConclusion[];
   personalBests: PersonalBest[];
   streaks: StreakSummary;
   heroPool: HeroPoolStability;
   maps: MapAdaptability;
+};
+
+export type RoleRankSummary = {
+  roleType: string;
+  roleLabel: string;
+  matches: number;
+  wins: number;
+  winRate: number;
+  kda: number;
+  rankLevel: number;
+  rankSubTier: number;
+  rankKey: string;
 };
 
 export type Phase5ReviewHighlights = {
@@ -397,10 +456,12 @@ export type RankingRow = {
   key: string;
   name: string;
   matches: number;
-  wins: number;
-  losses: number;
   winRate: number;
   playTimeHours: number;
+  kda: number;
+  rating: string | null;
+  bestHeroGuid: string | null;
+  bestHeroName: string | null;
   adaptabilityLabel: string | null;
 };
 

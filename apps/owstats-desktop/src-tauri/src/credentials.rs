@@ -17,8 +17,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub use crate::browser_session::{select_browser, BrowserCandidate};
 pub use crate::credential_store::{
-    credential_status_for_path, redact_sensitive_text as redacted_login_error,
-    save_credentials_atomic, DashenCredentials,
+    clear_credentials_for_path, credential_status_for_path,
+    redact_sensitive_text as redacted_login_error, save_credentials_atomic, DashenCredentials,
 };
 
 const LOGIN_URL: &str =
@@ -35,6 +35,10 @@ pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
 
 pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
     credential_status_for_path(&credential_path(app)?)
+}
+
+pub fn clear_credentials(app: &AppHandle) -> Result<bool> {
+    clear_credentials_for_path(&credential_path(app)?)
 }
 
 pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult> {

@@ -1,4 +1,4 @@
-import { heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey } from "../src/shared/assets.ts";
+import { heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, rankAssetUrl } from "../src/shared/assets.ts";
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
   if (actual !== expected) {
@@ -83,3 +83,14 @@ for (const [mapName, key] of localizedMapExpectations) {
   );
 }
 assertEqual(mapAssetUrl(null), null, "missing map key returns null");
+
+assertEqual(
+  rankAssetUrl("champion"),
+  "/@fs/D:/Codex/OW_data/owstats-local/assets/ranks/champion.png",
+  "rank asset URL uses stable rank key",
+);
+assertEqual(
+  rankAssetUrl("missing-rank"),
+  "/@fs/D:/Codex/OW_data/owstats-local/assets/ranks/unranked.png",
+  "unknown rank falls back to unranked",
+);
