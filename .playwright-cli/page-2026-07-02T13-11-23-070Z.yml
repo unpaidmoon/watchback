@@ -1,0 +1,117 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e7]
+      - generic [ref=e9]:
+        - heading "OWStatsLocal" [level=1] [ref=e10]
+        - paragraph [ref=e11]: 本地优先的守望先锋战绩工作台
+    - navigation "主导航" [ref=e13]:
+      - link "指挥台" [ref=e14] [cursor=pointer]:
+        - /url: "#/onboarding"
+      - link "对局" [ref=e15] [cursor=pointer]:
+        - /url: "#/matches"
+      - link "战报" [ref=e16] [cursor=pointer]:
+        - /url: "#/review"
+      - link "排行" [ref=e17] [cursor=pointer]:
+        - /url: "#/ranking"
+    - generic "全局状态" [ref=e18]:
+      - generic [ref=e19]:
+        - img [ref=e20]
+        - text: 本地数据
+      - button "通知" [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+  - generic [ref=e28]:
+    - generic [ref=e29]:
+      - img [ref=e30]
+      - generic [ref=e32]: 当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。
+    - generic [ref=e34]:
+      - img [ref=e37]
+      - generic [ref=e40]:
+        - heading "未登录玩家" [level=2] [ref=e41]
+        - paragraph [ref=e42]: 暂无头衔
+        - generic "账号摘要" [ref=e43]:
+          - generic [ref=e44]:
+            - generic [ref=e45]: 赞赏等级
+            - strong [ref=e46]: "-"
+          - generic [ref=e47]:
+            - generic [ref=e48]: 游戏时间
+            - strong [ref=e49]: "-"
+      - generic "常用英雄与已激活成就" [ref=e50]:
+        - region "常用英雄" [ref=e51]:
+          - heading "常用英雄" [level=3] [ref=e52]
+          - generic [ref=e53]:
+            - generic [ref=e56]: "--"
+            - generic [ref=e59]: "--"
+            - generic [ref=e62]: "--"
+        - region "成就展示" [ref=e63]:
+          - heading "成就展示" [level=3] [ref=e64]
+          - generic [ref=e65]:
+            - generic [ref=e68]: "--"
+            - generic [ref=e71]: "--"
+            - generic [ref=e74]: "--"
+      - generic [ref=e75]:
+        - region "数据覆盖度" [ref=e76]:
+          - generic [ref=e77]:
+            - generic [ref=e78]:
+              - text: 数据覆盖度
+              - strong [ref=e79]: 0%
+              - paragraph [ref=e80]: 暂无对局数据
+            - generic "数据摘要" [ref=e81]:
+              - generic [ref=e82]:
+                - generic [ref=e83]: 登录凭证
+                - strong [ref=e84]: 待登录
+              - generic [ref=e85]:
+                - generic [ref=e86]: 本地对局
+                - strong [ref=e87]: 0 场
+              - generic [ref=e88]:
+                - generic [ref=e89]: 最近同步
+                - strong [ref=e90]: 暂无同步
+          - generic [ref=e93]:
+            - generic [ref=e94]: 等待数据
+            - strong [ref=e95]: 等待同步
+          - generic "数据检查" [ref=e96]:
+            - generic [ref=e97]:
+              - img [ref=e98]
+              - text: 登录凭证待登录
+            - generic [ref=e101]:
+              - img [ref=e102]
+              - text: 本地数据库待检查
+            - generic [ref=e105]:
+              - img [ref=e106]
+              - text: 当前赛季等待数据
+            - generic [ref=e109]:
+              - img [ref=e110]
+              - text: 对局详情待补全
+            - generic [ref=e113]:
+              - img [ref=e114]
+              - text: 没有待处理失败
+        - region "设置选项" [ref=e117]:
+          - generic [ref=e118]:
+            - generic [ref=e119]:
+              - generic [ref=e120]: 赛季
+              - spinbutton "赛季" [ref=e121]: "22"
+            - button "同步赛季" [disabled] [ref=e122]:
+              - img [ref=e123]
+              - text: 同步赛季
+          - generic [ref=e128]:
+            - button "登录网易大神" [ref=e129] [cursor=pointer]:
+              - img [ref=e130]
+              - text: 登录网易大神
+            - button "检查更新" [ref=e133] [cursor=pointer]:
+              - img [ref=e134]
+              - text: 检查更新
+            - button "退出登录" [disabled] [ref=e137]:
+              - img [ref=e138]
+              - text: 退出登录
+            - button "版本号" [ref=e141] [cursor=pointer]:
+              - img [ref=e142]
+              - text: 版本号
+            - button "日志文件" [ref=e144] [cursor=pointer]:
+              - img [ref=e145]
+              - text: 日志文件
+            - button "数据存放路径" [ref=e148] [cursor=pointer]:
+              - img [ref=e149]
+              - text: 数据存放路径
+            - button "Github地址" [ref=e151] [cursor=pointer]:
+              - img [ref=e152]
+              - text: Github地址

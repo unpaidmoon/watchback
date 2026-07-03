@@ -509,11 +509,18 @@ fn fight_detail_exposes_arena_summary_rounds_and_safe_names() {
         Some("大师 2")
     );
     assert_eq!(arena.summary.teammates[0].kills, 22);
+    assert_eq!(arena.summary.teammates[0].assists, 5);
+    assert_eq!(arena.summary.teammates[0].deaths, 2);
     assert_eq!(arena.summary.teammates[0].damage, 9000);
+    assert_eq!(arena.summary.teammates[0].healing, 1200);
+    assert_eq!(arena.summary.teammates[0].mitigation, 700);
+    assert_eq!(arena.summary.teammates[0].final_hits, 6);
     assert_eq!(arena.summary.teammates[0].damage_taken, 400);
     assert_eq!(arena.summary.teammates[0].healing_taken, 600);
     assert_eq!(arena.summary.teammates[1].damage_taken, 50);
     assert_eq!(arena.summary.teammates[1].healing_taken, 60);
+    assert_eq!(arena.summary.enemies[0].damage_taken, 30);
+    assert_eq!(arena.summary.enemies[0].healing_taken, 40);
     assert_eq!(arena.summary.enemies[1].damage_taken, 70);
     assert_eq!(arena.summary.enemies[1].healing_taken, 80);
     assert_eq!(arena.summary.teammates[0].worth, Some(900));
@@ -537,6 +544,13 @@ fn fight_detail_exposes_arena_summary_rounds_and_safe_names() {
     assert_eq!(arena.rounds[2].result.as_deref(), Some("win"));
     assert_eq!(arena.rounds[0].teammates[0].name, "我方二号");
     assert_eq!(arena.rounds[1].enemies[0].name, "未知玩家");
+    assert_eq!(arena.rounds[2].teammates[0].kills, 22);
+    assert_eq!(arena.rounds[2].teammates[0].damage, 9000);
+    assert_eq!(arena.rounds[2].teammates[0].worth, Some(900));
+    assert_eq!(arena.rounds[2].teammates[0].end_worth, Some(1500));
+    assert!(arena.rounds[2].teammates[0].worth_max);
+    assert_eq!(arena.rounds[2].teammates[0].mod_guids, vec!["mod-last"]);
+    assert_eq!(arena.rounds[2].teammates[0].trait_guids, vec!["trait-last"]);
 }
 
 #[test]

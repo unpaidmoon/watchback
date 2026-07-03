@@ -822,12 +822,7 @@ fn arena_summary_player_rows(
 ) -> Vec<PlayerRow> {
     let source_list = summary_source
         .get(list_name)
-        .filter(|value| {
-            value
-                .as_array()
-                .map(|items| !items.is_empty())
-                .unwrap_or(false)
-        })
+        .filter(|value| value.as_array().is_some_and(|items| !items.is_empty()))
         .or_else(|| total.get(list_name));
     let mut rows = arena_player_rows(source_list, side, name_map, hero_names);
     let aggregates = arena_round_damage_healing_totals(rounds_value, list_name);

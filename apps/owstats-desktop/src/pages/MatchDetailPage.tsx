@@ -1,10 +1,10 @@
-import { AlertCircle, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertCircle, ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMatchDetails } from "../shared/api";
 import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
 import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
-import { arenaRankAssetUrl, resolveArenaModTraitInfo } from "../shared/assets";
+import { arenaRankAssetUrl } from "../shared/assets";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
@@ -339,45 +339,44 @@ function PlayerTable({ title, players, tone }: { title: string; players: PlayerR
     <GlassPanel className={`playerSection phase6PlayerSection ${tone}`} tone="solid">
       <h3>{title}</h3>
       <div className="playerTable phase6PlayerTable" aria-label={`${title}玩家数据`}>
-        {players.map((player, index) => (
-          <PlayerCard player={player} index={index} highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()} key={playerKeyFor(player, index)} />
-        ))}
+        {players.map((player, index) => {
+          const playerKey = playerKeyFor(player, index);
+          return (
+            <PlayerCard
+              player={player}
+              highlights={highlights.get(playerKey) ?? new Set()}
+              key={playerKey}
+            />
+          );
+        })}
       </div>
     </GlassPanel>
   );
 }
 
-function PlayerCard({ player, highlights }: { player: PlayerRow; index: number; highlights: Set<HighlightMetric> }) {
-  const [expanded, setExpanded] = useState(false);
-  const expandable = hasArenaExpansion(player);
+function PlayerCard({ player, highlights }: { player: PlayerRow; highlights: Set<HighlightMetric> }) {
   const rankIcon = arenaRankAssetUrl(player.rankKey);
   const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
   return (
-    <article className={`phase6PlayerCard ${expanded ? "phase7PlayerExpanded" : ""}`}>
-      <button
-        type="button"
-        className="phase7PlayerCardMain"
-        onClick={() => expandable && setExpanded((value) => !value)}
-        aria-expanded={expandable ? expanded : undefined}
-      >
+    <article className="phase6PlayerCard">
+      <div className="phase7PlayerCardMain">
         <span className="phase6PlayerPortrait">
           <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} />
         </span>
         <span className="phase6PlayerStats">
           <header>
-            <span className="phase7PlayerNameLine">
-              <strong>{player.name}</strong>
-              {(rankIcon || rankTierLabel) && (
-                <span className="phase7ArenaRankBadge">
-                  {rankIcon && <img src={rankIcon} alt="" />}
-                  {rankTierLabel}
-                </span>
-              )}
+            <span className="phase7PlayerIdentity">
+              <span className="phase7PlayerNameLine">
+                <strong>{player.name}</strong>
+                {(rankIcon || rankTierLabel) && (
+                  <span className="phase7ArenaRankBadge">
+                    {rankIcon && <img src={rankIcon} alt="" />}
+                    {rankTierLabel}
+                  </span>
+                )}
+              </span>
+              <span className="phase7PlayerHeroName">{player.heroName}</span>
             </span>
-            <span>
-              {player.heroName}
-            </span>
-            {expandable && <span className="phase7ExpandIcon">{expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</span>}
           </header>
           <span className="phase6PlayerMetricGrid">
             <span>
@@ -402,61 +401,9 @@ function PlayerCard({ player, highlights }: { player: PlayerRow; index: number; 
             </span>
           </span>
         </span>
-      </button>
-      {expanded && <ArenaPlayerExpansion player={player} />}
+      </div>
     </article>
   );
-}
-
-function ArenaPlayerExpansion({ player }: { player: PlayerRow }) {
-  return (
-    <div className="phase7ArenaExpansion">
-      <div className="phase7ArenaEconomy">
-        <span>经济</span>
-        <strong className={player.worthMax ? "phase6StatHighlight" : ""}>{formatEconomy(player)}</strong>
-      </div>
-      <ArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} fallbackName="待补充特质" />
-      <ArenaSlotGroup title="装备" guids={player.modGuids} slots={6} fallbackName="待补充异能" />
-    </div>
-  );
-}
-
-function ArenaSlotGroup({ title, guids, slots, fallbackName }: { title: string; guids: string[]; slots: number; fallbackName: string }) {
-  return (
-    <div className="phase7ArenaSlotGroup">
-      <span>{title}</span>
-      <div className="phase7ArenaSlots">
-        {Array.from({ length: slots }).map((_, index) => {
-          const guid = guids[index];
-          const info = resolveArenaModTraitInfo(guid);
-          return (
-            <span className={`phase7ArenaSlot ${guid ? "filled" : ""}`} key={`${title}-${index}`}>
-              {guid && info?.iconUrl && <img src={info.iconUrl} alt={info.name} />}
-              {guid && (
-                <span className="phase6PerkTooltipPanel" role="tooltip">
-                  <strong>{info?.name ?? fallbackName}</strong>
-                  {info?.description && <small>{info.description}</small>}
-                </span>
-              )}
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function hasArenaExpansion(player: PlayerRow): boolean {
-  return player.worth !== null || player.endWorth !== null || player.modGuids.length > 0 || player.traitGuids.length > 0;
-}
-
-function formatEconomy(player: PlayerRow): string {
-  if (player.worth !== null && player.endWorth !== null && player.worth !== player.endWorth) {
-    return `${player.worth} -> ${player.endWorth}`;
-  }
-  if (player.endWorth !== null) return String(player.endWorth);
-  if (player.worth !== null) return String(player.worth);
-  return "-";
 }
 
 function Highlight({ value, active }: { value: number; active: boolean }) {

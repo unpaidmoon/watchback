@@ -1,11 +1,11 @@
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, CircleDollarSign } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchTimeline } from "../features/matches/MatchTimeline";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
 import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
-import { arenaRankAssetUrl, resolvePerkInfo } from "../shared/assets";
+import { arenaRankAssetUrl, resolveArenaModTraitInfo, resolvePerkInfo } from "../shared/assets";
 import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
@@ -346,12 +346,28 @@ function CompactMatchDetail({ detail, loading, error, matchId }: { detail: Match
 function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; loading: boolean }) {
   const arena = detail.arenaDetail;
   const [selectedKey, setSelectedKey] = useState("summary");
+  const [expandedCompactArenaPlayerKeys, setExpandedCompactArenaPlayerKeys] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setSelectedKey("summary");
+    setExpandedCompactArenaPlayerKeys(new Set());
   }, [detail.matchId]);
 
   if (!arena) return null;
+
+  function selectCompactArenaSlice(nextKey: string) {
+    setSelectedKey(nextKey);
+    setExpandedCompactArenaPlayerKeys(new Set());
+  }
+
+  function toggleCompactArenaPlayer(playerKey: string) {
+    setExpandedCompactArenaPlayerKeys((current) => {
+      const next = new Set(current);
+      if (next.has(playerKey)) next.delete(playerKey);
+      else next.add(playerKey);
+      return next;
+    });
+  }
 
   const selected =
     selectedKey === "summary"
@@ -363,7 +379,7 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
         <button
           type="button"
           className={`phase7ArenaTab summary ${selected.key === arena.summary.key ? "active" : ""}`}
-          onClick={() => setSelectedKey(arena.summary.key)}
+          onClick={() => selectCompactArenaSlice(arena.summary.key)}
         >
           <span>{arena.summary.label}</span>
         </button>
@@ -371,7 +387,7 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
           <button
             type="button"
             className={`phase7ArenaTab ${round.result ?? "neutral"} ${selected.key === round.key ? "active" : ""}`}
-            onClick={() => setSelectedKey(round.key)}
+            onClick={() => selectCompactArenaSlice(round.key)}
             key={round.key}
           >
             <span>{formatArenaTabLabel(round)}</span>
@@ -403,9 +419,25 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
         </div>
 
         <div className="phase6CompactPlayers" aria-label="角斗双方玩家数据" key={selected.key}>
-          <CompactTeam title="队友" tone="team" players={selected.teammates} showPerks={false} />
+          <CompactTeam
+            title="队友"
+            tone="team"
+            players={selected.teammates}
+            showPerks={false}
+            economyMode={selected.key === "summary" ? "final" : "round"}
+            expandedPlayerKeys={expandedCompactArenaPlayerKeys}
+            onTogglePlayer={toggleCompactArenaPlayer}
+          />
           <div className="phase6CompactVs">VS</div>
-          <CompactTeam title="对手" tone="enemy" players={selected.enemies} showPerks={false} />
+          <CompactTeam
+            title="对手"
+            tone="enemy"
+            players={selected.enemies}
+            showPerks={false}
+            economyMode={selected.key === "summary" ? "final" : "round"}
+            expandedPlayerKeys={expandedCompactArenaPlayerKeys}
+            onTogglePlayer={toggleCompactArenaPlayer}
+          />
         </div>
         {selected.teammates.length + selected.enemies.length === 0 && <div className="emptyState">该回合暂无玩家明细。</div>}
       </div>
@@ -427,11 +459,17 @@ function CompactTeam({
   players,
   tone,
   showPerks = true,
+  economyMode,
+  expandedPlayerKeys,
+  onTogglePlayer,
 }: {
   title: string;
   players: PlayerRow[];
   tone: "team" | "enemy";
   showPerks?: boolean;
+  economyMode?: "final" | "round";
+  expandedPlayerKeys?: ReadonlySet<string>;
+  onTogglePlayer?: (playerKey: string) => void;
 }) {
   const highlights = playerHighlightMap(players);
   return (
@@ -440,9 +478,17 @@ function CompactTeam({
       <div className="phase6CompactPlayerRows">
         {players.map((player, index) => {
           const key = compactPlayerKey(player, index);
+          const expanded = expandedPlayerKeys?.has(key) ?? false;
           return (
             <div className="phase6CompactPlayerBlock" key={key}>
-              <CompactPlayerRow player={player} showPerks={showPerks} highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()} />
+              <CompactPlayerRow
+                player={player}
+                showPerks={showPerks}
+                highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()}
+                expanded={expanded}
+                onToggle={onTogglePlayer ? () => onTogglePlayer(key) : undefined}
+              />
+              {expanded && economyMode && <CompactArenaPlayerExpansion player={player} economyMode={economyMode} />}
             </div>
           );
         })}
@@ -451,7 +497,19 @@ function CompactTeam({
   );
 }
 
-function CompactPlayerRow({ player, showPerks = true, highlights }: { player: PlayerRow; showPerks?: boolean; highlights: Set<HighlightMetric> }) {
+function CompactPlayerRow({
+  player,
+  showPerks = true,
+  highlights,
+  expanded = false,
+  onToggle,
+}: {
+  player: PlayerRow;
+  showPerks?: boolean;
+  highlights: Set<HighlightMetric>;
+  expanded?: boolean;
+  onToggle?: () => void;
+}) {
   const rankIcon = arenaRankAssetUrl(player.rankKey);
   const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
   const perks = showPerks
@@ -460,8 +518,8 @@ function CompactPlayerRow({ player, showPerks = true, highlights }: { player: Pl
         return info ? [info] : [];
       })
     : [];
-  return (
-    <article className="phase6CompactPlayerRow">
+  const rowContent = (
+    <>
       <span className="phase6CompactAvatarPlate">
         <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
       </span>
@@ -515,8 +573,86 @@ function CompactPlayerRow({ player, showPerks = true, highlights }: { player: Pl
         <small>最后一击</small>
         <strong>{player.finalHits}</strong>
       </span>
-    </article>
+    </>
   );
+
+  if (onToggle) {
+    return (
+      <button
+        type="button"
+        className="phase6CompactPlayerRow phase7CompactPlayerExpandable"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={`${player.name}${expanded ? "收起角斗详情" : "展开角斗详情"}`}
+      >
+        {rowContent}
+      </button>
+    );
+  }
+
+  return <article className="phase6CompactPlayerRow">{rowContent}</article>;
+}
+
+function CompactArenaPlayerExpansion({ player, economyMode }: { player: PlayerRow; economyMode: "final" | "round" }) {
+  return (
+    <div className="phase7CompactArenaExpansion">
+      <div className="phase7CompactArenaEconomy">
+        <span className="phase7CompactArenaMoneyIcon" aria-hidden="true">
+          <CircleDollarSign size={46} strokeWidth={1.8} />
+        </span>
+        <strong className={player.worthMax ? "phase6StatHighlight" : ""}>{formatCompactArenaEconomy(player, economyMode)}</strong>
+        <span className="phase7CompactArenaMoneyLabel">本场资金</span>
+      </div>
+      <CompactArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} fallbackName="待补充特质" />
+      <CompactArenaSlotGroup title="装备" guids={player.modGuids} slots={6} fallbackName="待补充异能" />
+    </div>
+  );
+}
+
+function CompactArenaSlotGroup({ title, guids, slots, fallbackName }: { title: string; guids: string[]; slots: number; fallbackName: string }) {
+  const variant = slots === 4 ? "trait" : "mod";
+  return (
+    <div className={`phase7ArenaSlotGroup ${variant}`}>
+      <span>{title}</span>
+      <div className="phase7ArenaSlots">
+        {Array.from({ length: slots }).map((_, index) => {
+          const guid = guids[index];
+          const info = resolveArenaModTraitInfo(guid);
+          return (
+            <span
+              className={`phase7ArenaSlot ${variant} ${guid ? "filled" : ""}`}
+              key={`${title}-${index}`}
+              tabIndex={guid ? 0 : undefined}
+              aria-label={guid ? info?.name ?? fallbackName : undefined}
+            >
+              {guid && info?.iconUrl && <img src={info.iconUrl} alt={info.name} />}
+              {guid && variant === "trait" && <span className="phase7ArenaSlotName">{info?.name ?? fallbackName}</span>}
+              {guid && (
+                <span className="phase6PerkTooltipPanel" role="tooltip">
+                  <strong>{info?.name ?? fallbackName}</strong>
+                  {info?.description && <small>{info.description}</small>}
+                </span>
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatCompactArenaEconomy(player: PlayerRow, mode: "final" | "round"): string {
+  if (mode === "final") {
+    if (player.endWorth !== null) return String(player.endWorth);
+    if (player.worth !== null) return String(player.worth);
+    return "-";
+  }
+  if (player.worth !== null && player.endWorth !== null && player.worth !== player.endWorth) {
+    return `${player.worth} -> ${player.endWorth}`;
+  }
+  if (player.endWorth !== null) return String(player.endWorth);
+  if (player.worth !== null) return String(player.worth);
+  return "-";
 }
 
 function CompactHighlight({ value, active }: { value: number; active: boolean }) {

@@ -38,9 +38,9 @@ assert.equal(styleSource.includes("grid-template-columns: 380px minmax(0, 1fr)")
 assert.equal(styleSource.includes("grid-template-columns: 1fr"), true, "compact player teams should stack vertically");
 assert.equal(styleSource.includes(".phase6CompactDetailScroll"), true, "compact detail should have a scrollable content body");
 
-assert.equal(matchesPageSource.includes("expandedPlayerKey"), false, "compact detail should remove player insight expansion state");
-assert.equal(matchesPageSource.includes("expandedPlayerKeys"), false, "compact detail should remove multi-card expansion state");
-assert.equal(matchesPageSource.includes("Set<string>"), false, "compact detail should not store expanded player cards");
+assert.equal(matchesPageSource.includes("expandedPlayerKey,"), false, "compact detail should remove the old player insight expansion state");
+assert.equal(matchesPageSource.includes("expandedCompactArenaPlayerKeys"), true, "compact arena detail may store arena player expansion state");
+assert.equal(matchesPageSource.includes("toggleCompactArenaPlayer"), true, "compact arena detail should use an arena-specific expansion toggle");
 assert.equal(matchesPageSource.includes("phase6CompactHeroButton"), false, "compact detail player rows should no longer limit expansion to avatar-only buttons");
 assert.equal(matchesPageSource.includes("phase6CompactPlayerToggle"), false, "compact detail player rows should not be clickable expansion controls");
 assert.equal(matchesPageSource.includes("CompactPlayerInsightCard"), false, "compact detail should remove the slide-out hero stat card");
@@ -55,6 +55,8 @@ assert.equal(matchesPageSource.includes("player.finalHits"), true, "compact deta
 assert.equal(matchesPageSource.includes("最后一击"), true, "compact detail player rows should label final hits in Chinese");
 assert.equal(matchesPageSource.includes("player.mitigation"), true, "compact detail should render raw mitigation values in player rows");
 assert.equal(matchesPageSource.includes("formatCompactNumber(player.mitigation)"), false, "compact detail should not compact mitigation values in player rows");
+assert.equal(matchesPageSource.includes("phase7CompactExpandButton"), false, "compact arena rows should not use a separate expansion button");
+assert.equal(matchesPageSource.includes("phase7CompactPlayerExpandable"), true, "compact arena rows should restore row-click expansion");
 assert.equal(styleSource.includes("minmax(96px, 0.34fr)"), true, "player rows should reserve a compact final-hit column");
 
 assert.equal(matchesPageSource.includes("compactHeroStats"), false, "compact detail should remove hero stat card helpers");

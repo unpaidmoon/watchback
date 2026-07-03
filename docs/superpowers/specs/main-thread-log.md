@@ -516,3 +516,177 @@ Send a narrow correction prompt. Preserve the useful list-entry behavior, but
 restore `角斗汇总` detail semantics to `totalCount`, replace new English arena UI
 labels with Chinese, and either remove or explicitly quarantine unrelated
 scope-expansion changes for a later slice.
+
+## 2026-07-02 Phase 7 Arena Expansion Slice 1
+
+Goal:
+Review the first arena player expansion-card behavior slice.
+
+Decision:
+Accept the behavior slice at main-thread spot-check level. The implementation
+keeps the work local to the full match detail page and does not enable compact
+arena expansion.
+
+Execution result:
+- `MatchDetailReport` owns `expandedArenaPlayerKeys`.
+- Multiple arena player rows can be expanded at the same time.
+- Switching selected arena slice or match resets the expanded set.
+- Full arena detail passes `allowExpansion={true}`.
+- Normal match detail passes `allowExpansion={false}`.
+- Compact detail remains unchanged.
+- The expand affordance shows Chinese `展开` / `收起` text with an arrow icon.
+
+Verification reported:
+- `npx tsx scripts/arenaDetailFormat.test.ts`
+- `npm test`
+- `npm run build`
+- `git diff --check`
+
+Main-thread spot check:
+- The diff only touches `MatchDetailPage.tsx`, `styles.css`, and
+  `scripts/arenaDetailFormat.test.ts`.
+- The previous per-row local `useState(false)` expansion state is removed.
+- Source-level tests assert full arena detail enables expansion and compact
+  detail does not expose `phase7ExpandIcon`.
+
+Remaining risk:
+This is source-level verification only; no browser click test or screenshot has
+verified the full interaction. Also, all full arena rows currently show an
+expand affordance when arena expansion is enabled, even if the row has sparse
+expanded content.
+
+Next step:
+Proceed to Slice 2 for expansion content rules: verify summary uses `totalCount`
+data, round views use round data, empty slots stay reserved without visible
+empty text, missing mappings stay Chinese-only, and switching views continues to
+collapse expanded rows.
+
+## 2026-07-02 Phase 7 Arena Expansion Slice 2
+
+Goal:
+Review the arena expansion-card content-rule slice.
+
+Decision:
+Accept the slice at main-thread spot-check level. The implementation fixes the
+highest-risk content issue by ensuring `角斗汇总` player rows and expansion fields
+come from `totalCount`, while round views keep using their own round data.
+
+Execution result:
+- `arena_summary_player_rows(...)` now reads `totalCount` lists directly instead
+  of preferring the last arena round.
+- Tests assert summary `kills`, `damage`, economy fields, `modGuids`, and
+  `traitGuids` come from `totalCount`.
+- Tests assert round 3 keeps its own economy and guid values.
+- Full arena detail passes `economyMode="final"` for `角斗汇总` and
+  `economyMode="round"` for individual rounds.
+- Summary economy displays `endWorth` first, then `worth`; round economy keeps
+  the `worth -> endWorth` transition when both values differ.
+- Fixed slots remain four `traitGuids` slots and six `modGuids` slots.
+- Missing slot mappings use Chinese fallback labels and do not display raw guid
+  text.
+
+Reported verification:
+- `cargo fmt --check`
+- `cargo test --tests`
+- `npx tsx scripts/arenaDetailFormat.test.ts`
+- `npx tsx scripts/phase6Assets.test.ts`
+- `npm test`
+- `npm run build`
+- `git diff --check`
+
+Main-thread spot check:
+- The relevant diffs are in `queries.rs`, `import_baseline.rs`,
+  `MatchDetailPage.tsx`, and `arenaDetailFormat.test.ts`.
+- The code-level checks match the requested content rules.
+
+Remaining risk:
+The slot and tooltip behavior is still verified by source-level assertions, not
+by browser interaction or screenshot review. Tooltip positioning and compact
+behavior remain out of scope.
+
+Next step:
+Plan the next slice around visual verification and tooltip/slot usability before
+asset mapping is completed, so missing mappings can be inspected safely in the
+UI with Chinese fallback labels.
+
+## 2026-07-02 Phase 7 Arena Expansion Slice 3
+
+Goal:
+Review the arena expansion-card visual and tooltip usability slice.
+
+Decision:
+Accept the slice at main-thread spot-check level. The full arena detail
+expansion card is now visually usable enough to support the next asset-mapping
+work, while compact detail and normal detail remain without expansion entry.
+
+Execution result:
+- Expanded arena rows keep player identity and the expand/collapse control in
+  separate header columns.
+- Expanded content is organized as `经济` / `异能` / `装备` on desktop and stacks
+  into one column below 760px.
+- Multiple expanded rows use visible overflow and extra spacing.
+- Slot groups keep four trait slots and six mod slots with empty visual
+  placeholders instead of empty-state copy.
+- Slot tooltips show Chinese fallback names and do not display raw guid text.
+- Compact match detail and normal match detail still do not expose the arena
+  expansion affordance.
+
+Reported verification:
+- `npx tsx scripts/arenaDetailFormat.test.ts`
+- `npm test`
+- `npm run build`
+- `git diff --check`
+- `npx playwright test scripts/arenaDetailVisualCheck.spec.mjs --reporter=line`
+
+Main-thread spot check:
+- The relevant visual diffs are in `MatchDetailPage.tsx`, `styles.css`,
+  `arenaDetailFormat.test.ts`, and the new Playwright visual script.
+- Screenshot outputs exist for summary expansion, tooltip description, round
+  expansion, narrow expansion, normal detail without expansion, and compact
+  detail without expansion.
+- UTF-8 source text in the visual script reads correctly via Python even though
+  PowerShell output can render the Chinese mock text incorrectly.
+
+Remaining risk:
+At 720px width, the expansion content stacks correctly, but the row metric values
+above the expansion card can still truncate with ellipses. This is a polish item
+for the next visual pass, not a blocker for using the card to continue mapping
+assets. The visual check still runs in Vite + Chromium with a sanitized Tauri
+mock, not the native Tauri WebView.
+
+Next step:
+Proceed to the asset/mapping-oriented slice using the now-visible slots. Keep
+the same privacy rule: missing mappings may show only Chinese fallback text, not
+raw guid values.
+
+## 2026-07-03 Phase 7 Arena Compact Expansion Review
+
+Goal:
+Review the follow-up change that restores compact-panel row-click expansion and
+changes arena summary player data back to the last-round projection.
+
+Decision:
+Accept. The compact-panel row-click expansion and the summary last-round
+projection are intentional product-direction changes requested and personally
+verified by the user. The full match-detail arena expansion card may be removed
+for this direction; this is no longer treated as a blocking regression.
+
+Accepted parts:
+- Compact arena detail keeps expansion state in `MatchesPage.tsx`.
+- Clicking the whole compact player row toggles the arena expansion content.
+- There is no separate compact `展开/收起` button.
+- `aria-expanded` and focus styling are preserved for compact arena rows.
+- Switching compact arena slice or match clears the expanded compact rows.
+- Backend summary player rows now use the last arena round when it has player
+  lists, while damage taken and healing taken remain round-aggregate overrides.
+
+Scope clarification:
+- The user explicitly confirmed this change was their own suggestion and was
+  personally accepted in desktop verification.
+- Full-detail arena expansion removal is therefore an accepted scope change for
+  this slice, not a required correction.
+- Future prompts should not ask execution threads to restore full-detail
+  expansion unless the product direction changes again.
+
+Verification checked by main thread:
+- `git diff --check` exits 0 with only LF/CRLF warnings.
