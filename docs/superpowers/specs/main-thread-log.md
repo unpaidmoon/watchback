@@ -690,3 +690,30 @@ Scope clarification:
 
 Verification checked by main thread:
 - `git diff --check` exits 0 with only LF/CRLF warnings.
+
+## 2026-07-03 Phase 8 Command Center Season Sync Design
+
+Goal:
+Start Phase 8 and move the command center from a settings-like page toward a
+season data sync and local multi-season status workspace.
+
+Accepted product direction:
+- Phase 7 arena asset calibration remains a tail item and does not block Phase
+  8.
+- Phase 8 priority is season data fetching and multi-season SQLite
+  compatibility.
+- Supported seasons are fixed to S21, S22, and S23.
+- Do not add a global current-season state.
+- Each page keeps its own season filter.
+- Do not add a sync-all-seasons action.
+- The command center owns login state, single-season sync, and local season
+  health/status display.
+
+Design doc:
+- `docs/superpowers/specs/2026-07-03-phase-8-command-center-season-sync-design.md`
+
+First implementation direction:
+Build fixed S21/S22/S23 season cards on the command center, each with local data
+counts, detail coverage, arena/normal split, failed detail count, latest sync
+time, and a single-season sync button. Keep existing pages compatible with their
+own season selection.
