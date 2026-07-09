@@ -717,3 +717,120 @@ Build fixed S21/S22/S23 season cards on the command center, each with local data
 counts, detail coverage, arena/normal split, failed detail count, latest sync
 time, and a single-season sync button. Keep existing pages compatible with their
 own season selection.
+
+## 2026-07-03 Phase 8 Season JSON Dump Slice 1
+
+Goal:
+Review the local diagnostic entry for dumping a fetched season payload to
+`data/players`.
+
+Decision:
+Accept the slice. It restores a practical full-season JSON dump path without
+reimplementing the request protocol, while keeping the existing SQLite sync path
+on the same fetch flow.
+
+Execution result:
+- Added `apps/owstats-desktop/src-tauri/src/bin/dump_season_json.rs`.
+- Added exported APIs `dump_season_json` and `dump_season_json_with_base_url`.
+- Refactored `sync_season_with_base_url` to reuse
+  `fetch_season_parts_with_base_url`.
+- Dump output path is `data/players/local_s{season}_full_season.json`.
+- The `local_` filename is intentional to avoid putting local role ids in the
+  filename.
+- Fixture coverage includes normal list/detail, fight list/detail, and a detail
+  failure.
+- Dump payload recursively removes fields whose names include `token`, `cookie`,
+  `authorization`, or `credential`.
+
+Verification checked by main thread:
+- `cargo fmt --check`
+- `cargo test --test sync_client`
+- `cargo build --bin dump_season_json`
+- `cargo test --tests`
+- `git diff --check` exits 0 with only LF/CRLF warnings.
+
+Privacy notes:
+- No real upstream fetch was run in this review.
+- No local credential or browser profile file was read manually.
+- The fixture asserts dumped JSON does not contain token/cookie/customerToken
+  field names or dummy secret values.
+
+Next step:
+Proceed to the command-center season status cards, using this dump command only
+as a local diagnostic path. Real dumped JSON files must remain uncommitted unless
+the user explicitly requests otherwise.
+
+## 2026-07-03 Phase 8 Command Center Season Cards Slice 2
+
+Goal:
+Review the command-center product slice that adds fixed S21/S22/S23 local season
+status cards and single-season sync buttons.
+
+Decision:
+Accept the slice. The command center now exposes the fixed three-season local
+status surface without adding sync-all, global current-season state, or UI access
+to the diagnostic dump command.
+
+Execution result:
+- `OnboardingStatus` now includes `seasonStatuses`.
+- Backend returns fixed S21, S22, and S23 season status rows.
+- Each season status includes match/detail counts, normal/arena split, failed
+  detail count, latest local timestamp, and detail coverage percent.
+- Command center renders three fixed season cards.
+- Each card has its own `同步 Sxx` action through the existing `syncSeason`
+  command.
+- While one season is syncing, the active season card shows progress and other
+  season sync buttons are disabled.
+- Existing login, logout, update check, credential status, profile summary, and
+  data-health surfaces remain in place.
+
+Verification checked by main thread:
+- `cargo fmt --check`
+- `cargo test --test phase8_command_center`
+- `npx tsx scripts/phase6Shell.test.ts`
+- `cargo test --tests`
+- `cargo build --bin dump_season_json`
+- `npm test`
+- `npm run build`
+- `git diff --check` exits 0 with only LF/CRLF warnings.
+
+Privacy notes:
+- No real upstream sync was run during review.
+- No local credential or browser profile file was read manually.
+- The command-center UI does not expose `dump_season_json` or any token-like
+  value.
+
+Remaining risk:
+No Playwright or native Tauri visual screenshot was run for the new three-card
+layout. Source tests and TypeScript build cover structure and compilation, but a
+later visual pass should inspect narrow-width card wrapping and real-data text
+lengths.
+
+Next step:
+Proceed to Phase 8 multi-season compatibility review across existing pages:
+matches, review, ranking, and friend analytics should continue using their own
+season filters without mixing S21/S22/S23 data.
+
+## 2026-07-09 Phase 8 Multi-Season Page Compatibility Design
+
+Goal:
+Document the next development phase after fixed S21/S22/S23 command-center
+sync: make existing pages work correctly when multiple seasons coexist in the
+same SQLite database.
+
+Accepted product direction:
+- Keep S21, S22, and S23 as the fixed supported seasons.
+- Do not add global current-season state.
+- Do not add sync-all-seasons.
+- Keep the command center as login, single-season sync, and local season health
+  only; it must not drive page filters.
+- Each product page owns its own season selection.
+- Remove old S22-only assumptions from page defaults and tests.
+
+Design doc:
+- `docs/superpowers/specs/2026-07-09-phase-8-multi-season-page-compatibility-design.md`
+
+First implementation direction:
+Start with backend multi-season isolation tests before changing UI. Then adapt
+personal review, ranking, friend analytics, and matches/detail behavior in
+narrow slices, preserving Chinese-only visible UI text and privacy constraints.

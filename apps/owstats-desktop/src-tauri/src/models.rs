@@ -380,6 +380,34 @@ pub struct SyncProgress {
     pub latest_errors: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerTargetStatus {
+    pub state: String,
+    pub input_bnet: Option<String>,
+    pub resolved_bnet: Option<String>,
+    pub bound_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BindPlayerTargetRequest {
+    pub bnet: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BindPlayerTargetResult {
+    pub status: PlayerTargetStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearPlayerTargetResult {
+    pub cleared: bool,
+    pub status: PlayerTargetStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonalReviewRequest {
@@ -564,6 +592,7 @@ pub struct OnboardingStatus {
     pub can_enter_review: bool,
     pub credential_status: CredentialStatus,
     pub local_data: LocalDataStatus,
+    pub season_statuses: Vec<SeasonDataStatus>,
     pub health: DataHealthStatus,
 }
 
@@ -641,6 +670,19 @@ pub struct LocalDataStatus {
     pub detail_matches: i64,
     pub last_synced_or_imported_at: Option<String>,
     pub freshness_risk: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonDataStatus {
+    pub season: i64,
+    pub match_count: i64,
+    pub detail_count: i64,
+    pub normal_match_count: i64,
+    pub arena_match_count: i64,
+    pub failed_detail_count: i64,
+    pub last_synced_or_imported_at: Option<String>,
+    pub coverage_percent: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

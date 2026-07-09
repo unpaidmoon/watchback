@@ -66,7 +66,7 @@ export function commandCenterMetrics(status: OnboardingStatus | null): CommandMe
       meta: status?.credentialStatus.savedAt ? `保存于 ${status.credentialStatus.savedAt}` : "用于读取赛季报告",
     },
     {
-      label: "当前赛季",
+      label: "本地赛季",
       value: status?.selectedSeason ? `S${status.selectedSeason}` : "-",
       meta: status?.availableSeasons.length ? `本地已有 ${status.availableSeasons.length} 个赛季` : "等待同步",
     },

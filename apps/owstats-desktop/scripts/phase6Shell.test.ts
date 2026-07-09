@@ -54,6 +54,18 @@ assertEqual(onboardingSource.includes("phase6PassStatusTrack"), false, "player p
 assertEqual(onboardingSource.includes("phase6UnifiedCommandPanel"), true, "command center is consolidated into one player pass control panel");
 assertEqual(onboardingSource.includes("phase6CoverageMeter"), true, "command center shows data coverage");
 assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data area keeps one unified coverage card");
+assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads fixed season status cards from onboarding status");
+assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), true, "command center has an explicit fixed season list");
+assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders a fixed season card grid");
+assertEqual(onboardingSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
+assertEqual(onboardingSource.includes("S21"), true, "command center includes S21 card copy");
+assertEqual(onboardingSource.includes("S22"), true, "command center includes S22 card copy");
+assertEqual(onboardingSource.includes("S23"), true, "command center includes S23 card copy");
+assertEqual(onboardingSource.includes("`同步 S${seasonStatus.season}`"), true, "season sync button text is generated per season");
+assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
+assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");
+assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
+assertEqual(onboardingSource.includes("dumpSeason"), false, "command center does not expose diagnostic dump API wrapper");
 assertEqual(onboardingSource.includes("phase6DataFacts"), true, "data coverage card owns credential, match count, and last sync facts");
 assertEqual(onboardingSource.includes("phase6DataHealthGrid"), true, "data coverage card owns health checks");
 assertEqual(onboardingSource.includes("phase6SyncTimeline"), false, "command center removes separate sync status card");
@@ -109,6 +121,38 @@ const status: OnboardingStatus = {
     lastSyncedOrImportedAt: "2026-06-28 05:40",
     freshnessRisk: "fresh",
   },
+  seasonStatuses: [
+    {
+      season: 21,
+      matchCount: 0,
+      detailCount: 0,
+      normalMatchCount: 0,
+      arenaMatchCount: 0,
+      failedDetailCount: 0,
+      lastSyncedOrImportedAt: null,
+      coveragePercent: 0,
+    },
+    {
+      season: 22,
+      matchCount: 186,
+      detailCount: 142,
+      normalMatchCount: 140,
+      arenaMatchCount: 46,
+      failedDetailCount: 1,
+      lastSyncedOrImportedAt: "2026-06-28 05:40",
+      coveragePercent: 76,
+    },
+    {
+      season: 23,
+      matchCount: 0,
+      detailCount: 0,
+      normalMatchCount: 0,
+      arenaMatchCount: 0,
+      failedDetailCount: 0,
+      lastSyncedOrImportedAt: null,
+      coveragePercent: 0,
+    },
+  ],
   health: { readable: true, warnings: [] },
 };
 

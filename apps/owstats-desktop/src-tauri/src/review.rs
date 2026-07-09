@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 const MAP_MIN_SAMPLE: i64 = 2;
+const COMMAND_CENTER_SEASONS: [i64; 3] = [21, 22, 23];
 const ROLE_ORDER: [(&str, &str); 4] = [
     ("tank", "重装"),
     ("dps", "输出"),
@@ -464,6 +465,7 @@ pub fn get_onboarding_status(
             .collect::<rusqlite::Result<Vec<i64>>>()?;
         rows
     };
+    let season_statuses = command_center_season_statuses(db)?;
     let selected = request
         .season
         .or_else(|| available_seasons.iter().copied().max());
@@ -515,11 +517,76 @@ pub fn get_onboarding_status(
                 "没有本地数据".to_string()
             },
         },
+        season_statuses,
         health: DataHealthStatus {
             readable: can_enter_review,
             warnings,
         },
     })
+}
+
+fn command_center_season_statuses(db: &OwDatabase) -> Result<Vec<SeasonDataStatus>> {
+    COMMAND_CENTER_SEASONS
+        .iter()
+        .map(|season| command_center_season_status(db, *season))
+        .collect()
+}
+
+fn command_center_season_status(db: &OwDatabase, season: i64) -> Result<SeasonDataStatus> {
+    let conn = db.connect()?;
+    let (match_count, normal_match_count, arena_match_count, match_updated_at): (
+        i64,
+        i64,
+        i64,
+        Option<String>,
+    ) = conn.query_row(
+        r#"
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN bucket='preset' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN bucket='stadium' OR match_kind='fight' OR game_mode IN ('LeisureFight', 'SportFight') THEN 1 ELSE 0 END), 0),
+            MAX(updated_at)
+        FROM matches
+        WHERE season=?
+        "#,
+        params![season],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?;
+    let (detail_count, detail_updated_at): (i64, Option<String>) = conn.query_row(
+        r#"
+        SELECT COUNT(d.match_id), MAX(d.updated_at)
+        FROM match_details d
+        JOIN matches m ON m.match_id=d.match_id
+        WHERE m.season=?
+        "#,
+        params![season],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let failed_detail_count = (match_count - detail_count).max(0);
+    let coverage_percent = if match_count > 0 {
+        ((detail_count * 100) / match_count).clamp(0, 100)
+    } else {
+        0
+    };
+
+    Ok(SeasonDataStatus {
+        season,
+        match_count,
+        detail_count,
+        normal_match_count,
+        arena_match_count,
+        failed_detail_count,
+        last_synced_or_imported_at: latest_timestamp(match_updated_at, detail_updated_at),
+        coverage_percent,
+    })
+}
+
+fn latest_timestamp(left: Option<String>, right: Option<String>) -> Option<String> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(if left >= right { left } else { right }),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
 }
 
 fn selected_season(db: &OwDatabase, requested: Option<i64>) -> Result<Option<i64>> {

@@ -7,14 +7,21 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const DASHEN_CUSTOMER_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool/customer";
 const CLIENT_TYPE: &str = "60";
 const ORIGIN: &str = "https://act.ds.163.com";
 const REFERER: &str = "https://act.ds.163.com/";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36 app/df_client dfVersion/100111";
-const NORMAL_MODES: &[&str] = &["sport", "leisure"];
+const NORMAL_MODES: &[&str] = &[
+    "SportPreset",
+    "SportOpen",
+    "LeisurePreset",
+    "Leisure6v6",
+    "sport",
+    "leisure",
+];
 const FIGHT_MODES: &[&str] = &["QuickFight", "LeisureFight", "SportFight"];
 const MAX_PAGES_PER_MODE: i64 = 80;
 const MAX_HTTP_ATTEMPTS: usize = 5;
@@ -22,14 +29,37 @@ const REMOTE_REQUEST_SPACING_MS: u64 = 350;
 const HTTP_TIMEOUT_SECONDS: u64 = 20;
 
 #[derive(Debug, Deserialize)]
-struct Credentials {
+pub(crate) struct Credentials {
     #[serde(alias = "roleId")]
-    role_id: i64,
-    token: String,
+    pub(crate) role_id: i64,
+    pub(crate) token: String,
     #[serde(default, alias = "customerToken")]
-    customer_token: Option<String>,
-    dts: Option<i64>,
-    server: Option<i64>,
+    pub(crate) customer_token: Option<String>,
+    pub(crate) dts: Option<i64>,
+    pub(crate) server: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeasonJsonDump {
+    pub path: PathBuf,
+    pub entries: usize,
+    pub details: usize,
+    pub failed_details: usize,
+    pub skipped_duplicates: usize,
+}
+
+struct SeasonFetchParts {
+    cached_player: Value,
+    entries: Vec<Value>,
+    details: Vec<Value>,
+    detail_errors: Vec<Value>,
+    list_pages: Vec<Value>,
+    skipped_duplicates: usize,
+}
+
+struct ModeFetchPages {
+    entries: Vec<Value>,
+    list_pages: Vec<Value>,
 }
 
 pub async fn sync_season(db: &OwDatabase, project_root: &Path, season: i64) -> Result<SyncSummary> {
@@ -42,7 +72,34 @@ pub async fn sync_season_with_progress(
     season: i64,
     progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
-    sync_season_with_base_url(db, project_root, season, DASHEN_CUSTOMER_BASE, progress).await
+    let credential_path = default_project_credential_path(project_root);
+    sync_season_with_credentials_path_base_url(
+        db,
+        project_root,
+        &credential_path,
+        season,
+        DASHEN_CUSTOMER_BASE,
+        progress,
+    )
+    .await
+}
+
+pub async fn sync_season_with_credentials_path_progress(
+    db: &OwDatabase,
+    project_root: &Path,
+    credential_path: &Path,
+    season: i64,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    sync_season_with_credentials_path_base_url(
+        db,
+        project_root,
+        credential_path,
+        season,
+        DASHEN_CUSTOMER_BASE,
+        progress,
+    )
+    .await
 }
 
 pub async fn sync_season_with_base_url(
@@ -50,12 +107,269 @@ pub async fn sync_season_with_base_url(
     project_root: &Path,
     season: i64,
     customer_base_url: &str,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    let credential_path = default_project_credential_path(project_root);
+    sync_season_with_credentials_path_base_url(
+        db,
+        project_root,
+        &credential_path,
+        season,
+        customer_base_url,
+        progress,
+    )
+    .await
+}
+
+pub async fn sync_season_with_credentials_path_base_url(
+    db: &OwDatabase,
+    project_root: &Path,
+    credential_path: &Path,
+    season: i64,
+    customer_base_url: &str,
     mut progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
+    db.initialize()?;
+    let parts =
+        fetch_season_parts_with_base_url(credential_path, season, customer_base_url, &mut progress)
+            .await?;
+    let total = parts.entries.len();
+    let payload = build_full_season_payload(
+        season,
+        &parts.cached_player,
+        parts.entries,
+        parts.details,
+        parts.detail_errors,
+        parts.list_pages,
+    );
+    write_season_payload(&project_root.join("data").join("players"), season, &payload)?;
+    if total == 0 {
+        return Err(anyhow!(
+            "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后重新登录后再试。"
+        ));
+    }
+    let entries = payload
+        .pointer("/matches/entries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let details = payload
+        .pointer("/matches/details")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let detail_errors = payload
+        .pointer("/matches/detail_errors")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    progress(SyncProgress {
+        season,
+        phase: "写入 SQLite".to_string(),
+        processed: total,
+        total,
+        current_match_id: None,
+        failed_details: detail_errors.len(),
+        latest_errors: detail_errors
+            .iter()
+            .rev()
+            .take(5)
+            .filter_map(|item| string_field(item, "message"))
+            .collect(),
+    });
+    let summary = sync_import_parts(
+        db,
+        project_root,
+        season,
+        &payload,
+        entries,
+        details,
+        detail_errors,
+        parts.skipped_duplicates,
+    )?;
+    progress(SyncProgress {
+        season,
+        phase: "完成".to_string(),
+        processed: summary.processed,
+        total: summary.total,
+        current_match_id: None,
+        failed_details: summary.failed_details,
+        latest_errors: summary.latest_errors.clone(),
+    });
+    Ok(summary)
+}
+
+pub async fn sync_season_with_credentials_and_target_paths_base_url(
+    db: &OwDatabase,
+    project_root: &Path,
+    credential_path: &Path,
+    target_path: &Path,
+    season: i64,
+    customer_base_url: &str,
+    mut progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    db.initialize()?;
+    let credentials = read_credentials(credential_path)?;
+    let target = crate::player_target::read_player_target_for_path(target_path)?;
+    progress(SyncProgress {
+        season,
+        phase: "拉取赛季 JSON".to_string(),
+        processed: 0,
+        total: 0,
+        current_match_id: None,
+        failed_details: 0,
+        latest_errors: Vec::new(),
+    });
+    let fetch = crate::season_fetch::fetch_full_season_with_base_url(
+        crate::season_fetch::FullSeasonRequest {
+            credentials: crate::dashen_client::DashenCredentials {
+                role_id: credentials.role_id,
+                token: credentials.token,
+                dts: credentials.dts,
+                server: credentials.server.unwrap_or(1),
+            },
+            customer_token: target.customer_token,
+            input_bnet: target.input_bnet,
+            resolved_bnet: target.resolved_bnet,
+            season,
+            customer_base_url: customer_base_url.to_string(),
+            pages_per_batch: 5,
+            detail_concurrency: 2,
+            include_fight: true,
+        },
+    )
+    .await?;
+
+    write_season_payload(
+        &project_root.join("data").join("players"),
+        season,
+        &fetch.payload,
+    )?;
+    if fetch.entries == 0 {
+        return Err(anyhow!(
+            "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后重新登录后再试。"
+        ));
+    }
+
+    let entries = fetch
+        .payload
+        .pointer("/matches/entries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let details = fetch
+        .payload
+        .pointer("/matches/details")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let detail_errors = fetch
+        .payload
+        .pointer("/matches/detail_errors")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    progress(SyncProgress {
+        season,
+        phase: "写入 SQLite".to_string(),
+        processed: fetch.entries,
+        total: fetch.entries,
+        current_match_id: None,
+        failed_details: detail_errors.len(),
+        latest_errors: Vec::new(),
+    });
+    let summary = sync_import_parts(
+        db,
+        project_root,
+        season,
+        &fetch.payload,
+        entries,
+        details,
+        detail_errors,
+        0,
+    )?;
+    progress(SyncProgress {
+        season,
+        phase: "完成".to_string(),
+        processed: summary.processed,
+        total: summary.total,
+        current_match_id: None,
+        failed_details: summary.failed_details,
+        latest_errors: summary.latest_errors.clone(),
+    });
+    Ok(summary)
+}
+
+pub async fn dump_season_json(
+    project_root: &Path,
+    season: i64,
+    output_dir: &Path,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SeasonJsonDump> {
+    let credential_path = default_project_credential_path(project_root);
+    dump_season_json_with_base_url(
+        project_root,
+        &credential_path,
+        season,
+        output_dir,
+        DASHEN_CUSTOMER_BASE,
+        progress,
+    )
+    .await
+}
+
+pub async fn dump_season_json_with_base_url(
+    _project_root: &Path,
+    credential_path: &Path,
+    season: i64,
+    output_dir: &Path,
+    customer_base_url: &str,
+    mut progress: impl FnMut(SyncProgress),
+) -> Result<SeasonJsonDump> {
+    let parts =
+        fetch_season_parts_with_base_url(credential_path, season, customer_base_url, &mut progress)
+            .await?;
+    let entries = parts.entries.len();
+    let details = parts.details.len();
+    let failed_details = parts.detail_errors.len();
+    let skipped_duplicates = parts.skipped_duplicates;
+    let payload = build_full_season_payload(
+        season,
+        &parts.cached_player,
+        parts.entries,
+        parts.details,
+        parts.detail_errors,
+        parts.list_pages,
+    );
+    let path = write_season_payload(output_dir, season, &payload)?;
+    Ok(SeasonJsonDump {
+        path,
+        entries,
+        details,
+        failed_details,
+        skipped_duplicates,
+    })
+}
+
+fn write_season_payload(output_dir: &Path, season: i64, payload: &Value) -> Result<PathBuf> {
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("failed to create output directory {}", output_dir.display()))?;
+    let path = output_dir.join(format!("local_s{season}_full_season.json"));
+    let text = serde_json::to_string_pretty(payload)?;
+    std::fs::write(&path, text)
+        .with_context(|| format!("failed to write season payload {}", path.display()))?;
+    Ok(path)
+}
+
+async fn fetch_season_parts_with_base_url(
+    credential_path: &Path,
+    season: i64,
+    customer_base_url: &str,
+    progress: &mut impl FnMut(SyncProgress),
+) -> Result<SeasonFetchParts> {
     if season <= 0 {
         return Err(anyhow!("season must be greater than 0"));
     }
-    db.initialize()?;
     progress(SyncProgress {
         season,
         phase: "读取本地凭证".to_string(),
@@ -65,21 +379,16 @@ pub async fn sync_season_with_base_url(
         failed_details: 0,
         latest_errors: Vec::new(),
     });
-    let credentials = read_credentials(project_root)?;
+    let credentials = read_credentials(credential_path)?;
     let customer_token = credentials
         .customer_token
         .clone()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| credentials.token.clone());
+        .ok_or_else(|| anyhow!("请先绑定目标玩家，再同步赛季数据"))?;
     let cached_player = json!({
         "input_bnet": Value::Null,
         "resolved_bnet": Value::Null,
-        "profile_card": {
-            "data": {
-                "roleId": credentials.role_id,
-                "customerToken": "***REDACTED***"
-            }
-        }
+        "profile_card": Value::Null
     });
     let client = reqwest::Client::builder()
         .default_headers(auth_headers(&credentials)?)
@@ -88,6 +397,7 @@ pub async fn sync_season_with_base_url(
         .build()?;
 
     let mut entries = Vec::<Value>::new();
+    let mut list_pages = Vec::<Value>::new();
     progress(SyncProgress {
         season,
         phase: "拉取赛季列表".to_string(),
@@ -98,30 +408,30 @@ pub async fn sync_season_with_base_url(
         latest_errors: Vec::new(),
     });
     for mode in NORMAL_MODES {
-        entries.extend(
-            fetch_mode_pages(
-                &client,
-                customer_base_url,
-                &customer_token,
-                mode,
-                season,
-                false,
-            )
-            .await?,
-        );
+        let fetched = fetch_mode_pages(
+            &client,
+            customer_base_url,
+            &customer_token,
+            mode,
+            season,
+            false,
+        )
+        .await?;
+        entries.extend(fetched.entries);
+        list_pages.extend(fetched.list_pages);
     }
     for mode in FIGHT_MODES {
-        entries.extend(
-            fetch_mode_pages(
-                &client,
-                customer_base_url,
-                &customer_token,
-                mode,
-                season,
-                true,
-            )
-            .await?,
-        );
+        let fetched = fetch_mode_pages(
+            &client,
+            customer_base_url,
+            &customer_token,
+            mode,
+            season,
+            true,
+        )
+        .await?;
+        entries.extend(fetched.entries);
+        list_pages.extend(fetched.list_pages);
     }
     let before_dedupe = entries.len();
     entries = dedupe_entries(entries, season);
@@ -169,40 +479,14 @@ pub async fn sync_season_with_base_url(
         });
     }
 
-    progress(SyncProgress {
-        season,
-        phase: "写入 SQLite".to_string(),
-        processed: total,
-        total,
-        current_match_id: None,
-        failed_details: detail_errors.len(),
-        latest_errors: detail_errors
-            .iter()
-            .rev()
-            .take(5)
-            .filter_map(|item| string_field(item, "message"))
-            .collect(),
-    });
-    let summary = sync_import_parts(
-        db,
-        project_root,
-        season,
-        &cached_player,
+    Ok(SeasonFetchParts {
+        cached_player,
         entries,
         details,
         detail_errors,
+        list_pages,
         skipped_duplicates,
-    )?;
-    progress(SyncProgress {
-        season,
-        phase: "完成".to_string(),
-        processed: summary.processed,
-        total: summary.total,
-        current_match_id: None,
-        failed_details: summary.failed_details,
-        latest_errors: summary.latest_errors.clone(),
-    });
-    Ok(summary)
+    })
 }
 
 pub fn sync_import_parts(
@@ -258,6 +542,59 @@ pub fn sync_import_parts(
     })
 }
 
+fn build_full_season_payload(
+    season: i64,
+    cached_player: &Value,
+    entries: Vec<Value>,
+    details: Vec<Value>,
+    detail_errors: Vec<Value>,
+    list_pages: Vec<Value>,
+) -> Value {
+    let safe_detail_errors = sanitize_detail_errors(detail_errors);
+    json!({
+        "input_bnet": strip_sensitive_fields(cached_player.get("input_bnet").cloned().unwrap_or(Value::Null)),
+        "resolved_bnet": strip_sensitive_fields(cached_player.get("resolved_bnet").cloned().unwrap_or(Value::Null)),
+        "profile_card": strip_sensitive_fields(cached_player.get("profile_card").cloned().unwrap_or(Value::Null)),
+        "fetch_mode": "rust_sync",
+        "season": season,
+        "matches": {
+            "total": entries.len(),
+            "entries": strip_sensitive_fields(Value::Array(entries)),
+            "details": strip_sensitive_fields(Value::Array(details)),
+            "detail_errors": strip_sensitive_fields(Value::Array(safe_detail_errors)),
+            "list_pages": strip_sensitive_fields(Value::Array(list_pages)),
+        }
+    })
+}
+
+fn strip_sensitive_fields(value: Value) -> Value {
+    match value {
+        Value::Array(items) => {
+            Value::Array(items.into_iter().map(strip_sensitive_fields).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .filter_map(|(key, value)| {
+                    if is_sensitive_field_name(&key) {
+                        None
+                    } else {
+                        Some((key, strip_sensitive_fields(value)))
+                    }
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn is_sensitive_field_name(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("token")
+        || key.contains("cookie")
+        || key.contains("authorization")
+        || key.contains("credential")
+}
+
 fn sanitize_detail_errors(detail_errors: Vec<Value>) -> Vec<Value> {
     detail_errors
         .into_iter()
@@ -275,9 +612,12 @@ fn sanitize_detail_errors(detail_errors: Vec<Value>) -> Vec<Value> {
         .collect()
 }
 
-fn read_credentials(project_root: &Path) -> Result<Credentials> {
-    let path = project_root.join("data").join(".dashen_credentials.json");
-    let text = std::fs::read_to_string(&path)
+fn default_project_credential_path(project_root: &Path) -> PathBuf {
+    project_root.join("data").join(".dashen_credentials.json")
+}
+
+fn read_credentials(path: &Path) -> Result<Credentials> {
+    let text = std::fs::read_to_string(path)
         .with_context(|| "local credentials not found at data/.dashen_credentials.json")?;
     let credentials: Credentials =
         serde_json::from_str(&text).with_context(|| "failed to parse local credentials")?;
@@ -285,6 +625,10 @@ fn read_credentials(project_root: &Path) -> Result<Credentials> {
         return Err(anyhow!("local credentials are incomplete"));
     }
     Ok(credentials)
+}
+
+pub(crate) fn read_credentials_for_command(path: &Path) -> Result<Credentials> {
+    read_credentials(path)
 }
 
 fn auth_headers(credentials: &Credentials) -> Result<HeaderMap> {
@@ -323,8 +667,9 @@ async fn fetch_mode_pages(
     mode: &str,
     season: i64,
     fight: bool,
-) -> Result<Vec<Value>> {
+) -> Result<ModeFetchPages> {
     let mut values = Vec::new();
+    let mut list_pages = Vec::new();
     for page in 1..=MAX_PAGES_PER_MODE {
         let endpoint = if fight {
             format!("{customer_base_url}/fight/queryMatchList")
@@ -343,6 +688,12 @@ async fn fetch_mode_pages(
             "match list",
         )
         .await?;
+        list_pages.push(json!({
+            "kind": if fight { "fight" } else { "normal" },
+            "gameMode": mode,
+            "page": page,
+            "payload": payload.clone(),
+        }));
         let mut page_entries = extract_match_entries(&payload);
         if page_entries.is_empty() {
             break;
@@ -356,7 +707,10 @@ async fn fetch_mode_pages(
         }
         values.extend(page_entries);
     }
-    Ok(values)
+    Ok(ModeFetchPages {
+        entries: values,
+        list_pages,
+    })
 }
 
 async fn fetch_detail(
@@ -457,24 +811,55 @@ fn safe_request_error(context: &str, error: &reqwest::Error) -> String {
 }
 
 fn extract_match_entries(payload: &Value) -> Vec<Value> {
-    let data = payload.get("data").unwrap_or(payload);
-    if let Some(items) = data.as_array() {
-        return items
-            .iter()
-            .filter(|item| item.is_object())
-            .cloned()
-            .collect();
-    }
-    for key in ["matchList", "recentMatchList"] {
-        if let Some(items) = data.get(key).and_then(Value::as_array) {
-            return items
-                .iter()
-                .filter(|item| item.is_object())
-                .cloned()
-                .collect();
+    for container in [
+        Some(payload),
+        payload.get("data"),
+        payload.get("result"),
+        payload.pointer("/data/result"),
+        payload.pointer("/result/data"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(entries) = extract_match_entries_from_container(container) {
+            return entries;
         }
     }
     Vec::new()
+}
+
+fn extract_match_entries_from_container(container: &Value) -> Option<Vec<Value>> {
+    if let Some(items) = container.as_array() {
+        return match_objects(items);
+    }
+    for key in [
+        "matchList",
+        "recentMatchList",
+        "list",
+        "records",
+        "rows",
+        "items",
+    ] {
+        if let Some(items) = container.get(key).and_then(Value::as_array) {
+            if let Some(entries) = match_objects(items) {
+                return Some(entries);
+            }
+        }
+    }
+    None
+}
+
+fn match_objects(items: &[Value]) -> Option<Vec<Value>> {
+    let entries = items
+        .iter()
+        .filter(|item| item.is_object() && item.get("matchId").is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
 }
 
 fn dedupe_entries(entries: Vec<Value>, season: i64) -> Vec<Value> {
@@ -529,5 +914,35 @@ mod tests {
         assert!(!message.contains("customer-secret"));
         assert!(!message.contains("session-secret"));
         assert!(message.contains("visible"));
+    }
+
+    #[test]
+    fn extracts_match_entries_from_result_match_list_wrapper() {
+        let payload = json!({
+            "code": 0,
+            "result": {
+                "matchList": [
+                    {"matchId": "wrapped-result-match", "beginTs": 1700000000000_i64}
+                ]
+            }
+        });
+
+        let entries = extract_match_entries(&payload);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            string_field(&entries[0], "matchId").as_deref(),
+            Some("wrapped-result-match")
+        );
+    }
+
+    #[test]
+    fn normal_fetch_modes_include_precise_upstream_game_modes() {
+        for mode in ["SportPreset", "SportOpen", "LeisurePreset", "Leisure6v6"] {
+            assert!(
+                NORMAL_MODES.contains(&mode),
+                "missing precise normal gameMode {mode}"
+            );
+        }
     }
 }

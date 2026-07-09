@@ -68,6 +68,22 @@ export type CredentialLoginResult = {
   status: CredentialStatus;
 };
 
+export type PlayerTargetStatus = {
+  state: "missing" | "bound" | string;
+  inputBnet?: string | null;
+  resolvedBnet?: string | null;
+  boundAt?: string | null;
+};
+
+export type BindPlayerTargetResult = {
+  status: PlayerTargetStatus;
+};
+
+export type ClearPlayerTargetResult = {
+  cleared: boolean;
+  status: PlayerTargetStatus;
+};
+
 export type PlayerProfile = {
   roleId: number | null;
   playerId: string | null;
@@ -543,5 +559,17 @@ export type OnboardingStatus = {
     lastSyncedOrImportedAt: string | null;
     freshnessRisk: string;
   };
+  seasonStatuses: SeasonDataStatus[];
   health: { readable: boolean; warnings: string[] };
+};
+
+export type SeasonDataStatus = {
+  season: number;
+  matchCount: number;
+  detailCount: number;
+  normalMatchCount: number;
+  arenaMatchCount: number;
+  failedDetailCount: number;
+  lastSyncedOrImportedAt: string | null;
+  coveragePercent: number;
 };

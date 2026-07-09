@@ -4,15 +4,18 @@ mod commands;
 pub mod credential_store;
 pub mod credentials;
 pub mod dashen_auth;
+pub mod dashen_client;
 mod db;
 mod importer;
 pub mod login_flow;
 mod match_evaluation;
 mod models;
+pub mod player_target;
 mod queries;
 pub mod ranking;
 mod redaction;
 mod review;
+pub mod season_fetch;
 mod settings;
 mod sync;
 
@@ -25,7 +28,10 @@ pub use queries::{get_match_detail, list_filter_options, list_matches, search_ma
 pub use redaction::redact_sensitive_json;
 pub use review::{get_onboarding_status, get_personal_season_review};
 pub use sync::{
-    sync_import_parts, sync_season, sync_season_with_base_url, sync_season_with_progress,
+    dump_season_json, dump_season_json_with_base_url, sync_import_parts, sync_season,
+    sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
+    sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
+    sync_season_with_progress,
 };
 
 pub fn run() {
@@ -43,6 +49,9 @@ pub fn run() {
             commands::get_onboarding_status,
             commands::get_personal_season_review,
             commands::get_credential_status,
+            commands::get_player_target_status,
+            commands::clear_player_target,
+            commands::bind_player_target,
             commands::get_player_profile,
             commands::get_user_settings,
             commands::save_user_settings,

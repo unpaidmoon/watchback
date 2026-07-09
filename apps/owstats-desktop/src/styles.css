@@ -2066,6 +2066,178 @@ select {
   grid-template-columns: minmax(220px, 1fr) 200px;
 }
 
+.phase8TargetPlayerPanel {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.4fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgb(219 229 240 / 0.9);
+  border-radius: var(--phase6-radius-sm);
+  background: rgb(255 255 255 / 0.78);
+}
+
+.phase8TargetPlayerSummary {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.phase8TargetPlayerSummary strong {
+  color: var(--phase6-ink);
+  font-size: 16px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.phase8TargetPlayerSummary p {
+  margin: 0;
+  color: var(--phase6-muted);
+  font-size: 12px;
+}
+
+.phase8TargetPlayerControls {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.phase8TargetPlayerInput {
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgb(203 213 225 / 0.95);
+  border-radius: var(--phase6-radius-sm);
+  background: #fff;
+  color: var(--phase6-ink);
+  font: inherit;
+}
+
+.phase8TargetPlayerInput:disabled {
+  background: rgb(241 245 249 / 0.8);
+  color: var(--phase6-muted);
+}
+
+.phase8SeasonStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.phase8SeasonStatusCard {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgb(219 229 240 / 0.9);
+  border-radius: var(--phase6-radius-sm);
+  background: rgb(248 250 252 / 0.74);
+}
+
+.phase8SeasonStatusHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.phase8SeasonStatusHeader h3 {
+  margin: 4px 0 0;
+  color: var(--phase6-ink);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.phase8SeasonStatusHeader > span {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgb(219 229 240 / 0.9);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.phase8SeasonStatusHeader > span.good {
+  border-color: rgb(34 197 94 / 0.28);
+  color: var(--phase6-good);
+}
+
+.phase8SeasonStatusHeader > span.warn {
+  border-color: rgb(245 158 11 / 0.28);
+  color: var(--phase6-warn);
+}
+
+.phase8SeasonStatusStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.phase8SeasonStatusStats > span {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid rgb(219 229 240 / 0.85);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.74);
+}
+
+.phase8SeasonStatusStats > span > span {
+  color: var(--phase6-muted);
+  font-size: 12px;
+}
+
+.phase8SeasonStatusStats > span > strong {
+  color: var(--phase6-ink);
+  font-size: 14px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.phase8SeasonStatusStats > span.good strong {
+  color: var(--phase6-good);
+}
+
+.phase8SeasonStatusStats > span.warn strong {
+  color: var(--phase6-warn);
+}
+
+.phase8SeasonCoverage {
+  display: grid;
+  gap: 8px;
+}
+
+.phase8SeasonCoverage > div:first-child,
+.phase8SeasonSyncFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.phase8SeasonCoverage span,
+.phase8SeasonSyncFooter span {
+  color: var(--phase6-muted);
+  font-size: 12px;
+}
+
+.phase8SeasonCoverage strong {
+  color: var(--phase6-ink);
+  font-size: 18px;
+}
+
+.phase8SeasonSyncFooter button {
+  flex: 0 0 auto;
+  min-width: 112px;
+}
+
 .phase6InfoMetric {
   min-height: 76px;
   display: grid;
@@ -4780,6 +4952,9 @@ select {
   .phase6CommandGridReal,
   .phase6DataSummary,
   .phase6SyncControl,
+  .phase8TargetPlayerPanel,
+  .phase8TargetPlayerControls,
+  .phase8SeasonStatusGrid,
   .phase6MatchMetrics {
     grid-template-columns: 1fr;
   }
