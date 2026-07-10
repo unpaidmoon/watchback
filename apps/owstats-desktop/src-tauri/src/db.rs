@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
@@ -205,7 +205,45 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             "CREATE INDEX IF NOT EXISTS idx_match_players_role ON match_players(season, is_current_player, role_type)",
             [],
         )?;
-        conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
+    if current < 3 {
+        let transaction = conn.unchecked_transaction()?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS arena_match_players (
+                match_id TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
+                season INTEGER NOT NULL,
+                round_index INTEGER NOT NULL,
+                side TEXT NOT NULL,
+                bnet_id TEXT NOT NULL,
+                player_name TEXT NOT NULL,
+                hero_guid TEXT NOT NULL,
+                hero_name TEXT,
+                is_current_player INTEGER NOT NULL DEFAULT 0,
+                kill INTEGER NOT NULL DEFAULT 0,
+                assist INTEGER NOT NULL DEFAULT 0,
+                death INTEGER NOT NULL DEFAULT 0,
+                hero_damage INTEGER NOT NULL DEFAULT 0,
+                cure INTEGER NOT NULL DEFAULT 0,
+                resist_damage INTEGER NOT NULL DEFAULT 0,
+                healing_taken INTEGER NOT NULL DEFAULT 0,
+                damage_taken INTEGER NOT NULL DEFAULT 0,
+                final_hit INTEGER NOT NULL DEFAULT 0,
+                target_competing_time INTEGER NOT NULL DEFAULT 0,
+                raw_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (match_id, round_index, side, bnet_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_arena_match_players_match
+                ON arena_match_players(match_id, round_index);
+            CREATE INDEX IF NOT EXISTS idx_arena_match_players_season
+                ON arena_match_players(season, bnet_id);
+            "#,
+        )?;
+        transaction.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
+        transaction.commit()?;
     }
     Ok(())
 }

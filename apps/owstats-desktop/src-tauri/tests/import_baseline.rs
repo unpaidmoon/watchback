@@ -639,7 +639,7 @@ fn database_initialize_sets_schema_version_idempotently() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 }
 
 #[test]
@@ -699,9 +699,80 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
+}
+
+#[test]
+fn database_migrates_v2_arena_player_index_idempotently() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    conn.execute(
+        r#"
+        INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+            hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+            deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+        )
+        VALUES (
+            'legacy-v2-match', 22, 'stadium', 'SportFight', 'fight', 'win', 'map-a', NULL,
+            'hero-a', NULL, 1700000000, 2, 1, 1, 2,
+            3, 4, 5, 6, 7, 8, '{}', '2026-07-11T00:00:00Z'
+        )
+        "#,
+        [],
+    )
+    .unwrap();
+    conn.execute_batch("DROP TABLE arena_match_players;")
+        .unwrap();
+    conn.pragma_update(None, "user_version", 2).unwrap();
+    drop(conn);
+
+    db.initialize().unwrap();
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let arena_table_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='arena_match_players'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let arena_match_index_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_index_list('arena_match_players') WHERE name='idx_arena_match_players_match'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let arena_season_index_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_index_list('arena_match_players') WHERE name='idx_arena_match_players_season'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let preserved_matches: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM matches WHERE match_id='legacy-v2-match'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(version, 3);
+    assert_eq!(arena_table_count, 1);
+    assert_eq!(arena_match_index_count, 1);
+    assert_eq!(arena_season_index_count, 1);
+    assert_eq!(preserved_matches, 1);
 }
 
 #[test]
