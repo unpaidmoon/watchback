@@ -708,11 +708,61 @@ fn database_migrates_legacy_match_players_role_type() {
 fn database_migrates_v2_arena_player_index_idempotently() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
-    db.initialize().unwrap();
-
     let conn = db.connect().unwrap();
-    conn.execute(
+    conn.execute_batch(
         r#"
+        CREATE TABLE matches (
+            match_id TEXT PRIMARY KEY,
+            season INTEGER NOT NULL,
+            bucket TEXT NOT NULL,
+            game_mode TEXT NOT NULL,
+            match_kind TEXT NOT NULL,
+            result TEXT NOT NULL,
+            map_guid TEXT NOT NULL,
+            map_name TEXT,
+            hero_guid TEXT NOT NULL,
+            hero_name TEXT,
+            begin_ts INTEGER NOT NULL,
+            team_score INTEGER NOT NULL,
+            opponent_score INTEGER NOT NULL,
+            kills INTEGER NOT NULL,
+            assists INTEGER NOT NULL,
+            deaths INTEGER NOT NULL,
+            damage INTEGER NOT NULL,
+            healing INTEGER NOT NULL,
+            mitigation INTEGER NOT NULL,
+            total_worth INTEGER NOT NULL,
+            duration_sec INTEGER NOT NULL,
+            raw_entry_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE match_players (
+            match_id TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
+            season INTEGER NOT NULL,
+            side TEXT NOT NULL,
+            bnet_id TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            hero_guid TEXT NOT NULL,
+            hero_name TEXT,
+            is_current_player INTEGER NOT NULL DEFAULT 0,
+            is_friend INTEGER NOT NULL DEFAULT 0,
+            kill INTEGER NOT NULL DEFAULT 0,
+            assist INTEGER NOT NULL DEFAULT 0,
+            death INTEGER NOT NULL DEFAULT 0,
+            hero_damage INTEGER NOT NULL DEFAULT 0,
+            cure INTEGER NOT NULL DEFAULT 0,
+            resist_damage INTEGER NOT NULL DEFAULT 0,
+            healing_taken INTEGER NOT NULL DEFAULT 0,
+            damage_taken INTEGER NOT NULL DEFAULT 0,
+            final_hit INTEGER NOT NULL DEFAULT 0,
+            target_competing_time INTEGER NOT NULL DEFAULT 0,
+            role_type TEXT,
+            raw_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (match_id, side, bnet_id)
+        );
+
         INSERT INTO matches (
             match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
             hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
@@ -722,14 +772,12 @@ fn database_migrates_v2_arena_player_index_idempotently() {
             'legacy-v2-match', 22, 'stadium', 'SportFight', 'fight', 'win', 'map-a', NULL,
             'hero-a', NULL, 1700000000, 2, 1, 1, 2,
             3, 4, 5, 6, 7, 8, '{}', '2026-07-11T00:00:00Z'
-        )
+        );
+
+        PRAGMA user_version = 2;
         "#,
-        [],
     )
     .unwrap();
-    conn.execute_batch("DROP TABLE arena_match_players;")
-        .unwrap();
-    conn.pragma_update(None, "user_version", 2).unwrap();
     drop(conn);
 
     db.initialize().unwrap();
@@ -746,16 +794,44 @@ fn database_migrates_v2_arena_player_index_idempotently() {
             |row| row.get(0),
         )
         .unwrap();
-    let arena_match_index_count: i64 = conn
+    let arena_columns: String = conn
         .query_row(
-            "SELECT COUNT(*) FROM pragma_index_list('arena_match_players') WHERE name='idx_arena_match_players_match'",
+            "SELECT group_concat(name, ',') FROM pragma_table_info('arena_match_players') ORDER BY cid",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    let arena_season_index_count: i64 = conn
+    let primary_key_columns: String = conn
         .query_row(
-            "SELECT COUNT(*) FROM pragma_index_list('arena_match_players') WHERE name='idx_arena_match_players_season'",
+            "SELECT group_concat(name, ',') FROM pragma_table_info('arena_match_players') WHERE pk > 0 ORDER BY pk",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let foreign_key_definition = conn
+        .query_row(
+            "SELECT \"table\" || ',' || \"from\" || ',' || on_delete FROM pragma_foreign_key_list('arena_match_players')",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    let bnet_index_columns: String = conn
+        .query_row(
+            "SELECT group_concat(name, ',') FROM pragma_index_info('idx_arena_match_players_bnet') ORDER BY seqno",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let name_index_columns: String = conn
+        .query_row(
+            "SELECT group_concat(name, ',') FROM pragma_index_info('idx_arena_match_players_name') ORDER BY seqno",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let explicit_indexes: String = conn
+        .query_row(
+            "SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_index_list('arena_match_players') WHERE origin='c' ORDER BY name)",
             [],
             |row| row.get(0),
         )
@@ -770,8 +846,18 @@ fn database_migrates_v2_arena_player_index_idempotently() {
 
     assert_eq!(version, 3);
     assert_eq!(arena_table_count, 1);
-    assert_eq!(arena_match_index_count, 1);
-    assert_eq!(arena_season_index_count, 1);
+    assert_eq!(
+        arena_columns,
+        "match_id,season,side,bnet_id,player_name,updated_at"
+    );
+    assert_eq!(primary_key_columns, "match_id,side,bnet_id");
+    assert_eq!(foreign_key_definition, "matches,match_id,CASCADE");
+    assert_eq!(
+        explicit_indexes,
+        "idx_arena_match_players_bnet,idx_arena_match_players_name"
+    );
+    assert_eq!(bnet_index_columns, "bnet_id,season");
+    assert_eq!(name_index_columns, "player_name,season");
     assert_eq!(preserved_matches, 1);
 }
 
