@@ -55,6 +55,7 @@ build/
 *.spec
 
 # Test artifacts
+/test-results/
 court_image_*.png
 court_result.json
 apps/owstats-desktop/.playwright-cli/
