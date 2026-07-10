@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
 import { HeroAvatar, MapPreview } from "../shared/phase6Components";
@@ -20,6 +20,23 @@ const heroSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "
 const mapSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
 const selectableSeasons = [23, 22, 21] as const;
 
+export function createLatestRankingRequestGuard() {
+  let latestRequest = 0;
+
+  return {
+    begin() {
+      latestRequest += 1;
+      return latestRequest;
+    },
+    isCurrent(request: number) {
+      return latestRequest === request;
+    },
+    invalidate(request?: number) {
+      if (request === undefined || latestRequest === request) latestRequest += 1;
+    },
+  };
+}
+
 const sortLabels: Record<RankingSortKey, string> = {
   bestHero: "最佳英雄",
   matches: "场数",
@@ -39,6 +56,7 @@ export function RankingPage() {
   const [ranking, setRanking] = useState<RankingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const rankingRequestGuard = useRef(createLatestRankingRequestGuard());
 
   useEffect(() => {
     const nextTab = params.get("tab") === "maps" ? "maps" : "heroes";
@@ -48,17 +66,25 @@ export function RankingPage() {
   }, [params, requestedSeason]);
 
   useEffect(() => {
+    const request = rankingRequestGuard.current.begin();
     setLoading(true);
     setError(null);
     void getRankings(selectedSeason)
       .then((nextRanking) => {
+        if (!rankingRequestGuard.current.isCurrent(request)) return;
         setRanking(nextRanking);
         if (selectedSeason === undefined && nextRanking.season) {
           setSelectedSeason(nextRanking.season);
         }
       })
-      .catch((err) => setError(productErrorMessage(err)))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (rankingRequestGuard.current.isCurrent(request)) setError(productErrorMessage(err));
+      })
+      .finally(() => {
+        if (rankingRequestGuard.current.isCurrent(request)) setLoading(false);
+      });
+
+    return () => rankingRequestGuard.current.invalidate(request);
   }, [selectedSeason]);
 
   const rows = useMemo(() => {
@@ -142,10 +168,10 @@ export function RankingPage() {
   );
 }
 
-function parseSeasonParam(value: string | null) {
+export function parseSeasonParam(value: string | null) {
   if (!value) return undefined;
   const season = Number(value);
-  return Number.isFinite(season) ? season : undefined;
+  return selectableSeasons.includes(season as (typeof selectableSeasons)[number]) ? season : undefined;
 }
 
 function RankingTable({
