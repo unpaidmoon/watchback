@@ -8,6 +8,7 @@ import {
   createLatestFriendAnalysisRequestGuard,
   FriendAnalysisEmptyState,
   hasFriendAnalysisSeasonData,
+  normalizeFriendAnalysisRequestedSeason,
   parseFriendAnalysisSeasonParam,
 } from "../src/pages/FriendAnalyticsPage";
 
@@ -31,10 +32,19 @@ assert.match(analyticsSource, /<select[^>]+value=\{selectedSeason/, "friend anal
 assert.equal(parseFriendAnalysisSeasonParam("21"), 21, "friend analysis should accept S21 URL state");
 assert.equal(parseFriendAnalysisSeasonParam("23"), 23, "friend analysis should accept S23 URL state");
 assert.equal(parseFriendAnalysisSeasonParam("999"), undefined, "friend analysis should ignore unsupported URL seasons");
+assert.deepEqual(
+  normalizeFriendAnalysisRequestedSeason("999"),
+  { selectedSeason: undefined, shouldReplaceUrl: true },
+  "an unsupported friend-analysis URL season must use the latest-season request and replace its URL",
+);
+assert.deepEqual(
+  normalizeFriendAnalysisRequestedSeason(null),
+  { selectedSeason: undefined, shouldReplaceUrl: false },
+  "an absent friend-analysis URL season must use the latest-season request without replacing its URL",
+);
 assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S]*setLoading\(false\);/, "a URL season change must clear stale friend analysis state");
 assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
-assert.match(analyticsSource, /nextParams\.delete\("season"\)/, "an invalid friend-analysis season URL must be normalized");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

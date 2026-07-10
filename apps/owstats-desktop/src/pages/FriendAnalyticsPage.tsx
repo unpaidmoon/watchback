@@ -32,6 +32,14 @@ export function parseFriendAnalysisSeasonParam(value: string | null) {
   return selectableSeasons.includes(season as (typeof selectableSeasons)[number]) ? season : undefined;
 }
 
+export function normalizeFriendAnalysisRequestedSeason(value: string | null) {
+  const selectedSeason = parseFriendAnalysisSeasonParam(value);
+  return {
+    selectedSeason,
+    shouldReplaceUrl: value !== null && selectedSeason === undefined,
+  };
+}
+
 export function hasFriendAnalysisSeasonData(analysis: Pick<SeasonAnalysis, "season">): analysis is { season: number } {
   return typeof analysis.season === "number" && analysis.season > 0;
 }
@@ -50,8 +58,7 @@ export function FriendAnalysisEmptyState() {
 export function FriendAnalyticsPage() {
   const [params, setParams] = useSearchParams();
   const seasonParam = params.get("season");
-  const requestedSeason = parseFriendAnalysisSeasonParam(seasonParam);
-  const hasInvalidSeasonParam = seasonParam !== null && requestedSeason === undefined;
+  const { selectedSeason: requestedSeason, shouldReplaceUrl } = normalizeFriendAnalysisRequestedSeason(seasonParam);
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [analysis, setAnalysis] = useState<SeasonAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,11 +66,11 @@ export function FriendAnalyticsPage() {
   const analysisRequestGuard = useRef(createLatestFriendAnalysisRequestGuard());
 
   useEffect(() => {
-    if (!hasInvalidSeasonParam) return;
+    if (!shouldReplaceUrl) return;
     const nextParams = new URLSearchParams(params);
     nextParams.delete("season");
     setParams(nextParams, { replace: true });
-  }, [hasInvalidSeasonParam, params, setParams]);
+  }, [shouldReplaceUrl, params, setParams]);
 
   useEffect(() => {
     analysisRequestGuard.current.invalidate();
