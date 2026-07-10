@@ -15,6 +15,9 @@ import {
 const reviewSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
+const matchesSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
+const matchesPageCacheSource = readFileSync(new URL("../src/shared/matchesPageCache.ts", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
 assert.match(reviewSource, /getPersonalSeasonReview\(selectedSeason/, "review page should request personal review with selectedSeason");
@@ -45,6 +48,18 @@ assert.deepEqual(
 assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S]*setLoading\(false\);/, "a URL season change must clear stale friend analysis state");
 assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
+
+assert.match(matchesSource, /chooseInitialMatchFilters\(filtersFromParams\(searchParams\), cachedPage\?\.filters, hasExplicitFilters\)/, "matches page should restore URL season filters before considering cached filters");
+assert.match(matchesSource, /<FilterBar filters=\{filters\} options=\{options\} onChange=\{setFilters\} \/>/, "matches page should bind the filter bar to the page-local filter state");
+assert.match(matchesSource, /paramsFromFilters\(filters, selectedMatchId\)/, "matches page should persist its current filter state, including season, to the URL");
+assert.match(matchesSource, /if \(next\.season !== undefined && !options\.seasons\.includes\(next\.season\)\) delete next\.season;/, "matches page should clear an unavailable URL season instead of querying a stale season");
+
+assert.match(filterBarSource, /<select value=\{filters\.season \?\? ""\} onChange=\{\(event\) => patch\(\{ season: numberOrUndefined\(event\.target\.value\) \}\)\}>/, "match filter bar should keep its season selector bound to the page-local season filter");
+assert.match(filterBarSource, /\{options\.seasons\.map\(\(season\) => \(/, "match filter bar should render the locally available season options");
+
+assert.match(matchesPageCacheSource, /const filterParamKeys = \["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"\];/, "matches cache should treat season as an explicit URL filter");
+assert.match(matchesPageCacheSource, /return cache\.loadedFilterKey !== "" && cache\.loadedFilterKey === matchFiltersKey\(filters\);/, "matches cache should hydrate explicit URL filters only when their full filter key matches");
+assert.match(matchesPageCacheSource, /const filterKey = matchFiltersKey\(filters\);/, "matches cache preload should key entries by all filters, including season");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
