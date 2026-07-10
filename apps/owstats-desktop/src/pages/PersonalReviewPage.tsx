@@ -5,7 +5,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { SeasonAnalysisModules } from "./FriendAnalyticsPage";
 import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
@@ -34,6 +34,38 @@ type AchievementKey = "win-streak" | "win-rate" | "s-grade" | "carry" | "signatu
 const romanLevels = ["I", "II", "III"] as const;
 const selectableSeasons = [23, 22, 21] as const;
 
+export function createLatestRequestGuard() {
+  let latestRequest = 0;
+
+  return {
+    begin() {
+      latestRequest += 1;
+      return latestRequest;
+    },
+    isCurrent(request: number) {
+      return latestRequest === request;
+    },
+    invalidate(request?: number) {
+      if (request === undefined || latestRequest === request) latestRequest += 1;
+    },
+  };
+}
+
+export function hasReviewSeasonData(review: Pick<PersonalSeasonReview, "summary">) {
+  return typeof review.summary.season === "number" && review.summary.season > 0;
+}
+
+export function ReviewEmptyState() {
+  return (
+    <section className="workspace reviewWorkspace phase6ReviewWorkspace">
+      <GlassPanel className="phase6RoleReport" tone="solid">
+        <h2>暂无可用赛季战报</h2>
+        <p>当前本地数据库没有可用于复盘的赛季数据。</p>
+      </GlassPanel>
+    </section>
+  );
+}
+
 export function PersonalReviewPage() {
   const [params, setParams] = useSearchParams();
   const requestedSeason = parseSeasonParam(params.get("season"));
@@ -44,31 +76,63 @@ export function PersonalReviewPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedAchievement, setSelectedAchievement] = useState<ReviewAchievement | null>(null);
+  const reviewRequestGuard = useRef(createLatestRequestGuard());
+  const analysisRequestGuard = useRef(createLatestRequestGuard());
 
   useEffect(() => {
+    reviewRequestGuard.current.invalidate();
+    analysisRequestGuard.current.invalidate();
     setSelectedSeason(requestedSeason);
+    setReview(null);
+    setAnalysis(null);
+    setError(null);
+    setAnalysisError(null);
+    setAnalysisLoading(false);
   }, [requestedSeason]);
 
   useEffect(() => {
+    const request = reviewRequestGuard.current.begin();
+    setReview(null);
     setError(null);
     void getPersonalSeasonReview(selectedSeason)
       .then((nextReview) => {
+        if (!reviewRequestGuard.current.isCurrent(request)) return;
         setReview(nextReview);
-        if (selectedSeason === undefined && nextReview.summary.season) {
-          setSelectedSeason(nextReview.summary.season);
+        const backendSeason = nextReview.summary.season;
+        if (selectedSeason === undefined && typeof backendSeason === "number" && backendSeason > 0) {
+          setSelectedSeason(backendSeason);
         }
       })
-      .catch((err) => setError(productErrorMessage(err)));
+      .catch((err) => {
+        if (reviewRequestGuard.current.isCurrent(request)) setError(productErrorMessage(err));
+      });
+
+    return () => reviewRequestGuard.current.invalidate(request);
   }, [selectedSeason]);
 
   useEffect(() => {
-    if (selectedSeason === undefined) return;
+    if (selectedSeason === undefined) {
+      setAnalysis(null);
+      setAnalysisError(null);
+      setAnalysisLoading(false);
+      return;
+    }
+    const request = analysisRequestGuard.current.begin();
+    setAnalysis(null);
     setAnalysisLoading(true);
     setAnalysisError(null);
     void getSeasonAnalysis(selectedSeason)
-      .then(setAnalysis)
-      .catch((err) => setAnalysisError(productErrorMessage(err)))
-      .finally(() => setAnalysisLoading(false));
+      .then((nextAnalysis) => {
+        if (analysisRequestGuard.current.isCurrent(request)) setAnalysis(nextAnalysis);
+      })
+      .catch((err) => {
+        if (analysisRequestGuard.current.isCurrent(request)) setAnalysisError(productErrorMessage(err));
+      })
+      .finally(() => {
+        if (analysisRequestGuard.current.isCurrent(request)) setAnalysisLoading(false);
+      });
+
+    return () => analysisRequestGuard.current.invalidate(request);
   }, [selectedSeason]);
 
   function changeSeason(nextSeason: number) {
@@ -90,6 +154,8 @@ export function PersonalReviewPage() {
   }
 
   if (!review) return <section className="workspace">正在加载个人赛季战报...</section>;
+
+  if (!hasReviewSeasonData(review)) return <ReviewEmptyState />;
 
   const achievements = buildSharedReviewAchievements(review);
   const analytics = analysis?.friend ?? null;
