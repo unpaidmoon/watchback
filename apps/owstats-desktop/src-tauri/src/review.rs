@@ -182,7 +182,7 @@ fn role_summaries_from_matches(
     let mut by_role = HashMap::<String, RoleAggregate>::new();
     for (game_mode, result, kills, assists, deaths, begin_ts, raw_json) in rows {
         let parsed = serde_json::from_str::<Value>(&raw_json).unwrap_or(Value::Null);
-        let role = role_type_from_match_entry(&game_mode, &parsed);
+        let role = role_type_from_match_player(&game_mode, &parsed, "");
         if role.is_empty() {
             continue;
         }
@@ -209,12 +209,14 @@ fn role_summaries_from_match_players(
         r#"
         SELECT
             COALESCE(mp.role_type, ''),
+            m.game_mode,
             m.result,
             mp.kill,
             mp.assist,
             mp.death,
             m.begin_ts,
-            mp.raw_json
+            mp.raw_json,
+            m.raw_entry_json
         FROM match_players mp
         JOIN matches m ON m.match_id = mp.match_id
         WHERE mp.is_current_player = 1
@@ -229,11 +231,13 @@ fn role_summaries_from_match_players(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
+            row.get::<_, String>(2)?,
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
             row.get::<_, i64>(5)?,
-            row.get::<_, String>(6)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
         ))
     };
     let rows = if let Some(value) = season {
@@ -245,8 +249,11 @@ fn role_summaries_from_match_players(
     };
 
     let mut by_role = HashMap::<String, RoleAggregate>::new();
-    for (raw_role, result, kills, assists, deaths, begin_ts, raw_json) in rows {
-        let role = normalize_role_type(&raw_role);
+    for (raw_role, game_mode, result, kills, assists, deaths, begin_ts, raw_json, raw_entry_json) in
+        rows
+    {
+        let raw_entry = serde_json::from_str::<Value>(&raw_entry_json).unwrap_or(Value::Null);
+        let role = role_type_from_match_player(&game_mode, &raw_entry, &raw_role);
         if !ROLE_ORDER.iter().any(|(key, _)| *key == role) {
             continue;
         }
@@ -314,20 +321,26 @@ fn add_role_match(
     }
 }
 
-fn role_type_from_match_entry(game_mode: &str, raw_entry: &Value) -> &'static str {
-    if game_mode == "SportOpen" {
+fn role_type_from_match_player(
+    game_mode: &str,
+    raw_entry: &Value,
+    fallback_role_type: &str,
+) -> &'static str {
+    let instance_type = raw_entry
+        .get("instanceType")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if game_mode == "SportOpen" || (game_mode == "sport" && instance_type == "IT_RULESET") {
         return "open";
     }
-
-    if game_mode == "SportPreset" {
+    if game_mode == "SportPreset" || (game_mode == "sport" && instance_type == "IT_RANKED") {
         return normalize_role_type(
             raw_entry
                 .get("roleType")
                 .and_then(Value::as_str)
-                .unwrap_or(""),
+                .unwrap_or(fallback_role_type),
         );
     }
-
     ""
 }
 
