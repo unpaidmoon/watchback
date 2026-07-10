@@ -24,6 +24,7 @@ assert.equal(getMatchesPageCache()?.scrollTop, 420, "cache keeps scroll position
 
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("season=21")), true, "S21 query counts as an explicit filter");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("qa=1")), false, "qa query does not override cached filters");
 
 assert.deepEqual(
@@ -37,6 +38,11 @@ assert.deepEqual(
   cachedFilters,
   "cached filters are restored when URL has no explicit filters",
 );
+assert.deepEqual(
+  chooseInitialMatchFilters({ season: 21 }, { season: 22 }, true),
+  { season: 21 },
+  "an explicit S21 URL filter wins over a cached S22 filter",
+);
 
 assert.equal(
   matchFiltersKey({ result: "win", hero: "ana" }),
@@ -47,6 +53,11 @@ assert.notEqual(
   matchFiltersKey({ hero: "ana" }),
   matchFiltersKey({ hero: "ana", playerName: "是糖三分毒#5811" }),
   "playerName participates in the loaded filter cache key",
+);
+assert.notEqual(
+  matchFiltersKey({ season: 21 }),
+  matchFiltersKey({ season: 22 }),
+  "S21 and S22 use different match-list cache keys",
 );
 
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), false, "cache does not hydrate before first successful load");
@@ -59,6 +70,11 @@ assert.equal(
   canHydrateMatchesPageCache(getMatchesPageCache(), { hero: "genji" }, true),
   false,
   "cache does not hydrate when explicit filters ask for a different list",
+);
+assert.equal(
+  canHydrateMatchesPageCache(getMatchesPageCache(), { season: 21 }, true),
+  false,
+  "an S22 cache does not hydrate an explicit S21 route",
 );
 
 assert.deepEqual(
@@ -153,6 +169,24 @@ await preloadMatchesPageCache({
 });
 
 assert.equal(matchListCalls, 1, "startup preload does not reload an already cached default list");
+
+clearMatchesPageCache();
+let season21LoaderFilters: MatchFilters | undefined;
+const season21Preloaded = await preloadMatchesPageCache(
+  {
+    getOverview: async () => overview,
+    listMatchFilters: async () => options,
+    listMatchTimeline: async (filters) => {
+      season21LoaderFilters = filters;
+      return matches;
+    },
+  },
+  { season: 21 },
+);
+
+assert.deepEqual(season21LoaderFilters, { season: 21 }, "S21 preload passes the selected season to the match-list loader");
+assert.equal(season21Preloaded.loadedFilterKey, matchFiltersKey({ season: 21 }), "S21 preload stores the S21 cache key");
+assert.equal(getMatchesPageCache()?.loadedFilterKey, matchFiltersKey({ season: 21 }), "S21 preload caches its own loaded key");
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 assert.equal(matchesPageSource.includes("window.scrollY"), false, "MatchesPage should not save window scroll for the match list");

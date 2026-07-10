@@ -17,7 +17,6 @@ const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", impor
 const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
 const matchesSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
-const matchesPageCacheSource = readFileSync(new URL("../src/shared/matchesPageCache.ts", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
 assert.match(reviewSource, /getPersonalSeasonReview\(selectedSeason/, "review page should request personal review with selectedSeason");
@@ -56,10 +55,6 @@ assert.match(matchesSource, /if \(next\.season !== undefined && !options\.season
 
 assert.match(filterBarSource, /<select value=\{filters\.season \?\? ""\} onChange=\{\(event\) => patch\(\{ season: numberOrUndefined\(event\.target\.value\) \}\)\}>/, "match filter bar should keep its season selector bound to the page-local season filter");
 assert.match(filterBarSource, /\{options\.seasons\.map\(\(season\) => \(/, "match filter bar should render the locally available season options");
-
-assert.match(matchesPageCacheSource, /const filterParamKeys = \["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"\];/, "matches cache should treat season as an explicit URL filter");
-assert.match(matchesPageCacheSource, /return cache\.loadedFilterKey !== "" && cache\.loadedFilterKey === matchFiltersKey\(filters\);/, "matches cache should hydrate explicit URL filters only when their full filter key matches");
-assert.match(matchesPageCacheSource, /const filterKey = matchFiltersKey\(filters\);/, "matches cache preload should key entries by all filters, including season");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
