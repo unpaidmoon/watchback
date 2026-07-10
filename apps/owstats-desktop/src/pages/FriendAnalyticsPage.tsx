@@ -49,12 +49,21 @@ export function FriendAnalysisEmptyState() {
 
 export function FriendAnalyticsPage() {
   const [params, setParams] = useSearchParams();
-  const requestedSeason = parseFriendAnalysisSeasonParam(params.get("season"));
+  const seasonParam = params.get("season");
+  const requestedSeason = parseFriendAnalysisSeasonParam(seasonParam);
+  const hasInvalidSeasonParam = seasonParam !== null && requestedSeason === undefined;
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [analysis, setAnalysis] = useState<SeasonAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const analysisRequestGuard = useRef(createLatestFriendAnalysisRequestGuard());
+
+  useEffect(() => {
+    if (!hasInvalidSeasonParam) return;
+    const nextParams = new URLSearchParams(params);
+    nextParams.delete("season");
+    setParams(nextParams, { replace: true });
+  }, [hasInvalidSeasonParam, params, setParams]);
 
   useEffect(() => {
     analysisRequestGuard.current.invalidate();
@@ -87,10 +96,14 @@ export function FriendAnalyticsPage() {
     return () => analysisRequestGuard.current.invalidate(request);
   }, [selectedSeason]);
 
-  function changeSeason(nextSeason: number) {
+  function changeSeason(nextSeason: number | undefined) {
     setSelectedSeason(nextSeason);
     const nextParams = new URLSearchParams(params);
-    nextParams.set("season", String(nextSeason));
+    if (nextSeason === undefined) {
+      nextParams.delete("season");
+    } else {
+      nextParams.set("season", String(nextSeason));
+    }
     setParams(nextParams);
   }
 
@@ -103,11 +116,12 @@ export function FriendAnalyticsPage() {
       <header className="sectionHeader phase6InlineHeader">
         <div>
           <span className="phase6Eyebrow">好友分析</span>
-          <h2>{selectedSeason ? `S${selectedSeason} 好友分析` : "好友分析"}</h2>
+          <h2>{selectedSeason ? `S${selectedSeason} 好友分析` : "最新赛季好友分析"}</h2>
         </div>
         <label className="seasonSelect phase8SeasonSelect">
           <span>赛季</span>
-          <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(Number(event.target.value))}>
+          <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(event.target.value ? Number(event.target.value) : undefined)}>
+            <option value="">最新赛季</option>
             {selectableSeasons.map((season) => (
               <option key={season} value={season}>
                 S{season}
@@ -141,7 +155,7 @@ export function SeasonAnalysisModules({
         </div>
       )}
 
-      {loading && <div className="emptyState">正在计算赛季分析...</div>}
+      {loading && <div className="emptyState">正在加载好友分析...</div>}
       {!loading && analytics && (
         <>
           <FriendPhase5Summary analytics={analytics} />

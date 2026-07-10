@@ -32,6 +32,9 @@ assert.equal(parseFriendAnalysisSeasonParam("21"), 21, "friend analysis should a
 assert.equal(parseFriendAnalysisSeasonParam("23"), 23, "friend analysis should accept S23 URL state");
 assert.equal(parseFriendAnalysisSeasonParam("999"), undefined, "friend analysis should ignore unsupported URL seasons");
 assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S]*setLoading\(false\);/, "a URL season change must clear stale friend analysis state");
+assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
+assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
+assert.match(analyticsSource, /nextParams\.delete\("season"\)/, "an invalid friend-analysis season URL must be normalized");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -151,6 +154,11 @@ await secondFriendResponse.promise.catch(() => undefined);
 await settlePromises();
 assert.equal(friendAnalysisError, "S23 请求失败", "the current friend-analysis error must be displayed");
 assert.equal(friendAnalysisLoading, false, "the current friend-analysis completion must clear loading");
+
+const navigationFriendRequestGuard = createLatestFriendAnalysisRequestGuard();
+const requestBeforeNavigation = navigationFriendRequestGuard.begin();
+navigationFriendRequestGuard.invalidate();
+assert.equal(navigationFriendRequestGuard.isCurrent(requestBeforeNavigation), false, "navigation must invalidate the previous friend-analysis request");
 
 assert.equal(hasReviewSeasonData({ summary: { season: null } } as never), false, "a null backend season must show the empty review state");
 assert.equal(hasReviewSeasonData({ summary: { season: 0 } } as never), false, "a zero backend season must show the empty review state");
