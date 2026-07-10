@@ -1202,6 +1202,28 @@ select {
   background: transparent;
 }
 
+.seasonSelect {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #c7d2e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.seasonSelect select {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+}
+
 .rankingTable {
   display: grid;
   gap: 6px;
@@ -3938,6 +3960,12 @@ select {
 .phase6SegmentedControl button.active {
   background: var(--phase6-accent);
   color: #1f242b;
+}
+
+.phase8SeasonSelect {
+  border-color: var(--phase6-border);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.72);
 }
 
 .phase6RankingSearch {
