@@ -862,6 +862,201 @@ fn database_migrates_v2_arena_player_index_idempotently() {
 }
 
 #[test]
+fn arena_player_projection_indexes_total_and_round_players_safely_and_idempotently() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 22,
+        "matches": {
+            "entries": [
+                {
+                    "matchId": "arena-projection",
+                    "matchRet": 1,
+                    "mapGuid": "map-a",
+                    "heroGuid": "hero-current",
+                    "gameMode": "SportFight",
+                    "_dashenSeason": 22
+                }
+            ],
+            "details": [
+                {
+                    "match_id": "arena-projection",
+                    "match_kind": "fight",
+                    "payload": {
+                        "data": {
+                            "nameMap": {
+                                "9400": "回合玩家",
+                                "9500": "95001234"
+                            },
+                            "totalCount": {
+                                "teammateList": [
+                                    {"bnetId": 9100, "name": "总计玩家"},
+                                    {"bnetId": 9200, "name": "92001234"}
+                                ],
+                                "enemyList": [
+                                    {
+                                        "bnetId": 9300,
+                                        "name": "0f8fad5b-d9cb-469f-a165-70867728950e"
+                                    }
+                                ]
+                            },
+                            "roundCountList": [
+                                {
+                                    "teammateList": [
+                                        {"bnetId": 9100, "name": "回合更新玩家"},
+                                        {"bnetId": 9400}
+                                    ],
+                                    "enemyList": [
+                                        {"bnetId": 9500}
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+
+    let conn = db.connect().unwrap();
+    let rows = {
+        let mut statement = conn
+            .prepare(
+                "SELECT side, bnet_id, player_name FROM arena_match_players \
+                 WHERE season = 22 ORDER BY bnet_id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let marker: String = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key='arena_player_index_v1:22'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(rows.len(), 5);
+    assert_eq!(
+        rows[0],
+        ("teammate".into(), "9100".into(), "回合更新玩家".into())
+    );
+    assert_eq!(
+        rows[1],
+        ("teammate".into(), "9200".into(), "未知玩家".into())
+    );
+    assert_eq!(rows[2], ("enemy".into(), "9300".into(), "未知玩家".into()));
+    assert_eq!(
+        rows[3],
+        ("teammate".into(), "9400".into(), "回合玩家".into())
+    );
+    assert_eq!(rows[4], ("enemy".into(), "9500".into(), "未知玩家".into()));
+    assert_eq!(marker, "complete");
+}
+
+#[test]
+fn arena_player_rebuild_only_replaces_its_season_and_marks_empty_projection_complete() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = |season: i64, match_id: &str, players: Value| {
+        json!({
+            "season": season,
+            "matches": {
+                "entries": [
+                    {
+                        "matchId": match_id,
+                        "matchRet": 1,
+                        "mapGuid": "map-a",
+                        "heroGuid": "hero-current",
+                        "gameMode": "SportFight",
+                        "_dashenSeason": season
+                    }
+                ],
+                "details": [
+                    {
+                        "match_id": match_id,
+                        "match_kind": "fight",
+                        "payload": {
+                            "data": {
+                                "totalCount": {
+                                    "teammateList": players,
+                                    "enemyList": []
+                                },
+                                "roundCountList": []
+                            }
+                        }
+                    }
+                ]
+            }
+        })
+    };
+
+    import_payload_value(
+        &db,
+        &payload(
+            21,
+            "arena-s21",
+            json!([{"bnetId": 2100, "name": "S21 玩家"}]),
+        ),
+        temp.path(),
+    )
+    .unwrap();
+    import_payload_value(
+        &db,
+        &payload(
+            22,
+            "arena-s22",
+            json!([{"bnetId": 2200, "name": "S22 玩家"}]),
+        ),
+        temp.path(),
+    )
+    .unwrap();
+    import_payload_value(&db, &payload(22, "arena-s22", json!([])), temp.path()).unwrap();
+
+    let conn = db.connect().unwrap();
+    let s21_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM arena_match_players WHERE season = 21",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let s22_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM arena_match_players WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let complete_markers: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM app_settings \
+             WHERE key IN ('arena_player_index_v1:21', 'arena_player_index_v1:22') \
+               AND value = 'complete'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(s21_rows, 1);
+    assert_eq!(s22_rows, 0);
+    assert_eq!(complete_markers, 2);
+}
+
+#[test]
 fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));

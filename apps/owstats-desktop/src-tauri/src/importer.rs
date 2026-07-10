@@ -281,6 +281,10 @@ fn rebuild_match_players_for_season(
         "DELETE FROM match_players WHERE season = ?",
         params![season],
     )?;
+    tx.execute(
+        "DELETE FROM arena_match_players WHERE season = ?",
+        params![season],
+    )?;
     let current_bnet = payload
         .and_then(|item| item.pointer("/profile_card/data/bnetId"))
         .and_then(value_to_string)
@@ -288,9 +292,6 @@ fn rebuild_match_players_for_season(
         .unwrap_or_default();
 
     for detail in details {
-        if string_field(detail, "match_kind").as_deref() != Some("normal") {
-            continue;
-        }
         let match_id = string_field(detail, "match_id").unwrap_or_default();
         if match_id.is_empty() {
             continue;
@@ -303,6 +304,13 @@ fn rebuild_match_players_for_season(
             )
             .ok();
         if bucket.as_deref() != Some("preset") {
+            if string_field(detail, "match_kind").as_deref() == Some("fight") {
+                let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
+                insert_arena_player_index_rows(tx, &match_id, season, data, now)?;
+            }
+            continue;
+        }
+        if string_field(detail, "match_kind").as_deref() != Some("normal") {
             continue;
         }
         let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
@@ -332,7 +340,149 @@ fn rebuild_match_players_for_season(
             now,
         )?;
     }
+    let key = format!("arena_player_index_v1:{season}");
+    tx.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, 'complete', ?2) \
+         ON CONFLICT(key) DO UPDATE SET value='complete', updated_at=excluded.updated_at",
+        params![key, now],
+    )?;
     Ok(())
+}
+
+fn insert_arena_player_index_rows(
+    tx: &rusqlite::Transaction<'_>,
+    match_id: &str,
+    season: i64,
+    data: &Value,
+    now: &str,
+) -> Result<()> {
+    let name_map = arena_name_map(data);
+    insert_arena_player_index_side(
+        tx,
+        match_id,
+        season,
+        "teammate",
+        data.pointer("/totalCount/teammateList"),
+        &name_map,
+        now,
+    )?;
+    insert_arena_player_index_side(
+        tx,
+        match_id,
+        season,
+        "enemy",
+        data.pointer("/totalCount/enemyList"),
+        &name_map,
+        now,
+    )?;
+
+    if let Some(rounds) = data.get("roundCountList").and_then(Value::as_array) {
+        for round in rounds {
+            insert_arena_player_index_side(
+                tx,
+                match_id,
+                season,
+                "teammate",
+                round.get("teammateList"),
+                &name_map,
+                now,
+            )?;
+            insert_arena_player_index_side(
+                tx,
+                match_id,
+                season,
+                "enemy",
+                round.get("enemyList"),
+                &name_map,
+                now,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn insert_arena_player_index_side(
+    tx: &rusqlite::Transaction<'_>,
+    match_id: &str,
+    season: i64,
+    side: &str,
+    value: Option<&Value>,
+    name_map: &HashMap<String, String>,
+    now: &str,
+) -> Result<()> {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for item in items {
+        if !item.is_object() {
+            continue;
+        }
+        let bnet_id = string_field(item, "bnetId").unwrap_or_default();
+        if bnet_id.is_empty() {
+            continue;
+        }
+        tx.execute(
+            r#"
+            INSERT INTO arena_match_players (match_id, season, side, bnet_id, player_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(match_id, side, bnet_id) DO UPDATE SET
+                season=excluded.season,
+                player_name=excluded.player_name,
+                updated_at=excluded.updated_at
+            "#,
+            params![
+                match_id,
+                season,
+                side,
+                bnet_id,
+                arena_player_name(item, name_map),
+                now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn arena_name_map(data: &Value) -> HashMap<String, String> {
+    data.get("nameMap")
+        .and_then(Value::as_object)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|(key, value)| {
+                    let name = value.as_str()?.trim();
+                    if key.trim().is_empty() || name.is_empty() {
+                        None
+                    } else {
+                        Some((key.to_string(), name.to_string()))
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn arena_player_name(item: &Value, name_map: &HashMap<String, String>) -> String {
+    let bnet_id = string_field(item, "bnetId").unwrap_or_default();
+    string_field(item, "name")
+        .filter(|name| !looks_like_private_id(name))
+        .or_else(|| {
+            name_map
+                .get(&bnet_id)
+                .filter(|name| !looks_like_private_id(name))
+                .cloned()
+        })
+        .unwrap_or_else(|| "未知玩家".to_string())
+}
+
+fn looks_like_private_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return !trimmed.is_empty();
+    }
+    let compact = trimmed.chars().filter(|ch| *ch != '-').collect::<String>();
+    compact.len() == 32 && compact.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn player_rows_for_side<'a>(data: &'a Value, list_name: &str) -> Option<&'a Value> {
