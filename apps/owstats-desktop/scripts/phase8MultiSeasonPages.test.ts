@@ -5,11 +5,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createLatestRequestGuard, hasReviewSeasonData, ReviewEmptyState } from "../src/pages/PersonalReviewPage";
 
 const reviewSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
+const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
 assert.match(reviewSource, /getPersonalSeasonReview\(selectedSeason/, "review page should request personal review with selectedSeason");
 assert.match(reviewSource, /getSeasonAnalysis\(selectedSeason/, "review page should request season analysis with the same selectedSeason");
 assert.match(reviewSource, /const titleSeason = selectedSeason \?\? review\.summary\.season/, "review title should use selectedSeason before backend summary season");
+
+assert.match(rankingSource, /getRankings\(selectedSeason/, "ranking page should request rankings with selectedSeason");
+assert.match(rankingSource, /<select[^>]+value=\{selectedSeason/, "ranking page should render a page-level season selector");
+assert.match(rankingSource, /\.set\("season", String\(nextSeason\)\)/, "ranking page selector should persist season in the URL");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
