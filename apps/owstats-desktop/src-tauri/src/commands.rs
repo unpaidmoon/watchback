@@ -3,7 +3,7 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_credentials_and_target_paths_output_dir_base_url, BindPlayerTargetRequest,
+    sync_season_with_current_account_credentials_path_output_dir_base_url, BindPlayerTargetRequest,
     BindPlayerTargetResult, ClearPlayerTargetResult, CredentialLoginCancelResult,
     CredentialLoginResult, CredentialStatus, FilterOptions, FriendAnalytics,
     FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult, MatchDetailView,
@@ -222,13 +222,11 @@ pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSum
     let paths = app_paths(&app)?;
     let root = paths.seasons();
     let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let emit_app = app.clone();
-    sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    sync_season_with_current_account_credentials_path_output_dir_base_url(
         &db,
         &root,
         &credential_path,
-        &target_path,
         request.season,
         "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
         move |progress| {

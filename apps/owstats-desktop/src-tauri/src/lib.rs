@@ -33,6 +33,7 @@ pub use sync::{
     sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
+    sync_season_with_current_account_credentials_path_output_dir_base_url,
     sync_season_with_progress,
 };
 

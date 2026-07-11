@@ -401,7 +401,7 @@ async fn full_season_fetch_tries_current_season_without_season_param_first() {
 }
 
 #[tokio::test]
-async fn desktop_sync_writes_json_to_explicit_season_directory_before_importing_sqlite() {
+async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_season_directory() {
     let temp = tempfile::tempdir().unwrap();
     let app_data = temp.path().join("app-data");
     let season_dir = app_data.join("seasons");
@@ -409,17 +409,7 @@ async fn desktop_sync_writes_json_to_explicit_season_directory_before_importing_
 
     std::fs::write(
         app_data.join(".dashen_credentials.json"),
-        r#"{"role_id":123,"token":"account-auth-token","dts":2026,"server":1}"#,
-    )
-    .unwrap();
-    save_player_target_for_path(
-        &app_data.join(".dashen_player_target.json"),
-        &PlayerTarget {
-            input_bnet: "Tester#12345".to_string(),
-            resolved_bnet: Some("Tester#12345".to_string()),
-            customer_token: "player-customer-token".to_string(),
-            bound_at: "2026-07-03T00:00:00Z".to_string(),
-        },
+        r#"{"role_id":123,"token":"account-auth-token","customer_token":"current-account-customer-token","dts":2026,"server":1}"#,
     )
     .unwrap();
 
@@ -427,11 +417,10 @@ async fn desktop_sync_writes_json_to_explicit_season_directory_before_importing_
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
 
     let summary =
-        owstats_desktop_lib::sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        owstats_desktop_lib::sync_season_with_current_account_credentials_path_output_dir_base_url(
             &db,
             &season_dir,
             &app_data.join(".dashen_credentials.json"),
-            &app_data.join(".dashen_player_target.json"),
             23,
             &format!("{}/customer", server.base_url),
             |_| {},
