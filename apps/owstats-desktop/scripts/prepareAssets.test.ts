@@ -123,14 +123,16 @@ await withFixture(async ({ appRoot, repoRoot }) => {
 });
 
 await withFixture(async ({ appRoot, repoRoot, inventory }) => {
-  const outsideFile = path.join(repoRoot, "outside-secret.txt");
-  const linkedFile = path.join(repoRoot, "assets", "heroes", "linked.png");
+  const outsideDir = path.join(repoRoot, "outside-assets");
+  const linkedDir = path.join(repoRoot, "assets", "heroes", "linked-dir");
+  await mkdir(outsideDir, { recursive: true });
+  const outsideFile = path.join(outsideDir, "outside.png");
   await writeFile(outsideFile, "outside");
-  await symlink(outsideFile, linkedFile, "file");
-  inventory.files.push("heroes/linked.png");
+  await symlink(outsideDir, linkedDir, "junction");
+  inventory.files.push("heroes/linked-dir/outside.png");
   inventory.files.sort();
   await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
-  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /符号链接.*heroes[\\/]linked\.png/i);
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /符号链接.*heroes[\\/]linked-dir/i);
 });
 
 await withFixture(async ({ appRoot, repoRoot, inventory }) => {
