@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
@@ -24,11 +25,30 @@ impl OwDatabase {
         }
         let conn = Connection::open(&self.path)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        if self.path.is_file() {
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
+        }
         Ok(conn)
     }
 
     pub fn initialize(&self) -> Result<()> {
+        let database_preexisted = self.path.is_file()
+            && std::fs::metadata(&self.path)
+                .map(|metadata| metadata.len() > 0)
+                .unwrap_or(false);
         let conn = self.connect()?;
+        if database_preexisted {
+            if let Some(app_data_dir) = self.path.parent() {
+                crate::database::backup::backup_before_schema_migration(
+                    &conn,
+                    &self.path,
+                    &app_data_dir.join("backups"),
+                    crate::database::migrations::CURRENT_SCHEMA_VERSION,
+                )?;
+            }
+        }
         initialize_connection(&conn)?;
         if let Some(app_data_dir) = self.path.parent() {
             crate::privacy_migration::migrate_legacy_persistence(&conn, app_data_dir, &self.path)?;
