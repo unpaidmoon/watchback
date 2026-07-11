@@ -12,6 +12,7 @@ pub mod login_flow;
 mod match_evaluation;
 mod models;
 pub mod player_target;
+mod privacy_migration;
 mod queries;
 pub mod ranking;
 mod redaction;

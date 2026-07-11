@@ -32,6 +32,9 @@ impl OwDatabase {
     pub fn initialize(&self) -> Result<()> {
         let conn = self.connect()?;
         initialize_connection(&conn)?;
+        if let Some(app_data_dir) = self.path.parent() {
+            crate::privacy_migration::migrate_legacy_persistence(&conn, app_data_dir, &self.path)?;
+        }
         Ok(())
     }
 }

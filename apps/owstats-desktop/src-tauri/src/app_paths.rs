@@ -45,6 +45,9 @@ impl AppPaths {
     pub fn backups(&self) -> PathBuf {
         self.root.join("backups")
     }
+    pub fn privacy_backups(&self) -> PathBuf {
+        self.root.join("privacy-backups")
+    }
 }
 
 #[cfg(test)]
@@ -66,6 +69,7 @@ mod tests {
             (paths.seasons(), "seasons"),
             (paths.diagnostics(), "diagnostics"),
             (paths.backups(), "backups"),
+            (paths.privacy_backups(), "privacy-backups"),
         ];
 
         for (path, file_name) in expected {
