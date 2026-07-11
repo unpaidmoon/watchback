@@ -31,6 +31,17 @@ cd apps\owstats-desktop
 npm run tauri build
 ```
 
+## Portable Development Inputs
+
+- `apps/owstats-desktop/runtime-config/ow-lookups.json` 是前后端共用的正式最小字典；桌面运行和构建不得读取被忽略的 `docs/reference/`。
+- `apps/owstats-desktop/runtime-config/assets-inventory.json` 是资源构建白名单。资源变更后显式运行 `node scripts/prepareAssets.mjs --refresh-inventory` 并审查差异；普通 test/build 不调用 Git。
+- `npm test`、`npm run build` 和 `npm run dev` 会先确定性重建 `public/assets`。生成目录不提交，资源 URL 固定为 `/assets/...`。
+- Tauri 桌面运行路径统一由 `AppPaths` 从 `app_data_dir` 派生。数据库、设置、凭据、浏览器 profile、赛季 JSON、诊断和备份不得从仓库根推导。
+- `CARGO_MANIFEST_DIR` 只允许显式开发 CLI 和测试使用；桌面 commands 不得依赖仓库布局。
+- `npm run build` 的 postbuild 会扫描 `dist`，发现 `/@fs/`、开发机盘符路径或 `docs/reference` 时失败。
+
+更新资源或路径代码后，除常规检查外还应从 `git archive HEAD` 创建 tracked-only 临时副本，执行前端测试、构建、Rust 测试和 `npm run tauri:dev -- --no-watch` 启动烟测。不要把真实 app-data、凭据、浏览器 profile 或玩家数据复制到临时副本。
+
 ## Commit Discipline
 
 - Do not mix unrelated changes in one commit. Keep product behavior, release configuration, database migrations, text repair, and test-only changes separate when they can be reviewed or rolled back independently.

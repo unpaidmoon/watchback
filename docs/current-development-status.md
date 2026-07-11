@@ -1,20 +1,22 @@
 # OWStatsLocal 当前开发状态
 
 > 更新日期：2026-07-11
-> 稳定化阶段：STAB-002 已验证。任务 11–14 已按独立提交纳入 `codex/stabilization`。
+> 稳定化阶段：STAB-003 已验证。资源与桌面运行路径已收口为 tracked-only、仓库无关输入。
 
 ## 产品与架构
 
 - 主产品位于 `apps/owstats-desktop`，采用 Tauri 2、React、TypeScript、Rust 和 SQLite；前端通过 Tauri command 调用 Rust 查询、同步与持久化能力。
 - 产品固定支持 S21、S22、S23。对局、个人战报、排行和好友分析页面各自维护赛季选择与 URL 状态，不存在全局赛季状态或“一键同步全部赛季”。
-- STAB-002 任务 1–13 已按小提交重建，当前已提交范围为 `d8d8054..88a9dbb`；其中包含协作约束、生成物治理、竞技模式修正、多赛季查询与页面隔离，以及角斗玩家索引 schema v3、投影、回填查询和经确认素材。
+- STAB-002 任务 1–13 已按小提交重建，提交范围为 `d8d8054..88a9dbb`；STAB-003 的资源与路径提交范围为 `0533f41..b8a10bd`。
 - 角斗玩家索引使用 `arena_match_players` 投影；schema v3 以前向、幂等迁移建立表与索引。导入按赛季写入投影，查询前用 `arena_player_index_v1:<season>` 完成 marker 判断缺失回填，空投影赛季也可被标记为完成，避免重复重建。
 - 任务 11–13 已实现并通过本轮测试：角斗玩家按名称或 bnet 标识搜索但只返回显示名、按玩家筛选角斗对局、逐赛季 marker 回填；`Shion` 中文别名改为“死怨”；五张已确认 S23 预览图及映射记录已保留。任务 14 完成文档收尾、36 路径对账和最终验证。
 
 ## 资源与隐私边界
 
-- `esperanca2.png`、`ilios2.png`、`nepal2.png`、`oasis-university.png`、`samoa2.png` 仅作为经复审的候选预览素材保留，尚未接入运行时资源解析。
-- 字典提取、正式资源打包、仓库相对资源 URL 和运行路径治理延期到 STAB-003；本阶段未恢复 `docs/reference` 输入、`D:\Codex\...` 或 `/@fs/` 运行依赖。
+- 正式资源由 tracked `assets-inventory.json` 白名单和三份 manifest 校验后确定性准备；源 symlink/junction、路径越界、未跟踪文件和敏感 runtime config 会使准备失败。
+- 前端统一使用 `/assets/...`，Vite 不再放行开发机绝对目录；构建产物扫描禁止 `/@fs/`、开发机盘符路径和 `docs/reference`。
+- `ow-lookups.json` 是前端和 Rust importer 共用的最小正式字典；桌面运行不再读取 ignored `docs/reference` 或仓库 `data/players`。
+- `AppPaths` 统一派生数据库、设置、资料、凭据、旧 target、浏览器 profile、seasons、diagnostics 和 backups；桌面同步 JSON 直接写入 `app_data/seasons`。
 - 登录身份、凭据结构、持久化 raw JSON 的统一递归脱敏和存量数据迁移延期到 STAB-004；本轮未读取真实凭据、浏览器 profile、真实数据库或玩家 dump。
 
 ## 快照 36 路径对账
@@ -79,4 +81,6 @@
 - `cargo test --tests`：通过；真实上游凭据测试 `live_rust_sync_imports_a_complete_season` 按设计忽略。
 - `npm test`：通过。
 - `npm run build`：通过；Vite 报告既有大 chunk 警告，不影响退出码。
-- 本轮未执行 `npm run tauri build`、安装包构建、干净 checkout 构建、原生 Tauri WebView 烟测或真实上游同步，因此不声称安装版或异机可用性已验证。
+- `git archive HEAD` tracked-only 临时副本中：`npm ci --offline`、`npm test`、`npm run build`、`cargo fmt --check`、`cargo test --tests` 通过。
+- tracked-only 副本的 `npm run tauri:dev -- --no-watch` 完成编译并启动 `target\\debug\\owstats-desktop.exe`，随后正常终止烟测进程树。
+- 本轮未执行 `npm run tauri build`、安装包构建或真实上游同步；不声称安装版已验证。
