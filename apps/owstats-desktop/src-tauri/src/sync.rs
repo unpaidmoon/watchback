@@ -585,31 +585,7 @@ fn build_full_season_payload(
 }
 
 fn strip_sensitive_fields(value: Value) -> Value {
-    match value {
-        Value::Array(items) => {
-            Value::Array(items.into_iter().map(strip_sensitive_fields).collect())
-        }
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .filter_map(|(key, value)| {
-                    if is_sensitive_field_name(&key) {
-                        None
-                    } else {
-                        Some((key, strip_sensitive_fields(value)))
-                    }
-                })
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
-fn is_sensitive_field_name(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    key.contains("token")
-        || key.contains("cookie")
-        || key.contains("authorization")
-        || key.contains("credential")
+    crate::redaction::sanitize_persisted_json(&value)
 }
 
 fn sanitize_detail_errors(detail_errors: Vec<Value>) -> Vec<Value> {
@@ -896,16 +872,10 @@ fn dedupe_entries(entries: Vec<Value>, season: i64) -> Vec<Value> {
 }
 
 fn safe_error_message(message: &str) -> String {
-    let mut parts = Vec::new();
-    for part in message.split_whitespace() {
-        let lower = part.to_ascii_lowercase();
-        if lower.contains("token") || lower.contains("cookie") {
-            parts.push("[REDACTED]".to_string());
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    parts.join(" ").chars().take(240).collect()
+    crate::redaction::redact_sensitive_text(message)
+        .chars()
+        .take(240)
+        .collect()
 }
 
 #[cfg(test)]

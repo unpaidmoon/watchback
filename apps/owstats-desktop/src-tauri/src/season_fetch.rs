@@ -432,14 +432,8 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
 }
 
 fn safe_error_message(message: &str) -> String {
-    let mut parts = Vec::new();
-    for part in message.split_whitespace() {
-        let lower = part.to_ascii_lowercase();
-        if lower.contains("token") || lower.contains("cookie") {
-            parts.push("[REDACTED]".to_string());
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    parts.join(" ").chars().take(240).collect()
+    crate::redaction::redact_sensitive_text(message)
+        .chars()
+        .take(240)
+        .collect()
 }

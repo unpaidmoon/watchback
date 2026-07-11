@@ -84,17 +84,7 @@ pub fn clear_credentials_for_path(path: &Path) -> Result<bool> {
 }
 
 pub fn redact_sensitive_text(message: &str) -> String {
-    let mut parts = Vec::new();
-    for part in message.split_whitespace() {
-        let lowered = part.to_ascii_lowercase();
-        if lowered.contains("token") || lowered.contains("cookie") {
-            let key = part.split_once('=').map(|(key, _)| key).unwrap_or(part);
-            parts.push(format!("{key}=***REDACTED***"));
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    parts.join(" ")
+    crate::redaction::redact_sensitive_text(message)
 }
 
 #[cfg(test)]

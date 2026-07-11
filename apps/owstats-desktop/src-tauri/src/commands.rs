@@ -256,5 +256,5 @@ fn app_paths(app: &AppHandle) -> Result<crate::app_paths::AppPaths, String> {
 }
 
 fn to_message(error: impl std::fmt::Display) -> String {
-    error.to_string()
+    crate::redaction::safe_error_message(error)
 }
