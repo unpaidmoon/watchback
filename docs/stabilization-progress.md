@@ -9,7 +9,7 @@
 | STAB-001 | 安全快照与恢复验证 | P0 | 已验证 | Git bundle 恢复哈希一致 | `codex/stabilization-snapshot` |
 | STAB-002 | 拆分当前未提交成果 | P0 | 已验证 | Rust 全量测试、前端测试与构建通过；36 路径对账完成 | `d8d8054..88a9dbb`；`docs: complete STAB-002 decomposition` |
 | STAB-003 | 可复现资源与运行路径 | P0 | 已验证 | tracked inventory 两次准备哈希一致；主目录和 `git archive HEAD` 副本的前端测试/构建、Rust 全量测试通过；副本 `tauri:dev` 启动到 `owstats-desktop.exe` | `0533f41..b8a10bd`；`docs: complete STAB-003 portability` |
-| STAB-004 | 同步身份与敏感数据治理 | P0 | 待开始 | 未执行 | — |
+| STAB-004 | 同步身份与敏感数据治理 | P0 | 进行中 | 已完成审计与实施计划；正在建立唯一脱敏边界 | — |
 | STAB-005 | 数据库迁移与运行稳定性 | P0 | 待开始 | 未执行 | — |
 | STAB-006 | 渐进式模块化 | P1 | 待开始 | 未执行 | — |
 | STAB-007 | 统一验证脚本与 CI | P1 | 待开始 | 未执行 | — |
