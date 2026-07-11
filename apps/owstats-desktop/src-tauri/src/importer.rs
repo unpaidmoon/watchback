@@ -178,10 +178,12 @@ fn import_payload_value_with_lookups(
 
     rebuild_match_players_for_season(&tx, season, &details, &lookups, Some(payload), &now)?;
 
+    tx.execute("DELETE FROM sync_errors WHERE season = ?", [season])?;
+
     for error in &errors {
         tx.execute(
             r#"
-            INSERT INTO sync_errors (season, match_id, error_type, message, raw_json, created_at)
+            INSERT OR IGNORE INTO sync_errors (season, match_id, error_type, message, raw_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
             params![
@@ -196,6 +198,12 @@ fn import_payload_value_with_lookups(
             ],
         )?;
     }
+
+    let latest_error_count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM sync_errors WHERE season = ?",
+        [season],
+        |row| row.get(0),
+    )?;
 
     tx.execute(
         r#"
@@ -213,7 +221,7 @@ fn import_payload_value_with_lookups(
             now,
             entries.len() as i64,
             details.len() as i64,
-            errors.len() as i64
+            latest_error_count
         ],
     )?;
 

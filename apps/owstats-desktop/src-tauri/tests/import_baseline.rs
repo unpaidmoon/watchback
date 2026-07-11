@@ -639,7 +639,7 @@ fn database_initialize_sets_schema_version_idempotently() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 }
 
 #[test]
@@ -699,7 +699,7 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
 }
@@ -844,7 +844,7 @@ fn database_migrates_v2_arena_player_index_idempotently() {
         )
         .unwrap();
 
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(arena_table_count, 1);
     assert_eq!(
         arena_columns,
@@ -1633,8 +1633,8 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
         project_root,
         22,
         &cached_player,
-        entries,
-        details,
+        entries.clone(),
+        details.clone(),
         detail_errors,
         1,
     )
@@ -1648,6 +1648,13 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
         .unwrap();
     let player_rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM match_players", [], |row| row.get(0))
+        .unwrap();
+    let error_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_errors WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     let errors_text: String = conn
         .query_row(
@@ -1683,6 +1690,7 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
     assert_eq!(matches_count, 1);
     assert_eq!(details_count, 1);
     assert_eq!(player_rows, 3);
+    assert_eq!(error_rows, 1);
     assert!(!errors_text.contains("token-secret"));
     assert!(!errors_text.contains("customer-secret"));
     assert!(!errors_text.contains("session-secret"));
@@ -1690,4 +1698,27 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
     assert!(!detail_text.contains("detail-customer-secret"));
     assert!(!error_message.contains("token-secret"));
     assert!(!first.latest_errors.join(" ").contains("token-secret"));
+
+    drop(conn);
+    let recovered = sync_import_parts(
+        &db,
+        project_root,
+        22,
+        &cached_player,
+        entries,
+        details,
+        vec![],
+        1,
+    )
+    .unwrap();
+    let conn = db.connect().unwrap();
+    let remaining_errors: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_errors WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(recovered.failed_details, 0);
+    assert_eq!(remaining_errors, 0);
 }

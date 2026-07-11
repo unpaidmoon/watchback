@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use rusqlite::{Connection, Transaction};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 struct Migration {
     version: i64,
@@ -24,6 +24,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "arena player projection",
         apply: migrate_v3,
+    },
+    Migration {
+        version: 4,
+        name: "sync error latest snapshot",
+        apply: migrate_v4,
     },
 ];
 
@@ -76,6 +81,27 @@ fn migrate_v3(transaction: &Transaction<'_>) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_arena_match_players_bnet ON arena_match_players(bnet_id, season);
         CREATE INDEX IF NOT EXISTS idx_arena_match_players_name ON arena_match_players(player_name, season);
     "#)?;
+    Ok(())
+}
+
+fn migrate_v4(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        DELETE FROM sync_errors
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM sync_errors
+            GROUP BY season, match_id, error_type, message
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_errors_snapshot_unique
+            ON sync_errors(
+                IFNULL(season, -1),
+                IFNULL(match_id, ''),
+                IFNULL(error_type, ''),
+                IFNULL(message, '')
+            );
+        "#,
+    )?;
     Ok(())
 }
 
