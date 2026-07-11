@@ -1264,7 +1264,8 @@ fn detail_exposes_teammates_enemies_and_redacted_raw_json() {
     assert_eq!(detail.teammates[0].hero_name, "安娜");
     assert!(!raw.contains("detail-secret"));
     assert!(!raw.contains("entry-secret"));
-    assert!(raw.contains("***REDACTED***"));
+    assert!(!raw.contains("customerToken"));
+    assert!(!raw.contains("token\""));
 }
 
 #[test]
@@ -1376,7 +1377,7 @@ fn import_persists_profile_card_for_command_center() {
         .unwrap();
 
     assert!(raw_json.contains("\"name\":\"Current#1000\""));
-    assert!(raw_json.contains("***REDACTED***"));
+    assert!(!raw_json.contains("customerToken"));
     assert!(!raw_json.contains("customer-secret"));
 }
 

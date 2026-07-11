@@ -231,10 +231,13 @@ mod tests {
             fs::read_to_string(target).unwrap(),
             "legacy-target-must-remain"
         );
-        let backups = fs::read_dir(temp.path().join("privacy-backups"))
+        let backup_dirs = fs::read_dir(temp.path().join("privacy-backups"))
             .unwrap()
-            .count();
-        assert_eq!(backups, 1);
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(backup_dirs.len(), 1);
+        assert!(backup_dirs[0].join("owstats.sqlite3").is_file());
+        assert!(backup_dirs[0].join("seasons").join("22.json").is_file());
         assert!(migration_complete(&conn).unwrap());
         migrate_legacy_persistence(&conn, temp.path(), &database_path).unwrap();
         assert_eq!(
