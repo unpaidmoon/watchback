@@ -7,7 +7,7 @@ use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const PRESET_MODES: &[&str] = &[
     "LeisurePreset",
@@ -28,18 +28,25 @@ pub fn import_full_season_payload(
         .with_context(|| format!("failed to read season payload {}", path.display()))?;
     let payload: Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse season payload {}", path.display()))?;
-    let root = path
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .unwrap_or_else(|| Path::new("."));
-    import_payload_value(db, &payload, root)
+    import_payload_value_embedded(db, &payload)
+}
+
+pub fn import_payload_value_embedded(db: &OwDatabase, payload: &Value) -> Result<ImportSummary> {
+    import_payload_value_with_lookups(db, payload, load_embedded_lookup()?)
 }
 
 pub fn import_payload_value(
     db: &OwDatabase,
     payload: &Value,
     project_root: &Path,
+) -> Result<ImportSummary> {
+    import_payload_value_with_lookups(db, payload, load_lookup(project_root))
+}
+
+fn import_payload_value_with_lookups(
+    db: &OwDatabase,
+    payload: &Value,
+    lookups: Lookups,
 ) -> Result<ImportSummary> {
     db.initialize()?;
     let conn = db.connect()?;
@@ -61,7 +68,6 @@ pub fn import_payload_value(
         .cloned()
         .unwrap_or_default();
     let now = Utc::now().to_rfc3339();
-    let lookups = load_lookup(project_root);
     let details_by_id = details_by_match_id(&details);
 
     let tx = conn.unchecked_transaction()?;
@@ -736,6 +742,8 @@ fn normalize_timestamp(value: i64) -> i64 {
 struct Lookups {
     heroes: HashMap<String, String>,
     maps: HashMap<String, String>,
+    #[allow(dead_code)]
+    attrs: HashMap<String, String>,
 }
 
 fn load_lookup(project_root: &Path) -> Lookups {
@@ -743,16 +751,46 @@ fn load_lookup(project_root: &Path) -> Lookups {
     let parsed = std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-    let heroes = dict_names(parsed.as_ref().and_then(|item| item.get("heroes")));
-    let maps = dict_names(parsed.as_ref().and_then(|item| item.get("maps")));
-    Lookups { heroes, maps }
+    parsed
+        .as_ref()
+        .map(parse_lookups)
+        .unwrap_or_else(|| load_embedded_lookup().expect("embedded runtime lookup must be valid"))
+}
+
+fn load_embedded_lookup() -> Result<Lookups> {
+    let parsed: Value = serde_json::from_str(include_str!("../../runtime-config/ow-lookups.json"))
+        .context("failed to parse embedded runtime lookup")?;
+    Ok(parse_lookups(&parsed))
+}
+
+fn parse_lookups(parsed: &Value) -> Lookups {
+    Lookups {
+        heroes: dict_names(parsed.get("heroes")),
+        maps: dict_names(parsed.get("maps")),
+        attrs: attr_names(parsed.get("attrs")),
+    }
 }
 
 fn load_lookup_from_db(tx: &rusqlite::Transaction<'_>) -> Result<Lookups> {
     Ok(Lookups {
         heroes: load_dictionary_from_db(tx, "hero_dict")?,
         maps: load_dictionary_from_db(tx, "map_dict")?,
+        attrs: HashMap::new(),
     })
+}
+
+fn attr_names(value: Option<&Value>) -> HashMap<String, String> {
+    value
+        .and_then(Value::as_object)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|(guid, item)| {
+                    string_field(item, "text").map(|text| (guid.clone(), text))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn load_dictionary_from_db(
@@ -813,6 +851,28 @@ fn is_sensitive_key(key: &str) -> bool {
     lowered.contains("token") || lowered.contains("cookie")
 }
 
+#[cfg(test)]
+mod portable_lookup_tests {
+    use super::load_embedded_lookup;
+
+    #[test]
+    fn embedded_lookup_resolves_known_hero_map_and_attribute_without_project_root() {
+        let lookup = load_embedded_lookup().unwrap();
+        assert_eq!(
+            lookup.heroes.get("207165582859043131").map(String::as_str),
+            Some("安娜")
+        );
+        assert_eq!(
+            lookup.maps.get("576460752303425122").map(String::as_str),
+            Some("漓江塔")
+        );
+        assert_eq!(
+            lookup.attrs.get("603482350067646509").map(String::as_str),
+            Some("单独消灭")
+        );
+    }
+}
+
 fn upsert_dictionary(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
@@ -828,10 +888,6 @@ fn upsert_dictionary(
         tx.execute(&sql, params![guid, name, raw.to_string(), now])?;
     }
     Ok(())
-}
-
-pub fn default_database_path(app_data_dir: PathBuf) -> PathBuf {
-    app_data_dir.join("owstats.sqlite3")
 }
 
 pub fn existing_import_summary(db: &OwDatabase) -> Result<Option<ImportSummary>> {

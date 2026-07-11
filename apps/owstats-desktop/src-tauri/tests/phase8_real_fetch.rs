@@ -406,11 +406,10 @@ async fn full_season_fetch_tries_current_season_without_season_param_first() {
 }
 
 #[tokio::test]
-async fn sync_writes_json_before_importing_sqlite() {
+async fn desktop_sync_writes_json_to_explicit_season_directory_before_importing_sqlite() {
     let temp = tempfile::tempdir().unwrap();
-    let project_root = temp.path().join("project");
     let app_data = temp.path().join("app-data");
-    std::fs::create_dir_all(project_root.join("data")).unwrap();
+    let season_dir = app_data.join("seasons");
     std::fs::create_dir_all(&app_data).unwrap();
 
     std::fs::write(
@@ -432,22 +431,20 @@ async fn sync_writes_json_before_importing_sqlite() {
     let server = spawn_full_season_server();
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
 
-    let summary = owstats_desktop_lib::sync_season_with_credentials_and_target_paths_base_url(
-        &db,
-        &project_root,
-        &app_data.join(".dashen_credentials.json"),
-        &app_data.join(".dashen_player_target.json"),
-        23,
-        &format!("{}/customer", server.base_url),
-        |_| {},
-    )
-    .await
-    .unwrap();
+    let summary =
+        owstats_desktop_lib::sync_season_with_credentials_and_target_paths_output_dir_base_url(
+            &db,
+            &season_dir,
+            &app_data.join(".dashen_credentials.json"),
+            &app_data.join(".dashen_player_target.json"),
+            23,
+            &format!("{}/customer", server.base_url),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
-    let raw_path = project_root
-        .join("data")
-        .join("players")
-        .join("local_s23_full_season.json");
+    let raw_path = season_dir.join("local_s23_full_season.json");
     assert!(raw_path.exists());
     assert_eq!(summary.imported_matches, 3);
 }

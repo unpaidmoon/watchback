@@ -3,7 +3,7 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_credentials_and_target_paths_base_url, BindPlayerTargetRequest,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, BindPlayerTargetRequest,
     BindPlayerTargetResult, ClearPlayerTargetResult, CredentialLoginCancelResult,
     CredentialLoginResult, CredentialStatus, FilterOptions, FriendAnalytics,
     FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult, MatchDetailView,
@@ -159,13 +159,8 @@ pub fn get_player_profile(app: AppHandle) -> Result<PlayerProfile, String> {
     let role_id = crate::credentials::get_credential_status(&app)
         .map_err(to_message)?
         .role_id;
-    crate::settings::get_player_profile_with_project_root(
-        &app_database(&app)?,
-        &player_profile_path(&app)?,
-        role_id,
-        &project_root()?,
-    )
-    .map_err(to_message)
+    crate::settings::get_player_profile(&app_database(&app)?, &player_profile_path(&app)?, role_id)
+        .map_err(to_message)
 }
 
 #[tauri::command]
@@ -224,11 +219,12 @@ pub fn get_season_analysis(app: AppHandle, season: Option<i64>) -> Result<Season
 #[tauri::command]
 pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSummary, String> {
     let db = app_database(&app)?;
-    let root = project_root()?;
+    let paths = app_paths(&app)?;
+    let root = paths.seasons();
     let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
     let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let emit_app = app.clone();
-    sync_season_with_credentials_and_target_paths_base_url(
+    sync_season_with_credentials_and_target_paths_output_dir_base_url(
         &db,
         &root,
         &credential_path,
@@ -257,16 +253,6 @@ fn user_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn app_paths(app: &AppHandle) -> Result<crate::app_paths::AppPaths, String> {
     crate::app_paths::AppPaths::from_app(app).map_err(to_message)
-}
-
-fn project_root() -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .and_then(|apps_dir| apps_dir.parent())
-        .and_then(|repo| repo.parent())
-        .map(PathBuf::from)
-        .ok_or_else(|| "failed to resolve repository root".to_string())
 }
 
 fn to_message(error: impl std::fmt::Display) -> String {

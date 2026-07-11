@@ -50,7 +50,16 @@ for (const key of [
 assert.doesNotThrow(() => assertNoSensitiveKeys({ description: "ordinary token-style value" }));
 
 assertNoSensitiveKeys(config);
-assert.deepEqual(Object.keys(config).sort(), ["attrs", "heroAttrList", "heroPerkList", "perkList"]);
+assert.deepEqual(Object.keys(config).sort(), [
+  "attrs",
+  "heroAttrList",
+  "heroPerkList",
+  "heroes",
+  "maps",
+  "perkList",
+]);
+assert.equal(config.heroes["207165582859043131"].name, "安娜");
+assert.equal(config.maps["576460752303425122"].name, "漓江塔");
 assert.ok(config.attrs && Object.keys(config.attrs).length > 0, "runtime config should include stat attributes");
 assert.equal(config.attrs?.["603482350067646509"]?.text, "单独消灭");
 assert.equal(config.attrs?.["603482350067646509"]?.type, "通用数据");

@@ -1,5 +1,5 @@
 use crate::db::OwDatabase;
-use crate::importer::{import_payload_value, string_field};
+use crate::importer::{import_payload_value_embedded, string_field};
 use crate::models::{SyncProgress, SyncSummary};
 use anyhow::{anyhow, Context, Result};
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -206,6 +206,27 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
     target_path: &Path,
     season: i64,
     customer_base_url: &str,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        db,
+        &project_root.join("data").join("players"),
+        credential_path,
+        target_path,
+        season,
+        customer_base_url,
+        progress,
+    )
+    .await
+}
+
+pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    db: &OwDatabase,
+    season_output_dir: &Path,
+    credential_path: &Path,
+    target_path: &Path,
+    season: i64,
+    customer_base_url: &str,
     mut progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
     db.initialize()?;
@@ -240,11 +261,7 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
     )
     .await?;
 
-    write_season_payload(
-        &project_root.join("data").join("players"),
-        season,
-        &fetch.payload,
-    )?;
+    write_season_payload(season_output_dir, season, &fetch.payload)?;
     if fetch.entries == 0 {
         return Err(anyhow!(
             "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后重新登录后再试。"
@@ -280,7 +297,7 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
     });
     let summary = sync_import_parts(
         db,
-        project_root,
+        season_output_dir,
         season,
         &fetch.payload,
         entries,
@@ -491,7 +508,7 @@ async fn fetch_season_parts_with_base_url(
 
 pub fn sync_import_parts(
     db: &OwDatabase,
-    project_root: &Path,
+    _project_root: &Path,
     season: i64,
     cached_player: &Value,
     entries: Vec<Value>,
@@ -515,7 +532,7 @@ pub fn sync_import_parts(
             "detail_errors": safe_detail_errors,
         }
     });
-    let import_summary = import_payload_value(db, &payload, project_root)?;
+    let import_summary = import_payload_value_embedded(db, &payload)?;
     let errors = payload
         .pointer("/matches/detail_errors")
         .and_then(Value::as_array)

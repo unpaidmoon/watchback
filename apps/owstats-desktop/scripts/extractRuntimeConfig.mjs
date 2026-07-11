@@ -18,8 +18,12 @@ const firstBy = (values, keyOf) => {
 };
 const perkFields = ["id", "guid", "name", "desc"];
 const attrFields = ["valueGuid", "valueText", "valueType"];
+const dictionary = (value) =>
+  Object.fromEntries(Object.entries(value ?? {}).map(([key, item]) => [key, pick(item, ["name"])]));
 
 const runtimeConfig = {
+  heroes: dictionary(cache.heroes),
+  maps: dictionary(cache.maps),
   attrs: Object.fromEntries(Object.entries(cache.attrs ?? {}).map(([key, value]) => [key, pick(value, ["text", "type"])])),
   heroPerkList: Object.fromEntries(
     Object.entries(queryTool.heroPerkList ?? {}).map(([key, perks]) => [key, perks.map((perk) => pick(perk, perkFields))]),
