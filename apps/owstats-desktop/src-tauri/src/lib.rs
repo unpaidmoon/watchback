@@ -21,6 +21,7 @@ mod review;
 pub mod season_fetch;
 mod settings;
 mod sync;
+mod sync_coordinator;
 
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
@@ -42,6 +43,7 @@ pub use sync::{
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(sync_coordinator::SyncCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
             commands::list_match_filters,

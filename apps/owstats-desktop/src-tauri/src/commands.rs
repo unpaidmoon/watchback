@@ -12,7 +12,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,7 +166,12 @@ pub fn get_season_analysis(app: AppHandle, season: Option<i64>) -> Result<Season
 }
 
 #[tauri::command]
-pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSummary, String> {
+pub async fn sync_season(
+    app: AppHandle,
+    request: SyncRequest,
+    coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+) -> Result<SyncSummary, String> {
+    let _permit = coordinator.try_acquire().map_err(str::to_string)?;
     let db = app_database(&app)?;
     let paths = app_paths(&app)?;
     let root = paths.seasons();
