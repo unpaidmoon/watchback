@@ -119,6 +119,18 @@ assertEqual(
 );
 
 assertEqual(normalizeStadiumAssetPath("assets/stadium/mod-trait/icon.png"), "/assets/stadium/mod-trait/icon.png", "stadium path maps to the stable asset root");
-for (const unsafePath of ["/@fs/D:/repo/assets/stadium/icon.png", "D:/repo/assets/stadium/icon.png", "../assets/stadium/icon.png", "assets/stadium/../icon.png"]) {
+for (const unsafePath of [
+  "/@fs/D:/repo/assets/stadium/icon.png",
+  "D:/repo/assets/stadium/icon.png",
+  "../assets/stadium/icon.png",
+  "assets/stadium/../icon.png",
+  "assets/stadium/%2e%2e/icon.png",
+  "assets/stadium/folder%2ficon.png",
+  "assets/stadium/C:/x.png",
+  "assets/stadium//server/icon.png",
+  "assets/stadium/folder\\icon.png",
+  "assets/stadium/./icon.png",
+  "assets/stadium/folder\u0000icon.png",
+]) {
   assertEqual(normalizeStadiumAssetPath(unsafePath), null, `stadium path rejects unsafe input ${unsafePath}`);
 }

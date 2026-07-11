@@ -101,8 +101,8 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>): Promise<vo
   }
 }
 
-await withFixture(async ({ appRoot, repoRoot }) => {
-  await prepareAssets({ appRoot, repoRoot });
+await withFixture(async ({ appRoot, repoRoot, inventory }) => {
+  const result = await prepareAssets({ appRoot, repoRoot });
   assert.equal(await readFile(path.join(appRoot, "public", "assets", "heroes", "ana.png"), "utf8"), "hero");
   assert.equal(await readFile(path.join(appRoot, "public", "assets", "ranks", "bronze.png"), "utf8"), "rank");
   await assert.rejects(readFile(path.join(appRoot, "public", "assets", "token-style", "unreferenced.png")), /ENOENT/);
@@ -110,10 +110,8 @@ await withFixture(async ({ appRoot, repoRoot }) => {
     await readFile(path.join(appRoot, "public", "assets", "stadium", "ranks", "fight", "bronze.png"), "utf8"),
     "fight",
   );
-  assert.deepEqual(
-    JSON.parse(await readFile(path.join(appRoot, "public", "assets", "config", "ow-lookups.json"), "utf8")),
-    { attrs: { damage: { text: "伤害", type: "通用数据" } } },
-  );
+  await assert.rejects(readFile(path.join(appRoot, "public", "assets", "config", "ow-lookups.json")), /ENOENT/);
+  assert.equal(result.fileCount, inventory.files.length, "prepared output count includes tracked assets only");
 });
 
 await withFixture(async ({ appRoot, repoRoot }) => {

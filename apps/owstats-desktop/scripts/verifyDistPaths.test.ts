@@ -9,10 +9,20 @@ const root = await mkdtemp(path.join(tmpdir(), "owstats-dist-paths-"));
 try {
   const dist = path.join(root, "dist");
   await mkdir(dist);
-  await writeFile(path.join(dist, "clean.js"), "const url='/assets/heroes/ana.png';");
+  await writeFile(path.join(dist, "clean.js"), "const asset='/assets/heroes/ana.png'; const remote='https://example.com';");
+  await writeFile(path.join(dist, "binary.png"), Buffer.from([0, 255, ...Buffer.from("E:/outside-repository/file.png")]));
   await verifyDistPaths(dist, { repoRoot: root });
 
-  for (const forbidden of ["/@fs/D:/repo/file.png", "D:/Codex/OW_data/file.png", "C:\\Users\\user\\file.png", "docs/reference/query.json", `${root.replaceAll("\\", "/")}/assets/file.png`]) {
+  for (const forbidden of [
+    "/@fs/D:/repo/file.png",
+    "D:/Codex/OW_data/file.png",
+    "D:\\Codex\\OW_data\\file.png",
+    "C:/Users/user/file.png",
+    "C:\\Users\\user\\file.png",
+    "E:/outside-repository/file.png",
+    "docs/reference/query.json",
+    `${root.replaceAll("\\", "/")}/assets/file.png`,
+  ]) {
     await writeFile(path.join(dist, "bad.js"), forbidden);
     await assert.rejects(() => verifyDistPaths(dist, { repoRoot: root }), /bad\.js/, `scanner rejects ${forbidden}`);
   }

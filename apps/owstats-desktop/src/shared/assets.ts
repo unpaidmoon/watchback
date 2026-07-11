@@ -180,14 +180,16 @@ export function normalizeAssetKey(value: string | null | undefined): string | nu
 export function normalizeStadiumAssetPath(value: string | null | undefined): string | null {
   const raw = value?.trim();
   if (!raw) return null;
-  const normalized = raw.replace(/\\/g, "/");
-  if (normalized.startsWith("/") || /^[a-z]:\//i.test(normalized) || normalized.includes(["/@", "fs/"].join("")) || normalized.split("/").includes("..")) {
+  if (raw.includes("\\") || raw.includes("%") || raw.includes(":") || /[\u0000-\u001f\u007f]/.test(raw)) {
     return null;
   }
   const prefix = "assets/stadium/";
-  if (!normalized.startsWith(prefix)) return null;
-  const relative = normalized.slice(prefix.length).replace(/^\.\//, "");
-  return relative && !relative.split("/").includes(".") ? `${stadiumAssetRoot}/${relative}` : null;
+  if (!raw.startsWith(prefix)) return null;
+  const relative = raw.slice(prefix.length);
+  const segments = relative.split("/");
+  return segments.length > 0 && segments.every((segment) => segment !== "" && segment !== "." && segment !== "..")
+    ? `${stadiumAssetRoot}/${relative}`
+    : null;
 }
 
 function assetKey(value: string | null | undefined, lookup: Map<string, string>): string | null {

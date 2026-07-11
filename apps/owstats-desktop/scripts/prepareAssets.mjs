@@ -261,8 +261,6 @@ export async function prepareAssets({ repoRoot, appRoot } = {}) {
   await mkdir(stagingRoot, { recursive: true });
   try {
     await copyInventoryFiles(assetsRoot, stagingRoot, inventoryFiles);
-    await mkdir(path.join(stagingRoot, "config"), { recursive: true });
-    await writeFile(path.join(stagingRoot, "config", "ow-lookups.json"), `${JSON.stringify(runtimeConfig, null, 2)}\n`);
     await replaceDirectoryAtomically(outputRoot, stagingRoot);
   } catch (error) {
     await rm(stagingRoot, { recursive: true, force: true });
