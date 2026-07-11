@@ -1,13 +1,8 @@
-use crate::db::OwDatabase;
-use crate::models::*;
-use anyhow::{Context, Result};
-use rusqlite::params;
-use serde_json::Value;
-use std::collections::HashMap;
+use super::*;
 
-const MAP_MIN_SAMPLE: i64 = 2;
-const COMMAND_CENTER_SEASONS: [i64; 3] = [21, 22, 23];
-const ROLE_ORDER: [(&str, &str); 4] = [
+pub(super) const MAP_MIN_SAMPLE: i64 = 2;
+pub(super) const COMMAND_CENTER_SEASONS: [i64; 3] = [21, 22, 23];
+pub(super) const ROLE_ORDER: [(&str, &str); 4] = [
     ("tank", "重装"),
     ("dps", "输出"),
     ("healer", "支援"),
@@ -15,7 +10,7 @@ const ROLE_ORDER: [(&str, &str); 4] = [
 ];
 
 #[derive(Debug, Clone)]
-struct ReviewMatch {
+pub(super) struct ReviewMatch {
     match_id: String,
     result: String,
     map_name: String,
@@ -44,7 +39,7 @@ impl ReviewMatch {
 }
 
 #[derive(Debug, Clone, Default)]
-struct Aggregate {
+pub(super) struct Aggregate {
     matches: i64,
     wins: i64,
     kills: i64,
@@ -68,7 +63,7 @@ impl Aggregate {
     }
 }
 
-pub fn get_personal_season_review(
+pub(super) fn get_personal_season_review_impl(
     db: &OwDatabase,
     request: PersonalReviewRequest,
 ) -> Result<PersonalSeasonReview> {
@@ -116,493 +111,7 @@ pub fn get_personal_season_review(
     })
 }
 
-#[derive(Debug, Clone, Default)]
-struct RoleAggregate {
-    matches: i64,
-    wins: i64,
-    kills: i64,
-    assists: i64,
-    deaths: i64,
-    latest_begin_ts: i64,
-    rank_score: i64,
-    rank_sub_tier: i64,
-}
-
-fn role_summaries(db: &OwDatabase, season: Option<i64>) -> Result<Vec<RoleRankSummary>> {
-    let from_matches = role_summaries_from_matches(db, season)?;
-    if from_matches.values().any(|item| item.matches > 0) {
-        return Ok(build_role_summaries(from_matches));
-    }
-
-    role_summaries_from_match_players(db, season).map(build_role_summaries)
-}
-
-fn role_summaries_from_matches(
-    db: &OwDatabase,
-    season: Option<i64>,
-) -> Result<HashMap<String, RoleAggregate>> {
-    let conn = db.connect()?;
-    let mut sql = String::from(
-        r#"
-        SELECT
-            game_mode,
-            result,
-            kills,
-            assists,
-            deaths,
-            begin_ts,
-            raw_entry_json
-        FROM matches
-        WHERE bucket = 'preset'
-        "#,
-    );
-    if season.is_some() {
-        sql.push_str(" AND season = ?");
-    }
-    let mut stmt = conn.prepare(&sql)?;
-    let mapper = |row: &rusqlite::Row<'_>| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
-            row.get::<_, i64>(3)?,
-            row.get::<_, i64>(4)?,
-            row.get::<_, i64>(5)?,
-            row.get::<_, String>(6)?,
-        ))
-    };
-    let rows = if let Some(value) = season {
-        stmt.query_map(params![value], mapper)?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        stmt.query_map([], mapper)?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-
-    let mut by_role = HashMap::<String, RoleAggregate>::new();
-    for (game_mode, result, kills, assists, deaths, begin_ts, raw_json) in rows {
-        let parsed = serde_json::from_str::<Value>(&raw_json).unwrap_or(Value::Null);
-        let role = role_type_from_match_player(&game_mode, &parsed, "");
-        if role.is_empty() {
-            continue;
-        }
-        add_role_match(
-            &mut by_role,
-            role,
-            &result,
-            kills,
-            assists,
-            deaths,
-            begin_ts,
-            &raw_json,
-        );
-    }
-    Ok(by_role)
-}
-
-fn role_summaries_from_match_players(
-    db: &OwDatabase,
-    season: Option<i64>,
-) -> Result<HashMap<String, RoleAggregate>> {
-    let conn = db.connect()?;
-    let mut sql = String::from(
-        r#"
-        SELECT
-            COALESCE(mp.role_type, ''),
-            m.game_mode,
-            m.result,
-            mp.kill,
-            mp.assist,
-            mp.death,
-            m.begin_ts,
-            mp.raw_json,
-            m.raw_entry_json
-        FROM match_players mp
-        JOIN matches m ON m.match_id = mp.match_id
-        WHERE mp.is_current_player = 1
-          AND m.bucket = 'preset'
-        "#,
-    );
-    if season.is_some() {
-        sql.push_str(" AND m.season = ?");
-    }
-    let mut stmt = conn.prepare(&sql)?;
-    let mapper = |row: &rusqlite::Row<'_>| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
-            row.get::<_, i64>(4)?,
-            row.get::<_, i64>(5)?,
-            row.get::<_, i64>(6)?,
-            row.get::<_, String>(7)?,
-            row.get::<_, String>(8)?,
-        ))
-    };
-    let rows = if let Some(value) = season {
-        stmt.query_map(params![value], mapper)?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        stmt.query_map([], mapper)?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-
-    let mut by_role = HashMap::<String, RoleAggregate>::new();
-    for (raw_role, game_mode, result, kills, assists, deaths, begin_ts, raw_json, raw_entry_json) in
-        rows
-    {
-        let raw_entry = serde_json::from_str::<Value>(&raw_entry_json).unwrap_or(Value::Null);
-        let role = role_type_from_match_player(&game_mode, &raw_entry, &raw_role);
-        if !ROLE_ORDER.iter().any(|(key, _)| *key == role) {
-            continue;
-        }
-        add_role_match(
-            &mut by_role,
-            role,
-            &result,
-            kills,
-            assists,
-            deaths,
-            begin_ts,
-            &raw_json,
-        );
-    }
-
-    Ok(by_role)
-}
-
-fn build_role_summaries(by_role: HashMap<String, RoleAggregate>) -> Vec<RoleRankSummary> {
-    ROLE_ORDER
-        .iter()
-        .map(|(role_type, role_label)| {
-            let item = by_role.get(*role_type).cloned().unwrap_or_default();
-            let rank_level = rank_level_for_score(item.rank_score);
-            RoleRankSummary {
-                role_type: (*role_type).to_string(),
-                role_label: (*role_label).to_string(),
-                matches: item.matches,
-                wins: item.wins,
-                win_rate: round2(ratio(item.wins, item.matches)),
-                kda: round2((item.kills + item.assists) as f64 / item.deaths.max(1) as f64),
-                rank_level,
-                rank_sub_tier: if rank_level > 0 {
-                    item.rank_sub_tier
-                } else {
-                    0
-                },
-                rank_key: rank_key_for_level(rank_level).to_string(),
-            }
-        })
-        .collect()
-}
-
-fn add_role_match(
-    by_role: &mut HashMap<String, RoleAggregate>,
-    role: &str,
-    result: &str,
-    kills: i64,
-    assists: i64,
-    deaths: i64,
-    begin_ts: i64,
-    raw_json: &str,
-) {
-    let item = by_role.entry(role.to_string()).or_default();
-    item.matches += 1;
-    item.wins += if result == "win" { 1 } else { 0 };
-    item.kills += kills;
-    item.assists += assists;
-    item.deaths += deaths;
-    let (rank_score, rank_sub_tier) = parse_rank_info(raw_json);
-    if rank_score > 0 && begin_ts >= item.latest_begin_ts {
-        item.latest_begin_ts = begin_ts;
-        item.rank_score = rank_score;
-        item.rank_sub_tier = rank_sub_tier;
-    }
-}
-
-fn role_type_from_match_player(
-    game_mode: &str,
-    raw_entry: &Value,
-    fallback_role_type: &str,
-) -> &'static str {
-    let instance_type = raw_entry
-        .get("instanceType")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if game_mode == "SportOpen" || (game_mode == "sport" && instance_type == "IT_RULESET") {
-        return "open";
-    }
-    if game_mode == "SportPreset" || (game_mode == "sport" && instance_type == "IT_RANKED") {
-        return normalize_role_type(
-            raw_entry
-                .get("roleType")
-                .and_then(Value::as_str)
-                .unwrap_or(fallback_role_type),
-        );
-    }
-    ""
-}
-
-fn normalize_role_type(role_type: &str) -> &'static str {
-    match role_type.trim().to_ascii_lowercase().as_str() {
-        "tank" => "tank",
-        "dps" | "damage" => "dps",
-        "healer" | "support" => "healer",
-        "open" => "open",
-        _ => "",
-    }
-}
-
-fn parse_rank_info(raw_json: &str) -> (i64, i64) {
-    let parsed = serde_json::from_str::<Value>(raw_json).unwrap_or(Value::Null);
-    let rank_info = parsed.get("rankInfo").unwrap_or(&Value::Null);
-    (
-        json_i64(rank_info.get("rankScore")),
-        json_i64(rank_info.get("rankSubTier")),
-    )
-}
-
-fn json_i64(value: Option<&Value>) -> i64 {
-    value
-        .and_then(|item| {
-            item.as_i64()
-                .or_else(|| item.as_f64().map(|value| value.round() as i64))
-                .or_else(|| item.as_str().and_then(|text| text.parse().ok()))
-        })
-        .unwrap_or(0)
-}
-
-fn rank_level_for_score(rank_score: i64) -> i64 {
-    if rank_score <= 0 {
-        0
-    } else {
-        ((rank_score / 100) + 1).clamp(1, 8)
-    }
-}
-
-fn rank_key_for_level(rank_level: i64) -> &'static str {
-    match rank_level {
-        1 => "bronze",
-        2 => "silver",
-        3 => "gold",
-        4 => "platinum",
-        5 => "diamond",
-        6 => "master",
-        7 => "grandmaster",
-        8 => "champion",
-        _ => "unranked",
-    }
-}
-
-fn phase5_highlights(
-    db: &OwDatabase,
-    season: Option<i64>,
-    streaks: &StreakSummary,
-) -> Result<Phase5ReviewHighlights> {
-    let conn = db.connect()?;
-    let mut sql = String::from(
-        r#"
-        SELECT e.primary_tag, e.grade, e.evidence_tags_json
-        FROM match_evaluations e
-        JOIN matches m ON m.match_id = e.match_id
-        WHERE m.bucket='preset'
-        "#,
-    );
-    let mut rows = if let Some(season) = season {
-        sql.push_str(" AND m.season=?");
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt
-            .query_map(params![season], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
-    } else {
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
-    };
-
-    let carry_count = rows.iter().filter(|row| row.0 == "带飞局").count() as i64;
-    let try_hard_count = rows.iter().filter(|row| row.0 == "尽力局").count() as i64;
-    let s_grade_count = rows.iter().filter(|row| row.1 == "S").count() as i64;
-    let mut highlight_counts = HashMap::<String, i64>::new();
-    for (_, _, evidence_text) in rows.drain(..) {
-        for tag in serde_json::from_str::<Vec<String>>(&evidence_text).unwrap_or_default() {
-            if matches!(
-                tag.as_str(),
-                "KDA最高" | "击杀最多" | "伤害最高" | "治疗最高" | "格挡最多"
-            ) {
-                *highlight_counts.entry(tag).or_default() += 1;
-            }
-        }
-    }
-    let most_common_highlight = highlight_counts
-        .into_iter()
-        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-        .map(|item| item.0);
-
-    Ok(Phase5ReviewHighlights {
-        carry_count,
-        try_hard_count,
-        s_grade_count,
-        longest_win_streak: streaks.longest_win_streak,
-        most_common_highlight,
-    })
-}
-
-pub fn get_onboarding_status(
-    db: &OwDatabase,
-    request: OnboardingStatusRequest,
-) -> Result<OnboardingStatus> {
-    db.initialize()?;
-    let conn = db.connect()?;
-    let available_seasons = {
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT season FROM matches WHERE bucket='preset' ORDER BY season")?;
-        let rows = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<i64>>>()?;
-        rows
-    };
-    let season_statuses = command_center_season_statuses(db)?;
-    let selected = request
-        .season
-        .or_else(|| available_seasons.iter().copied().max());
-    let (preset_matches, detail_matches, last_seen) = if let Some(season) = selected {
-        conn.query_row(
-            r#"
-            SELECT
-                COUNT(m.match_id),
-                COUNT(d.match_id),
-                MAX(m.updated_at)
-            FROM matches m
-            LEFT JOIN match_details d ON d.match_id = m.match_id
-            WHERE m.bucket='preset' AND m.season=?
-            "#,
-            params![season],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?
-    } else {
-        (0, 0, None)
-    };
-    let can_enter_review = preset_matches > 0;
-    let mut warnings = Vec::new();
-    if preset_matches == 0 {
-        warnings.push("没有可读取的本地预设/开放赛季数据。".to_string());
-    } else if detail_matches < preset_matches {
-        warnings.push("部分比赛详情缺失，但仍可进入复盘。".to_string());
-    }
-
-    Ok(OnboardingStatus {
-        selected_season: selected,
-        available_seasons,
-        can_enter_review,
-        credential_status: CredentialStatus {
-            state: "external".to_string(),
-            message: "沿用第二阶段外部凭证流程。".to_string(),
-            exposes_secret: false,
-            role_id: None,
-            saved_at: None,
-        },
-        local_data: LocalDataStatus {
-            data_source: "本地 SQLite".to_string(),
-            season: selected,
-            preset_matches,
-            detail_matches,
-            last_synced_or_imported_at: last_seen,
-            freshness_risk: if can_enter_review {
-                "未知".to_string()
-            } else {
-                "没有本地数据".to_string()
-            },
-        },
-        season_statuses,
-        health: DataHealthStatus {
-            readable: can_enter_review,
-            warnings,
-        },
-    })
-}
-
-fn command_center_season_statuses(db: &OwDatabase) -> Result<Vec<SeasonDataStatus>> {
-    COMMAND_CENTER_SEASONS
-        .iter()
-        .map(|season| command_center_season_status(db, *season))
-        .collect()
-}
-
-fn command_center_season_status(db: &OwDatabase, season: i64) -> Result<SeasonDataStatus> {
-    let conn = db.connect()?;
-    let (match_count, normal_match_count, arena_match_count, match_updated_at): (
-        i64,
-        i64,
-        i64,
-        Option<String>,
-    ) = conn.query_row(
-        r#"
-        SELECT
-            COUNT(*),
-            COALESCE(SUM(CASE WHEN bucket='preset' THEN 1 ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN bucket='stadium' OR match_kind='fight' OR game_mode IN ('LeisureFight', 'SportFight') THEN 1 ELSE 0 END), 0),
-            MAX(updated_at)
-        FROM matches
-        WHERE season=?
-        "#,
-        params![season],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    )?;
-    let (detail_count, detail_updated_at): (i64, Option<String>) = conn.query_row(
-        r#"
-        SELECT COUNT(d.match_id), MAX(d.updated_at)
-        FROM match_details d
-        JOIN matches m ON m.match_id=d.match_id
-        WHERE m.season=?
-        "#,
-        params![season],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let failed_detail_count = (match_count - detail_count).max(0);
-    let coverage_percent = if match_count > 0 {
-        ((detail_count * 100) / match_count).clamp(0, 100)
-    } else {
-        0
-    };
-
-    Ok(SeasonDataStatus {
-        season,
-        match_count,
-        detail_count,
-        normal_match_count,
-        arena_match_count,
-        failed_detail_count,
-        last_synced_or_imported_at: latest_timestamp(match_updated_at, detail_updated_at),
-        coverage_percent,
-    })
-}
-
-fn latest_timestamp(left: Option<String>, right: Option<String>) -> Option<String> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(if left >= right { left } else { right }),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    }
-}
-
-fn selected_season(db: &OwDatabase, requested: Option<i64>) -> Result<Option<i64>> {
+pub(super) fn selected_season(db: &OwDatabase, requested: Option<i64>) -> Result<Option<i64>> {
     if requested.is_some() {
         return Ok(requested);
     }
@@ -617,7 +126,7 @@ fn selected_season(db: &OwDatabase, requested: Option<i64>) -> Result<Option<i64
     Ok(season)
 }
 
-fn review_rows(db: &OwDatabase, season: Option<i64>) -> Result<Vec<ReviewMatch>> {
+pub(super) fn review_rows(db: &OwDatabase, season: Option<i64>) -> Result<Vec<ReviewMatch>> {
     let conn = db.connect()?;
     let mut sql = String::from(
         r#"
@@ -658,7 +167,7 @@ fn review_rows(db: &OwDatabase, season: Option<i64>) -> Result<Vec<ReviewMatch>>
     Ok(rows)
 }
 
-fn build_baseline(
+pub(super) fn build_baseline(
     all_rows: &[ReviewMatch],
     baseline_rows: &[ReviewMatch],
     aggregate: &Aggregate,
@@ -699,7 +208,7 @@ fn build_baseline(
     }
 }
 
-fn personal_bests(rows: &[ReviewMatch]) -> Vec<PersonalBest> {
+pub(super) fn personal_bests(rows: &[ReviewMatch]) -> Vec<PersonalBest> {
     let mut bests = Vec::new();
     push_best(&mut bests, rows, "kills", "最高消灭", |row| row.kills);
     push_best(&mut bests, rows, "damage", "最高伤害", |row| row.damage);
@@ -710,7 +219,7 @@ fn personal_bests(rows: &[ReviewMatch]) -> Vec<PersonalBest> {
     bests
 }
 
-fn push_best(
+pub(super) fn push_best(
     bests: &mut Vec<PersonalBest>,
     rows: &[ReviewMatch],
     metric: &str,
@@ -734,7 +243,7 @@ fn push_best(
     }
 }
 
-fn streaks(rows: &[ReviewMatch]) -> StreakSummary {
+pub(super) fn streaks(rows: &[ReviewMatch]) -> StreakSummary {
     let mut current_win = 0;
     let mut current_loss = 0;
     let mut longest_win = 0;
@@ -759,7 +268,7 @@ fn streaks(rows: &[ReviewMatch]) -> StreakSummary {
     }
 }
 
-fn hero_pool(rows: &[ReviewMatch], baseline: &Aggregate) -> HeroPoolStability {
+pub(super) fn hero_pool(rows: &[ReviewMatch], baseline: &Aggregate) -> HeroPoolStability {
     let mut by_hero = HashMap::<String, Aggregate>::new();
     let mut names = HashMap::<String, String>::new();
     for row in rows {
@@ -826,7 +335,7 @@ fn hero_pool(rows: &[ReviewMatch], baseline: &Aggregate) -> HeroPoolStability {
     }
 }
 
-fn map_adaptability(rows: &[ReviewMatch], baseline: &Aggregate) -> MapAdaptability {
+pub(super) fn map_adaptability(rows: &[ReviewMatch], baseline: &Aggregate) -> MapAdaptability {
     let season_win_rate = aggregate(rows).win_rate();
     let mut by_map = HashMap::<String, Vec<&ReviewMatch>>::new();
     for row in rows {
@@ -915,7 +424,7 @@ fn map_adaptability(rows: &[ReviewMatch], baseline: &Aggregate) -> MapAdaptabili
     }
 }
 
-fn top_conclusions(
+pub(super) fn top_conclusions(
     personal_bests: &[PersonalBest],
     hero_pool: &HeroPoolStability,
     maps: &MapAdaptability,
@@ -993,7 +502,7 @@ fn top_conclusions(
     items
 }
 
-fn aggregate<'a>(rows: impl IntoIterator<Item = &'a ReviewMatch>) -> Aggregate {
+pub(super) fn aggregate<'a>(rows: impl IntoIterator<Item = &'a ReviewMatch>) -> Aggregate {
     let mut aggregate = Aggregate::default();
     for row in rows {
         aggregate.add(row);
@@ -1001,7 +510,7 @@ fn aggregate<'a>(rows: impl IntoIterator<Item = &'a ReviewMatch>) -> Aggregate {
     aggregate
 }
 
-fn short_match_threshold(rows: &[ReviewMatch]) -> i64 {
+pub(super) fn short_match_threshold(rows: &[ReviewMatch]) -> i64 {
     if rows.iter().any(|row| row.duration_sec > 0) {
         60
     } else {
@@ -1009,7 +518,7 @@ fn short_match_threshold(rows: &[ReviewMatch]) -> i64 {
     }
 }
 
-fn match_evidence(row: &ReviewMatch) -> EvidenceLink {
+pub(super) fn match_evidence(row: &ReviewMatch) -> EvidenceLink {
     EvidenceLink {
         kind: "match".to_string(),
         label: "查看比赛".to_string(),
@@ -1020,7 +529,7 @@ fn match_evidence(row: &ReviewMatch) -> EvidenceLink {
     }
 }
 
-fn hero_evidence(hero: &str) -> EvidenceLink {
+pub(super) fn hero_evidence(hero: &str) -> EvidenceLink {
     EvidenceLink {
         kind: "hero".to_string(),
         label: "筛选英雄".to_string(),
@@ -1031,7 +540,7 @@ fn hero_evidence(hero: &str) -> EvidenceLink {
     }
 }
 
-fn map_evidence(map: &str) -> EvidenceLink {
+pub(super) fn map_evidence(map: &str) -> EvidenceLink {
     EvidenceLink {
         kind: "map".to_string(),
         label: "筛选地图".to_string(),
@@ -1042,7 +551,7 @@ fn map_evidence(map: &str) -> EvidenceLink {
     }
 }
 
-fn result_label(result: &str) -> &'static str {
+pub(super) fn result_label(result: &str) -> &'static str {
     match result {
         "win" => "胜利",
         "loss" => "失败",
@@ -1051,7 +560,7 @@ fn result_label(result: &str) -> &'static str {
     }
 }
 
-fn avg(value: i64, count: i64) -> f64 {
+pub(super) fn avg(value: i64, count: i64) -> f64 {
     if count <= 0 {
         0.0
     } else {
@@ -1059,7 +568,7 @@ fn avg(value: i64, count: i64) -> f64 {
     }
 }
 
-fn ratio(value: i64, total: i64) -> f64 {
+pub(super) fn ratio(value: i64, total: i64) -> f64 {
     if total <= 0 {
         0.0
     } else {
@@ -1067,7 +576,7 @@ fn ratio(value: i64, total: i64) -> f64 {
     }
 }
 
-fn round2(value: f64) -> f64 {
+pub(super) fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
