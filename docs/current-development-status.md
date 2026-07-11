@@ -1,7 +1,7 @@
 # OWStatsLocal 当前开发状态
 
 > 更新日期：2026-07-11
-> 稳定化阶段：STAB-004 已验证。资源与桌面运行路径、当前账号同步身份及持久化敏感数据边界已收口；STAB-005 正在进行。
+> 稳定化阶段：STAB-005 已验证。资源、运行路径、同步身份、隐私持久化和数据库恢复边界已收口；STAB-006 正在进行。
 
 ## 产品与架构
 
@@ -19,6 +19,8 @@
 - `AppPaths` 统一派生数据库、设置、资料、凭据、旧 target、浏览器 profile、seasons、diagnostics 和 backups；桌面同步 JSON 直接写入 `app_data/seasons`。
 - 同步只使用当前浏览器登录账号的凭据身份；产品入口不再提供 BattleTag 目标绑定或 `searchBnetAccount`。`ready` 表示已识别当前账号，`currentPlayerMissing` 表示需重新登录，不能解锁同步。
 - 新写入的赛季 JSON、SQLite raw JSON、同步错误和前端可见错误都经过统一递归脱敏。首次打开旧数据库会先备份 SQLite/赛季 JSON 至 `privacy-backups`，再对旧数据进行幂等清洗；不读取或操作旧 target 文件、真实凭据、浏览器 profile、真实数据库或玩家 dump。
+- SQLite 使用显式 v1-v4 迁移注册表；旧库升级前生成一致性副本至 `app_data/backups`，新库不生成冗余备份。所有连接统一配置 WAL、NORMAL 和 5 秒锁等待，且高于程序版本的数据库会被拒绝打开。
+- 同步错误按赛季保存为最新快照，重复同步不增长；桌面端只允许一个赛季同步在运行，中断导入会回滚，移除故障后可以重试。
 
 ## 快照 36 路径对账
 

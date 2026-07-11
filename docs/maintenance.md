@@ -55,6 +55,14 @@ npm run tauri build
 - 迁移会递归删除 token、cookie、authorization、credential 和 storage 类键；失败时不会写完成 marker，可在修复环境后安全重试。
 - 不要手动删除 `privacy-backups` 以掩盖问题；它可能是恢复旧数据的唯一副本。凭据、浏览器 profile 和旧 `.dashen_player_target.json` 不属于该迁移的读取或备份范围。
 
+## Database Migrations and Sync Stability
+
+- 数据库版本由 `src-tauri/src/database/migrations.rs` 的注册表管理。每一步必须在独立事务中完成变更、更新 `user_version` 并提交；不得修改已经发布的迁移版本。
+- 已存在且需要升级的 SQLite 文件会在 schema 变更前使用 SQLite 一致性备份写入 `app_data/backups/`。空库不生成备份；备份失败会阻止迁移，源库保持原样。
+- 所有文件数据库连接使用 WAL、`synchronous=NORMAL` 和 5 秒 `busy_timeout`。不要绕过 `OwDatabase::connect` 直接打开产品数据库。
+- `sync_errors` 表示某赛季最近一次同步未完成详情的快照，而不是无限历史。导入目标赛季时先清旧错误，成功重试会清零该赛季错误；其他赛季必须保持不变。
+- 桌面同步由全局 `SyncCoordinator` 串行化。不要在 command、后台任务或新 UI 入口绕过该 guard 并行写同一个 SQLite/app-data 目录。
+
 ## Rollback
 
 If a release fails after installation, identify the smallest commit that introduced the failure and revert that commit first.
