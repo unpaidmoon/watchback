@@ -1,5 +1,5 @@
 use crate::db::OwDatabase;
-use crate::importer::{int_field, string_field};
+use crate::importer::{int_field, rebuild_match_players_from_existing_details, string_field};
 use crate::models::{
     ArenaDetailSlice, ArenaMatchDetail, ComparisonMetrics, FilterOption, FilterOptions, HeroStat,
     MatchDetailView, MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary,
@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 pub fn list_matches(db: &OwDatabase, filters: MatchFilters) -> Result<Vec<MatchSummary>> {
     db.initialize()?;
+    ensure_arena_player_index(db, filters.season)?;
     let conn = db.connect()?;
     let mut sql = String::from(
         r#"
@@ -135,6 +136,7 @@ pub fn list_filter_options(db: &OwDatabase) -> Result<FilterOptions> {
 
 pub fn search_match_players(db: &OwDatabase, query: &str) -> Result<Vec<PlayerSearchOption>> {
     db.initialize()?;
+    ensure_arena_player_index(db, None)?;
     let needle = query.trim();
     if needle.is_empty() {
         return Ok(Vec::new());
@@ -143,14 +145,22 @@ pub fn search_match_players(db: &OwDatabase, query: &str) -> Result<Vec<PlayerSe
     let pattern = format!("%{}%", escape_like(needle));
     let mut stmt = conn.prepare(
         r#"
-        SELECT mp.player_name, COUNT(DISTINCT mp.match_id) AS matches, MAX(m.begin_ts) AS latest_begin_ts
-        FROM match_players mp
-        JOIN matches m ON m.match_id = mp.match_id
-        WHERE m.bucket = 'preset'
-          AND TRIM(mp.player_name) <> ''
-          AND mp.player_name LIKE ? ESCAPE '\'
-        GROUP BY mp.player_name
-        ORDER BY matches DESC, latest_begin_ts DESC, mp.player_name
+        WITH searchable_players AS (
+            SELECT mp.match_id, mp.player_name, mp.bnet_id
+            FROM match_players mp
+            JOIN matches m ON m.match_id = mp.match_id
+            WHERE m.bucket = 'preset' AND TRIM(mp.player_name) <> ''
+            UNION
+            SELECT amp.match_id, amp.player_name, amp.bnet_id
+            FROM arena_match_players amp
+            WHERE TRIM(amp.player_name) <> ''
+        )
+        SELECT sp.player_name, COUNT(DISTINCT sp.match_id) AS matches, MAX(m.begin_ts) AS latest_begin_ts
+        FROM searchable_players sp
+        JOIN matches m ON m.match_id = sp.match_id
+        WHERE sp.player_name LIKE ?1 ESCAPE '\' OR sp.bnet_id LIKE ?1 ESCAPE '\'
+        GROUP BY sp.player_name
+        ORDER BY matches DESC, latest_begin_ts DESC, sp.player_name
         LIMIT 10
         "#,
     )?;
@@ -163,6 +173,34 @@ pub fn search_match_players(db: &OwDatabase, query: &str) -> Result<Vec<PlayerSe
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
+}
+
+fn ensure_arena_player_index(db: &OwDatabase, season: Option<i64>) -> Result<()> {
+    let conn = db.connect()?;
+    let missing_season = conn
+        .query_row(
+            r#"
+            SELECT DISTINCT m.season
+            FROM matches m
+            JOIN match_details d ON d.match_id = m.match_id
+            WHERE m.bucket = 'stadium'
+              AND (m.match_kind = 'fight' OR d.match_kind = 'fight')
+              AND (?1 IS NULL OR m.season = ?1)
+              AND NOT EXISTS (
+                  SELECT 1 FROM app_settings s
+                  WHERE s.key = 'arena_player_index_v1:' || m.season
+              )
+            LIMIT 1
+            "#,
+            params![season],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    drop(conn);
+    if missing_season.is_some() {
+        rebuild_match_players_from_existing_details(db)?;
+    }
+    Ok(())
 }
 
 pub fn get_match_detail(db: &OwDatabase, match_id: &str) -> Result<MatchDetailView> {
@@ -517,8 +555,10 @@ fn append_filters(sql: &mut String, owned: &mut Vec<Box<dyn ToSql>>, filters: &M
     }
     if let Some(player_name) = non_empty(&filters.player_name) {
         sql.push_str(
-            " AND EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = m.match_id AND mp.player_name = ?)",
+            " AND (EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = m.match_id AND mp.player_name = ?) \
+             OR EXISTS (SELECT 1 FROM arena_match_players amp WHERE amp.match_id = m.match_id AND amp.player_name = ?))",
         );
+        owned.push(Box::new(player_name.clone()));
         owned.push(Box::new(player_name));
     }
     if let Some(from) = non_empty(&filters.date_from).and_then(|date| begin_bound(&date, false)) {

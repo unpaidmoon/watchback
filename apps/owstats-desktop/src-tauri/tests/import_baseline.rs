@@ -2,8 +2,8 @@
 
 use owstats_desktop_lib::{
     get_friend_analytics, get_match_detail, import_payload_value, list_filter_options,
-    list_matches, redact_sensitive_json, sync_import_parts, FriendAnalyticsFilters, MatchFilters,
-    OwDatabase,
+    list_matches, redact_sensitive_json, search_match_players, sync_import_parts,
+    FriendAnalyticsFilters, MatchFilters, OwDatabase,
 };
 use serde_json::{json, Value};
 
@@ -1054,6 +1054,168 @@ fn arena_player_rebuild_only_replaces_its_season_and_marks_empty_projection_comp
     assert_eq!(s21_rows, 1);
     assert_eq!(s22_rows, 0);
     assert_eq!(complete_markers, 2);
+}
+
+#[test]
+fn arena_player_searches_by_name_and_bnet_without_returning_private_ids_and_filters_matches() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 22,
+        "matches": {
+            "entries": [{
+                "matchId": "arena-query",
+                "matchRet": 1,
+                "mapGuid": "map-a",
+                "heroGuid": "hero-current",
+                "gameMode": "SportFight",
+                "beginTs": 1700007200000_i64,
+                "_dashenSeason": 22
+            }],
+            "details": [{
+                "match_id": "arena-query",
+                "match_kind": "fight",
+                "payload": {"data": {"totalCount": {
+                    "teammateList": [{"bnetId": 22001234, "name": "稳定玩家名"}],
+                    "enemyList": []
+                }, "roundCountList": []}}
+            }]
+        }
+    });
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+
+    let by_name = search_match_players(&db, "稳定玩家").unwrap();
+    let by_bnet = search_match_players(&db, "22001234").unwrap();
+    let filtered = list_matches(
+        &db,
+        MatchFilters {
+            season: Some(22),
+            player_name: Some("稳定玩家名".into()),
+            ..MatchFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(by_name.len(), 1);
+    assert_eq!(by_name[0].player_name, "稳定玩家名");
+    assert_eq!(by_bnet.len(), 1);
+    assert_eq!(by_bnet[0].player_name, "稳定玩家名");
+    assert!(!serde_json::to_string(&by_bnet)
+        .unwrap()
+        .contains("22001234"));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].match_id, "arena-query");
+}
+
+#[test]
+fn arena_player_backfill_detects_each_unmarked_fight_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = |season: i64, match_id: &str, bnet_id: i64, name: &str| {
+        json!({
+            "season": season,
+            "matches": {
+                "entries": [{
+                    "matchId": match_id,
+                    "matchRet": 1,
+                    "mapGuid": "map-a",
+                    "heroGuid": "hero-current",
+                    "gameMode": "SportFight",
+                    "_dashenSeason": season
+                }],
+                "details": [{
+                    "match_id": match_id,
+                    "match_kind": "fight",
+                    "payload": {"data": {"totalCount": {
+                        "teammateList": [{"bnetId": bnet_id, "name": name}],
+                        "enemyList": []
+                    }, "roundCountList": []}}
+                }]
+            }
+        })
+    };
+    import_payload_value(
+        &db,
+        &payload(21, "arena-s21", 2100, "S21 玩家"),
+        temp.path(),
+    )
+    .unwrap();
+    import_payload_value(
+        &db,
+        &payload(22, "arena-s22", 2200, "S22 玩家"),
+        temp.path(),
+    )
+    .unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute("DELETE FROM arena_match_players WHERE season = 22", [])
+        .unwrap();
+    conn.execute(
+        "DELETE FROM app_settings WHERE key = 'arena_player_index_v1:22'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let matches = list_matches(
+        &db,
+        MatchFilters {
+            season: Some(22),
+            player_name: Some("S22 玩家".into()),
+            ..MatchFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].match_id, "arena-s22");
+}
+
+#[test]
+fn arena_player_complete_marker_prevents_rebuilding_zero_player_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 22,
+        "matches": {
+            "entries": [{
+                "matchId": "arena-empty",
+                "matchRet": 1,
+                "mapGuid": "map-a",
+                "heroGuid": "hero-current",
+                "gameMode": "SportFight",
+                "_dashenSeason": 22
+            }],
+            "details": [{
+                "match_id": "arena-empty",
+                "match_kind": "fight",
+                "payload": {"data": {"totalCount": {
+                    "teammateList": [], "enemyList": []
+                }, "roundCountList": []}}
+            }]
+        }
+    });
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE app_settings SET updated_at = 'sentinel' WHERE key = 'arena_player_index_v1:22'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    search_match_players(&db, "nobody").unwrap();
+    list_matches(&db, MatchFilters::default()).unwrap();
+
+    let updated_at: String = db
+        .connect()
+        .unwrap()
+        .query_row(
+            "SELECT updated_at FROM app_settings WHERE key = 'arena_player_index_v1:22'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(updated_at, "sentinel");
 }
 
 #[test]
