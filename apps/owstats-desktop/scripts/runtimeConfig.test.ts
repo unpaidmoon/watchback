@@ -11,15 +11,7 @@ const config = JSON.parse(readFileSync(configUrl, "utf8")) as {
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return (
-    normalized.endsWith("token") ||
-    normalized === "cookie" ||
-    normalized === "cookies" ||
-    normalized === "authorization" ||
-    normalized === "credential" ||
-    normalized === "credentials" ||
-    normalized === "storage"
-  );
+  return ["token", "cookie", "authorization", "credential", "storage"].some((term) => normalized.includes(term));
 }
 
 function assertNoSensitiveKeys(value: unknown, path = "root"): void {
@@ -43,10 +35,15 @@ for (const key of [
   "customer_token",
   "cookie",
   "cookies",
+  "cookieHeader",
   "authorization",
+  "authorizationHeader",
   "credential",
   "credentials",
+  "credentialPath",
   "storage",
+  "browserStorage",
+  "storageState",
 ]) {
   assert.throws(() => assertNoSensitiveKeys({ safe: [{ nested: { [key]: "redacted" } }] }));
 }
