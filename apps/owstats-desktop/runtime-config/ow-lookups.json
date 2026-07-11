@@ -2898,56 +2898,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067649906",
       "valueText": "尖刺护体伤害量",
       "valueType": "特色数据"
@@ -2956,56 +2906,6 @@
       "valueGuid": "603482350067649949",
       "valueText": "尖刺墙助攻",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067649758",
@@ -3033,46 +2933,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647458",
       "valueText": "暴击命中率",
       "valueType": "通用数据"
@@ -3081,11 +2941,6 @@
       "valueGuid": "603482350067647444",
       "valueText": "攻击助攻",
       "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
     },
     {
       "valueGuid": "603482350067647479",
@@ -3098,23 +2953,8 @@
       "valueType": "通用数据"
     },
     {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648474",
       "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
       "valueType": "通用数据"
     },
     {
@@ -3158,91 +2998,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067649598",
       "valueText": "笼中斗消灭",
       "valueType": "特色数据"
@@ -3268,94 +3023,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648352",
       "valueText": "生命之树治疗量",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067649073",
@@ -3366,76 +3036,6 @@
       "valueGuid": "603482350067649134",
       "valueText": "棘刺箭雨消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067649000",
@@ -3463,71 +3063,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648359",
       "valueText": "“狐”助攻",
       "valueType": "特色数据"
@@ -3543,89 +3078,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648647",
       "valueText": "“锥”消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648616",
@@ -3653,56 +3108,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648191",
       "valueText": "引力乱流消灭",
       "valueType": "特色数据"
@@ -3723,19 +3128,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648583",
       "valueText": "生成过量生命值",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648581",
@@ -3750,81 +3145,6 @@
     {
       "valueGuid": "603482350067648586",
       "valueText": "质量吸附命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647626",
-      "valueText": "强化伤害",
       "valueType": "特色数据"
     },
     {
@@ -3848,69 +3168,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647000",
       "valueText": "开镜命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648047",
@@ -3943,69 +3203,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648455",
       "valueText": "延时雷管效率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648269",
@@ -4038,66 +3238,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648211",
       "valueText": "充能射击命中率",
       "valueType": "特色数据"
@@ -4118,74 +3258,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648528",
       "valueText": "充能射击暴击率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648062",
@@ -4213,81 +3288,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648232",
-      "valueText": "击退消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648018",
       "valueText": "鼓舞士气持续时间占比",
       "valueType": "特色数据"
@@ -4300,11 +3300,6 @@
     {
       "valueGuid": "603482350067648010",
       "valueText": "武器伤害",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648232",
-      "valueText": "击退消灭",
       "valueType": "特色数据"
     },
     {
@@ -4321,66 +3316,6 @@
       "valueGuid": "603482350067648409",
       "valueText": "流星飞锤命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647925",
@@ -4403,16 +3338,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648919",
       "valueText": "对敌人聚合射线效率",
       "valueType": "特色数据"
@@ -4423,56 +3348,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648349",
       "valueText": "撼地猛刺消灭",
       "valueType": "特色数据"
@@ -4481,16 +3356,6 @@
       "valueGuid": "603482350067648344",
       "valueText": "拦截终极技能次数",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648552",
@@ -4513,61 +3378,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647000",
-      "valueText": "开镜命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
       "valueGuid": "603482350067647506",
       "valueText": "麻醉敌人",
       "valueType": "特色数据"
@@ -4583,44 +3393,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647626",
-      "valueText": "强化伤害",
-      "valueType": "特色数据"
-    },
-    {
       "valueGuid": "603482350067647962",
       "valueText": "麻醉镖命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648156",
-      "valueText": "强化治疗量",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648406",
@@ -4628,89 +3403,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647556",
       "valueText": "侵入敌人",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648504",
       "valueText": "电磁脉冲消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648736",
@@ -4728,56 +3428,6 @@
       "valueType": "通用数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647773",
       "valueText": "毁天灭地消灭",
       "valueType": "特色数据"
@@ -4786,21 +3436,6 @@
       "valueGuid": "603482350067647776",
       "valueText": "生成过量生命值",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648232",
-      "valueText": "击退消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648543",
@@ -4813,51 +3448,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647180",
       "valueText": "暴雪消灭",
       "valueType": "特色数据"
@@ -4868,29 +3458,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647825",
       "valueText": "主要攻击伤害",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648490",
@@ -4908,64 +3478,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647167",
       "valueText": "自毁消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647838",
@@ -4978,16 +3493,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648538",
       "valueText": "呼叫机甲消灭",
       "valueType": "特色数据"
@@ -4998,94 +3503,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647123",
       "valueText": "提供音障",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648661",
@@ -5093,49 +3513,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648662",
       "valueText": "治愈音效使用率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647030",
@@ -5148,94 +3528,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647325",
       "valueText": "生物力场治疗量",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648500",
       "valueText": "螺旋飞弹命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647021",
@@ -5253,16 +3553,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647856",
       "valueText": "辅助攻击伤害",
       "valueType": "特色数据"
@@ -5278,59 +3568,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648600",
       "valueText": "辅助攻击模式命中率",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067649183",
       "valueText": "抵挡伤害量-盟友",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067646770",
@@ -5348,69 +3593,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647928",
       "valueText": "震荡地雷消灭",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648487",
       "valueText": "直接命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067646993",
@@ -5428,59 +3618,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648570",
       "valueText": "链钩消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067649668",
@@ -5488,43 +3628,8 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647677",
       "valueText": "平均每10分钟对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
       "valueType": "通用数据"
     },
     {
@@ -5538,84 +3643,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647318",
-      "valueText": "连射消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648371",
       "valueText": "闪光弹消灭",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647709",
       "valueText": "“斩”消灭/每10分钟",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647677",
-      "valueText": "平均每10分钟对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647155",
@@ -5628,16 +3663,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647795",
       "valueText": "辅助攻击伤害",
       "valueType": "特色数据"
@@ -5648,19 +3673,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648481",
       "valueText": "“影”重置",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648484",
@@ -5668,88 +3683,8 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647314",
       "valueText": "“圣”治疗量",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647626",
-      "valueText": "强化伤害",
       "valueType": "特色数据"
     },
     {
@@ -5773,89 +3708,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648448",
       "valueText": "“灭”蓄力消灭",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648368",
       "valueText": "火炮模式消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648459",
@@ -5873,46 +3733,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647112",
       "valueText": "传送玩家",
       "valueType": "特色数据"
@@ -5921,11 +3741,6 @@
       "valueGuid": "603482350067647109",
       "valueText": "哨戒炮消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647921",
@@ -5943,59 +3758,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648510",
       "valueText": "平均伤害系数",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647079",
@@ -6005,41 +3770,6 @@
     {
       "valueGuid": "603482350067647082",
       "valueText": "复活玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647492",
-      "valueText": "拯救玩家",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647626",
-      "valueText": "强化伤害",
       "valueType": "特色数据"
     },
     {
@@ -6063,46 +3793,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647068",
       "valueText": "冲锋消灭",
       "valueType": "特色数据"
@@ -6123,21 +3813,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647444",
-      "valueText": "攻击助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648563",
       "valueText": "烈焰打击命中",
       "valueType": "特色数据"
@@ -6153,46 +3828,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067646569",
       "valueText": "脉冲炸弹消灭",
       "valueType": "特色数据"
@@ -6203,83 +3838,13 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647965",
       "valueText": "脉冲炸弹命中率",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648524",
       "valueText": "低生命值闪回",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647000",
-      "valueText": "开镜命中率",
       "valueType": "特色数据"
     },
     {
@@ -6288,144 +3853,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648047",
-      "valueText": "开镜暴击率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648119",
-      "valueText": "开镜暴击消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067646522",
       "valueText": "死亡绽放消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647105",
@@ -6436,16 +3866,6 @@
       "valueGuid": "603482350067647283",
       "valueText": "熔火核心消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647829",
@@ -6463,56 +3883,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067646596",
       "valueText": "弹幕消灭",
       "valueType": "特色数据"
@@ -6523,69 +3893,14 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648036",
       "valueText": "直接命中率",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648232",
-      "valueText": "击退消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648498",
       "valueText": "滞空时间占比",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067647097",
@@ -6598,24 +3913,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647901",
       "valueText": "主要攻击模式命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648232",
-      "valueText": "击退消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067648592",
@@ -6628,93 +3928,13 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647041",
       "valueText": "“竜”消灭",
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647289",
-      "valueText": "侦测助攻",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067648038",
       "valueText": "“岚”消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648474",
-      "valueText": "暴击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646513",
-      "valueText": "射击命中",
       "valueType": "特色数据"
     },
     {
@@ -6723,18 +3943,8 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067649965",
       "valueText": "瞄准射击命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
       "valueType": "通用数据"
     },
     {
@@ -6743,33 +3953,8 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067649967",
       "valueText": "瞄准射击消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
       "valueType": "通用数据"
     },
     {
@@ -6778,28 +3963,8 @@
       "valueType": "通用数据"
     },
     {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067647330",
       "valueText": "地形消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累积游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648392",
-      "valueText": "助攻",
       "valueType": "通用数据"
     },
     {
@@ -6811,36 +3976,6 @@
       "valueGuid": "603482350067649985",
       "valueText": "翻江波消灭",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648156",
-      "valueText": "强化治疗量",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067650157",
@@ -6863,69 +3998,9 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067650141",
       "valueText": "锋锐剑气命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646509",
-      "valueText": "单独消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067650353",
@@ -6943,26 +4018,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067650029",
       "valueText": "全景牢笼命中",
       "valueType": "特色数据"
@@ -6978,31 +4033,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067647462",
-      "valueText": "自我治疗量",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067650322",
       "valueText": "救生索使用率",
       "valueType": "特色数据"
@@ -7011,21 +4041,6 @@
       "valueGuid": "603482350067650210",
       "valueText": "呼噜噜治疗量",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067648232",
-      "valueText": "击退消灭",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646913",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067650224",
@@ -7043,36 +4058,6 @@
       "valueType": "特色数据"
     },
     {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647458",
-      "valueText": "暴击命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646506",
-      "valueText": "阵亡",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067648623",
-      "valueText": "英雄获胜",
-      "valueType": "通用数据"
-    },
-    {
       "valueGuid": "603482350067650213",
       "valueText": "覆盖协议消灭",
       "valueType": "特色数据"
@@ -7086,26 +4071,6 @@
       "valueGuid": "603482350067650218",
       "valueText": "虹吸冲击枪伤害量",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646511",
-      "valueText": "武器命中率",
-      "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646507",
-      "valueText": "最后一击",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067650171",
@@ -7126,21 +4091,6 @@
       "valueGuid": "603482350067650267",
       "valueText": "平均灵气",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067647479",
-      "valueText": "治疗量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067647671",
-      "valueText": "对英雄伤害量",
-      "valueType": "通用数据"
-    },
-    {
-      "valueGuid": "603482350067646497",
-      "valueText": "累计游戏时间",
-      "valueType": "通用数据"
     },
     {
       "valueGuid": "603482350067650377",
@@ -7166,11 +4116,6 @@
       "valueGuid": "603482350067650382",
       "valueText": "纵情狂飙空中发射命中率",
       "valueType": "特色数据"
-    },
-    {
-      "valueGuid": "603482350067646495",
-      "valueText": "消灭",
-      "valueType": "通用数据"
     }
   ]
 }

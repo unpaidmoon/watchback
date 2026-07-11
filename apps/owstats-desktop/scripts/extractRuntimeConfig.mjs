@@ -8,6 +8,14 @@ const cache = JSON.parse(await readFile(resolve(repoRoot, "docs/reference/ow_con
 const queryTool = JSON.parse(await readFile(resolve(repoRoot, "docs/reference/res/query_tool.json"), "utf8"));
 
 const pick = (value, keys) => Object.fromEntries(keys.flatMap((key) => (value?.[key] == null ? [] : [[key, value[key]]])));
+const firstBy = (values, keyOf) => {
+  const unique = new Map();
+  for (const value of values) {
+    const key = keyOf(value);
+    if (!unique.has(key)) unique.set(key, value);
+  }
+  return [...unique.values()];
+};
 const perkFields = ["id", "guid", "name", "desc"];
 const attrFields = ["valueGuid", "valueText", "valueType"];
 
@@ -17,7 +25,10 @@ const runtimeConfig = {
     Object.entries(queryTool.heroPerkList ?? {}).map(([key, perks]) => [key, perks.map((perk) => pick(perk, perkFields))]),
   ),
   perkList: (queryTool.perkList ?? []).map((perk) => pick(perk, perkFields)),
-  heroAttrList: (queryTool.heroAttrList ?? []).map((attr) => pick(attr, attrFields)),
+  heroAttrList: firstBy(
+    (queryTool.heroAttrList ?? []).map((attr) => pick(attr, attrFields)),
+    (attr) => attr.valueGuid,
+  ),
 };
 
 const output = resolve(appRoot, "runtime-config/ow-lookups.json");
