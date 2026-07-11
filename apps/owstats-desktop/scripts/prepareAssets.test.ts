@@ -70,6 +70,16 @@ await withFixture(async ({ appRoot, repoRoot }) => {
   );
 });
 
+await withFixture(async ({ appRoot, repoRoot }) => {
+  const staleFile = path.join(appRoot, "public", "assets", "stale", "old.png");
+  await mkdir(path.dirname(staleFile), { recursive: true });
+  await writeFile(staleFile, "stale");
+
+  await prepareAssets({ appRoot, repoRoot });
+
+  await assert.rejects(readFile(staleFile), /ENOENT/);
+});
+
 await withFixture(async ({ appRoot, repoRoot, rootManifest }) => {
   rootManifest.heroes = [{ local_path: "data/assets/overwatch/heroes/missing.png" }];
   await writeJson(path.join(repoRoot, "assets", "manifest.json"), rootManifest);
@@ -80,6 +90,12 @@ await withFixture(async ({ appRoot, repoRoot, rootManifest }) => {
   rootManifest.heroes = [{ local_path: "C:\\private\\hero.png" }];
   await writeJson(path.join(repoRoot, "assets", "manifest.json"), rootManifest);
   await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets\/manifest\.json.*绝对路径/i);
+});
+
+await withFixture(async ({ appRoot, repoRoot, rootManifest }) => {
+  rootManifest.heroes = [{ local_path: "/@fs/D:/private/hero.png" }];
+  await writeJson(path.join(repoRoot, "assets", "manifest.json"), rootManifest);
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets\/manifest\.json.*禁止 \/@fs\/ 路径/i);
 });
 
 await withFixture(async ({ appRoot, repoRoot, rootManifest }) => {
