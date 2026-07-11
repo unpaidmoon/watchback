@@ -4,7 +4,11 @@ import assetManifest from "../../../assets/manifest.json" with { type: "json" };
 import { perkAssetUrls, resolveHeroStatInfo, resolvePerkInfo } from "../src/shared/assets.ts";
 
 const rustModels = readFileSync(new URL("../src-tauri/src/models.rs", import.meta.url), "utf8");
-const rustQueries = readFileSync(new URL("../src-tauri/src/queries.rs", import.meta.url), "utf8");
+const rustQueries = [
+  "../src-tauri/src/queries/mod.rs",
+  "../src-tauri/src/queries/normal_detail.rs",
+  "../src-tauri/src/queries/arena_detail.rs",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 const sharedTypes = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
 const sharedAssets = readFileSync(new URL("../src/shared/assets.ts", import.meta.url), "utf8");
 

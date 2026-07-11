@@ -1,4 +1,4 @@
-﻿import {
+import {
   commandCenterMetrics,
   credentialTone,
   hasDesktopBackend,
@@ -27,7 +27,7 @@ assertEqual(typeof logout, "function", "logout API wrapper exists");
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
-const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 assertEqual(onboardingSource.includes("phase6PlayerPass"), true, "command center uses a player pass identity strip");
 assertEqual(onboardingSource.includes("phase6PlayerPassRail"), true, "player pass uses a compact visual rail instead of a large diagonal block");
 assertEqual(onboardingSource.includes("phase6ProfileInlineStats"), true, "player pass places endorsement and play time under the title");

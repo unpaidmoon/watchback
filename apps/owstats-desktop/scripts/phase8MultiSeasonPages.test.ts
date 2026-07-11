@@ -17,6 +17,7 @@ const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", impor
 const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
 const matchesSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
+const matchFiltersSource = readFileSync(new URL("../src/features/matches/matchFilters.ts", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
 assert.match(reviewSource, /getPersonalSeasonReview\(selectedSeason/, "review page should request personal review with selectedSeason");
@@ -51,7 +52,7 @@ assert.match(analyticsSource, /正在加载好友分析/, "friend analysis shoul
 assert.match(matchesSource, /chooseInitialMatchFilters\(filtersFromParams\(searchParams\), cachedPage\?\.filters, hasExplicitFilters\)/, "matches page should restore URL season filters before considering cached filters");
 assert.match(matchesSource, /<FilterBar filters=\{filters\} options=\{options\} onChange=\{setFilters\} \/>/, "matches page should bind the filter bar to the page-local filter state");
 assert.match(matchesSource, /paramsFromFilters\(filters, selectedMatchId\)/, "matches page should persist its current filter state, including season, to the URL");
-assert.match(matchesSource, /if \(next\.season !== undefined && !options\.seasons\.includes\(next\.season\)\) delete next\.season;/, "matches page should clear an unavailable URL season instead of querying a stale season");
+assert.match(matchFiltersSource, /if \(next\.season !== undefined && !options\.seasons\.includes\(next\.season\)\) delete next\.season;/, "matches page should clear an unavailable URL season instead of querying a stale season");
 
 assert.match(filterBarSource, /<select value=\{filters\.season \?\? ""\} onChange=\{\(event\) => patch\(\{ season: numberOrUndefined\(event\.target\.value\) \}\)\}>/, "match filter bar should keep its season selector bound to the page-local season filter");
 assert.match(filterBarSource, /\{options\.seasons\.map\(\(season\) => \(/, "match filter bar should render the locally available season options");
