@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { arenaRankAssetUrl, heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, rankAssetUrl } from "../src/shared/assets.ts";
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
@@ -5,6 +7,13 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
     throw new Error(`${message}: expected ${String(expected)}, got ${String(actual)}`);
   }
 }
+
+const assetManifest = JSON.parse(
+  readFileSync(new URL("../../../assets/manifest.json", import.meta.url), "utf8"),
+) as { heroes: Array<{ key: string; cn_name: string }> };
+const shion = assetManifest.heroes.find((hero) => hero.key === "shion");
+
+assertEqual(shion?.cn_name, "死怨", "Shion uses the localized Chinese hero name");
 
 assertEqual(normalizeAssetKey("Soldier: 76"), "soldier-76", "normalizes punctuation and spaces");
 assertEqual(normalizeAssetKey("  King's Row  "), "kings-row", "normalizes apostrophes");
