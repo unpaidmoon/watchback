@@ -53,6 +53,8 @@ apps/*/src-tauri/gen/
 dist/
 build/
 *.spec
+apps/owstats-desktop/public/assets/
+apps/owstats-desktop/public/assets.tmp/
 
 # Test artifacts
 /test-results/
