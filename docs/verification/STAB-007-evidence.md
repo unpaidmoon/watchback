@@ -1,6 +1,6 @@
 # STAB-007 验证证据
 
-状态：待最终 archive 验收。
+状态：已验证（2026-07-12）。
 
 ## 验证入口
 
@@ -19,10 +19,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 - 前端分层脚本契约、CI workflow 结构与 archive 内容检查通过。
 - `cargo clippy --all-targets -- -D warnings` 通过。
 - 快速验证入口（跳过构建、Clippy、archive）通过。
+- 在 `8189d30` 上运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1` 通过：扫描、资源准备、前端测试、前端构建与产物扫描、Rust 格式、严格 Clippy、Rust 全量测试、STAB-005/006 契约、`git diff --check` 和 tracked-only archive 均通过。
+- archive 中重新执行了 `npm ci`、`npm test`、`npm run build`、`cargo fmt --check` 和 `cargo test --tests`；临时目录已清理。
 
 ## 最终验收要求
 
-在 STAB-007 提交后执行不带跳过参数的统一入口；记录其通过结果、`git diff --check` 和 `git status --short`。本阶段不执行 `tauri build`、不创建安装包、不创建或推送稳定标签。
+本阶段未执行 `tauri build`、未创建安装包、未创建或推送稳定标签，也未读取真实账号凭据、浏览器 profile、app data 或玩家 dump。
 
 待用户授权创建标签时使用：
 
