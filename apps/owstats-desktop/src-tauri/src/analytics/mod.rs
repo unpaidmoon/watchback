@@ -10,6 +10,9 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use rusqlite::ToSql;
 use std::collections::HashMap;
 
+mod boards;
+use boards::build_boards;
+
 const MIN_SAMPLE: i64 = 5;
 const PHASE5_MIN_SAMPLE: i64 = 3;
 
@@ -35,47 +38,47 @@ struct FriendMatchRow {
 }
 
 #[derive(Debug, Clone)]
-struct FriendAggregate {
-    bnet_id: String,
-    name: String,
-    same_team_matches: i64,
-    wins: i64,
-    kills: i64,
-    assists: i64,
-    deaths: i64,
-    damage: i64,
-    healing: i64,
-    mitigation: i64,
-    damage_taken: i64,
-    healing_taken: i64,
+pub(super) struct FriendAggregate {
+    pub(super) bnet_id: String,
+    pub(super) name: String,
+    pub(super) same_team_matches: i64,
+    pub(super) wins: i64,
+    pub(super) kills: i64,
+    pub(super) assists: i64,
+    pub(super) deaths: i64,
+    pub(super) damage: i64,
+    pub(super) healing: i64,
+    pub(super) mitigation: i64,
+    pub(super) damage_taken: i64,
+    pub(super) healing_taken: i64,
 }
 
 impl FriendAggregate {
-    fn win_rate(&self) -> f64 {
+    pub(super) fn win_rate(&self) -> f64 {
         ratio(self.wins, self.same_team_matches)
     }
 
-    fn avg_deaths(&self) -> f64 {
+    pub(super) fn avg_deaths(&self) -> f64 {
         average(self.deaths, self.same_team_matches)
     }
 
-    fn avg_damage_taken(&self) -> f64 {
+    pub(super) fn avg_damage_taken(&self) -> f64 {
         average(self.damage_taken, self.same_team_matches)
     }
 
-    fn avg_healing_taken(&self) -> f64 {
+    pub(super) fn avg_healing_taken(&self) -> f64 {
         average(self.healing_taken, self.same_team_matches)
     }
 
-    fn avg_mitigation(&self) -> f64 {
+    pub(super) fn avg_mitigation(&self) -> f64 {
         average(self.mitigation, self.same_team_matches)
     }
 
-    fn avg_kills(&self) -> f64 {
+    pub(super) fn avg_kills(&self) -> f64 {
         average(self.kills, self.same_team_matches)
     }
 
-    fn healing_to_kill_rate(&self) -> f64 {
+    pub(super) fn healing_to_kill_rate(&self) -> f64 {
         if self.healing_taken <= 0 {
             0.0
         } else {
@@ -743,111 +746,15 @@ fn compute_intimacy_scores(rows: &[FriendMatchRow]) -> HashMap<String, i64> {
     scores
 }
 
-fn build_boards(eligible: &[FriendAggregate], bands: &Bands) -> Vec<FriendBoard> {
-    vec![
-        board(
-            "front_pressure",
-            "前排压力位",
-            "平均承受伤害高，平均格挡也高。",
-            eligible,
-            |item| bands.high_damage(item) && bands.high_mitigation(item),
-            |item| item.avg_damage_taken() + item.avg_mitigation(),
-        ),
-        board(
-            "low_resource_partner",
-            "在世华佗",
-            "平均受到治疗量低，平均死亡数也低。",
-            eligible,
-            |item| bands.low_healing(item) && bands.low_deaths(item),
-            |item| {
-                (bands.high_healing - item.avg_healing_taken()).max(0.0)
-                    + (bands.high_deaths - item.avg_deaths()).max(0.0) * 1000.0
-            },
-        ),
-        board(
-            "priority_care",
-            "资源黑洞",
-            "平均受到治疗量高，平均死亡数也高。",
-            eligible,
-            |item| bands.high_healing_taken(item) && bands.high_deaths(item),
-            |item| item.avg_healing_taken() + item.avg_deaths() * 1000.0,
-        ),
-        board(
-            "healing_conversion",
-            "受疗转化手",
-            "受疗不低，千疗击杀更高。",
-            eligible,
-            |item| bands.high_healing_taken(item) && bands.high_healing_to_kill(item),
-            |item| item.healing_to_kill_rate() * 1000.0 + item.avg_kills() * 100.0,
-        ),
-    ]
-}
-
-fn board(
-    key: &str,
-    label: &str,
-    description: &str,
-    eligible: &[FriendAggregate],
-    include: impl Fn(&FriendAggregate) -> bool,
-    score: impl Fn(&FriendAggregate) -> f64,
-) -> FriendBoard {
-    let mut friends = eligible
-        .iter()
-        .filter(|item| include(item))
-        .map(|item| entry(item, key, label, score(item), description))
-        .collect::<Vec<_>>();
-    friends.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.same_team_matches.cmp(&a.same_team_matches))
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    friends.truncate(2);
-    FriendBoard {
-        key: key.to_string(),
-        label: label.to_string(),
-        description: description.to_string(),
-        friends,
-    }
-}
-
-fn entry(
-    item: &FriendAggregate,
-    board_key: &str,
-    board_label: &str,
-    score: f64,
-    reason: &str,
-) -> FriendBoardEntry {
-    FriendBoardEntry {
-        bnet_id: item.bnet_id.clone(),
-        name: item.name.clone(),
-        board_key: board_key.to_string(),
-        board_label: board_label.to_string(),
-        same_team_matches: item.same_team_matches,
-        win_rate: round2(item.win_rate()),
-        avg_damage_taken: round2(item.avg_damage_taken()),
-        avg_healing_taken: round2(item.avg_healing_taken()),
-        avg_mitigation: round2(item.avg_mitigation()),
-        avg_deaths: round2(item.avg_deaths()),
-        avg_kills: round2(item.avg_kills()),
-        avg_assists: round2(average(item.assists, item.same_team_matches)),
-        avg_damage: round2(average(item.damage, item.same_team_matches)),
-        avg_healing: round2(average(item.healing, item.same_team_matches)),
-        score: round2(score),
-        reasons: vec![reason.to_string()],
-    }
-}
-
 #[derive(Debug, Clone)]
-struct Bands {
-    high_damage: f64,
-    high_healing: f64,
-    high_mitigation: f64,
-    high_deaths: f64,
-    low_healing: f64,
-    low_deaths: f64,
-    high_kills: f64,
+pub(super) struct Bands {
+    pub(super) high_damage: f64,
+    pub(super) high_healing: f64,
+    pub(super) high_mitigation: f64,
+    pub(super) high_deaths: f64,
+    pub(super) low_healing: f64,
+    pub(super) low_deaths: f64,
+    pub(super) high_kills: f64,
 }
 
 impl Bands {
@@ -863,31 +770,31 @@ impl Bands {
         }
     }
 
-    fn high_damage(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn high_damage(&self, item: &FriendAggregate) -> bool {
         item.avg_damage_taken() >= self.high_damage
     }
 
-    fn high_healing_taken(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn high_healing_taken(&self, item: &FriendAggregate) -> bool {
         item.avg_healing_taken() >= self.high_healing
     }
 
-    fn high_mitigation(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn high_mitigation(&self, item: &FriendAggregate) -> bool {
         item.avg_mitigation() >= self.high_mitigation
     }
 
-    fn high_deaths(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn high_deaths(&self, item: &FriendAggregate) -> bool {
         item.avg_deaths() >= self.high_deaths
     }
 
-    fn low_healing(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn low_healing(&self, item: &FriendAggregate) -> bool {
         item.avg_healing_taken() <= self.low_healing
     }
 
-    fn low_deaths(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn low_deaths(&self, item: &FriendAggregate) -> bool {
         item.avg_deaths() <= self.low_deaths
     }
 
-    fn high_healing_to_kill(&self, item: &FriendAggregate) -> bool {
+    pub(super) fn high_healing_to_kill(&self, item: &FriendAggregate) -> bool {
         item.avg_kills() >= self.high_kills
     }
 }
@@ -922,7 +829,7 @@ fn breakdown(
     items
 }
 
-fn average(total: i64, count: i64) -> f64 {
+pub(super) fn average(total: i64, count: i64) -> f64 {
     if count <= 0 {
         0.0
     } else {
@@ -930,7 +837,7 @@ fn average(total: i64, count: i64) -> f64 {
     }
 }
 
-fn ratio(value: i64, total: i64) -> f64 {
+pub(super) fn ratio(value: i64, total: i64) -> f64 {
     if total <= 0 {
         0.0
     } else {
@@ -938,7 +845,7 @@ fn ratio(value: i64, total: i64) -> f64 {
     }
 }
 
-fn round2(value: f64) -> f64 {
+pub(super) fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
