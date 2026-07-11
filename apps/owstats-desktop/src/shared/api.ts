@@ -1,8 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   FilterOptions,
-  BindPlayerTargetResult,
-  ClearPlayerTargetResult,
   CredentialLoginResult,
   CredentialStatus,
   FriendAnalytics,
@@ -14,7 +12,6 @@ import type {
   OnboardingStatus,
   Overview,
   PersonalSeasonReview,
-  PlayerTargetStatus,
   PlayerProfile,
   PlayerSearchOption,
   RankingResponse,
@@ -71,18 +68,6 @@ export function getPersonalSeasonReview(season?: number) {
 
 export function getCredentialStatus() {
   return invoke<CredentialStatus>("get_credential_status");
-}
-
-export function getPlayerTargetStatus() {
-  return invoke<PlayerTargetStatus>("get_player_target_status");
-}
-
-export function clearPlayerTarget() {
-  return invoke<ClearPlayerTargetResult>("clear_player_target");
-}
-
-export function bindPlayerTarget(bnet: string) {
-  return invoke<BindPlayerTargetResult>("bind_player_target", { request: { bnet } });
 }
 
 export function getPlayerProfile() {

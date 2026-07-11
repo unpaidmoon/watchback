@@ -98,8 +98,9 @@ assertEqual(rankingSource.includes('const heroSortKeys: RankingSortKey[] = ["mat
 assertEqual(rankingSource.includes('const mapSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"]'), true, "map ranking sortable keys exclude best hero and rating");
 assertEqual(onboardingSource.includes("队友分析"), false, "command center does not duplicate friend analysis navigation");
 
-assertEqual(credentialTone("saved"), "good", "saved credential is good");
+assertEqual(credentialTone("ready"), "good", "current-account credential is good");
 assertEqual(credentialTone("missing"), "warn", "missing credential needs attention");
+assertEqual(credentialTone("currentPlayerMissing"), "warn", "unidentified current account needs attention");
 assertEqual(credentialTone("failed"), "bad", "failed credential is bad");
 
 const status: OnboardingStatus = {
@@ -107,8 +108,8 @@ const status: OnboardingStatus = {
   availableSeasons: [22],
   canEnterReview: true,
   credentialStatus: {
-    state: "saved",
-    message: "saved",
+    state: "ready",
+    message: "当前登录账号可用",
     exposesSecret: false,
     roleId: 123,
     savedAt: "2026-06-28T05:40:00Z",

@@ -720,10 +720,6 @@ fn read_credentials(path: &Path) -> Result<Credentials> {
     Ok(credentials)
 }
 
-pub(crate) fn read_credentials_for_command(path: &Path) -> Result<Credentials> {
-    read_credentials(path)
-}
-
 fn auth_headers(credentials: &Credentials) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     headers.insert(

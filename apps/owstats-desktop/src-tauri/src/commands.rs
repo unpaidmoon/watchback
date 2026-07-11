@@ -3,14 +3,12 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_current_account_credentials_path_output_dir_base_url, BindPlayerTargetRequest,
-    BindPlayerTargetResult, ClearPlayerTargetResult, CredentialLoginCancelResult,
-    CredentialLoginResult, CredentialStatus, FilterOptions, FriendAnalytics,
-    FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult, MatchDetailView,
-    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
-    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
-    UpdateCheckResult, UserSettings,
+    sync_season_with_current_account_credentials_path_output_dir_base_url,
+    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
+    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult,
+    MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
+    OwDatabase, PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
+    RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -103,55 +101,6 @@ pub fn get_personal_season_review(
 #[tauri::command]
 pub fn get_credential_status(app: AppHandle) -> Result<CredentialStatus, String> {
     crate::credentials::get_credential_status(&app).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_player_target_status(app: AppHandle) -> Result<PlayerTargetStatus, String> {
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    crate::player_target::player_target_status_for_path(&path).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn clear_player_target(app: AppHandle) -> Result<ClearPlayerTargetResult, String> {
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    let cleared = crate::player_target::clear_player_target_for_path(&path).map_err(to_message)?;
-    let status = crate::player_target::player_target_status_for_path(&path).map_err(to_message)?;
-    Ok(ClearPlayerTargetResult { cleared, status })
-}
-
-#[tauri::command]
-pub async fn bind_player_target(
-    app: AppHandle,
-    request: BindPlayerTargetRequest,
-) -> Result<BindPlayerTargetResult, String> {
-    let bnet = request.bnet.trim();
-    if bnet.is_empty() {
-        return Err("请输入 BattleTag".to_string());
-    }
-    let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
-    let credentials =
-        crate::sync::read_credentials_for_command(&credential_path).map_err(to_message)?;
-    let client = crate::dashen_client::DashenClient::new(
-        crate::dashen_client::DashenCredentials {
-            role_id: credentials.role_id,
-            token: credentials.token,
-            dts: credentials.dts,
-            server: credentials.server.unwrap_or(1),
-        },
-        "https://datamsapi.ds.163.com/v1/a19ld5tool/customer".to_string(),
-    )
-    .map_err(to_message)?;
-    let payload = client.search_bnet_account(bnet).await.map_err(to_message)?;
-    let target = crate::player_target::target_from_search_payload(
-        bnet,
-        &payload,
-        &chrono::Utc::now().to_rfc3339(),
-    )
-    .map_err(to_message)?;
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    crate::player_target::save_player_target_for_path(&path, &target).map_err(to_message)?;
-    let status = crate::player_target::player_target_status_for_path(&path).map_err(to_message)?;
-    Ok(BindPlayerTargetResult { status })
 }
 
 #[tauri::command]

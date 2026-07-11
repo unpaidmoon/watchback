@@ -22,7 +22,7 @@ export const phase6NavItems: Phase6NavItem[] = [
 ];
 
 export function credentialTone(state: string | null | undefined): StatusTone {
-  if (state === "saved") {
+  if (state === "ready") {
     return "good";
   }
 
@@ -30,7 +30,7 @@ export function credentialTone(state: string | null | undefined): StatusTone {
     return "bad";
   }
 
-  if (state === "missing" || state === "not_found" || state === "incomplete") {
+  if (state === "missing" || state === "not_found" || state === "incomplete" || state === "currentPlayerMissing") {
     return "warn";
   }
 
@@ -38,12 +38,16 @@ export function credentialTone(state: string | null | undefined): StatusTone {
 }
 
 export function credentialLabel(state: string | null | undefined): string {
-  if (state === "saved") {
+  if (state === "ready") {
     return "已登录";
   }
 
   if (state === "failed" || state === "invalid") {
     return "需重新登录";
+  }
+
+  if (state === "currentPlayerMissing") {
+    return "待识别账号";
   }
 
   return "未登录";
