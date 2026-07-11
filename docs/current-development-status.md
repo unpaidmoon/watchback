@@ -1,7 +1,7 @@
 # OWStatsLocal 当前开发状态
 
 > 更新日期：2026-07-11
-> 稳定化阶段：STAB-003 已验证。资源与桌面运行路径已收口为 tracked-only、仓库无关输入。
+> 稳定化阶段：STAB-004 已验证。资源与桌面运行路径、当前账号同步身份及持久化敏感数据边界已收口；STAB-005 正在进行。
 
 ## 产品与架构
 
@@ -17,7 +17,8 @@
 - 前端统一使用 `/assets/...`，Vite 不再放行开发机绝对目录；构建产物扫描禁止 `/@fs/`、开发机盘符路径和 `docs/reference`。
 - `ow-lookups.json` 是前端和 Rust importer 共用的最小正式字典；桌面运行不再读取 ignored `docs/reference` 或仓库 `data/players`。
 - `AppPaths` 统一派生数据库、设置、资料、凭据、旧 target、浏览器 profile、seasons、diagnostics 和 backups；桌面同步 JSON 直接写入 `app_data/seasons`。
-- 登录身份、凭据结构、持久化 raw JSON 的统一递归脱敏和存量数据迁移延期到 STAB-004；本轮未读取真实凭据、浏览器 profile、真实数据库或玩家 dump。
+- 同步只使用当前浏览器登录账号的凭据身份；产品入口不再提供 BattleTag 目标绑定或 `searchBnetAccount`。`ready` 表示已识别当前账号，`currentPlayerMissing` 表示需重新登录，不能解锁同步。
+- 新写入的赛季 JSON、SQLite raw JSON、同步错误和前端可见错误都经过统一递归脱敏。首次打开旧数据库会先备份 SQLite/赛季 JSON 至 `privacy-backups`，再对旧数据进行幂等清洗；不读取或操作旧 target 文件、真实凭据、浏览器 profile、真实数据库或玩家 dump。
 
 ## 快照 36 路径对账
 

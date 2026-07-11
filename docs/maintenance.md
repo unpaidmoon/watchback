@@ -49,6 +49,12 @@ npm run tauri build
 - Check `git status --short` before every commit and before release. Only intentional source and documentation changes should be listed.
 - If a change modifies the SQLite schema, add or update migration tests. At minimum, cover initializing the database twice so migrations stay idempotent.
 
+## Privacy Migration
+
+- 桌面程序初始化数据库时会执行一次 `privacy_sanitization_v1`：仅处理 app data 下的 SQLite raw 字段和 `seasons/` JSON，并先写入 `privacy-backups/<timestamp>/` 备份。
+- 迁移会递归删除 token、cookie、authorization、credential 和 storage 类键；失败时不会写完成 marker，可在修复环境后安全重试。
+- 不要手动删除 `privacy-backups` 以掩盖问题；它可能是恢复旧数据的唯一副本。凭据、浏览器 profile 和旧 `.dashen_player_target.json` 不属于该迁移的读取或备份范围。
+
 ## Rollback
 
 If a release fails after installation, identify the smallest commit that introduced the failure and revert that commit first.
