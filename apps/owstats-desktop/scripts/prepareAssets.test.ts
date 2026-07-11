@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { prepareAssets, replaceDirectoryAtomically } from "./prepareAssets.mjs";
@@ -10,6 +10,7 @@ type Fixture = {
   repoRoot: string;
   rootManifest: Record<string, unknown>;
   runtimeConfig: Record<string, unknown>;
+  inventory: { version: number; files: string[] };
 };
 
 async function makeFixture(): Promise<Fixture> {
@@ -50,7 +51,23 @@ async function makeFixture(): Promise<Fixture> {
     modTrait: [],
   });
   await writeJson(path.join(appRoot, "runtime-config", "ow-lookups.json"), runtimeConfig);
-  return { appRoot, repoRoot, rootManifest, runtimeConfig };
+  const inventory = {
+    version: 1,
+    files: [
+      "achievements/badge.png",
+      "heroes/ana.png",
+      "manifest.json",
+      "ranks/bronze.png",
+      "ranks/manifest.json",
+      "ranks/open-wide/bronze.png",
+      "ranks/open-wide/c1.png",
+      "stadium/manifest.json",
+      "stadium/ranks/fight/bronze-pure.png",
+      "stadium/ranks/fight/bronze.png",
+    ],
+  };
+  await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
+  return { appRoot, repoRoot, rootManifest, runtimeConfig, inventory };
 }
 
 async function outputSnapshot(root: string): Promise<Array<{ path: string; sha256: string }>> {
@@ -88,10 +105,7 @@ await withFixture(async ({ appRoot, repoRoot }) => {
   await prepareAssets({ appRoot, repoRoot });
   assert.equal(await readFile(path.join(appRoot, "public", "assets", "heroes", "ana.png"), "utf8"), "hero");
   assert.equal(await readFile(path.join(appRoot, "public", "assets", "ranks", "bronze.png"), "utf8"), "rank");
-  assert.equal(
-    await readFile(path.join(appRoot, "public", "assets", "token-style", "unreferenced.png"), "utf8"),
-    "unreferenced",
-  );
+  await assert.rejects(readFile(path.join(appRoot, "public", "assets", "token-style", "unreferenced.png")), /ENOENT/);
   assert.equal(
     await readFile(path.join(appRoot, "public", "assets", "stadium", "ranks", "fight", "bronze.png"), "utf8"),
     "fight",
@@ -110,12 +124,58 @@ await withFixture(async ({ appRoot, repoRoot }) => {
   assert.deepEqual(second, first);
 });
 
-await withFixture(async ({ appRoot, repoRoot }) => {
+await withFixture(async ({ appRoot, repoRoot, inventory }) => {
   const outsideFile = path.join(repoRoot, "outside-secret.txt");
   const linkedFile = path.join(repoRoot, "assets", "heroes", "linked.png");
   await writeFile(outsideFile, "outside");
   await symlink(outsideFile, linkedFile, "file");
+  inventory.files.push("heroes/linked.png");
+  inventory.files.sort();
+  await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
   await assert.rejects(prepareAssets({ appRoot, repoRoot }), /符号链接.*heroes[\\/]linked\.png/i);
+});
+
+await withFixture(async ({ appRoot, repoRoot, inventory }) => {
+  inventory.files.push("heroes/missing.png");
+  inventory.files.sort();
+  await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets-inventory\.json.*heroes\/missing\.png.*不存在/i);
+});
+
+await withFixture(async ({ appRoot, repoRoot, inventory }) => {
+  inventory.files = inventory.files.filter((file) => file !== "heroes/ana.png");
+  await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets-inventory\.json.*未列出.*heroes\/ana\.png/i);
+});
+
+await withFixture(async ({ appRoot, repoRoot, inventory }) => {
+  inventory.files.push("../outside.png");
+  inventory.files.sort();
+  await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets-inventory\.json.*\.\./i);
+});
+
+await withFixture(async ({ appRoot, repoRoot, inventory }) => {
+  inventory.files.push(inventory.files[0]);
+  inventory.files.sort();
+  await writeJson(path.join(appRoot, "runtime-config", "assets-inventory.json"), inventory);
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets-inventory\.json.*重复/i);
+});
+
+await withFixture(async ({ appRoot, repoRoot }) => {
+  const assetsRoot = path.join(repoRoot, "assets");
+  const externalAssets = path.join(repoRoot, "external-assets");
+  await rename(assetsRoot, externalAssets);
+  await symlink(externalAssets, assetsRoot, "junction");
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /assets.*根目录.*符号链接/i);
+});
+
+await withFixture(async ({ appRoot, repoRoot }) => {
+  const runtimeRoot = path.join(appRoot, "runtime-config");
+  const externalRuntime = path.join(repoRoot, "external-runtime");
+  await rename(runtimeRoot, externalRuntime);
+  await symlink(externalRuntime, runtimeRoot, "junction");
+  await assert.rejects(prepareAssets({ appRoot, repoRoot }), /runtime-config.*根目录.*符号链接/i);
 });
 
 await withFixture(async ({ appRoot }) => {

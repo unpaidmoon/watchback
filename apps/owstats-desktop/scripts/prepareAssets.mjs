@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const sensitiveTerms = ["token", "cookie", "authorization", "credential", "storage"];
+const execFileAsync = promisify(execFile);
 
 function normalizedRelativePath(value, manifestName) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${manifestName}: 资源路径必须是非空字符串`);
@@ -92,6 +95,17 @@ async function assertSafeSourceFile(file, allowedRoot, displayName) {
   if (!isInsideRoot(fileReal, rootReal)) throw new Error(`${displayName}: realpath 越过允许根目录`);
 }
 
+async function assertSafeSourceRoot(root, allowedParent, displayName) {
+  const absoluteRoot = path.resolve(root);
+  const absoluteParent = path.resolve(allowedParent);
+  const rootInfo = await lstat(absoluteRoot);
+  if (rootInfo.isSymbolicLink()) throw new Error(`${displayName} 根目录禁止符号链接或 junction`);
+  if (!rootInfo.isDirectory()) throw new Error(`${displayName} 根目录必须是目录`);
+  const parentReal = await realpath(absoluteParent);
+  const rootReal = await realpath(absoluteRoot);
+  if (!isInsideRoot(rootReal, parentReal)) throw new Error(`${displayName} 根目录 realpath 越过允许目录`);
+}
+
 async function assertReferencedFile(source, allowedRoot, manifestName, field, rawPath) {
   try {
     await assertSafeSourceFile(source, allowedRoot, `${manifestName} ${field} ${rawPath}`);
@@ -100,7 +114,13 @@ async function assertReferencedFile(source, allowedRoot, manifestName, field, ra
   }
 }
 
-async function validateManifests({ rootManifest, ranksManifest, stadiumManifest, assetsRoot }) {
+async function validateManifests({ rootManifest, ranksManifest, stadiumManifest, assetsRoot, inventoryFiles }) {
+  const inventorySet = new Set(inventoryFiles);
+  const assertInventoried = (relative, reference) => {
+    if (!inventorySet.has(relative)) {
+      throw new Error(`runtime-config/assets-inventory.json: 未列出 ${reference} 引用 ${relative}`);
+    }
+  };
   assertObject(rootManifest, "assets/manifest.json");
   for (const field of ["heroes", "maps", "perks"]) {
     assertArrayField(rootManifest, field, "assets/manifest.json");
@@ -115,6 +135,7 @@ async function validateManifests({ rootManifest, ranksManifest, stadiumManifest,
     const prefix = "data/assets/overwatch/";
     if (!relative.startsWith(prefix)) throw new Error(`assets/manifest.json: ${field} 路径不在允许的源目录内 ${value}`);
     const assetPath = relative.slice(prefix.length);
+    assertInventoried(assetPath, `assets/manifest.json ${field}`);
     await assertReferencedFile(path.join(assetsRoot, ...assetPath.split("/")), assetsRoot, "assets/manifest.json", field, value);
   }
 
@@ -124,10 +145,12 @@ async function validateManifests({ rootManifest, ranksManifest, stadiumManifest,
   assertObjectEntries(ranksManifest.ranks, "ranks", "assets/ranks/manifest.json");
   for (const { field, value } of collectFields(ranksManifest.ranks, new Set(["file", "wideFile"]))) {
     const relative = normalizedRelativePath(value, "assets/ranks/manifest.json");
+    assertInventoried(`ranks/${relative}`, `assets/ranks/manifest.json ${field}`);
     await assertReferencedFile(path.join(assetsRoot, "ranks", ...relative.split("/")), path.join(assetsRoot, "ranks"), "assets/ranks/manifest.json", field, value);
   }
   for (const value of ranksManifest.openWideFiles) {
     const relative = normalizedRelativePath(value, "assets/ranks/manifest.json");
+    assertInventoried(`ranks/${relative}`, "assets/ranks/manifest.json openWideFiles");
     await assertReferencedFile(path.join(assetsRoot, "ranks", ...relative.split("/")), path.join(assetsRoot, "ranks"), "assets/ranks/manifest.json", "openWideFiles", value);
   }
 
@@ -141,31 +164,38 @@ async function validateManifests({ rootManifest, ranksManifest, stadiumManifest,
     const prefix = "assets/";
     if (!relative.startsWith(prefix)) throw new Error(`assets/stadium/manifest.json: ${field} 路径不在允许的源目录内 ${value}`);
     const assetPath = relative.slice(prefix.length);
+    assertInventoried(assetPath, `assets/stadium/manifest.json ${field}`);
     await assertReferencedFile(path.join(assetsRoot, ...assetPath.split("/")), assetsRoot, "assets/stadium/manifest.json", field, value);
   }
 }
 
-async function copySourceTree(sourceRoot, destinationRoot) {
-  async function walk(source, destination) {
-    const sourceInfo = await lstat(source);
-    if (sourceInfo.isSymbolicLink()) throw new Error(`禁止符号链接 ${path.relative(sourceRoot, source)}`);
-    if (!sourceInfo.isDirectory()) throw new Error(`${source}: 源根目录必须是目录`);
-    await mkdir(destination, { recursive: true });
-    const entries = await readdir(source, { withFileTypes: true });
-    entries.sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      const sourcePath = path.join(source, entry.name);
-      const destinationPath = path.join(destination, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`禁止符号链接 ${path.relative(sourceRoot, sourcePath)}`);
-      if (entry.isDirectory()) await walk(sourcePath, destinationPath);
-      else {
-        await assertSafeSourceFile(sourcePath, sourceRoot, path.relative(sourceRoot, sourcePath));
-        await mkdir(path.dirname(destinationPath), { recursive: true });
-        await copyFile(sourcePath, destinationPath);
-      }
+function validateInventory(inventory) {
+  const inventoryName = "runtime-config/assets-inventory.json";
+  assertObject(inventory, inventoryName);
+  if (inventory.version !== 1) throw new Error(`${inventoryName}: version 必须是 1`);
+  assertArrayField(inventory, "files", inventoryName);
+  const normalized = inventory.files.map((value) => normalizedRelativePath(value, inventoryName));
+  const unique = new Set(normalized);
+  if (unique.size !== normalized.length) throw new Error(`${inventoryName}: files 包含重复路径`);
+  const sorted = [...normalized].sort((left, right) => left.localeCompare(right));
+  if (!normalized.every((value, index) => value === sorted[index])) throw new Error(`${inventoryName}: files 必须排序`);
+  return normalized;
+}
+
+async function copyInventoryFiles(assetsRoot, stagingRoot, inventoryFiles) {
+  for (const relative of inventoryFiles) {
+    const source = path.join(assetsRoot, ...relative.split("/"));
+    try {
+      await assertSafeSourceFile(source, assetsRoot, `assets-inventory.json ${relative}`);
+    } catch (error) {
+      throw new Error(
+        `runtime-config/assets-inventory.json: ${relative} 不存在或不是安全普通文件 (${error instanceof Error ? error.message : String(error)})`,
+      );
     }
+    const destination = path.join(stagingRoot, ...relative.split("/"));
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(source, destination);
   }
-  await walk(sourceRoot, destinationRoot);
 }
 
 export async function replaceDirectoryAtomically(outputRoot, stagingRoot, injected = {}) {
@@ -210,21 +240,27 @@ export async function prepareAssets({ repoRoot, appRoot } = {}) {
   const stadiumManifestFile = path.join(assetsRoot, "stadium", "manifest.json");
   const runtimeRoot = path.resolve(appRoot, "runtime-config");
   const runtimeFile = path.join(runtimeRoot, "ow-lookups.json");
+  const inventoryFile = path.join(runtimeRoot, "assets-inventory.json");
 
+  await assertSafeSourceRoot(assetsRoot, repoRoot, "assets");
+  await assertSafeSourceRoot(runtimeRoot, appRoot, "runtime-config");
   await assertSafeSourceFile(rootManifestFile, assetsRoot, "assets/manifest.json");
   await assertSafeSourceFile(ranksManifestFile, assetsRoot, "assets/ranks/manifest.json");
   await assertSafeSourceFile(stadiumManifestFile, assetsRoot, "assets/stadium/manifest.json");
   await assertSafeSourceFile(runtimeFile, runtimeRoot, "runtime-config/ow-lookups.json");
+  await assertSafeSourceFile(inventoryFile, runtimeRoot, "runtime-config/assets-inventory.json");
   const rootManifest = await readJson(rootManifestFile, "assets/manifest.json");
   const ranksManifest = await readJson(ranksManifestFile, "assets/ranks/manifest.json");
   const stadiumManifest = await readJson(stadiumManifestFile, "assets/stadium/manifest.json");
   const runtimeConfig = await readJson(runtimeFile, "runtime-config/ow-lookups.json");
+  const inventory = await readJson(inventoryFile, "runtime-config/assets-inventory.json");
   assertNoSensitiveKeys(runtimeConfig, "runtime-config/ow-lookups.json");
-  await validateManifests({ rootManifest, ranksManifest, stadiumManifest, assetsRoot });
+  const inventoryFiles = validateInventory(inventory);
+  await validateManifests({ rootManifest, ranksManifest, stadiumManifest, assetsRoot, inventoryFiles });
 
   await mkdir(stagingRoot, { recursive: true });
   try {
-    await copySourceTree(assetsRoot, stagingRoot);
+    await copyInventoryFiles(assetsRoot, stagingRoot, inventoryFiles);
     await mkdir(path.join(stagingRoot, "config"), { recursive: true });
     await writeFile(path.join(stagingRoot, "config", "ow-lookups.json"), `${JSON.stringify(runtimeConfig, null, 2)}\n`);
     await replaceDirectoryAtomically(outputRoot, stagingRoot);
@@ -233,6 +269,20 @@ export async function prepareAssets({ repoRoot, appRoot } = {}) {
     throw error;
   }
   return { outputRoot, fileCount: (await collectFiles(outputRoot)).length };
+}
+
+export async function refreshAssetsInventory({ repoRoot, appRoot }) {
+  const { stdout } = await execFileAsync("git", ["-C", repoRoot, "ls-files", "--", "assets"]);
+  const files = stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((file) => file.replaceAll("\\", "/"))
+    .filter((file) => file.startsWith("assets/"))
+    .map((file) => file.slice("assets/".length));
+  const uniqueSorted = [...new Set(files)].sort((left, right) => left.localeCompare(right));
+  const inventoryFile = path.resolve(appRoot, "runtime-config", "assets-inventory.json");
+  await writeFile(inventoryFile, `${JSON.stringify({ version: 1, files: uniqueSorted }, null, 2)}\n`);
+  return { inventoryFile, fileCount: uniqueSorted.length };
 }
 
 async function collectFiles(root) {
@@ -252,10 +302,19 @@ const scriptPath = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   const appRoot = path.resolve(path.dirname(scriptPath), "..");
   const repoRoot = path.resolve(appRoot, "..", "..");
-  prepareAssets({ repoRoot, appRoot })
-    .then(({ outputRoot, fileCount }) => console.log(`已准备 ${fileCount} 个文件：${outputRoot}`))
-    .catch((error) => {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exitCode = 1;
-    });
+  if (process.argv.includes("--refresh-inventory")) {
+    refreshAssetsInventory({ repoRoot, appRoot })
+      .then(({ inventoryFile, fileCount }) => console.log(`已刷新 ${fileCount} 个 tracked assets：${inventoryFile}`))
+      .catch((error) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      });
+  } else {
+    prepareAssets({ repoRoot, appRoot })
+      .then(({ outputRoot, fileCount }) => console.log(`已准备 ${fileCount} 个文件：${outputRoot}`))
+      .catch((error) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      });
+  }
 }
