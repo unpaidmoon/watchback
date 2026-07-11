@@ -8,6 +8,16 @@ Keep commits focused on one reason to change. If two changes would need differen
 
 ## Required Checks
 
+首选从仓库根目录运行统一入口：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+```
+
+该入口依次执行发布面敏感信息与绝对路径扫描、资源准备、分层前端测试和构建、构建产物扫描、Rust 格式/Clippy/全量测试、STAB-005/006 契约测试、`git diff --check`，以及基于 `git archive HEAD` 的 tracked-only checkout 验收。它不会读取本机 app data、凭据或浏览器 profile，也不会执行 `tauri build`。日常只想验证当前工作树时可使用 `-ChangedOnly`；不要把该快捷模式当作发布验收。
+
+GitHub Actions 使用同一个 `scripts/verify.ps1`，不要在 workflow 中复制或另行删减验证命令。
+
 Backend:
 
 ```powershell

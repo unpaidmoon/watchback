@@ -12,6 +12,6 @@
 | STAB-004 | 同步身份与敏感数据治理 | P0 | 已验证 | 递归脱敏覆盖 JSON、错误和 SQLite；同步只使用当前登录账号；旧 BattleTag 入口已移除；历史 SQLite/赛季 JSON 先备份后原子清洗，临时 SQLite/目录、后端全量测试、前端测试和构建通过 | `00a4590..db5ba0b`，`docs: complete STAB-004 privacy stabilization` |
 | STAB-005 | 数据库迁移与运行稳定性 | P0 | 已验证 | v1-v4 显式事务迁移、未来版本拒绝、升级前一致性备份、WAL/5 秒锁等待、赛季错误快照、桌面同步互斥和中断恢复均由临时 SQLite 测试覆盖；后端全量测试通过 | `279477a..273fd41`，`docs: complete STAB-005 runtime stability` |
 | STAB-006 | 渐进式模块化 | P1 | 已验证 | queries/review/sync 改为稳定 facade 加内部职责模块；好友榜单、对局详情与赛季健康卡独立；纯函数/DTO/既有功能回归、后端全量测试、前端测试与构建通过。CSS 仅完成聚合入口，好友 repository/metrics 与指挥台数据 hook 的进一步细分已记录为受控后续项 | `b87ebc7..514455b`，`docs: complete STAB-006 modularization` |
-| STAB-007 | 统一验证脚本与 CI | P1 | 进行中 | 已完成审计与实施计划；下一步建立统一本地验证入口、CI 与证据产物 | — |
+| STAB-007 | 统一验证脚本与 CI | P1 | 进行中 | 发布面敏感信息/绝对路径扫描、分层前端命令、根验证入口、tracked-only archive 验收和 Windows CI 已实现；待提交后重新执行 archive 验收并记录最终证据 | — |
 
 状态只使用：`待开始`、`进行中`、`已验证`、`阻塞`。任意时刻只允许一个任务处于 `进行中`。
