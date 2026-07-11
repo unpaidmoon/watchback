@@ -1722,3 +1722,92 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
     assert_eq!(recovered.failed_details, 0);
     assert_eq!(remaining_errors, 0);
 }
+
+#[test]
+fn interrupted_import_rolls_back_and_a_later_retry_remains_idempotent() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = season_payload();
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let conn = db.connect().unwrap();
+    let before_matches: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM matches WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let before_errors: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_errors WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER fail_stab005_import BEFORE UPDATE ON matches BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+    )
+    .unwrap();
+    drop(conn);
+
+    assert!(import_payload_value(&db, &payload, temp.path()).is_err());
+    let conn = db.connect().unwrap();
+    let failed_matches: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM matches WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let failed_errors: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_errors WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(failed_matches, before_matches);
+    assert_eq!(failed_errors, before_errors);
+    conn.execute("DROP TRIGGER fail_stab005_import", [])
+        .unwrap();
+    drop(conn);
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let conn = db.connect().unwrap();
+    let recovered_matches: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM matches WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let recovered_errors: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_errors WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+    let retried_matches: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM matches WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let retried_errors: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sync_errors WHERE season = 22",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(recovered_matches, before_matches);
+    assert_eq!(recovered_errors, before_errors);
+    assert_eq!(retried_matches, recovered_matches);
+    assert_eq!(retried_errors, recovered_errors);
+}
