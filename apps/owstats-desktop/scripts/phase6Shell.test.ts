@@ -26,6 +26,8 @@ assertEqual(typeof checkAppUpdate, "function", "update check API wrapper exists"
 assertEqual(typeof logout, "function", "logout API wrapper exists");
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
+const seasonHealthSource = readFileSync(new URL("../src/features/command-center/SeasonHealthPanel.tsx", import.meta.url), "utf8");
+const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 assertEqual(onboardingSource.includes("phase6PlayerPass"), true, "command center uses a player pass identity strip");
@@ -57,11 +59,11 @@ assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data are
 assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads fixed season status cards from onboarding status");
 assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), true, "command center has an explicit fixed season list");
 assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders a fixed season card grid");
-assertEqual(onboardingSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
+assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
 assertEqual(onboardingSource.includes("S21"), true, "command center includes S21 card copy");
 assertEqual(onboardingSource.includes("S22"), true, "command center includes S22 card copy");
 assertEqual(onboardingSource.includes("S23"), true, "command center includes S23 card copy");
-assertEqual(onboardingSource.includes("`同步 S${seasonStatus.season}`"), true, "season sync button text is generated per season");
+assertEqual(commandCenterSource.includes("`同步 S${seasonStatus.season}`"), true, "season sync button text is generated per season");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
