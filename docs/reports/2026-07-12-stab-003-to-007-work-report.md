@@ -1,7 +1,7 @@
 # OWStatsLocal 稳定化工作报告（STAB-003 至 STAB-007）
 
-日期：2026-07-12  
-分支：`codex/stabilization`  
+日期：2026-07-12
+分支：`codex/stabilization`
 范围：资源与运行路径、同步身份与隐私、数据库稳定性、模块化、统一验证与 CI。
 
 ## 结论
