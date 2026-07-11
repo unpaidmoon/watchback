@@ -15,6 +15,7 @@ pub(super) fn write_season_payload(
     Ok(path)
 }
 
+#[allow(clippy::too_many_arguments)] // Sync facade passes the independently fetched payload parts explicitly.
 pub fn sync_import_parts(
     db: &OwDatabase,
     _project_root: &Path,

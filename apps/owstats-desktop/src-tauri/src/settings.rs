@@ -189,22 +189,22 @@ fn profile_from_raw(
         bnet_id
             .as_deref()
             .and_then(|value| value.parse::<i64>().ok())
-            .or_else(|| json_i64(&raw, "bnetId"))
+            .or_else(|| json_i64(raw, "bnetId"))
     });
-    let player_id = json_string(&raw, "name")
+    let player_id = json_string(raw, "name")
         .or(display_name)
         .or(bnet_id.clone());
 
     PlayerProfile {
         role_id,
         player_id,
-        avatar_url: json_string(&raw, "icon")
-            .or_else(|| json_string(&raw, "headIcon"))
-            .or_else(|| json_string(&raw, "avatar"))
-            .or_else(|| json_string(&raw, "avatarUrl")),
-        endorsement_level: json_i64(&raw, "level").or_else(|| json_i64(&raw, "endorsementLevel")),
-        play_time_hours: json_f64(&raw, "gameTime").or_else(|| json_f64(&raw, "playTimeHours")),
-        title: json_string(&raw, "title"),
+        avatar_url: json_string(raw, "icon")
+            .or_else(|| json_string(raw, "headIcon"))
+            .or_else(|| json_string(raw, "avatar"))
+            .or_else(|| json_string(raw, "avatarUrl")),
+        endorsement_level: json_i64(raw, "level").or_else(|| json_i64(raw, "endorsementLevel")),
+        play_time_hours: json_f64(raw, "gameTime").or_else(|| json_f64(raw, "playTimeHours")),
+        title: json_string(raw, "title"),
         refreshed_at,
     }
 }

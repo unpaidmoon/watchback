@@ -215,7 +215,7 @@ pub(super) fn personal_bests(rows: &[ReviewMatch]) -> Vec<PersonalBest> {
     push_best(&mut bests, rows, "healing", "最高治疗", |row| {
         row.healing
     });
-    bests.sort_by(|a, b| b.value.cmp(&a.value));
+    bests.sort_by_key(|item| std::cmp::Reverse(item.value));
     bests
 }
 
@@ -276,7 +276,7 @@ pub(super) fn hero_pool(rows: &[ReviewMatch], baseline: &Aggregate) -> HeroPoolS
         names.insert(row.hero_guid.clone(), row.hero_name.clone());
     }
     let mut heroes = by_hero.into_iter().collect::<Vec<_>>();
-    heroes.sort_by(|a, b| b.1.matches.cmp(&a.1.matches));
+    heroes.sort_by_key(|item| std::cmp::Reverse(item.1.matches));
     let total_matches = rows.len() as i64;
     let top1 = heroes.first().map(|item| item.1.matches).unwrap_or(0);
     let top3: i64 = heroes.iter().take(3).map(|item| item.1.matches).sum();
@@ -497,7 +497,7 @@ pub(super) fn top_conclusions(
     });
     items.extend(hero_pool.clues.clone());
     items.extend(maps.conclusions.clone());
-    items.sort_by(|a, b| b.priority.cmp(&a.priority));
+    items.sort_by_key(|item| std::cmp::Reverse(item.priority));
     items.truncate(8);
     items
 }

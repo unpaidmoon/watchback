@@ -319,6 +319,7 @@ async fn fetch_details(
     (details, detail_errors)
 }
 
+#[allow(clippy::too_many_arguments)] // Fetch stages remain explicit to preserve request ordering and error boundaries.
 fn build_payload(
     request: &FullSeasonRequest,
     profile_card: Value,

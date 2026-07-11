@@ -83,9 +83,7 @@ pub(super) async fn fetch_mode_pages(
             break;
         }
         for item in &mut page_entries {
-            if fight {
-                item["gameMode"] = Value::String(mode.to_string());
-            } else if item.get("gameMode").is_none() {
+            if fight || item.get("gameMode").is_none() {
                 item["gameMode"] = Value::String(mode.to_string());
             }
         }

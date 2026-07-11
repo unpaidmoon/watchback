@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)] // Review fixtures deliberately expose each match dimension.
+
 use owstats_desktop_lib::{
     get_onboarding_status, get_personal_season_review, OnboardingStatusRequest, OwDatabase,
     PersonalReviewRequest,

@@ -592,6 +592,7 @@ fn infer_current_bnet(details: &[Value]) -> Option<String> {
         .map(|(bnet_id, _)| bnet_id)
 }
 
+#[allow(clippy::too_many_arguments)] // SQL row mapping preserves the importer call boundary.
 fn insert_player_rows(
     tx: &rusqlite::Transaction<'_>,
     match_id: &str,
@@ -863,6 +864,7 @@ fn is_sensitive_key(key: &str) -> bool {
     lowered.contains("token") || lowered.contains("cookie")
 }
 
+#[allow(clippy::items_after_test_module)] // Public importer helpers intentionally follow lookup unit tests.
 #[cfg(test)]
 mod portable_lookup_tests {
     use super::load_embedded_lookup;

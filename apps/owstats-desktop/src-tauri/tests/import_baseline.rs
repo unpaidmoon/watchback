@@ -1400,6 +1400,7 @@ fn friend_analytics_backfills_empty_match_players_from_existing_details() {
     assert!(player_rows > 0);
 }
 
+#[allow(clippy::too_many_arguments)] // Test fixture maps directly to the persisted player columns.
 fn seed_friend_row(
     db: &OwDatabase,
     match_id: &str,

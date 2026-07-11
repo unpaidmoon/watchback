@@ -438,12 +438,12 @@ fn redact_fragment(value: &str) -> String {
 
 fn project_root() -> Result<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Ok(manifest_dir
+    manifest_dir
         .join("..")
         .join("..")
         .join("..")
         .canonicalize()
-        .with_context(|| "failed to resolve project root")?)
+        .with_context(|| "failed to resolve project root")
 }
 
 #[cfg(test)]

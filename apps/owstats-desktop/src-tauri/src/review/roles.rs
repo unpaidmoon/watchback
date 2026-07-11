@@ -183,6 +183,7 @@ pub(super) fn build_role_summaries(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)] // Aggregation inputs mirror the selected SQL columns.
 pub(super) fn add_role_match(
     by_role: &mut HashMap<String, RoleAggregate>,
     role: &str,

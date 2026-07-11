@@ -26,6 +26,7 @@ struct PlayerSeed {
     mitigation: i64,
 }
 
+#[allow(clippy::too_many_arguments)] // Test fixture mirrors all independent score inputs.
 fn player(
     bnet_id: &'static str,
     name: &'static str,

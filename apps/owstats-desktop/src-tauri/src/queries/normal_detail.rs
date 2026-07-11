@@ -1,5 +1,21 @@
 use super::*;
 
+type NormalDetailRow = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    String,
+);
+
 pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<MatchDetailView> {
     db.initialize()?;
     let conn = db.connect()?;
@@ -17,21 +33,7 @@ pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<M
         opponent_score,
         duration_sec,
         match_kind,
-    ): (
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
-        String,
-    ) = conn
+    ): NormalDetailRow = conn
         .query_row(
             r#"
             SELECT
