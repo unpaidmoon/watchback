@@ -6,6 +6,7 @@ pub mod credential_store;
 pub mod credentials;
 pub mod dashen_auth;
 pub mod dashen_client;
+mod database;
 mod db;
 mod importer;
 pub mod login_flow;

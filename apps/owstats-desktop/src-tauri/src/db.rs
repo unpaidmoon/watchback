@@ -1,8 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-
-const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
@@ -193,69 +191,6 @@ pub fn initialize_connection(conn: &Connection) -> Result<()> {
         "#,
         [],
     )?;
-    run_migrations(conn)?;
-    Ok(())
-}
-
-fn run_migrations(conn: &Connection) -> Result<()> {
-    let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if current > CURRENT_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "数据库版本高于当前程序，请升级 OWStatsLocal 后再打开此数据"
-        ));
-    }
-    if current < 1 {
-        conn.pragma_update(None, "user_version", 1)?;
-    }
-    if current < 2 {
-        add_column_if_missing(conn, "match_players", "role_type", "TEXT")?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_match_players_role ON match_players(season, is_current_player, role_type)",
-            [],
-        )?;
-        conn.pragma_update(None, "user_version", 2)?;
-    }
-    if current < 3 {
-        let transaction = conn.unchecked_transaction()?;
-        transaction.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS arena_match_players (
-                match_id TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
-                season INTEGER NOT NULL,
-                side TEXT NOT NULL,
-                bnet_id TEXT NOT NULL,
-                player_name TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (match_id, side, bnet_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_arena_match_players_bnet
-                ON arena_match_players(bnet_id, season);
-            CREATE INDEX IF NOT EXISTS idx_arena_match_players_name
-                ON arena_match_players(player_name, season);
-            "#,
-        )?;
-        transaction.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
-        transaction.commit()?;
-    }
-    Ok(())
-}
-
-fn add_column_if_missing(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let columns = stmt
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    if !columns.iter().any(|item| item == column) {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-            [],
-        )?;
-    }
+    crate::database::migrations::run_migrations(conn)?;
     Ok(())
 }
