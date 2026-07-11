@@ -197,6 +197,67 @@ await withFixture(async ({ appRoot }) => {
   );
   assert.equal(await readFile(path.join(outputRoot, "old.txt"), "utf8"), "old");
   await assert.rejects(readFile(path.join(stagingRoot, "new.txt")), /ENOENT/);
+  assert.equal(renameCalls, 3, "non-transient rename errors must not retry");
+});
+
+await withFixture(async ({ appRoot }) => {
+  const outputRoot = path.join(appRoot, "public", "assets");
+  const stagingRoot = path.join(appRoot, "public", ".assets-stage-transient");
+  await mkdir(outputRoot, { recursive: true });
+  await mkdir(stagingRoot, { recursive: true });
+  await writeFile(path.join(outputRoot, "old.txt"), "old");
+  await writeFile(path.join(stagingRoot, "new.txt"), "new");
+  let renameCalls = 0;
+  const { rename: nativeRename } = await import("node:fs/promises");
+
+  await replaceDirectoryAtomically(outputRoot, stagingRoot, {
+    rename: async (from: string, to: string) => {
+      renameCalls += 1;
+      if (renameCalls <= 2) {
+        const error = new Error(`transient rename ${renameCalls}`) as NodeJS.ErrnoException;
+        error.code = renameCalls === 1 ? "EPERM" : "EBUSY";
+        throw error;
+      }
+      await nativeRename(from, to);
+    },
+    sleep: async () => {},
+  });
+
+  assert.equal(await readFile(path.join(outputRoot, "new.txt"), "utf8"), "new");
+  assert.equal(renameCalls, 4);
+});
+
+await withFixture(async ({ appRoot }) => {
+  const publicRoot = path.join(appRoot, "public");
+  const outputRoot = path.join(publicRoot, "assets");
+  const stagingRoot = path.join(publicRoot, ".assets-stage-permanent");
+  await mkdir(outputRoot, { recursive: true });
+  await mkdir(stagingRoot, { recursive: true });
+  await writeFile(path.join(outputRoot, "old.txt"), "old");
+  await writeFile(path.join(stagingRoot, "new.txt"), "new");
+  let stagingRenameAttempts = 0;
+  const { rename: nativeRename } = await import("node:fs/promises");
+
+  await assert.rejects(
+    replaceDirectoryAtomically(outputRoot, stagingRoot, {
+      rename: async (from: string, to: string) => {
+        if (from === stagingRoot) {
+          stagingRenameAttempts += 1;
+          const error = new Error("permanent rename lock") as NodeJS.ErrnoException;
+          error.code = "EPERM";
+          throw error;
+        }
+        await nativeRename(from, to);
+      },
+      sleep: async () => {},
+    }),
+    /permanent rename lock/,
+  );
+
+  assert.equal(stagingRenameAttempts, 5);
+  assert.equal(await readFile(path.join(outputRoot, "old.txt"), "utf8"), "old");
+  await assert.rejects(readFile(path.join(stagingRoot, "new.txt")), /ENOENT/);
+  assert.deepEqual((await readdir(publicRoot)).filter((name) => name.includes(".backup-")), []);
 });
 
 await withFixture(async ({ appRoot, repoRoot, rootManifest }) => {

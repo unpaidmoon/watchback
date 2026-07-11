@@ -7,6 +7,24 @@ import { promisify } from "node:util";
 
 const sensitiveTerms = ["token", "cookie", "authorization", "credential", "storage"];
 const execFileAsync = promisify(execFile);
+const transientRenameCodes = new Set(["EPERM", "EBUSY", "ENOTEMPTY"]);
+const renameMaxAttempts = 5;
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function renameWithRetry(fsOps, from, to) {
+  for (let attempt = 1; attempt <= renameMaxAttempts; attempt += 1) {
+    try {
+      await fsOps.rename(from, to);
+      return;
+    } catch (error) {
+      if (!transientRenameCodes.has(error?.code) || attempt === renameMaxAttempts) throw error;
+      await fsOps.sleep(20 * (2 ** (attempt - 1)));
+    }
+  }
+}
 
 function normalizedRelativePath(value, manifestName) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${manifestName}: 资源路径必须是非空字符串`);
@@ -199,19 +217,19 @@ async function copyInventoryFiles(assetsRoot, stagingRoot, inventoryFiles) {
 }
 
 export async function replaceDirectoryAtomically(outputRoot, stagingRoot, injected = {}) {
-  const fsOps = { rename, rm, lstat, ...injected };
+  const fsOps = { rename, rm, lstat, sleep, ...injected };
   const backupRoot = `${outputRoot}.backup-${randomUUID()}`;
   let oldMoved = false;
   try {
     if (await pathExistsWith(fsOps, outputRoot)) {
-      await fsOps.rename(outputRoot, backupRoot);
+      await renameWithRetry(fsOps, outputRoot, backupRoot);
       oldMoved = true;
     }
     try {
-      await fsOps.rename(stagingRoot, outputRoot);
+      await renameWithRetry(fsOps, stagingRoot, outputRoot);
     } catch (error) {
       await fsOps.rm(outputRoot, { recursive: true, force: true });
-      if (oldMoved) await fsOps.rename(backupRoot, outputRoot);
+      if (oldMoved) await renameWithRetry(fsOps, backupRoot, outputRoot);
       throw error;
     }
     if (oldMoved) await fsOps.rm(backupRoot, { recursive: true, force: true });
