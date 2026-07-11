@@ -329,10 +329,9 @@ fn build_payload(
     detail_errors: Vec<Value>,
     list_pages: Vec<Value>,
 ) -> Value {
-    json!({
+    let payload = json!({
         "input_bnet": request.input_bnet,
         "resolved_bnet": request.resolved_bnet,
-        "customer_token": request.customer_token,
         "profile_card": profile_card,
         "count_info": {
             "sport": sport_count,
@@ -347,7 +346,8 @@ fn build_payload(
             "detail_errors": detail_errors,
             "list_pages": list_pages,
         }
-    })
+    });
+    crate::redaction::sanitize_persisted_json(&payload)
 }
 
 fn extract_match_entries(payload: &Value) -> Vec<Value> {

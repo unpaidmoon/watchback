@@ -372,7 +372,8 @@ fn write_season_payload(output_dir: &Path, season: i64, payload: &Value) -> Resu
     std::fs::create_dir_all(output_dir)
         .with_context(|| format!("failed to create output directory {}", output_dir.display()))?;
     let path = output_dir.join(format!("local_s{season}_full_season.json"));
-    let text = serde_json::to_string_pretty(payload)?;
+    let sanitized = crate::redaction::sanitize_persisted_json(payload);
+    let text = serde_json::to_string_pretty(&sanitized)?;
     std::fs::write(&path, text)
         .with_context(|| format!("failed to write season payload {}", path.display()))?;
     Ok(path)

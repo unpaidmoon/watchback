@@ -260,7 +260,7 @@ async fn dashen_client_retries_http_429_with_backoff() {
 }
 
 #[tokio::test]
-async fn full_season_fetch_builds_python_shaped_payload_with_local_raw_tokens() {
+async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
     use owstats_desktop_lib::dashen_client::DashenCredentials;
     use owstats_desktop_lib::season_fetch::{fetch_full_season_with_base_url, FullSeasonRequest};
 
@@ -320,14 +320,9 @@ async fn full_season_fetch_builds_python_shaped_payload_with_local_raw_tokens() 
         .as_array()
         .unwrap()
         .is_empty());
-    assert_eq!(
-        fetch.payload["customer_token"], "player-customer-token",
-        "local raw JSON should preserve the target customer token"
-    );
-    assert!(
-        text.contains(r#""customerToken":"detail-secret""#),
-        "local raw JSON should preserve upstream detail token-like fields"
-    );
+    assert!(fetch.payload.get("customer_token").is_none());
+    assert!(!text.contains("player-customer-token"));
+    assert!(!text.contains("detail-secret"));
     assert!(!text.contains("account-auth-token"));
 }
 
