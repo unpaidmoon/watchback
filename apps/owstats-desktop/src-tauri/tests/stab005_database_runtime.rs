@@ -1,6 +1,7 @@
 use owstats_desktop_lib::OwDatabase;
 use rusqlite::Connection;
 use std::fs;
+use std::time::Duration;
 
 #[test]
 fn database_rejects_a_schema_newer_than_the_running_application() {
@@ -25,6 +26,33 @@ fn every_database_connection_waits_for_brief_lock_contention() {
         .unwrap();
 
     assert_eq!(timeout, 5_000);
+    let journal_mode: String = conn
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .unwrap();
+    assert_eq!(journal_mode.to_lowercase(), "wal");
+}
+
+#[test]
+fn second_writer_waits_for_the_first_writer_to_finish() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("owstats.sqlite3");
+    let db = OwDatabase::new(&path);
+    db.initialize().unwrap();
+    let first = db.connect().unwrap();
+    first.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+    let worker_path = path.clone();
+    let worker = std::thread::spawn(move || {
+        let second = OwDatabase::new(worker_path).connect().unwrap();
+        second.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('stab005-lock', 'ok', 'now')",
+            [],
+        )
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    first.execute_batch("COMMIT;").unwrap();
+
+    worker.join().unwrap().unwrap();
 }
 
 #[test]
