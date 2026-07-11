@@ -1,10 +1,9 @@
 import assetManifest from "../../../../assets/manifest.json";
 import rankManifest from "../../../../assets/ranks/manifest.json";
 import stadiumManifest from "../../../../assets/stadium/manifest.json";
-import owConfigCache from "../../../../docs/reference/ow_config_cache.json";
-import queryToolConfig from "../../../../docs/reference/res/query_tool.json";
+import runtimeLookups from "../../runtime-config/ow-lookups.json";
 
-const repoAssetRoot = "/@fs/D:/Codex/OW_data/owstats-local/assets";
+const repoAssetRoot = "/assets";
 const rankAssetRoot = `${repoAssetRoot}/ranks`;
 const achievementAssetRoot = `${repoAssetRoot}/achievements/token-style`;
 const stadiumAssetRoot = `${repoAssetRoot}/stadium`;
@@ -58,7 +57,8 @@ const arenaRankFiles = new Map(
   (stadium.fightRanks ?? []).flatMap((rank) => {
     const key = normalizeAssetKey(rank.key);
     const file = rank.localPath ?? rank.pureLocalPath;
-    return key && file ? [[key, file.replace(/^assets\/stadium\//, "")] as const] : [];
+    const url = normalizeStadiumAssetPath(file);
+    return key && url ? [[key, url] as const] : [];
   }),
 );
 
@@ -102,8 +102,8 @@ export type HeroStatInfo = {
   type: string | null;
 };
 
-const queryTool = queryToolConfig as QueryToolConfig;
-const owConfig = owConfigCache as OwConfigCache;
+const queryTool = runtimeLookups as QueryToolConfig;
+const owConfig = runtimeLookups as OwConfigCache;
 
 const localizedMapAliases: Record<string, string> = {
   阿特利斯: "aatlis",
@@ -177,6 +177,19 @@ export function normalizeAssetKey(value: string | null | undefined): string | nu
   return normalized ? normalized : null;
 }
 
+export function normalizeStadiumAssetPath(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/\\/g, "/");
+  if (normalized.startsWith("/") || /^[a-z]:\//i.test(normalized) || normalized.includes(["/@", "fs/"].join("")) || normalized.split("/").includes("..")) {
+    return null;
+  }
+  const prefix = "assets/stadium/";
+  if (!normalized.startsWith(prefix)) return null;
+  const relative = normalized.slice(prefix.length).replace(/^\.\//, "");
+  return relative && !relative.split("/").includes(".") ? `${stadiumAssetRoot}/${relative}` : null;
+}
+
 function assetKey(value: string | null | undefined, lookup: Map<string, string>): string | null {
   const raw = value?.trim();
   if (!raw) return null;
@@ -222,7 +235,7 @@ export function arenaRankAssetUrl(rankKey: string | null | undefined): string | 
   const key = normalizeAssetKey(rankKey);
   if (!key) return null;
   const file = arenaRankFiles.get(key);
-  return file ? `${stadiumAssetRoot}/${file}` : null;
+  return file ?? null;
 }
 
 export function achievementBadgeUrl(achievementKey: string, level: 1 | 2 | 3): string {
@@ -275,7 +288,7 @@ function buildArenaModTraitLookup(entries: StadiumModTraitEntry[]) {
   for (const entry of entries) {
     const keys = [entry.id, entry.decimalId, entry.hexId].filter((value): value is string => Boolean(value?.trim()));
     if (keys.length === 0) continue;
-    const iconUrl = entry.localPath ? `/@fs/D:/Codex/OW_data/owstats-local/${entry.localPath}` : null;
+    const iconUrl = normalizeStadiumAssetPath(entry.localPath);
     const firstKey = keys[0];
     const info: ArenaModTraitInfo = {
       id: firstKey,
