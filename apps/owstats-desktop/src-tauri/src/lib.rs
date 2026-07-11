@@ -1,4 +1,5 @@
 mod analytics;
+pub mod app_paths;
 pub mod browser_session;
 mod commands;
 pub mod credential_store;

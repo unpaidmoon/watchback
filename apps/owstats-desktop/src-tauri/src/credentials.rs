@@ -13,7 +13,7 @@ use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 pub use crate::browser_session::{select_browser, BrowserCandidate};
 pub use crate::credential_store::{
@@ -30,7 +30,7 @@ const SERVER_ID: i64 = 1;
 static LOGIN_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
-    Ok(app.path().app_data_dir()?.join(".dashen_credentials.json"))
+    Ok(crate::app_paths::AppPaths::from_app(app)?.credentials())
 }
 
 pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
@@ -51,7 +51,7 @@ pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult>
     );
     let browser = select_browser(find_windows_browsers())?;
     let port = choose_debug_port(std::process::id());
-    let profile_dir = app.path().app_data_dir()?.join("chrome-dashen-profile");
+    let profile_dir = crate::app_paths::AppPaths::from_app(&app)?.browser_profile();
 
     emit_login_progress(&app, LoginPhase::OpeningBrowser, "正在打开网易大神登录页。");
     launch_browser(&browser, LOGIN_URL, port, &profile_dir)

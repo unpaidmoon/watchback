@@ -1,4 +1,4 @@
-use crate::importer::{default_database_path, existing_import_summary};
+use crate::importer::existing_import_summary;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
@@ -14,7 +14,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -244,24 +244,19 @@ pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSum
 }
 
 fn app_database(app: &AppHandle) -> Result<OwDatabase, String> {
-    let data_dir = app.path().app_data_dir().map_err(to_message)?;
-    Ok(OwDatabase::new(default_database_path(data_dir)))
+    Ok(OwDatabase::new(app_paths(app)?.database()))
 }
 
 fn player_profile_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(to_message)?
-        .join("player_profile.json"))
+    Ok(app_paths(app)?.player_profile())
 }
 
 fn user_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(to_message)?
-        .join("user_settings.json"))
+    Ok(app_paths(app)?.user_settings())
+}
+
+fn app_paths(app: &AppHandle) -> Result<crate::app_paths::AppPaths, String> {
+    crate::app_paths::AppPaths::from_app(app).map_err(to_message)
 }
 
 fn project_root() -> Result<PathBuf, String> {
