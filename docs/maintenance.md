@@ -63,6 +63,13 @@ npm run tauri build
 - `sync_errors` 表示某赛季最近一次同步未完成详情的快照，而不是无限历史。导入目标赛季时先清旧错误，成功重试会清零该赛季错误；其他赛季必须保持不变。
 - 桌面同步由全局 `SyncCoordinator` 串行化。不要在 command、后台任务或新 UI 入口绕过该 guard 并行写同一个 SQLite/app-data 目录。
 
+## Module Boundaries
+
+- Rust 领域模块以 `mod.rs` 保持兼容 façade：`queries/` 负责列表、普通详情、竞技场详情与 lookup；`review/` 分为个人战报、角色段位和指挥台状态；`sync/` 分为 façade、client、fetch、payload 和 persist。新增调用必须继续经由 `lib.rs` 的既有公开入口。
+- 好友分析已经将榜单 DTO 生成放入 `analytics/boards.rs`；repository/filter SQL 与聚合指标暂在 `analytics/mod.rs`，因为它们共享行模型与统计辅助函数。后续拆分时不得改变样本阈值、排序或中文 fallback。
+- 前端 `MatchesPage` 仅编排 URL、缓存和请求状态；紧凑详情位于 `features/matches/CompactMatchDetail.tsx`。指挥台的赛季健康卡、数据事实和时间格式化位于 `features/command-center/SeasonHealthPanel.tsx`。
+- `styles.css` 仅是稳定的样式聚合入口。现有规则先保留在 `styles/shared.css`，避免未经视觉回归的声明级迁移；新的 feature 样式应写入对应 `styles/features/` 文件。
+
 ## Rollback
 
 If a release fails after installation, identify the smallest commit that introduced the failure and revert that commit first.
