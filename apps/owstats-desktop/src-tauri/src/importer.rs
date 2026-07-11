@@ -1,7 +1,7 @@
 use crate::db::OwDatabase;
 use crate::match_evaluation::refresh_match_evaluations_conn;
 use crate::models::ImportSummary;
-use crate::redaction::redact_sensitive_json;
+use crate::redaction::{redact_sensitive_json, redact_sensitive_text, sanitize_persisted_json};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -48,6 +48,8 @@ fn import_payload_value_with_lookups(
     payload: &Value,
     lookups: Lookups,
 ) -> Result<ImportSummary> {
+    let sanitized_payload = sanitize_persisted_json(payload);
+    let payload = &sanitized_payload;
     db.initialize()?;
     let conn = db.connect()?;
     let season = payload.get("season").and_then(Value::as_i64).unwrap_or(0);
@@ -186,7 +188,9 @@ fn import_payload_value_with_lookups(
                 season,
                 string_field(error, "match_id"),
                 string_field(error, "error_type"),
-                string_field(error, "error").or_else(|| string_field(error, "message")),
+                string_field(error, "error")
+                    .or_else(|| string_field(error, "message"))
+                    .map(|message| redact_sensitive_text(&message)),
                 serde_json::to_string(error)?,
                 now,
             ],

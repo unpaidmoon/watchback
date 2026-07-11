@@ -1588,7 +1588,8 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
         "heroGuid": "hero-current",
         "beginTs": 1700000000000_i64,
         "gameMode": "LeisurePreset",
-        "_dashenSeason": 22
+        "_dashenSeason": 22,
+        "authorization": "entry-auth-secret"
     })];
     let details = vec![json!({
         "match_id": "sync-match-1",
@@ -1596,6 +1597,7 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
         "payload": {
             "data": {
                 "matchRet": 1,
+                "customerToken": "detail-customer-secret",
                 "mapGuid": "map-a",
                 "gameTimeSec": 600,
                 "teammateList": [
@@ -1653,6 +1655,27 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
             |row| row.get(0),
         )
         .unwrap();
+    let entry_text: String = conn
+        .query_row(
+            "SELECT raw_entry_json FROM matches WHERE match_id = 'sync-match-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let detail_text: String = conn
+        .query_row(
+            "SELECT raw_detail_json FROM match_details WHERE match_id = 'sync-match-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let error_message: String = conn
+        .query_row(
+            "SELECT message FROM sync_errors ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
 
     assert_eq!(first.failed_details, 1);
     assert_eq!(second.failed_details, 1);
@@ -1662,5 +1685,8 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
     assert!(!errors_text.contains("token-secret"));
     assert!(!errors_text.contains("customer-secret"));
     assert!(!errors_text.contains("session-secret"));
+    assert!(!entry_text.contains("entry-auth-secret"));
+    assert!(!detail_text.contains("detail-customer-secret"));
+    assert!(!error_message.contains("token-secret"));
     assert!(!first.latest_errors.join(" ").contains("token-secret"));
 }
