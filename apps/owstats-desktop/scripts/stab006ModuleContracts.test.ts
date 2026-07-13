@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { filtersFromParams, paramsFromFilters, validateFilters } from "../src/features/matches/matchFilters.ts";
@@ -38,6 +38,15 @@ assert.deepEqual(
 );
 
 const root = fileURLToPath(new URL("../src/", import.meta.url));
+const matchesSource = readFileSync(join(root, "pages", "MatchesPage.tsx"), "utf8");
+for (const file of ["MatchListPane.tsx", "MatchListCard.tsx", "MatchDetailPane.tsx"]) {
+  assert.ok(existsSync(join(root, "features", "matches", file)), `${file} must exist`);
+}
+assert.match(matchesSource, /<MatchListPane/);
+assert.match(matchesSource, /<MatchDetailPane/);
+assert.doesNotMatch(matchesSource, /<MatchTimeline/);
+assert.doesNotMatch(matchesSource, /<CompactMatchDetail/);
+
 const styleEntry = readFileSync(join(root, "styles.css"), "utf8");
 const expectedStyleModules = [
   "./styles/tokens.css",

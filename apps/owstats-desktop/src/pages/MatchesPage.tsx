@@ -1,9 +1,9 @@
 import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CompactMatchDetail } from "../features/matches/CompactMatchDetail";
 import { FilterBar } from "../features/matches/FilterBar";
-import { MatchTimeline } from "../features/matches/MatchTimeline";
+import { MatchDetailPane } from "../features/matches/MatchDetailPane";
+import { MatchListPane } from "../features/matches/MatchListPane";
 import { filtersFromParams, hasLoadedOptions, paramsFromFilters, validateFilters } from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
 import {
@@ -386,10 +386,10 @@ export function MatchesPage() {
 
       <FilterBar filters={filters} options={options} onChange={setFilters} />
 
-      <section className="workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench">
-        <div className="phase6WorkbenchList">
+      <section className="matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench">
+        <div className="matchListPane phase6WorkbenchList">
           <QaRegion id="MAT-LIST">
-            <MatchTimeline
+            <MatchListPane
               ref={timelineRef}
               matches={matches}
               selectedMatchId={selectedMatchId}
@@ -401,18 +401,12 @@ export function MatchesPage() {
             />
           </QaRegion>
         </div>
-        <aside className="phase6WorkbenchDetail" aria-label="对局详情">
-          {selectedMatchId ? (
-            <CompactMatchDetail
-              detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}
-              loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
-              error={detailStateMatchId === selectedMatchId ? detailError : null}
-              matchId={selectedMatchId}
-            />
-          ) : (
-            <div className="emptyState phase6WorkbenchEmpty">选择左侧对局查看详情。</div>
-          )}
-        </aside>
+        <MatchDetailPane
+          detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}
+          loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
+          error={detailStateMatchId === selectedMatchId ? detailError : null}
+          matchId={selectedMatchId}
+        />
       </section>
     </>
   );

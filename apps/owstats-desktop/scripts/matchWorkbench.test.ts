@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
+const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCard.tsx", import.meta.url), "utf8");
+const listPaneSource = readFileSync(new URL("../src/features/matches/MatchListPane.tsx", import.meta.url), "utf8");
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
 const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
@@ -11,7 +14,10 @@ assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesP
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
 assert.equal(matchesPageSource.includes("<MetricCard"), false, "MatchesPage should remove the metric card strip above the workbench");
 assert.equal(matchesPageSource.includes("getMatchDetails"), true, "MatchesPage should load selected match detail in place");
-assert.equal(matchesPageSource.includes("CompactMatchDetail"), true, "MatchesPage should use a compact in-page match detail");
+assert.equal(matchesPageSource.includes("MatchListPane"), true, "MatchesPage should coordinate the list pane component");
+assert.equal(matchesPageSource.includes("MatchDetailPane"), true, "MatchesPage should coordinate the detail pane component");
+assert.equal(matchesPageSource.includes("<CompactMatchDetail"), false, "MatchesPage should delegate compact detail rendering to the detail pane");
+assert.equal(matchesPageSource.includes("<MatchTimeline"), false, "MatchesPage should delegate timeline rendering to the list pane");
 assert.equal(matchesPageSource.includes("MatchDetailReport"), false, "MatchesPage should not reuse the full-size match detail page inside the workbench");
 assert.equal(matchesPageSource.includes("selectedMatchId"), true, "MatchesPage should keep selected match state");
 assert.equal(matchesPageSource.includes("navigate(`/matches/${matchId}`)"), false, "MatchesPage should not navigate away when selecting a match row");
@@ -36,21 +42,26 @@ assert.equal(
   true,
   "detail errors are only rendered for the selected match that owns the state",
 );
+assert.equal(detailPaneSource.includes("CompactMatchDetail"), true, "MatchDetailPane should own compact detail rendering");
+assert.equal(detailPaneSource.includes("选择左侧对局查看详情。"), true, "MatchDetailPane should own the unchanged empty state");
+assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), true, "MatchListPane should preserve the timeline ref boundary");
+assert.equal(listPaneSource.includes("<MatchTimeline"), true, "MatchListPane should delegate streak rendering to MatchTimeline");
 
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
-assert.equal(timelineSource.includes("phase6MatchRowSelected"), true, "MatchTimeline should render selected state on the active row");
-assert.equal(timelineSource.includes("MatchPerformanceBadges"), false, "MatchTimeline cards should not render grade or award badges");
-assert.equal(timelineSource.includes("primaryTagBadgeTone"), true, "MatchTimeline should keep the primary performance tag only");
-assert.equal(timelineSource.includes("phase6MatchListHeroLine"), true, "MatchTimeline should render a compact full-data hero row");
-assert.equal(timelineSource.includes("phase6VerticalPerformanceTag"), true, "MatchTimeline should show the performance tag as a vertical hero-side badge");
-assert.equal(timelineSource.includes("<span>对局表现</span>"), false, "MatchTimeline should remove the horizontal match performance label");
-assert.equal(timelineSource.includes("<span>{match.heroName}</span>"), false, "MatchTimeline should not render the hero name in compact list cards");
+assert.equal(timelineSource.includes("<MatchListCard"), true, "MatchTimeline should map streak segments to list cards");
+assert.equal(listCardSource.includes("phase6MatchRowSelected"), true, "MatchListCard should render selected state on the active row");
+assert.equal(listCardSource.includes("MatchPerformanceBadges"), false, "Match list cards should not render grade or award badges");
+assert.equal(listCardSource.includes("primaryTagBadgeTone"), true, "MatchListCard should keep the primary performance tag only");
+assert.equal(listCardSource.includes("phase6MatchListHeroLine"), true, "MatchListCard should render a compact full-data hero row");
+assert.equal(listCardSource.includes("phase6VerticalPerformanceTag"), true, "MatchListCard should show the performance tag as a vertical hero-side badge");
+assert.equal(listCardSource.includes("<span>对局表现</span>"), false, "MatchListCard should omit the horizontal match performance label");
+assert.equal(listCardSource.includes("<span>{match.heroName}</span>"), false, "MatchListCard should not render the hero name in compact list cards");
 assert.ok(
-  timelineSource.indexOf("phase6MatchListHeroLine") < timelineSource.indexOf("phase6MatchListStats") &&
-    timelineSource.indexOf("phase6MatchListStats") < timelineSource.indexOf("phase6MatchOpen"),
-  "MatchTimeline should place list stats inside the hero row before the open affordance",
+  listCardSource.indexOf("phase6MatchListHeroLine") < listCardSource.indexOf("phase6MatchListStats") &&
+    listCardSource.indexOf("phase6MatchListStats") < listCardSource.indexOf("phase6MatchOpen"),
+  "MatchListCard should place list stats inside the hero row before the open affordance",
 );
-assert.equal(timelineSource.includes("phase6MatchListStats"), true, "MatchTimeline should render full stats without horizontal clipping");
+assert.equal(listCardSource.includes("phase6MatchListStats"), true, "MatchListCard should render full stats without horizontal clipping");
 
 assert.equal(detailPageSource.includes("export function MatchDetailReport"), true, "Match detail page should export reusable detail content for the workbench");
 
