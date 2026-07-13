@@ -4,7 +4,7 @@ use owstats_desktop_lib::credentials::{
 };
 
 #[test]
-fn credential_status_requires_current_account_identity_without_secret() {
+fn credential_status_accepts_saved_login_without_bound_player_target() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join(".dashen_credentials.json");
     std::fs::write(
@@ -15,7 +15,7 @@ fn credential_status_requires_current_account_identity_without_secret() {
 
     let status = credential_status_for_path(&path).unwrap();
 
-    assert_eq!(status.state, "currentPlayerMissing");
+    assert_eq!(status.state, "ready");
     assert_eq!(status.role_id, Some(114514191));
     assert_eq!(status.saved_at.as_deref(), Some("2026-06-27T00:00:00Z"));
     assert!(!status.message.contains("secret-token"));

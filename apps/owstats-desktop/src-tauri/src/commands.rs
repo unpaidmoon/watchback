@@ -3,12 +3,14 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_current_account_credentials_path_output_dir_base_url,
-    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
-    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult,
-    MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
-    OwDatabase, PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
-    RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, BindPlayerTargetRequest,
+    BindPlayerTargetResult, ClearPlayerTargetResult, CredentialLoginCancelResult,
+    CredentialLoginResult, CredentialStatus, FilterOptions, FriendAnalytics,
+    FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult, MatchDetailView,
+    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
+    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
+    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
+    UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -156,6 +158,62 @@ pub fn cancel_dashen_login(app: AppHandle) -> Result<CredentialLoginCancelResult
 }
 
 #[tauri::command]
+pub fn get_player_target_status(app: AppHandle) -> Result<PlayerTargetStatus, String> {
+    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    crate::player_target::player_target_status_for_path(&path).map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn bind_player_target(
+    app: AppHandle,
+    request: BindPlayerTargetRequest,
+) -> Result<BindPlayerTargetResult, String> {
+    let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
+    let saved: crate::credential_store::DashenCredentials =
+        serde_json::from_str(&std::fs::read_to_string(&credential_path).map_err(to_message)?)
+            .map_err(to_message)?;
+    let client = crate::dashen_client::DashenClient::new(
+        crate::dashen_client::DashenCredentials {
+            role_id: saved.role_id,
+            token: saved.token,
+            dts: saved.dts.and_then(|value| value.parse().ok()),
+            server: saved.server,
+        },
+        "https://datamsapi.ds.163.com/v1/a19ld5tool".to_string(),
+    )
+    .map_err(to_message)?;
+    let payload = client
+        .search_bnet_account(&request.bnet)
+        .await
+        .map_err(to_message)?;
+    let target = crate::player_target::target_from_search_payload(
+        &request.bnet,
+        &payload,
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .map_err(to_message)?;
+    client
+        .query_card(&target.customer_token)
+        .await
+        .map_err(to_message)?;
+    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    crate::player_target::save_player_target_for_path(&path, &target).map_err(to_message)?;
+    Ok(BindPlayerTargetResult {
+        status: crate::player_target::player_target_status_for_path(&path).map_err(to_message)?,
+    })
+}
+
+#[tauri::command]
+pub fn clear_player_target(app: AppHandle) -> Result<ClearPlayerTargetResult, String> {
+    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let cleared = crate::player_target::clear_player_target_for_path(&path).map_err(to_message)?;
+    Ok(ClearPlayerTargetResult {
+        cleared,
+        status: crate::player_target::player_target_status_for_path(&path).map_err(to_message)?,
+    })
+}
+
+#[tauri::command]
 pub fn get_rankings(app: AppHandle, season: Option<i64>) -> Result<RankingResponse, String> {
     crate::ranking::get_rankings(&app_database(&app)?, season).map_err(to_message)
 }
@@ -263,11 +321,13 @@ pub async fn sync_season(
     let paths = app_paths(&app)?;
     let root = paths.seasons();
     let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let emit_app = app.clone();
-    sync_season_with_current_account_credentials_path_output_dir_base_url(
+    sync_season_with_credentials_and_target_paths_output_dir_base_url(
         &db,
         &root,
         &credential_path,
+        &target_path,
         request.season,
         "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
         move |progress| {

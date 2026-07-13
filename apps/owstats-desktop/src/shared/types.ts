@@ -519,6 +519,7 @@ export type RankingRow = {
 
 export type RankingResponse = {
   season: number | null;
+  availableSeasons: number[];
   heroes: RankingRow[];
   maps: RankingRow[];
 };

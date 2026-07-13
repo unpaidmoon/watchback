@@ -27,7 +27,11 @@ assert.match(reviewSource, /const titleSeason = selectedSeason \?\? review\.summ
 assert.match(rankingSource, /getRankings\(selectedSeason/, "ranking page should request rankings with selectedSeason");
 assert.match(rankingSource, /<select[^>]+value=\{selectedSeason/, "ranking page should render a page-level season selector");
 assert.match(rankingSource, /\.set\("season", String\(nextSeason\)\)/, "ranking page selector should persist season in the URL");
-assert.equal(parseSeasonParam("999"), undefined, "ranking page must ignore unsupported URL seasons");
+assert.equal(rankingSource.includes("selectableSeasons"), false, "ranking page must not keep a fixed season list");
+assert.match(rankingSource, /ranking\?\.availableSeasons/, "ranking page should render seasons returned by the backend");
+assert.equal(parseSeasonParam("15"), 15, "ranking page should accept an older locally available URL season");
+assert.equal(parseSeasonParam("999"), 999, "ranking page should let the backend validate a positive URL season");
+assert.equal(parseSeasonParam("0"), undefined, "ranking page should reject a non-positive URL season");
 
 assert.match(analyticsSource, /getSeasonAnalysis\(selectedSeason/, "friend analysis page should request analysis with selectedSeason");
 assert.match(analyticsSource, /S\$\{selectedSeason\}/, "friend analysis page should title the selected season");

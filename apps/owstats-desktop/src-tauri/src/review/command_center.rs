@@ -7,17 +7,23 @@ pub(super) fn get_onboarding_status_impl(
     db.initialize()?;
     let conn = db.connect()?;
     let available_seasons = {
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT season FROM matches WHERE bucket='preset' ORDER BY season")?;
+        let mut stmt = conn.prepare("SELECT DISTINCT season FROM matches ORDER BY season")?;
         let rows = stmt
             .query_map([], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<i64>>>()?;
         rows
     };
-    let season_statuses = command_center_season_statuses(db)?;
     let selected = request
         .season
         .or_else(|| available_seasons.iter().copied().max());
+    let mut status_seasons = available_seasons.clone();
+    if let Some(season) = selected {
+        if !status_seasons.contains(&season) {
+            status_seasons.push(season);
+            status_seasons.sort_unstable();
+        }
+    }
+    let season_statuses = command_center_season_statuses(db, &status_seasons)?;
     let (preset_matches, detail_matches, last_seen) = if let Some(season) = selected {
         conn.query_row(
             r#"
@@ -74,8 +80,11 @@ pub(super) fn get_onboarding_status_impl(
     })
 }
 
-pub(super) fn command_center_season_statuses(db: &OwDatabase) -> Result<Vec<SeasonDataStatus>> {
-    COMMAND_CENTER_SEASONS
+pub(super) fn command_center_season_statuses(
+    db: &OwDatabase,
+    seasons: &[i64],
+) -> Result<Vec<SeasonDataStatus>> {
+    seasons
         .iter()
         .map(|season| command_center_season_status(db, *season))
         .collect()

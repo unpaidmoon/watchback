@@ -21,6 +21,9 @@ import type {
   Overview,
   PersonalSeasonReview,
   PlayerProfile,
+  PlayerTargetStatus,
+  BindPlayerTargetResult,
+  ClearPlayerTargetResult,
   PlayerSearchOption,
   RankingResponse,
   SeasonAnalysis,
@@ -104,6 +107,18 @@ export function startDashenLogin() {
 
 export function cancelDashenLogin() {
   return invoke<{ cancelled: boolean; message: string }>("cancel_dashen_login");
+}
+
+export function getPlayerTargetStatus() {
+  return invoke<PlayerTargetStatus>("get_player_target_status");
+}
+
+export function bindPlayerTarget(bnet: string) {
+  return invoke<BindPlayerTargetResult>("bind_player_target", { request: { bnet } });
+}
+
+export function clearPlayerTarget() {
+  return invoke<ClearPlayerTargetResult>("clear_player_target");
 }
 
 export function getRankings(season?: number) {

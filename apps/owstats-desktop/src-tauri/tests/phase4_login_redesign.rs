@@ -76,7 +76,8 @@ fn token_script_builds_signed_request_without_embedding_existing_secret() {
     assert!(script.contains("\"roleId\":\"123456\""));
     assert!(script.contains("window.sig.default"));
     assert!(script.contains("GL-CheckSum"));
-    assert!(script.contains("customerToken"));
+    assert!(!script.contains("findCustomerTokenFromCustomerRequests"));
+    assert!(!script.contains("performance.getEntriesByType('resource')"));
 }
 
 #[test]
@@ -95,8 +96,7 @@ fn parses_successful_report_token_result_into_credentials() {
     let result = serde_json::json!({
         "ok": true,
         "role_id": "123456",
-        "token": "secret-token",
-        "customer_token": "customer-secret"
+        "token": "secret-token"
     });
 
     let credentials = credentials_from_report_result(&result, "111111", 1, "2026-06-27T00:00:00Z")
@@ -105,16 +105,13 @@ fn parses_successful_report_token_result_into_credentials() {
 
     assert_eq!(credentials.role_id, 123456);
     assert_eq!(credentials.token, "secret-token");
-    assert_eq!(
-        credentials.customer_token.as_deref(),
-        Some("customer-secret")
-    );
+    assert_eq!(credentials.customer_token, None);
     assert_eq!(credentials.server, 1);
     assert_eq!(credentials.saved_at, "2026-06-27T00:00:00Z");
 }
 
 #[test]
-fn parses_camel_case_customer_token_from_report_result() {
+fn report_token_result_does_not_define_player_target() {
     let result = serde_json::json!({
         "ok": true,
         "roleId": "123456",
@@ -127,10 +124,7 @@ fn parses_camel_case_customer_token_from_report_result() {
         .unwrap();
 
     assert_eq!(credentials.role_id, 123456);
-    assert_eq!(
-        credentials.customer_token.as_deref(),
-        Some("customer-secret")
-    );
+    assert_eq!(credentials.customer_token, None);
 }
 
 #[test]

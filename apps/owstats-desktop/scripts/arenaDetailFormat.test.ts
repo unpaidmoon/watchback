@@ -51,10 +51,12 @@ assert.equal(compactSource.includes('className="phase7CompactArenaMoneyIcon"'), 
 assert.equal(compactSource.includes('className="phase7CompactArenaMoneyLabel"'), true, "compact arena economy should label money in Chinese");
 assert.equal(compactSource.includes("const variant = slots === 4 ? \"trait\" : \"mod\""), true, "compact arena slot groups should derive trait and equipment visual modes from fixed slot counts");
 assert.equal(compactSource.includes("phase7ArenaSlotName"), true, "compact arena trait slots should render mapped names beside icons");
-assert.equal(compactSource.includes('CompactArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} fallbackName="待补充特质"'), true, "compact arena trait slots should be fixed to four with Chinese fallback");
-assert.equal(compactSource.includes('CompactArenaSlotGroup title="装备" guids={player.modGuids} slots={6} fallbackName="待补充异能"'), true, "compact arena mod slots should be fixed to six with Chinese fallback");
-assert.equal(compactSource.includes("info?.name ?? fallbackName"), true, "missing compact arena slot mappings should show Chinese fallback names");
-assert.equal(compactSource.includes("info?.name ?? guid"), false, "missing compact arena slot mappings must not expose raw guid text");
+assert.equal(compactSource.includes("const displayName = info?.name ?? guid"), true, "unmapped arena slots should use their raw GUID as the display fallback");
+assert.equal(compactSource.includes("fallbackName="), false, "arena slot groups should not keep a pending-text fallback");
+assert.equal(compactSource.includes('CompactArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} />'), true, "compact arena trait slots should be fixed to four without a pending-text fallback");
+assert.equal(compactSource.includes('CompactArenaSlotGroup title="装备" guids={player.modGuids} slots={6} />'), true, "compact arena mod slots should be fixed to six without a pending-text fallback");
+assert.equal(compactSource.includes("aria-label={guid ? displayName : undefined}"), true, "missing compact arena slot mappings should expose their raw GUID in the accessibility label");
+assert.equal(compactSource.includes("<strong>{displayName}</strong>"), true, "missing compact arena slot mappings should expose their raw GUID in the tooltip");
 assert.equal(compactSource.includes("暂无装备"), false, "empty compact arena mod slots should not render empty copy");
 assert.equal(compactSource.includes("暂无异能"), false, "empty compact arena trait slots should not render empty copy");
 assert.match(styleSource, /\.phase7CompactArenaExpansion\s*\{[^}]*grid-template-columns:\s*minmax\(110px,\s*0\.55fr\)\s+minmax\(180px,\s*1fr\)\s+minmax\(240px,\s*1\.25fr\)/s, "compact arena expansion should organize economy, traits, and equipment horizontally when space allows");

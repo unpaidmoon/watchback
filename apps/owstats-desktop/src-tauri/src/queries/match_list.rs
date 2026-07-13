@@ -24,6 +24,7 @@ pub(super) fn list_matches_impl(
     append_filters(&mut sql, &mut owned, &filters);
     sql.push_str(" ORDER BY m.begin_ts DESC, m.match_id");
 
+    let map_names = map_lookup(&conn)?;
     let params: Vec<&dyn ToSql> = owned
         .iter()
         .map(|item| item.as_ref() as &dyn ToSql)
@@ -45,6 +46,22 @@ pub(super) fn list_matches_impl(
         } else {
             None
         };
+        let map_preview_guid = if match_kind == "fight" {
+            last_round_map_guid(raw_detail_json.as_deref())
+        } else {
+            None
+        };
+        let display_map_name = map_preview_guid
+            .as_deref()
+            .and_then(|guid| map_names.get(guid).cloned())
+            .or_else(|| {
+                if match_kind == "fight" {
+                    manual_arena_map_name(&map_guid).map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| resolved_map_name(&map_names, &map_guid, &map_name));
         Ok(MatchSummary {
             match_id: match_id.clone(),
             season: row.get(1)?,
@@ -55,12 +72,8 @@ pub(super) fn list_matches_impl(
             result_label: result_label(&result).to_string(),
             result,
             map_guid: map_guid.clone(),
-            map_preview_guid: if match_kind == "fight" {
-                last_round_map_guid(raw_detail_json.as_deref())
-            } else {
-                None
-            },
-            map_name: fallback_name(map_name, &map_guid, "未知地图"),
+            map_preview_guid,
+            map_name: display_map_name,
             hero_guid: hero_guid.clone(),
             hero_name: fallback_name(hero_name, &hero_guid, "未知英雄"),
             begin_ts,

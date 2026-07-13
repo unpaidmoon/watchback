@@ -5,7 +5,7 @@ use owstats_desktop_lib::{
 };
 
 #[test]
-fn public_query_and_review_dtos_keep_their_contracts_on_an_empty_temporary_database() {
+fn public_query_and_review_dtos_keep_dynamic_season_contracts_on_an_empty_database() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
 
@@ -25,7 +25,7 @@ fn public_query_and_review_dtos_keep_their_contracts_on_an_empty_temporary_datab
             .iter()
             .map(|status| status.season)
             .collect::<Vec<_>>(),
-        vec![21, 22, 23]
+        vec![22]
     );
     let json = serde_json::to_value(&onboarding).unwrap();
     assert!(json.get("seasonStatuses").is_some());

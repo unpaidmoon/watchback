@@ -832,6 +832,7 @@ pub struct DataHealthStatus {
 #[serde(rename_all = "camelCase")]
 pub struct RankingResponse {
     pub season: Option<i64>,
+    pub available_seasons: Vec<i64>,
     pub heroes: Vec<RankingRow>,
     pub maps: Vec<RankingRow>,
 }

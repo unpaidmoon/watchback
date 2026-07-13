@@ -15,6 +15,54 @@ fn import_synthetic_season(db: &OwDatabase) {
     import_payload_value(db, &season_payload(), temp.path()).unwrap();
 }
 
+#[test]
+fn legacy_normal_map_uses_builtin_name_in_list_detail_and_filters() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let payload = json!({
+        "season": 21,
+        "matches": {
+            "entries": [match_entry(
+                "legacy-lijiang",
+                1,
+                "LeisurePreset",
+                "576460752303425207",
+                "hero-current",
+                1700000000000_i64
+            )],
+            "details": [match_detail("legacy-lijiang", "normal", "576460752303425207", 600)],
+            "detail_errors": []
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+
+    let row = list_matches(
+        &db,
+        MatchFilters {
+            season: Some(22),
+            ..MatchFilters::default()
+        },
+    )
+    .unwrap()
+    .into_iter()
+    .find(|item| item.match_id == "legacy-lijiang")
+    .unwrap();
+    assert_eq!(row.map_name, "漓江塔");
+
+    let filters = list_filter_options(&db).unwrap();
+    assert!(filters
+        .maps
+        .iter()
+        .any(|option| option.id == "576460752303425207" && option.label == "漓江塔"));
+
+    let detail = get_match_detail(&db, "legacy-lijiang").unwrap();
+    assert_eq!(detail.map_name.as_deref(), Some("漓江塔"));
+}
+
 fn lookup_payload() -> String {
     serde_json::to_string(&json!({
         "heroes": {
@@ -208,7 +256,7 @@ fn list_matches_includes_fight_rows_and_uses_last_round_map_preview() {
                             "roundCountList": [
                                 {"mapGuid": "map-a", "teamScore": 1, "opponentScore": 0, "teammateList": [], "enemyList": []},
                                 {
-                                    "mapGuid": "map-b",
+                                    "mapGuid": "576460752303428183",
                                     "teamScore": 2,
                                     "opponentScore": 0,
                                     "gameTimeSec": 222,
@@ -245,7 +293,11 @@ fn list_matches_includes_fight_rows_and_uses_last_round_map_preview() {
     assert_eq!(arena.bucket, "stadium");
     assert_eq!(arena.mode_label, "角斗竞技");
     assert_eq!(arena.map_guid, "map-a");
-    assert_eq!(arena.map_preview_guid.as_deref(), Some("map-b"));
+    assert_eq!(
+        arena.map_preview_guid.as_deref(),
+        Some("576460752303428183")
+    );
+    assert_eq!(arena.map_name, "泰晤士区");
     assert_eq!(arena.team_score, 2);
     assert_eq!(arena.opponent_score, 0);
     assert_eq!(arena.kills, 7);
@@ -409,7 +461,7 @@ fn fight_detail_exposes_arena_summary_rounds_and_safe_names() {
                                     "enemyList": [{"bnetId": 3000, "heroGuid": "hero-enemy", "kill": 1}]
                                 },
                                 {
-                                    "mapGuid": "map-b",
+                                    "mapGuid": "576460752303428272",
                                     "gameTimeSec": 310,
                                     "startTime": 1700000330,
                                     "teamScore": 1,
@@ -500,6 +552,7 @@ fn fight_detail_exposes_arena_summary_rounds_and_safe_names() {
     assert_eq!(arena.summary.duration_sec, Some(901));
     assert_eq!(arena.summary.begin_ts, Some(1700000000));
     assert_eq!(arena.summary.map_guid.as_deref(), Some("map-a"));
+    assert_eq!(arena.summary.map_name.as_deref(), Some("漓江塔"));
     assert_eq!(arena.summary.teammates[0].name, "我方一号");
     assert_eq!(arena.summary.teammates[1].name, "我方二号");
     assert_eq!(arena.summary.enemies[0].name, "对手一号");
@@ -541,6 +594,7 @@ fn fight_detail_exposes_arena_summary_rounds_and_safe_names() {
     assert_eq!(arena.rounds[0].label, "回合 1");
     assert_eq!(arena.rounds[0].result.as_deref(), Some("win"));
     assert_eq!(arena.rounds[1].result.as_deref(), Some("loss"));
+    assert_eq!(arena.rounds[1].map_name.as_deref(), Some("埃斯佩兰萨"));
     assert_eq!(arena.rounds[2].result.as_deref(), Some("win"));
     assert_eq!(arena.rounds[0].teammates[0].name, "我方二号");
     assert_eq!(arena.rounds[1].enemies[0].name, "未知玩家");
@@ -640,6 +694,53 @@ fn database_initialize_sets_schema_version_idempotently() {
         .unwrap();
 
     assert_eq!(version, 6);
+}
+
+#[test]
+fn database_migration_backfills_legacy_builtin_map_names() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute("DELETE FROM map_dict", []).unwrap();
+    conn.execute(
+        r#"
+        INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+            hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+            deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+        )
+        VALUES (
+            'legacy-map', 21, 'preset', 'LeisurePreset', 'normal', 'win',
+            '576460752303425207', NULL, 'hero-current', '安娜', 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, '{}', '2026-07-12T00:00:00Z'
+        )
+        "#,
+        [],
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 4_i64).unwrap();
+    drop(conn);
+
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    let map_name: String = conn
+        .query_row(
+            "SELECT map_name FROM matches WHERE match_id = 'legacy-map'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let dictionary_name: String = conn
+        .query_row(
+            "SELECT name FROM map_dict WHERE guid = '576460752303425207'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(map_name, "漓江塔");
+    assert_eq!(dictionary_name, "漓江塔");
 }
 
 #[test]
@@ -1284,6 +1385,35 @@ fn filter_options_are_populated_from_imported_matches() {
     assert!(options.maps.iter().any(|option| option.id == "map-a"));
     assert!(options.results.contains(&"win".to_string()));
     assert!(options.modes.contains(&"LeisurePreset".to_string()));
+}
+
+#[test]
+fn filter_options_expose_only_the_six_supported_match_modes() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    for (index, game_mode) in ["leisure", "sport"].iter().enumerate() {
+        conn.execute(
+            "INSERT INTO matches (match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name, hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at) VALUES (?1, 22, 'preset', ?2, 'normal', 'win', 'map', '地图', 'hero', '英雄', ?3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 60, '{}', '2026-07-12T00:00:00Z')",
+            rusqlite::params![format!("legacy-mode-{index}"), game_mode, index as i64],
+        )
+        .unwrap();
+    }
+
+    let options = list_filter_options(&db).unwrap();
+
+    assert_eq!(
+        options.modes,
+        vec![
+            "Leisure6v6",
+            "LeisurePreset",
+            "SportPreset",
+            "SportOpen",
+            "SportFight",
+            "LeisureFight",
+        ]
+    );
 }
 
 #[test]

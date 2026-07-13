@@ -71,6 +71,8 @@ type QueryToolPerk = {
 };
 
 type QueryToolConfig = {
+  heroes?: Record<string, { name?: string }>;
+  maps?: Record<string, { name?: string }>;
   heroPerkList?: Record<string, QueryToolPerk[]>;
   perkList?: QueryToolPerk[];
   heroAttrList?: QueryToolHeroAttr[];
@@ -146,6 +148,28 @@ const localizedMapAliases: Record<string, string> = {
   五星大学: "wuxing-university",
 };
 
+const stadiumMapPreviewFiles = new Map<string, string>([
+  ["576460752303428183", "thames-district.jpg"],
+  ["576460752303428186", "gogadoro.jpg"],
+  ["576460752303428190", "place-lacroix.jpg"],
+  ["576460752303428192", "redwood-dam.jpg"],
+  ["576460752303428209", "powder-keg-mine.jpg"],
+  ["576460752303428219", "ilios2.png"],
+  ["576460752303428223", "oasis3.png"],
+  ["576460752303428266", "arena-victoriae.jpg"],
+  ["576460752303428272", "esperanca2.png"],
+  ["576460752303428277", "throne-of-anubis.jpg"],
+  ["576460752303428278", "hanaoka.jpg"],
+  ["576460752303428279", "colosseo.jpg"],
+  ["576460752303428337", "nepal2.png"],
+  ["576460752303428437", "samoa2.png"],
+  ["576460752303428469", "wuxing-university.jpg"],
+  ["576460752303428488", "powder-keg-mine.jpg"],
+  ["576460752303428212", "serenza.png"],
+  ["576460752303428683", "lijiangtower2.png"],
+  ["576460752303429014", "oasis-university.png"],
+]);
+
 function manifestLookup(entries: ManifestEntry[]) {
   const lookup = new Map<string, string>();
   for (const entry of entries) {
@@ -159,8 +183,39 @@ function manifestLookup(entries: ManifestEntry[]) {
   return lookup;
 }
 
+function displayNameLookup(entries: ManifestEntry[]) {
+  const lookup = new Map<string, string>();
+  for (const entry of entries) {
+    const displayName = entry.cn_name?.trim() || entry.name?.trim();
+    if (!displayName) continue;
+    for (const value of [entry.key, entry.name, entry.cn_name, ...(entry.aliases ?? [])]) {
+      const raw = value?.trim();
+      if (!raw) continue;
+      lookup.set(raw.toLowerCase(), displayName);
+      const normalized = normalizeAssetKey(raw);
+      if (normalized) lookup.set(normalized, displayName);
+    }
+  }
+  return lookup;
+}
+
 const heroLookup = manifestLookup(manifest.heroes);
+for (const [guid, hero] of Object.entries(queryTool.heroes ?? {})) {
+  const heroName = hero.name?.trim();
+  const key = heroName ? assetKey(heroName, heroLookup) : null;
+  if (key) heroLookup.set(guid, key);
+}
 const mapLookup = new Map([...manifestLookup(manifest.maps), ...Object.entries(localizedMapAliases).map(([name, key]) => [name.toLowerCase(), key] as const)]);
+const heroDisplayNames = displayNameLookup(manifest.heroes);
+const mapDisplayNames = displayNameLookup(manifest.maps);
+for (const [guid, hero] of Object.entries(queryTool.heroes ?? {})) {
+  const name = hero.name?.trim();
+  if (name) heroDisplayNames.set(guid, resolveDisplayName(name, name, heroDisplayNames, name));
+}
+for (const [guid, map] of Object.entries(queryTool.maps ?? {})) {
+  const name = map.name?.trim();
+  if (name) mapDisplayNames.set(guid, resolveDisplayName(name, name, mapDisplayNames, name));
+}
 const perkIconLookup = buildPerkIconLookup(manifest.perks ?? []);
 const perkLookup = buildPerkLookup(queryTool, perkIconLookup);
 const heroStatLookup = buildHeroStatLookup(queryTool, owConfig);
@@ -175,6 +230,32 @@ export function normalizeAssetKey(value: string | null | undefined): string | nu
     .replace(/^-+|-+$/g, "");
 
   return normalized ? normalized : null;
+}
+
+function resolveDisplayName(
+  key: string | null | undefined,
+  name: string | null | undefined,
+  lookup: Map<string, string>,
+  fallback: string,
+) {
+  for (const value of [key, name]) {
+    const raw = value?.trim();
+    if (!raw) continue;
+    const normalized = normalizeAssetKey(raw);
+    const resolved = lookup.get(raw.toLowerCase()) ?? (normalized ? lookup.get(normalized) : undefined);
+    if (resolved) return resolved;
+  }
+  const persisted = name?.trim();
+  if (persisted && persisted !== key && !/^\d{12,}$/.test(persisted) && !/^0x[0-9a-f]+$/i.test(persisted)) return persisted;
+  return fallback;
+}
+
+export function resolveHeroDisplayName(heroKey: string | null | undefined, name?: string | null): string {
+  return resolveDisplayName(heroKey, name, heroDisplayNames, "未知英雄");
+}
+
+export function resolveMapDisplayName(mapKey: string | null | undefined, name?: string | null): string {
+  return resolveDisplayName(mapKey, name, mapDisplayNames, "未知地图");
 }
 
 export function normalizeStadiumAssetPath(value: string | null | undefined): string | null {
@@ -203,6 +284,12 @@ function uniqueUrls(values: Array<string | null | undefined>, lookup: Map<string
   const seen = new Set<string>();
   const urls: string[] = [];
   for (const value of values) {
+    const stadiumFile = folder === "maps" ? stadiumMapPreviewFiles.get(value?.trim() ?? "") : null;
+    if (stadiumFile && !seen.has(stadiumFile)) {
+      seen.add(stadiumFile);
+      urls.push(`${repoAssetRoot}/maps/${stadiumFile}`);
+      continue;
+    }
     const key = assetKey(value, lookup);
     if (!key || seen.has(key)) continue;
     seen.add(key);

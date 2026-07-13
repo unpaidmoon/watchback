@@ -15,7 +15,7 @@
     "tauri:dev": "tauri dev",
     "test:text": "node scripts/checkTextIntegrity.mjs",
     "test:resources": "tsx scripts/runtimeConfig.test.ts && tsx scripts/prepareAssets.test.ts && tsx scripts/verifyDistPaths.test.ts && tsx scripts/phase6Assets.test.ts && tsx scripts/verifyResources.test.ts",
-    "test:unit": "tsx scripts/rankingUtils.test.ts && tsx scripts/careerMmrUi.test.ts && tsx scripts/filterBarUi.test.ts && tsx scripts/matchesPageCache.test.ts && tsx scripts/reviewAchievements.test.ts && tsx scripts/matchListFormat.test.ts && tsx scripts/matchDetailHeaderFormat.test.ts && tsx scripts/arenaDetailFormat.test.ts && tsx scripts/playerHighlights.test.ts",
+    "test:unit": "tsx scripts/rankingUtils.test.ts && tsx scripts/careerMmrUi.test.ts && tsx scripts/rankingDisplayNames.test.ts && tsx scripts/filterBarUi.test.ts && tsx scripts/matchesPageCache.test.ts && tsx scripts/reviewAchievements.test.ts && tsx scripts/matchListFormat.test.ts && tsx scripts/matchDetailHeaderFormat.test.ts && tsx scripts/arenaDetailFormat.test.ts && tsx scripts/playerHighlights.test.ts",
     "test:components": "tsx scripts/stab006ModuleContracts.test.ts",
     "test:legacy": "tsx scripts/matchWorkbench.test.ts && tsx scripts/matchDetailEnrichment.test.ts && tsx scripts/phase6Shell.test.ts && tsx scripts/phase8RealFetch.test.ts && tsx scripts/phase6QaFeedback.test.ts && tsx scripts/reviewAchievementWall.test.ts && tsx scripts/reviewTrimmedSections.test.ts && tsx scripts/analysisMovedToReview.test.ts && tsx scripts/phase8MultiSeasonPages.test.ts && tsx scripts/matchPerformanceBadges.test.ts && tsx scripts/friendAnalyticsMetrics.test.ts && tsx scripts/friendBoardsReviewUi.test.ts && tsx scripts/friendBoardDescriptions.test.ts",
     "pretest": "npm run prepare:assets",

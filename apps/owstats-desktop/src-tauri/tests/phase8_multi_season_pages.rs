@@ -202,6 +202,41 @@ fn match_list_filters_keep_s21_and_s22_isolated() {
 }
 
 #[test]
+fn ranking_returns_dynamic_seasons_and_falls_back_from_missing_season() {
+    let db = test_db();
+    seed_two_seasons(&db);
+    for (season, id) in [(15, "s15-match"), (20, "s20-match")] {
+        seed_match(
+            &db,
+            MatchSeed {
+                season,
+                id,
+                result: "win",
+                map_guid: "map-legacy",
+                map_name: "Legacy Map",
+                hero_guid: "hero-legacy",
+                hero_name: "Legacy Hero",
+                begin_ts: season * 1_000,
+                grade: "A",
+                friend_bnet: "legacy-friend",
+                friend_name: "Legacy Friend",
+            },
+        );
+    }
+
+    let ranking = ranking::get_rankings(&db, Some(99)).unwrap();
+    let response = serde_json::to_value(&ranking).unwrap();
+
+    assert_eq!(
+        response["availableSeasons"],
+        serde_json::json!([22, 21, 20, 15])
+    );
+    assert_eq!(ranking.season, Some(22));
+    assert_eq!(ranking.heroes.len(), 1);
+    assert_eq!(ranking.heroes[0].name, "Tracer");
+}
+
+#[test]
 fn match_id_is_globally_unique_for_detail_lookup() {
     let db = test_db();
     seed_match(

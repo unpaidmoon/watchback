@@ -332,13 +332,13 @@ function CompactArenaPlayerExpansion({ player, economyMode }: { player: PlayerRo
         <strong className={player.worthMax ? "phase6StatHighlight" : ""}>{formatCompactArenaEconomy(player, economyMode)}</strong>
         <span className="phase7CompactArenaMoneyLabel">本场资金</span>
       </div>
-      <CompactArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} fallbackName="待补充特质" />
-      <CompactArenaSlotGroup title="装备" guids={player.modGuids} slots={6} fallbackName="待补充异能" />
+      <CompactArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} />
+      <CompactArenaSlotGroup title="装备" guids={player.modGuids} slots={6} />
     </div>
   );
 }
 
-function CompactArenaSlotGroup({ title, guids, slots, fallbackName }: { title: string; guids: string[]; slots: number; fallbackName: string }) {
+function CompactArenaSlotGroup({ title, guids, slots }: { title: string; guids: string[]; slots: number }) {
   const variant = slots === 4 ? "trait" : "mod";
   return (
     <div className={`phase7ArenaSlotGroup ${variant}`}>
@@ -347,18 +347,19 @@ function CompactArenaSlotGroup({ title, guids, slots, fallbackName }: { title: s
         {Array.from({ length: slots }).map((_, index) => {
           const guid = guids[index];
           const info = resolveArenaModTraitInfo(guid);
+          const displayName = info?.name ?? guid;
           return (
             <span
               className={`phase7ArenaSlot ${variant} ${guid ? "filled" : ""}`}
               key={`${title}-${index}`}
               tabIndex={guid ? 0 : undefined}
-              aria-label={guid ? info?.name ?? fallbackName : undefined}
+              aria-label={guid ? displayName : undefined}
             >
               {guid && info?.iconUrl && <img src={info.iconUrl} alt={info.name} />}
-              {guid && variant === "trait" && <span className="phase7ArenaSlotName">{info?.name ?? fallbackName}</span>}
+              {guid && variant === "trait" && <span className="phase7ArenaSlotName">{displayName}</span>}
               {guid && (
                 <span className="phase6PerkTooltipPanel" role="tooltip">
-                  <strong>{info?.name ?? fallbackName}</strong>
+                  <strong>{displayName}</strong>
                   {info?.description && <small>{info.description}</small>}
                 </span>
               )}

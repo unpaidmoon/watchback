@@ -1,7 +1,6 @@
 use super::*;
 
 pub(super) const MAP_MIN_SAMPLE: i64 = 2;
-pub(super) const COMMAND_CENTER_SEASONS: [i64; 3] = [21, 22, 23];
 pub(super) const ROLE_ORDER: [(&str, &str); 4] = [
     ("tank", "重装"),
     ("dps", "输出"),

@@ -7,6 +7,7 @@ import {
   readableSyncProgress,
 } from "../src/shared/phase6Shell.ts";
 import { checkAppUpdate, getPlayerProfile, getUserSettings, logout, saveUserSettings } from "../src/shared/api.ts";
+import { formatCompactTimestamp } from "../src/features/command-center/SeasonHealthPanel.tsx";
 import type { OnboardingStatus, SyncProgress } from "../src/shared/types.ts";
 import { readFileSync } from "node:fs";
 
@@ -30,6 +31,36 @@ const seasonHealthSource = readFileSync(new URL("../src/features/command-center/
 const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
+assertEqual(
+  /\.phase6CommandCenter\s*\{\s*max-width:\s*var\(--phase6-content-max\);\s*margin-inline:\s*auto;/.test(styles),
+  true,
+  "command center is horizontally centered inside the wide workspace",
+);
+assertEqual(
+  /\.phase6RankingWorkspace\s*\{\s*max-width:\s*var\(--phase6-content-max\);\s*margin-inline:\s*auto;/.test(styles),
+  true,
+  "ranking page is horizontally centered inside the wide workspace",
+);
+assertEqual(
+  /\.phase8SeasonStatusStats\s*\{\s*display: grid;\s*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\);/.test(styles),
+  true,
+  "command center data facts use one compact six-column row on wide screens",
+);
+assertEqual(
+  /@media \(max-width: 920px\)\s*\{[\s\S]*?\.phase8SeasonStatusStats\s*\{\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/.test(styles),
+  true,
+  "command center data facts fall back to three columns on narrow screens",
+);
+assertEqual(
+  /\.syncSeasonWorkbench \.phase8SeasonStatusStats,\s*\.syncSeasonWorkbench \.phase8SeasonStatusHeader,\s*\.syncSeasonWorkbench \.phase8SeasonCoverage,\s*\.syncSeasonWorkbench \.phase8SeasonSyncFooter\s*\{\s*grid-column: 1 \/ -1;/.test(styles),
+  true,
+  "command center data facts span the workbench width instead of its narrow left column",
+);
+assertEqual(
+  formatCompactTimestamp("2026-07-12T02:56:30Z"),
+  "07-12 10:56",
+  "compact timestamp removes only the year while preserving local month day and minute",
+);
 assertEqual(onboardingSource.includes("phase6PlayerPass"), true, "command center uses a player pass identity strip");
 assertEqual(onboardingSource.includes("phase6PlayerPassRail"), true, "player pass uses a compact visual rail instead of a large diagonal block");
 assertEqual(onboardingSource.includes("phase6ProfileInlineStats"), true, "player pass places endorsement and play time under the title");
@@ -56,13 +87,13 @@ assertEqual(onboardingSource.includes("phase6PassStatusTrack"), false, "player p
 assertEqual(onboardingSource.includes("phase6UnifiedCommandPanel"), true, "command center is consolidated into one player pass control panel");
 assertEqual(onboardingSource.includes("phase6CoverageMeter"), true, "command center shows data coverage");
 assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data area keeps one unified coverage card");
-assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads fixed season status cards from onboarding status");
-assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), true, "command center has an explicit fixed season list");
-assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders a fixed season card grid");
+assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads the selected season status from onboarding status");
+assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), false, "command center does not fix the season list");
+assertEqual(onboardingSource.includes("seasonInput"), true, "command center accepts an explicit season number");
+assertEqual(onboardingSource.includes("BattleTag"), true, "command center exposes BattleTag binding");
+assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
-assertEqual(onboardingSource.includes("S21"), true, "command center includes S21 card copy");
-assertEqual(onboardingSource.includes("S22"), true, "command center includes S22 card copy");
-assertEqual(onboardingSource.includes("S23"), true, "command center includes S23 card copy");
+assertEqual(onboardingSource.includes("S21"), false, "command center does not hard-code S21");
 assertEqual(commandCenterSource.includes("`同步 S${seasonStatus.season}`"), true, "season sync button text is generated per season");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");

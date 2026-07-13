@@ -189,6 +189,7 @@ assert.equal(season21Preloaded.loadedFilterKey, matchFiltersKey({ season: 21 }),
 assert.equal(getMatchesPageCache()?.loadedFilterKey, matchFiltersKey({ season: 21 }), "S21 preload caches its own loaded key");
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 assert.equal(matchesPageSource.includes("window.scrollY"), false, "MatchesPage should not save window scroll for the match list");
 assert.equal(matchesPageSource.includes("window.scrollTo"), false, "MatchesPage should not restore window scroll for the match list");
 assert.equal(matchesPageSource.includes("readMatchScrollAnchor"), true, "MatchesPage should save a match-id scroll anchor");
@@ -197,4 +198,14 @@ assert.equal(
   matchesPageSource.includes('window.addEventListener("scroll", rememberScroll'),
   true,
   "MatchesPage should listen to document scrolling before navigating away from the list",
+);
+assert.match(
+  onboardingSource,
+  /import\s*\{[^}]*clearMatchesPageCache[^}]*\}\s*from\s*["']\.\.\/shared\/matchesPageCache["']/s,
+  "a completed season sync imports the match-page cache invalidator",
+);
+assert.match(
+  onboardingSource,
+  /const summary = await syncSeason\(season\);\s*clearMatchesPageCache\(\);/s,
+  "a completed season sync invalidates the cached match list before reloading dashboard data",
 );

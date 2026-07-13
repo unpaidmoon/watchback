@@ -21,6 +21,9 @@ import {
   getOnboardingStatus,
   getPersonalSeasonReview,
   getPlayerProfile,
+  getPlayerTargetStatus,
+  bindPlayerTarget,
+  clearPlayerTarget,
   logout,
   startDashenLogin,
   syncSeason,
@@ -32,26 +35,26 @@ import { QaRegion } from "../shared/QaFeedbackLayer";
 import { activeBadgeLevel, activeTopAchievements, romanLevels } from "../shared/reviewAchievements";
 import type { ReviewAchievement } from "../shared/reviewAchievements";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
-import type { CredentialLoginProgress, OnboardingStatus, PersonalSeasonReview, PlayerProfile, SyncProgress } from "../shared/types";
+import { clearMatchesPageCache } from "../shared/matchesPageCache";
+import type { CredentialLoginProgress, OnboardingStatus, PersonalSeasonReview, PlayerProfile, PlayerTargetStatus, SyncProgress } from "../shared/types";
 
 type DashboardSnapshot = {
   status: OnboardingStatus;
   profile: PlayerProfile;
   review: PersonalSeasonReview | null;
+  targetStatus: PlayerTargetStatus;
 };
 
 const PROFILE_REVIEW_SEASON = 22;
-const FIXED_COMMAND_CENTER_SEASONS = [
-  { season: 21, label: "S21" },
-  { season: 22, label: "S22" },
-  { season: 23, label: "S23" },
-] as const;
 const dashboardCache = new Map<number, DashboardSnapshot>();
 
 export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [review, setReview] = useState<PersonalSeasonReview | null>(null);
+  const [targetStatus, setTargetStatus] = useState<PlayerTargetStatus | null>(null);
+  const [battleTag, setBattleTag] = useState("");
+  const [seasonInput, setSeasonInput] = useState("23");
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
@@ -90,12 +93,13 @@ export function OnboardingPage() {
   async function loadDashboard() {
     setError(null);
     try {
-      const [nextStatus, nextProfile, nextReview] = await Promise.all([
+      const [nextStatus, nextProfile, nextReview, nextTargetStatus] = await Promise.all([
         getOnboardingStatus(),
         getPlayerProfile(),
         getPersonalSeasonReview(PROFILE_REVIEW_SEASON).catch(() => null),
+        getPlayerTargetStatus(),
       ]);
-      const snapshot = { status: nextStatus, profile: nextProfile, review: nextReview };
+      const snapshot = { status: nextStatus, profile: nextProfile, review: nextReview, targetStatus: nextTargetStatus };
       dashboardCache.set(PROFILE_REVIEW_SEASON, snapshot);
       applyDashboardSnapshot(snapshot);
     } catch (err) {
@@ -107,6 +111,7 @@ export function OnboardingPage() {
     setStatus(snapshot.status);
     setProfile(snapshot.profile);
     setReview(snapshot.review);
+    setTargetStatus(snapshot.targetStatus);
   }
 
   async function runLogin() {
@@ -144,12 +149,42 @@ export function OnboardingPage() {
     setSyncProgress(null);
     try {
       const summary = await syncSeason(season);
+      clearMatchesPageCache();
       await loadDashboard();
       setNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
     } catch (err) {
       setError(productErrorMessage(err));
     } finally {
       setSyncingSeason(null);
+    }
+  }
+
+  async function runBindTarget() {
+    const bnet = battleTag.trim();
+    if (!bnet) {
+      setError("请输入 BattleTag，例如 Player#12345");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await bindPlayerTarget(bnet);
+      setTargetStatus(result.status);
+      setBattleTag("");
+      setNotice("BattleTag 已绑定，可以选择赛季同步");
+    } catch (err) {
+      setError(productErrorMessage(err));
+    }
+  }
+
+  async function runClearTarget() {
+    setError(null);
+    try {
+      const result = await clearPlayerTarget();
+      setTargetStatus(result.status);
+      setNotice("已清除当前 BattleTag 目标");
+    } catch (err) {
+      setError(productErrorMessage(err));
     }
   }
 
@@ -182,6 +217,7 @@ export function OnboardingPage() {
   }
 
   const credentialReady = status?.credentialStatus.state === "ready";
+  const targetReady = targetStatus?.state === "bound";
   const warnings = status?.health.warnings ?? [];
   const displayName = profile?.playerId ?? (status?.credentialStatus.roleId ? `角色 ${status.credentialStatus.roleId}` : "未登录玩家");
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
@@ -189,10 +225,10 @@ export function OnboardingPage() {
   const presetMatches = status?.localData.presetMatches ?? 0;
   const detailMatches = status?.localData.detailMatches ?? 0;
   const coveragePercent = presetMatches > 0 ? Math.min(100, Math.round((detailMatches / presetMatches) * 100)) : 0;
-  const seasonStatuses = FIXED_COMMAND_CENTER_SEASONS.map((fixedSeason) => {
-    return (
-      status?.seasonStatuses.find((item) => item.season === fixedSeason.season) ?? {
-        season: fixedSeason.season,
+  const selectedSeason = Number.parseInt(seasonInput, 10);
+  const seasonStatuses = Number.isSafeInteger(selectedSeason) && selectedSeason > 0
+    ? [status?.seasonStatuses.find((item) => item.season === selectedSeason) ?? {
+        season: selectedSeason,
         matchCount: 0,
         detailCount: 0,
         normalMatchCount: 0,
@@ -200,9 +236,8 @@ export function OnboardingPage() {
         failedDetailCount: 0,
         lastSyncedOrImportedAt: null,
         coveragePercent: 0,
-      }
-    );
-  });
+      }]
+    : [];
   const commonHeroes = review?.heroPool.mainHeroes.slice(0, 3) ?? [];
   const topAchievements = review ? activeTopAchievements(review, 3) : [];
 
@@ -292,27 +327,43 @@ export function OnboardingPage() {
             </section>
 
             <section className="phase6UnifiedActions" aria-label="设置选项">
-              <div className="phase8TargetPlayerPanel" aria-label="当前同步账号">
+              <section className="syncTargetStrip" aria-label="当前目标玩家">
                 <div className="phase8TargetPlayerSummary">
-                  <span className="phase6Eyebrow">当前同步账号</span>
-                  <strong>{credentialReady ? "当前登录账号" : "尚未识别当前账号"}</strong>
-                  <p>{credentialReady ? "仅同步当前浏览器登录账号的赛季数据" : status?.credentialStatus.message ?? "请登录网易大神"}</p>
+                  <span className="phase6Eyebrow">当前目标玩家</span>
+                  <strong>{targetReady ? targetStatus?.resolvedBnet ?? targetStatus?.inputBnet : "尚未绑定 BattleTag"}</strong>
+                  <p>{credentialReady ? "登录凭据可用；绑定 BattleTag 后可同步任意单赛季" : status?.credentialStatus.message ?? "请登录网易大神"}</p>
                 </div>
-              </div>
-              <div className="phase8SeasonStatusGrid" aria-label="赛季本地数据状态">
-                {seasonStatuses.map((seasonStatus) => (
-                  <SeasonStatusCard
-                    key={seasonStatus.season}
-                    seasonStatus={seasonStatus}
-                    credentialReady={credentialReady}
-                    syncingSeason={syncingSeason}
-                    progress={syncProgress?.season === seasonStatus.season ? syncProgress : null}
-                    onSync={() => runSeasonSync(seasonStatus.season)}
-                  />
-                ))}
-              </div>
+                <div className="syncTargetEditor">
+                  <input className="phase8TargetPlayerInput" aria-label="BattleTag" value={battleTag} onChange={(event) => setBattleTag(event.target.value)} placeholder="BattleTag，例如 Player#12345" />
+                  <button className="primaryButton" type="button" onClick={runBindTarget} disabled={!credentialReady}>{targetReady ? "更换目标" : "绑定 BattleTag"}</button>
+                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!targetReady}>清除</button>
+                </div>
+              </section>
+              <section className="syncSeasonWorkbench" aria-label="赛季同步">
+                <div className="syncSeasonPicker">
+                  <span className="phase6Eyebrow">赛季同步</span>
+                  <div>
+                    <button className="ghostButton" type="button" onClick={() => setSeasonInput(String(Math.max(1, selectedSeason - 1)))} aria-label="上一赛季">−</button>
+                    <label> S <input aria-label="赛季号" inputMode="numeric" value={seasonInput} onChange={(event) => setSeasonInput(event.target.value)} /> </label>
+                    <button className="ghostButton" type="button" onClick={() => setSeasonInput(String(selectedSeason + 1))} aria-label="下一赛季">+</button>
+                  </div>
+                  <p>已有赛季：{status?.availableSeasons.length ? status.availableSeasons.map((season) => `S${season}`).join(" · ") : "暂无"}</p>
+                </div>
+                <div className="phase8SeasonStatusGrid" aria-label="赛季本地数据状态">
+                  {seasonStatuses.map((seasonStatus) => (
+                    <SeasonStatusCard
+                      key={seasonStatus.season}
+                      seasonStatus={seasonStatus}
+                      credentialReady={credentialReady && targetReady}
+                      syncingSeason={syncingSeason}
+                      progress={syncProgress?.season === seasonStatus.season ? syncProgress : null}
+                      onSync={() => runSeasonSync(seasonStatus.season)}
+                    />
+                  ))}
+                </div>
+              </section>
 
-              <div className="phase6SettingsLauncherGrid">
+              <div className="phase6SettingsLauncherGrid syncSecondaryActions">
                 <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn}>
                   <LogIn size={18} />
                   {credentialReady ? "重新登录" : "登录网易大神"}

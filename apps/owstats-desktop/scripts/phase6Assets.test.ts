@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { arenaRankAssetUrl, heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, normalizeStadiumAssetPath, rankAssetUrl } from "../src/shared/assets.ts";
+import { arenaRankAssetUrl, heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, normalizeStadiumAssetPath, rankAssetUrl, resolveArenaModTraitInfo } from "../src/shared/assets.ts";
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
   if (actual !== expected) {
@@ -34,6 +34,11 @@ assertEqual(
   "hero asset URL maps Chinese names through manifest",
 );
 assertEqual(heroAssetUrl(""), null, "missing hero key returns null");
+assertEqual(
+  heroAssetUrl("207165582859043131"),
+  "/assets/heroes/ana.png",
+  "legacy numeric hero id maps through the bundled runtime lookup",
+);
 assertEqual(
   JSON.stringify(heroAssetUrls(["0x02E000000000013B", "安娜"])),
   JSON.stringify([
@@ -80,6 +85,31 @@ assertEqual(
   ]),
   "map asset URL candidates try guid then localized name",
 );
+assertEqual(
+  mapAssetUrl("576460752303428223"),
+  "/assets/maps/oasis3.png",
+  "stadium oasis garden map guid uses manual preview",
+);
+assertEqual(
+  mapAssetUrl("576460752303428212"),
+  "/assets/maps/serenza.png",
+  "stadium serenza map guid uses manual preview",
+);
+assertEqual(
+  mapAssetUrl("576460752303428683"),
+  "/assets/maps/lijiangtower2.png",
+  "stadium lijiang night market map guid uses manual preview",
+);
+assertEqual(
+  mapAssetUrl("576460752303428209"),
+  "/assets/maps/powder-keg-mine.jpg",
+  "stadium powder keg mine map guid uses its mapped preview",
+);
+assertEqual(
+  mapAssetUrl("576460752303428266"),
+  "/assets/maps/arena-victoriae.jpg",
+  "stadium arena victoriae map guid uses its mapped preview",
+);
 
 const localizedMapExpectations: Array<[string, string]> = [
   ["中城", "midtown"],
@@ -119,6 +149,7 @@ assertEqual(
 );
 
 assertEqual(normalizeStadiumAssetPath("assets/stadium/mod-trait/icon.png"), "/assets/stadium/mod-trait/icon.png", "stadium path maps to the stable asset root");
+assertEqual(resolveArenaModTraitInfo("0x0CC800000000FFFF"), null, "unmapped arena id remains unresolved for the UI fallback");
 for (const unsafePath of [
   "/@fs/D:/repo/assets/stadium/icon.png",
   "D:/repo/assets/stadium/icon.png",
