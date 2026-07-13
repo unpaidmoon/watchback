@@ -109,9 +109,12 @@ export function isLatestMatchRequest(requestId: number, latestRequestId: number)
   return requestId === latestRequestId;
 }
 
+export function isValidMatchesPageCacheSnapshot(cache: MatchesPageCache | null): cache is MatchesPageCache {
+  return cache !== null && cache.hasLoaded && cache.loadedFilterKey !== "" && cache.loadedFilterKey === matchFiltersKey(cache.filters);
+}
+
 export function canHydrateMatchesPageCache(cache: MatchesPageCache | null, filters: MatchFilters, hasExplicitFilters: boolean) {
-  if (!cache?.hasLoaded) return false;
-  if (cache.loadedFilterKey === "" || cache.loadedFilterKey !== matchFiltersKey(cache.filters)) return false;
+  if (!isValidMatchesPageCacheSnapshot(cache)) return false;
   if (!hasExplicitFilters) return true;
   return cache.loadedFilterKey === matchFiltersKey(filters);
 }
@@ -163,8 +166,9 @@ export function preloadMatchesPageCache(
   options: { cacheResult?: boolean } = {},
 ) {
   const filterKey = matchFiltersKey(filters);
-  if (matchesPageCache?.hasLoaded && matchesPageCache.loadedFilterKey === filterKey) {
-    return Promise.resolve(matchesPageCache);
+  const cache = matchesPageCache;
+  if (isValidMatchesPageCacheSnapshot(cache) && cache.loadedFilterKey === filterKey) {
+    return Promise.resolve(cache);
   }
   if (preloadPromise && preloadFilterKey === filterKey) return preloadPromise;
 

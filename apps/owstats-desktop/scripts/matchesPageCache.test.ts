@@ -200,6 +200,48 @@ const matches = [
   },
 ] satisfies MatchSummary[];
 
+const requestedPreloadFilters: MatchFilters = { season: 23 };
+const freshPreloadMatches = [{ ...matches[0], matchId: "fresh-match", season: 23 }] satisfies MatchSummary[];
+updateMatchesPageCache({
+  filters: { season: 22 },
+  matches,
+  loadedFilterKey: matchFiltersKey(requestedPreloadFilters),
+  hasLoaded: true,
+});
+assert.equal(
+  canHydrateMatchesPageCache(getMatchesPageCache(), requestedPreloadFilters, true),
+  false,
+  "an invalid cache snapshot is rejected even when its loaded key matches the requested preload",
+);
+
+let invalidCacheLoaderCalls = 0;
+const fallbackPreload = await preloadMatchesPageCache(
+  {
+    getOverview: async () => {
+      invalidCacheLoaderCalls += 1;
+      return overview;
+    },
+    listMatchFilters: async () => {
+      invalidCacheLoaderCalls += 1;
+      return options;
+    },
+    listMatchTimeline: async (filters) => {
+      invalidCacheLoaderCalls += 1;
+      assert.deepEqual(filters, requestedPreloadFilters, "fallback preload requests the intended filters");
+      return freshPreloadMatches;
+    },
+  },
+  requestedPreloadFilters,
+  { cacheResult: false },
+);
+
+assert.equal(invalidCacheLoaderCalls, 3, "fallback preload reloads every dependency instead of reusing an invalid snapshot");
+assert.deepEqual(fallbackPreload.filters, requestedPreloadFilters, "fallback preload returns the requested filters");
+assert.equal(fallbackPreload.loadedFilterKey, matchFiltersKey(requestedPreloadFilters), "fallback preload returns the requested key");
+assert.deepEqual(fallbackPreload.matches, freshPreloadMatches, "fallback preload returns the freshly loaded list");
+
+clearMatchesPageCache();
+
 const preloaded = await preloadMatchesPageCache({
   getOverview: async () => overview,
   listMatchFilters: async () => options,
