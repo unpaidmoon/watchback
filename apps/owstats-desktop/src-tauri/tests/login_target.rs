@@ -371,6 +371,109 @@ fn restart_requires_verified_role_association() {
     assert!(!legacy_status.sync_allowed);
 }
 
+#[test]
+fn in_memory_ready_status_is_not_reused_for_missing_or_different_credentials() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Current#1000", 101, "old-player-key");
+    let coordinator = LoginTargetCoordinator::default();
+    coordinator.replace_ready(101, "Current#1000", "Current#1000");
+
+    let wrong_role = coordinator.status_or_persisted(Some(&credentials(202)), &target_path);
+    assert_eq!(wrong_role.state, "verificationRequired");
+    assert!(!wrong_role.sync_allowed);
+
+    coordinator.replace_ready(101, "Current#1000", "Current#1000");
+    let missing_credentials = coordinator.status_or_persisted(None, &target_path);
+    assert_eq!(missing_credentials.state, "verificationRequired");
+    assert!(!missing_credentials.sync_allowed);
+}
+
+#[tokio::test]
+async fn stale_switch_request_cannot_commit_after_a_new_login_round_starts() {
+    let mut server = spawn_blocking_query_server("Second#2000", "second-player-key");
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Current#1000", 101, "old-player-key");
+    let coordinator = LoginTargetCoordinator::default();
+    coordinator.replace_switch_required(202, "Second#2000", "Current#1000");
+
+    let old_coordinator = coordinator.clone();
+    let old_target_path = target_path.clone();
+    let old_base_url = server.base_url.clone();
+    let old_request = tokio::spawn(async move {
+        confirm_switch(
+            &old_coordinator,
+            &credentials(202),
+            &old_target_path,
+            &old_base_url,
+        )
+        .await
+    });
+    server.wait_until_query().await;
+
+    coordinator.replace_unidentified(303);
+    server.release();
+    let stale_result = old_request.await.unwrap();
+    server.join();
+
+    assert_eq!(stale_result.state, "verificationRequired");
+    assert!(!stale_result.sync_allowed);
+    let current_session = coordinator.status().unwrap();
+    assert_eq!(current_session.state, "unidentified");
+    assert_eq!(current_session.detected_bnet, None);
+    let persisted = read_player_target_for_path(&target_path).unwrap();
+    assert_eq!(persisted.input_bnet, "Current#1000");
+    assert_eq!(persisted.source_role_id, Some(101));
+    assert_eq!(persisted.customer_token, "old-player-key");
+}
+
+#[tokio::test]
+async fn concurrent_direct_binding_uses_distinct_atomic_temp_files() {
+    let mut first_server = spawn_blocking_query_server("First#1000", "first-player-key");
+    let mut second_server = spawn_blocking_query_server("Second#2000", "second-player-key");
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+
+    let first_path = target_path.clone();
+    let first_url = first_server.base_url.clone();
+    let first = tokio::spawn(async move {
+        bind_detected_target_with_base_url(&credentials(101), "First#1000", &first_path, &first_url)
+            .await
+    });
+    let second_path = target_path.clone();
+    let second_url = second_server.base_url.clone();
+    let second = tokio::spawn(async move {
+        bind_detected_target_with_base_url(
+            &credentials(202),
+            "Second#2000",
+            &second_path,
+            &second_url,
+        )
+        .await
+    });
+    first_server.wait_until_query().await;
+    second_server.wait_until_query().await;
+    first_server.release();
+    second_server.release();
+
+    assert!(first.await.unwrap().is_ok());
+    assert!(second.await.unwrap().is_ok());
+    first_server.join();
+    second_server.join();
+    let target = read_player_target_for_path(&target_path).unwrap();
+    assert!(matches!(
+        target.input_bnet.as_str(),
+        "First#1000" | "Second#2000"
+    ));
+    let temp_files = std::fs::read_dir(temp.path())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(temp_files, 0);
+}
+
 #[tokio::test]
 async fn direct_binding_does_not_replace_target_when_query_card_fails() {
     let server = spawn_sequence_server(vec![
@@ -430,13 +533,10 @@ async fn query_card_business_failure_does_not_replace_the_existing_target() {
 
 #[tokio::test]
 async fn search_business_failure_does_not_continue_to_save_a_target() {
-    let server = spawn_sequence_server(vec![
-        Response::ok(
-            "/searchBnetAccount",
-            r#"{"code":403,"data":{"customerToken":"new-player-key","bnetId":"New#2000"}}"#,
-        ),
-        Response::ok("/customer/queryCard", r#"{"code":0,"data":{}}"#),
-    ]);
+    let server = spawn_sequence_server(vec![Response::ok(
+        "/searchBnetAccount",
+        r#"{"code":403,"data":{"customerToken":"new-player-key","bnetId":"New#2000"}}"#,
+    )]);
     let temp = tempfile::tempdir().unwrap();
     let target_path = temp.path().join("target.json");
     save_target(&target_path, "Old#1000", 101, "old-player-key");
@@ -453,6 +553,66 @@ async fn search_business_failure_does_not_continue_to_save_a_target() {
     let target = read_player_target_for_path(&target_path).unwrap();
     assert_eq!(target.input_bnet, "Old#1000");
     assert_eq!(target.customer_token, "old-player-key");
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    server.join();
+}
+
+#[tokio::test]
+async fn search_identity_mismatch_fails_closed_without_querying_or_overwriting() {
+    let server = spawn_sequence_server(vec![Response::ok(
+        "/searchBnetAccount",
+        r#"{"code":0,"data":{"customerToken":"new-player-key","bnetId":"Other#9999"}}"#,
+    )]);
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Old#1000", 101, "old-player-key");
+
+    let result = bind_detected_target_with_base_url(
+        &credentials(202),
+        "Current#1000",
+        &target_path,
+        &server.base_url,
+    )
+    .await;
+
+    let error = result.unwrap_err().to_string();
+    assert!(error.contains("搜索结果与识别账号不一致"));
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    let target = read_player_target_for_path(&target_path).unwrap();
+    assert_eq!(target.input_bnet, "Old#1000");
+    assert_eq!(target.customer_token, "old-player-key");
+    server.join();
+}
+
+#[tokio::test]
+async fn query_card_identity_mismatch_fails_closed_without_overwriting() {
+    let server = spawn_sequence_server(vec![
+        Response::ok(
+            "/searchBnetAccount",
+            r#"{"code":0,"data":{"customerToken":"new-player-key","bnetId":"Current#1000"}}"#,
+        ),
+        Response::ok(
+            "/customer/queryCard",
+            r#"{"code":0,"data":{"bnetId":"Other#9999"}}"#,
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Old#1000", 101, "old-player-key");
+
+    let result = bind_detected_target_with_base_url(
+        &credentials(202),
+        "Current#1000",
+        &target_path,
+        &server.base_url,
+    )
+    .await;
+
+    assert!(result.is_err());
+    let target = read_player_target_for_path(&target_path).unwrap();
+    assert_eq!(target.input_bnet, "Old#1000");
+    assert_eq!(target.customer_token, "old-player-key");
+    server.join();
 }
 
 fn credentials(role_id: i64) -> DashenCredentials {
@@ -483,6 +643,13 @@ fn save_target(path: &std::path::Path, bnet: &str, role_id: i64, customer_token:
 struct SequenceServer {
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl SequenceServer {
+    fn join(mut self) {
+        self.handle.take().unwrap().join().unwrap();
+    }
 }
 
 struct Response {
@@ -514,7 +681,7 @@ fn spawn_sequence_server(responses: Vec<Response>) -> SequenceServer {
     let address = listener.local_addr().unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured = requests.clone();
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
             let request_bytes = read_complete_http_request(&mut stream);
@@ -544,6 +711,7 @@ fn spawn_sequence_server(responses: Vec<Response>) -> SequenceServer {
     SequenceServer {
         base_url: format!("http://{address}"),
         requests,
+        handle: Some(handle),
     }
 }
 
@@ -572,4 +740,71 @@ fn read_complete_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
             return request;
         }
     }
+}
+
+struct BlockingQueryServer {
+    base_url: String,
+    query_started: Option<tokio::sync::oneshot::Receiver<()>>,
+    release_query: Option<std::sync::mpsc::Sender<()>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl BlockingQueryServer {
+    async fn wait_until_query(&mut self) {
+        self.query_started.take().unwrap().await.unwrap();
+    }
+
+    fn release(&mut self) {
+        self.release_query.take().unwrap().send(()).unwrap();
+    }
+
+    fn join(mut self) {
+        self.handle.take().unwrap().join().unwrap();
+    }
+}
+
+fn spawn_blocking_query_server(
+    bnet: &'static str,
+    customer_token: &'static str,
+) -> BlockingQueryServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (query_started_tx, query_started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || {
+        let (mut search, _) = listener.accept().unwrap();
+        let request = read_complete_http_request(&mut search);
+        assert!(String::from_utf8_lossy(&request).starts_with("POST /searchBnetAccount "));
+        write_json_response(
+            &mut search,
+            &format!(
+                r#"{{"code":0,"data":{{"customerToken":"{customer_token}","bnetId":"{bnet}"}}}}"#
+            ),
+        );
+
+        let (mut query, _) = listener.accept().unwrap();
+        let request = read_complete_http_request(&mut query);
+        assert!(String::from_utf8_lossy(&request).starts_with("GET /customer/queryCard?"));
+        query_started_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+        write_json_response(
+            &mut query,
+            &format!(r#"{{"code":0,"data":{{"bnetId":"{bnet}"}}}}"#),
+        );
+    });
+    BlockingQueryServer {
+        base_url: format!("http://{address}"),
+        query_started: Some(query_started_rx),
+        release_query: Some(release_tx),
+        handle: Some(handle),
+    }
+}
+
+fn write_json_response(stream: &mut std::net::TcpStream, body: &str) {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).unwrap();
 }
