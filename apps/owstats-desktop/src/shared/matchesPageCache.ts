@@ -27,6 +27,7 @@ export type MatchScrollAnchorCandidate = {
 const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"];
 
 let matchesPageCache: MatchesPageCache | null = null;
+let cacheGeneration = 0;
 const preloadPromises = new Map<string, Promise<MatchesPageCache>>();
 
 export function getMatchesPageCache() {
@@ -56,6 +57,7 @@ function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
 }
 
 export function clearMatchesPageCache() {
+  cacheGeneration += 1;
   matchesPageCache = null;
   preloadPromises.clear();
 }
@@ -181,6 +183,7 @@ export function preloadMatchesPageCache(
   const pendingPreload = preloadPromises.get(preloadKey);
   if (pendingPreload) return pendingPreload;
 
+  const preloadGeneration = cacheGeneration;
   let preloadPromise!: Promise<MatchesPageCache>;
   preloadPromise = Promise.all([loaders.getOverview(), loaders.listMatchFilters(), loaders.listMatchTimeline(filters)])
     .then(([overview, filterOptions, matches]) => {
@@ -193,7 +196,8 @@ export function preloadMatchesPageCache(
         loadedFilterKey: filterKey,
         hasLoaded: true,
       });
-      return options.cacheResult === false ? snapshot : updateMatchesPageCache(snapshot);
+      const canCacheResult = options.cacheResult !== false && preloadGeneration === cacheGeneration;
+      return canCacheResult ? updateMatchesPageCache(snapshot) : snapshot;
     })
     .finally(() => {
       if (preloadPromises.get(preloadKey) === preloadPromise) preloadPromises.delete(preloadKey);

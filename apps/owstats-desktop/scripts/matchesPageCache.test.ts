@@ -390,6 +390,102 @@ assert.deepEqual(detachedPolicyResult.matches, detachedPolicyMatches, "detached 
 assert.deepEqual(cachedPolicyResult.matches, cachedPolicyMatches, "cache-writing preload returns its own result");
 assert.deepEqual(getMatchesPageCache()?.matches, cachedPolicyMatches, "only the default preload policy updates the global cache");
 
+clearMatchesPageCache();
+const clearedPreloadFilters: MatchFilters = { season: 23 };
+const oldPreloadGate = createDeferred();
+const newPreloadGate = createDeferred();
+const oldPreloadMatches = [{ ...matches[0], matchId: "old-cleared-preload", season: 23 }] satisfies MatchSummary[];
+const newPreloadMatches = [{ ...matches[0], matchId: "new-after-clear-preload", season: 23 }] satisfies MatchSummary[];
+const probeMatches = [{ ...matches[0], matchId: "same-key-probe", season: 23 }] satisfies MatchSummary[];
+const oldPreloadPromise = preloadMatchesPageCache(
+  {
+    getOverview: async () => overview,
+    listMatchFilters: async () => options,
+    listMatchTimeline: async () => {
+      await oldPreloadGate.promise;
+      return oldPreloadMatches;
+    },
+  },
+  clearedPreloadFilters,
+);
+
+clearMatchesPageCache();
+let newPreloadLoaderCalls = 0;
+const newPreloadPromise = preloadMatchesPageCache(
+  {
+    getOverview: async () => {
+      newPreloadLoaderCalls += 1;
+      return overview;
+    },
+    listMatchFilters: async () => {
+      newPreloadLoaderCalls += 1;
+      return options;
+    },
+    listMatchTimeline: async () => {
+      newPreloadLoaderCalls += 1;
+      await newPreloadGate.promise;
+      return newPreloadMatches;
+    },
+  },
+  clearedPreloadFilters,
+);
+assert.equal(newPreloadLoaderCalls, 3, "clear removes old pending dedupe so a same-key preload starts fresh loaders");
+
+oldPreloadGate.resolve();
+const oldPreloadResult = await oldPreloadPromise;
+assert.deepEqual(oldPreloadResult.matches, oldPreloadMatches, "the cleared preload caller still receives its completed snapshot");
+assert.equal(getMatchesPageCache(), null, "a preload started before clear cannot restore its old snapshot globally");
+
+let sameKeyProbeLoaderCalls = 0;
+const sameKeyProbeResult = await preloadMatchesPageCache(
+  {
+    getOverview: async () => {
+      sameKeyProbeLoaderCalls += 1;
+      return overview;
+    },
+    listMatchFilters: async () => {
+      sameKeyProbeLoaderCalls += 1;
+      return options;
+    },
+    listMatchTimeline: async () => {
+      sameKeyProbeLoaderCalls += 1;
+      return probeMatches;
+    },
+  },
+  clearedPreloadFilters,
+  { cacheResult: false },
+);
+assert.equal(sameKeyProbeLoaderCalls, 3, "the old result cannot shortcut a same-key detached probe after clear");
+assert.deepEqual(sameKeyProbeResult.matches, probeMatches, "the same-key probe receives fresh loader data");
+assert.equal(getMatchesPageCache(), null, "the detached probe also leaves the global cache empty");
+
+let joinedNewLoaderCalls = 0;
+const joinedNewPreloadPromise = preloadMatchesPageCache(
+  {
+    getOverview: async () => {
+      joinedNewLoaderCalls += 1;
+      return overview;
+    },
+    listMatchFilters: async () => {
+      joinedNewLoaderCalls += 1;
+      return options;
+    },
+    listMatchTimeline: async () => {
+      joinedNewLoaderCalls += 1;
+      return newPreloadMatches;
+    },
+  },
+  clearedPreloadFilters,
+);
+assert.equal(joinedNewPreloadPromise, newPreloadPromise, "old promise cleanup cannot remove the new same-key pending preload");
+assert.equal(joinedNewLoaderCalls, 0, "a caller still joins the new preload after the old promise settles");
+
+newPreloadGate.resolve();
+const [newPreloadResult, joinedNewPreloadResult] = await Promise.all([newPreloadPromise, joinedNewPreloadPromise]);
+assert.deepEqual(newPreloadResult.matches, newPreloadMatches, "the post-clear preload returns its new snapshot");
+assert.deepEqual(joinedNewPreloadResult.matches, newPreloadMatches, "the joined caller receives the post-clear snapshot");
+assert.deepEqual(getMatchesPageCache()?.matches, newPreloadMatches, "the post-clear preload may update the global cache normally");
+
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 assert.equal(matchesPageSource.includes("window.scrollY"), false, "MatchesPage should not save window scroll for the match list");
