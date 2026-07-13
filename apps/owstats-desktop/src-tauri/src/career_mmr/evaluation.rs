@@ -56,7 +56,18 @@ struct TimeComponent<'a> {
 
 pub fn evaluate_outcome_baselines(rows: &[TrainingRow]) -> OutcomeEvaluationReport {
     let excluded_rows = rows.len() - rows.iter().filter(|r| valid(r)).count();
-    let valid_rows: Vec<&TrainingRow> = rows.iter().filter(|r| valid(r)).collect();
+    let mut role_events: BTreeMap<(&str, &str), &TrainingRow> = BTreeMap::new();
+    for row in rows.iter().filter(|row| valid(row)) {
+        role_events
+            .entry((&row.match_group, &row.role))
+            .and_modify(|selected| {
+                if segment_priority(row) > segment_priority(selected) {
+                    *selected = row;
+                }
+            })
+            .or_insert(row);
+    }
+    let valid_rows: Vec<&TrainingRow> = role_events.into_values().collect();
     let mut matches: BTreeMap<&str, Vec<&TrainingRow>> = BTreeMap::new();
     for row in &valid_rows {
         matches.entry(&row.match_group).or_default().push(row);
@@ -149,18 +160,23 @@ pub fn evaluate_outcome_baselines(rows: &[TrainingRow]) -> OutcomeEvaluationRepo
         embargoed_rows: 0,
         folds,
         groups,
-        hero_score_validation: "S22 official hero scores are external future validation data; the current outcome-only projection has no trainable hero rows, so correlation is not computable",
+        hero_score_validation: "S22 official hero scores remain external validation data; hero-level performance weights have not been fitted yet, so correlation is not computable",
     }
 }
 
 fn valid(row: &TrainingRow) -> bool {
-    row.outcome_only
-        && !row.allow_performance
-        && row.begin_ts >= 0
+    row.begin_ts >= 0
         && row.result.is_finite()
         && matches!(row.result, 0.0 | 0.5 | 1.0)
         && row.expected_win_rate.is_finite()
         && (0.0..=1.0).contains(&row.expected_win_rate)
+}
+
+fn segment_priority(row: &TrainingRow) -> (bool, i64) {
+    (
+        row.allow_performance,
+        row.hero_duration_sec.unwrap_or(0.0).round() as i64,
+    )
 }
 
 fn six_group_blocks(group_count: usize) -> Option<[usize; 7]> {

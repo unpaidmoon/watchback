@@ -27,20 +27,33 @@ fn fixture() -> Result<(TempDir, Connection)> {
 }
 
 #[test]
-fn projects_only_numeric_training_features_for_ordinary_matches() -> Result<()> {
+fn projects_exact_hero_segments_and_external_healing_for_ordinary_matches() -> Result<()> {
     let (_dir, conn) = fixture()?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES('private-match','normal',?1,'now')",
+        [r#"{"payload":{"data":{"heroList":[{"heroId":"hero-a","userTimeSec":480,"useTimeRate":0.8,"statMap":{"603482350067646495":9,"603482350067646507":6,"603482350067648392":8,"603482350067646506":7,"603482350067647671":6000,"603482350067646913":500}}]}}}"#],
+    )?;
     let projection = build_training_projection(&conn)?;
     assert_eq!(projection.rows.len(), 1);
     let row = &projection.rows[0];
     assert_eq!(row.season, 22);
     assert_eq!(row.role, "damage");
     assert_eq!(row.hero_duration_sec, Some(480.0));
-    assert_eq!(row.final_hit, None);
-    assert_eq!(row.healing_taken, None);
-    assert_eq!(row.objective_time_sec, None);
+    assert_eq!(row.final_hit, Some(6.0));
+    assert_eq!(row.kill, Some(9.0));
+    assert_eq!(row.assist, Some(8.0));
+    assert_eq!(row.death, Some(7.0));
+    assert_eq!(row.damage, Some(6000.0));
+    assert_eq!(row.healing, Some(500.0));
+    assert_eq!(row.healing_taken, Some(2000.0));
     assert!(row.hero_group.is_some());
-    assert!(!row.allow_performance_by_hero);
-    assert!(!row.allow_performance);
+    assert!(row.allow_performance_by_hero);
+    assert!(row.allow_performance);
+    assert_eq!(row.healing_taken_semantic, "external");
+    assert!(row.usable_for_resource_debt);
+    assert_eq!(projection.audit.performance_eligible_rows, 1);
+    assert_eq!(projection.audit.resource_debt_eligible_rows, 1);
+    assert_eq!(projection.audit.minor_segment_rows, 0);
     assert_eq!(row.expected_win_rate, 0.5);
     assert!(row.data_quality > 0.0);
     let serialized = serde_json::to_string(&projection.public_audit())?;
@@ -72,7 +85,7 @@ fn excludes_stadium_and_reports_role_coverage() -> Result<()> {
 }
 
 #[test]
-fn audits_missing_fields_and_self_healing_semantics_without_guessing() -> Result<()> {
+fn audits_healing_taken_as_external_teammate_healing() -> Result<()> {
     let (_dir, conn) = fixture()?;
     let projection = build_training_projection(&conn)?;
     let coverage = &projection.audit.coverage;
@@ -85,7 +98,7 @@ fn audits_missing_fields_and_self_healing_semantics_without_guessing() -> Result
         projection
             .audit
             .healing_taken_semantics
-            .explicit_self_healing_rows,
+            .explicit_external_healing_rows,
         1
     );
     assert_eq!(projection.audit.healing_taken_semantics.unknown_rows, 0);
@@ -111,7 +124,7 @@ fn projects_entry_stats_when_current_player_marker_is_unavailable() -> Result<()
         projection
             .audit
             .healing_taken_semantics
-            .explicit_self_healing_rows,
+            .explicit_external_healing_rows,
         1
     );
     Ok(())
@@ -211,5 +224,74 @@ fn stable_hero_key_does_not_change_when_an_earlier_hero_is_added() -> Result<()>
     let second = build_training_projection(&conn)?.rows[0].hero_group.clone();
     assert_eq!(first, second);
     assert!(first.is_some());
+    Ok(())
+}
+
+#[test]
+fn multi_hero_segments_do_not_duplicate_whole_match_healing_taken() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    conn.execute(
+        "INSERT INTO hero_dict(guid,name,role,updated_at) VALUES('hero-b','B','support','now')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES('private-match','normal',?1,'now')",
+        [r#"{"payload":{"data":{"heroList":[{"heroId":"hero-a","userTimeSec":300,"useTimeRate":0.5,"statMap":{"603482350067646507":4}},{"heroId":"hero-b","userTimeSec":300,"useTimeRate":0.5,"statMap":{"603482350067646507":2}}]}}}"#],
+    )?;
+
+    let projection = build_training_projection(&conn)?;
+    assert_eq!(projection.rows.len(), 2);
+    assert_eq!(projection.rows[0].role, "damage");
+    assert_eq!(projection.rows[1].role, "support");
+    assert!(projection.rows.iter().all(|row| row.allow_performance));
+    assert!(projection
+        .rows
+        .iter()
+        .all(|row| row.healing_taken.is_none()));
+    assert!(projection
+        .rows
+        .iter()
+        .all(|row| !row.usable_for_resource_debt));
+    Ok(())
+}
+
+#[test]
+fn short_hero_segment_remains_outcome_only() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES('private-match','normal',?1,'now')",
+        [r#"{"payload":{"data":{"heroList":[{"heroId":"hero-a","userTimeSec":30,"useTimeRate":0.05,"statMap":{"603482350067646507":9}}]}}}"#],
+    )?;
+
+    let row = build_training_projection(&conn)?.rows.remove(0);
+    assert!(row.outcome_only);
+    assert!(!row.allow_performance);
+    assert_eq!(row.final_hit, None);
+    assert!(!row.usable_for_resource_debt);
+    Ok(())
+}
+
+#[test]
+fn audit_projection_supports_pre_mmr_databases() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    conn.execute_batch("DROP TABLE career_mmr_events; DROP TABLE mmr_model_versions;")?;
+
+    let projection = build_training_projection(&conn)?;
+    assert_eq!(projection.rows.len(), 1);
+    assert_eq!(projection.rows[0].expected_win_rate, 0.5);
+    Ok(())
+}
+
+#[test]
+fn exact_segment_without_dictionary_role_is_skipped_instead_of_guessed() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES('private-match','normal',?1,'now')",
+        [r#"{"payload":{"data":{"heroList":[{"heroId":"unknown-hero","userTimeSec":600,"useTimeRate":1.0,"statMap":{"603482350067646507":9}}]}}}"#],
+    )?;
+
+    let projection = build_training_projection(&conn)?;
+    assert!(projection.rows.is_empty());
+    assert_eq!(projection.audit.performance_eligible_rows, 0);
     Ok(())
 }

@@ -191,14 +191,26 @@ fn explicitly_degrades_small_or_single_class_groups() {
 }
 
 #[test]
-fn rejects_non_outcome_or_invalid_probability_rows_without_leaking_values() {
+fn keeps_performance_rows_but_deduplicates_same_match_role_segments() {
     let mut rows = (0..60)
         .map(|i| row(i, "tank", ModeFamily::RoleCompetitive, (i % 2) as f64, 0.6))
         .collect::<Vec<_>>();
     rows[59].allow_performance = true;
+    rows[59].outcome_only = false;
+    let mut duplicate_segment = rows[59].clone();
+    duplicate_segment.hero_group = Some("different-hero".into());
+    rows.push(duplicate_segment);
     rows[58].expected_win_rate = 2.0;
     let report = evaluate_outcome_baselines(&rows);
-    assert_eq!(report.excluded_rows, 2);
+    assert_eq!(report.excluded_rows, 1);
+    assert_eq!(
+        report
+            .folds
+            .iter()
+            .map(|fold| fold.validation_samples)
+            .sum::<usize>(),
+        49
+    );
     let json = serde_json::to_string(&report).unwrap();
     assert!(!json.contains("hero_group"));
     assert!(!json.contains("match_id"));
