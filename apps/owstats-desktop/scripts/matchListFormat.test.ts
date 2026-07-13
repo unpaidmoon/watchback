@@ -29,8 +29,8 @@ const baseMatch: MatchSummary = {
   teamAwards: [],
 };
 
-assert.equal(formatScoreLine(baseMatch), "胜：3-0");
-assert.equal(formatMatchBannerTitle(baseMatch), "苏拉瓦萨 \\ 闪点作战");
+assert.equal(formatScoreLine(baseMatch), "3-0");
+assert.equal(formatMatchBannerTitle(baseMatch), "苏拉瓦萨 · 闪点作战");
 assert.equal(
   formatMatchBannerTitle({
     ...baseMatch,
@@ -40,8 +40,8 @@ assert.equal(
     mapGuid: "576460752303428223",
     mapName: "绿洲城 - 花园",
   }),
-  "角斗竞技",
+  "绿洲城 - 花园 · 角斗竞技",
 );
-assert.equal(formatCompactStat(5960), "5960");
-assert.equal(formatCompactStat(15000), "1.5w");
-assert.equal(formatCompactStat(10000), "1w");
+assert.equal(formatCompactStat(5960), "5,960");
+assert.equal(formatCompactStat(15000), "15,000");
+assert.equal(formatCompactStat(10000), "10,000");

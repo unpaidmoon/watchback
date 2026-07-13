@@ -13,3 +13,211 @@
   border: 1px solid var(--border-subtle);
   background: var(--surface-secondary);
 }
+
+.phase6WorkbenchList button.matchListCard {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 0;
+  padding: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  box-shadow: none;
+  transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
+
+.phase6WorkbenchList button.matchListCard:not(.phase6MatchRowSelected):hover {
+  border-color: var(--border-strong);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.matchListCard.phase6MatchRowSelected {
+  border-color: var(--data-primary);
+  background: color-mix(in srgb, var(--data-primary) 7%, var(--surface-secondary));
+  box-shadow: none;
+}
+
+.matchListCardSummary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.matchListCard .matchListCardMap {
+  position: static;
+  inset: auto;
+  width: 88px;
+  height: 68px;
+  border-radius: var(--radius-control);
+  filter: saturate(0.82) contrast(0.98);
+}
+
+.matchListCardCopy,
+.matchListCardData,
+.matchListCardStats {
+  min-width: 0;
+}
+
+.matchListCardCopy {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.matchListCardResultScore,
+.matchListCardMeta,
+.matchListCardHeroLine {
+  display: flex;
+  align-items: center;
+}
+
+.matchListCardResultScore {
+  gap: var(--space-2);
+}
+
+.matchListCardResult {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.matchListCardResultMarker {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.matchListCardResult.result-win .matchListCardResultMarker {
+  background: var(--status-success);
+}
+
+.matchListCardResult.result-loss .matchListCardResultMarker {
+  background: var(--status-danger);
+}
+
+.matchListCardResult.result-draw .matchListCardResultMarker,
+.matchListCardResult.result-neutral .matchListCardResultMarker {
+  background: var(--data-neutral);
+}
+
+.matchListCardScore {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.matchListCardTitle {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchListCardMeta {
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.matchListCardHeroLine {
+  min-width: 0;
+  gap: 6px;
+}
+
+.matchListCardHeroLine .phase6HeroAvatarShared {
+  width: 24px;
+  height: 24px;
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag {
+  min-width: 0;
+  min-height: 20px;
+  padding: 2px 6px;
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-tertiary);
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag.badgeTone-gold {
+  border-color: color-mix(in srgb, var(--data-secondary) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-secondary) 10%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag.badgeTone-blue {
+  border-color: color-mix(in srgb, var(--data-primary) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 8%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag.badgeTone-danger {
+  border-color: color-mix(in srgb, var(--status-danger) 32%, var(--border-subtle));
+  background: color-mix(in srgb, var(--status-danger) 7%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.matchListCardHeroName {
+  max-width: 96px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6WorkbenchList .matchListCardData {
+  position: static;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+}
+
+.matchListCardStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  gap: var(--space-2);
+}
+
+.matchListCardStats .phase6MatchMetricBlock {
+  min-width: 64px;
+  display: grid;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.matchListCardStats .phase6MatchMetricBlock strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase6WorkbenchList .matchListCardData .phase6MatchOpen {
+  grid-column: auto;
+  grid-row: auto;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 22px;
+}

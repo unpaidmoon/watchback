@@ -10,6 +10,7 @@ export type MatchListCardProps = {
 };
 
 export function MatchListCard({ match, selected, onSelect }: MatchListCardProps) {
+  const result = resultPresentation(match.result);
   return (
     <button
       type="button"
@@ -18,33 +19,48 @@ export function MatchListCard({ match, selected, onSelect }: MatchListCardProps)
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(match.matchId)}
     >
-      <span className="phase6MatchBanner">
-        <MapPreview mapKey={formatMatchPreviewKey(match)} name={match.mapName} className="phase6MatchMapThumb" />
-        <span className="phase6MatchScoreSlab">{formatScoreLine(match)}</span>
-        <span className="phase6MatchMapTitle">{formatMatchBannerTitle(match)}</span>
+      <span className="matchListCardSummary">
+        <MapPreview mapKey={formatMatchPreviewKey(match)} name={match.mapName} className="phase6MatchMapThumb matchListCardMap" />
+        <span className="matchListCardCopy">
+          <span className="matchListCardResultScore">
+            <span className={`matchListCardResult result-${result.tone}`}>
+              <span className="matchListCardResultMarker" aria-hidden="true" />
+              {result.label}
+            </span>
+            <strong className="matchListCardScore" data-numeric>{formatScoreLine(match)}</strong>
+          </span>
+          <strong className="matchListCardTitle">{formatMatchBannerTitle(match)}</strong>
+          <span className="matchListCardMeta">
+            <span>{match.beginLabel}</span>
+            <span className="phase6MatchListHeroLine matchListCardHeroLine">
+              <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
+              <strong className="matchListCardHeroName">{match.heroName}</strong>
+              {match.evaluation ? (
+                <span className={`phase6VerticalPerformanceTag badgeTone-${listPerformanceTone(match.evaluation.primaryTag)}`}>{match.evaluation.primaryTag}</span>
+              ) : (
+                <span className="phase6VerticalPerformanceTag badgeTone-blue">常规</span>
+              )}
+            </span>
+          </span>
+        </span>
       </span>
-      <span className="phase6MatchDataPanel">
-        <span className="phase6MatchListHeroLine">
-          <span className="phase6HeroStackCell">
-            <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
-            {match.evaluation ? (
-              <strong className={`phase6VerticalPerformanceTag badgeTone-${listPerformanceTone(match.evaluation.primaryTag)}`}>{match.evaluation.primaryTag}</strong>
-            ) : (
-              <strong className="phase6VerticalPerformanceTag badgeTone-blue">常规</strong>
-            )}
-          </span>
-          <span className="phase6MatchListStats">
-            <MetricBlock label="K/A/D" value={`${match.kills}/${match.assists}/${match.deaths}`} />
-            <MetricBlock
-              label="伤害 / 治疗 / 抵挡"
-              value={`${formatCompactStat(match.damage)}/${formatCompactStat(match.healing)}/${formatCompactStat(match.mitigation)}`}
-            />
-          </span>
+      <span className="phase6MatchDataPanel matchListCardData">
+        <span className="phase6MatchListStats matchListCardStats">
+          <MetricBlock label="K/D/A" value={`${match.kills}/${match.deaths}/${match.assists}`} />
+          <MetricBlock label="伤害" value={formatCompactStat(match.damage)} />
+          <MetricBlock label="承伤" value={formatCompactStat(match.mitigation)} />
         </span>
         <span className="phase6MatchOpen">›</span>
       </span>
     </button>
   );
+}
+
+function resultPresentation(result: string) {
+  if (result === "win") return { tone: "win", label: "胜利" };
+  if (result === "loss") return { tone: "loss", label: "失败" };
+  if (result === "draw") return { tone: "draw", label: "平局" };
+  return { tone: "neutral", label: "未知结果" };
 }
 
 function listPerformanceTone(primaryTag: string) {

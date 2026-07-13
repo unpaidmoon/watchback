@@ -9,6 +9,7 @@ const listPaneSource = readFileSync(new URL("../src/features/matches/MatchListPa
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
 const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
+const matchStyleSource = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 
 assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesPage should render the combined match workbench layout");
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
@@ -62,6 +63,21 @@ assert.ok(
   "MatchListCard should place list stats inside the hero row before the open affordance",
 );
 assert.equal(listCardSource.includes("phase6MatchListStats"), true, "MatchListCard should render full stats without horizontal clipping");
+assert.equal(listCardSource.includes("matchListCardResult"), true, "MatchListCard should render result separately");
+assert.equal(listCardSource.includes("matchListCardScore"), true, "MatchListCard should render score separately");
+assert.equal(listCardSource.includes("match.heroName"), true, "MatchListCard should label the played hero");
+assert.equal(listCardSource.includes("match.beginLabel"), true, "MatchListCard should show the match time");
+assert.equal(
+  listCardSource.includes("`${match.kills}/${match.deaths}/${match.assists}`"),
+  true,
+  "MatchListCard should render K/D/A in that order",
+);
+assert.equal(listCardSource.includes('label="K/A/D"'), false, "MatchListCard should not keep the ambiguous K/A/D order");
+assert.match(matchStyleSource, /\.matchListCard\.phase6MatchRowSelected[\s\S]*border-color:\s*var\(--data-primary\)/);
+assert.match(matchStyleSource, /\.matchListCardResult\.result-win \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-success\)/);
+assert.match(matchStyleSource, /\.matchListCardResult\.result-loss \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-danger\)/);
+assert.match(matchStyleSource, /\.matchListCard \.matchListCardMap[\s\S]*position:\s*static/);
+assert.match(matchStyleSource, /\.matchListCardHeroLine \.phase6VerticalPerformanceTag[\s\S]*writing-mode:\s*horizontal-tb/);
 
 assert.equal(detailPageSource.includes("export function MatchDetailReport"), true, "Match detail page should export reusable detail content for the workbench");
 
