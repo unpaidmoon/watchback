@@ -91,7 +91,15 @@ impl LoginTargetCoordinator {
             (Some(role_id), None) => self.replace_unidentified(role_id),
             (None, _) => {
                 self.clear();
-                verification_status(None, "请先登录并重新识别当前账号。")
+                status(
+                    "unidentified",
+                    None,
+                    None,
+                    "尚未识别当前登录账号，请重新登录后自动识别。",
+                    false,
+                    false,
+                    false,
+                )
             }
         }
     }

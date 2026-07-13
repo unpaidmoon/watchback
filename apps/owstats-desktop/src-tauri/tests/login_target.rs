@@ -246,6 +246,12 @@ fn clearing_a_target_keeps_retry_only_for_a_reliable_current_session_tag() {
     assert_eq!(unidentified.state, "unidentified");
     assert!(!unidentified.can_retry);
     assert_eq!(unidentified.detected_bnet, None);
+
+    coordinator.replace_ready(101, "Current#1000", "Current#1000");
+    let logged_out = coordinator.target_cleared(None);
+    assert_eq!(logged_out.state, "unidentified");
+    assert!(!logged_out.can_retry);
+    assert_eq!(logged_out.detected_bnet, None);
 }
 
 #[tokio::test]

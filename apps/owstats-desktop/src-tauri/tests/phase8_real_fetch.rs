@@ -109,6 +109,7 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
     )
     .unwrap();
     let db = OwDatabase::new(&database_path);
+    let server = spawn_request_counting_server();
 
     let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
         &db,
@@ -116,7 +117,7 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
         &credential_path,
         &target_path,
         23,
-        "http://127.0.0.1:1/customer",
+        &format!("{}/customer", server.base_url),
         |_| {},
     )
     .await
@@ -124,6 +125,10 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
     .to_string();
 
     assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+    assert!(
+        server.requests.lock().unwrap().is_empty(),
+        "rejected sync must not send an upstream request"
+    );
     assert!(
         !database_path.exists(),
         "gate must run before db initialization"
@@ -135,6 +140,7 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
     for secret in ["101", "202", "Other#2000", "synthetic-player-key", "token"] {
         assert!(!error.contains(secret));
     }
+    server.join();
 }
 
 #[tokio::test]
@@ -502,6 +508,70 @@ struct RecordedRequest {
 struct RecordingServer {
     base_url: String,
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
+}
+
+struct RequestCountingServer {
+    base_url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl RequestCountingServer {
+    fn join(mut self) {
+        self.stop.take().unwrap().send(()).unwrap();
+        self.handle.take().unwrap().join().unwrap();
+    }
+}
+
+impl Drop for RequestCountingServer {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn spawn_request_counting_server() -> RequestCountingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || loop {
+        if stop_rx.try_recv().is_ok() {
+            break;
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut buffer = [0_u8; 4096];
+                let read = stream.read(&mut buffer).unwrap_or(0);
+                let first_line = String::from_utf8_lossy(&buffer[..read])
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                captured.lock().unwrap().push(first_line);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 500 Synthetic Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::yield_now();
+            }
+            Err(error) => panic!("request counting server failed: {error}"),
+        }
+    });
+    RequestCountingServer {
+        base_url: format!("http://{address}"),
+        requests,
+        stop: Some(stop_tx),
+        handle: Some(handle),
+    }
 }
 
 struct DelayedDetailServer {
