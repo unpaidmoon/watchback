@@ -17,29 +17,29 @@ export function App() {
   return (
     <QaFeedbackProvider>
       <RouteFocusManager />
-      <main className="appShell phase6ProductShell">
-        <header className="phase6ProductTopBar">
-          <div className="phase6ProductBrand">
+      <main className="appFrame appShell phase6ProductShell">
+        <header className="appTopBar phase6ProductTopBar">
+          <div className="appBrand phase6ProductBrand">
             <span className="phase6ProductLogo">
               <Sparkles size={18} />
             </span>
             <div>
-              <strong>OWStatsLocal</strong>
+              <strong className="appBrandName">OWStatsLocal</strong>
               <p>本地优先的守望先锋战绩工作台</p>
             </div>
           </div>
 
           <QaRegion id="NAV-CAPSULE" className="phase6QaInlineRegion">
-            <nav className="phase6ProductNav" aria-label="主导航">
+            <nav className="appNav phase6ProductNav" aria-label="主导航">
               {phase6NavItems.map((item) => (
-                <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "active" : "")} title={item.title}>
+                <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "appNavLink active" : "appNavLink")} title={item.title}>
                   {item.label}
                 </NavLink>
               ))}
             </nav>
           </QaRegion>
 
-          <div className="phase6ShellStatus" aria-label="全局状态">
+          <div className="appShellStatus phase6ShellStatus" aria-label="全局状态">
             <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据" aria-current={false}>
               <CircleDot size={14} aria-hidden="true" />
               本地数据
@@ -47,7 +47,7 @@ export function App() {
           </div>
         </header>
 
-        <div className="phase6ProductSurface">
+        <div className="appCanvas phase6ProductSurface">
           <Routes>
             <Route path="/" element={<Navigate to="/matches" replace />} />
             <Route path="/onboarding" element={<OnboardingPage />} />

@@ -1,1 +1,35 @@
-/* Design tokens remain in shared.css until their declaration-only extraction. */
+:root {
+  --app-outside: #F5F5F3;
+  --app-canvas: #E3E8E2;
+  --surface-primary: #F0F1EA;
+  --surface-secondary: #F6F7F2;
+  --surface-control: #ECEEE9;
+  --text-primary: #202220;
+  --text-secondary: #60645F;
+  --text-tertiary: #8A8F89;
+  --border-subtle: #D8DED8;
+  --action-primary: #303030;
+  --action-on-primary: #FFFFFF;
+  --data-primary: #4B22D1;
+  --data-secondary: #2F8C95;
+  --data-neutral: #A5AAA4;
+  --status-success: #21A366;
+  --status-success-bg: #E2F3E7;
+  --status-danger: #E54848;
+  --status-danger-bg: #F8E7E5;
+  --status-warning: #B58A16;
+  --status-warning-bg: #F4EFD8;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --radius-shell: 30px;
+  --radius-primary: 20px;
+  --radius-secondary: 16px;
+  --radius-control: 12px;
+  --shadow-card: 0 8px 24px rgba(35, 40, 35, 0.035);
+  --motion-fast: 180ms;
+}

@@ -1,7 +1,7 @@
 @import "./styles/tokens.css";
+@import "./styles/shared.css";
 @import "./styles/base.css";
 @import "./styles/shell.css";
-@import "./styles/shared.css";
 @import "./styles/features/matches.css";
 @import "./styles/features/command-center.css";
 @import "./styles/features/review.css";
