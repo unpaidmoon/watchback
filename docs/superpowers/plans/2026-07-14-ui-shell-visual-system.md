@@ -340,7 +340,7 @@ assert.match(season, />赛季</);
 assert.match(season, /<option value="" selected="">全部赛季<\/option>/);
 assert.match(season, /<option value="22">S22<\/option>/);
 
-assert.match(renderToStaticMarkup(createElement(PageLoadingState, { label: "正在加载" })), /aria-busy="true"/);
+assert.match(renderToStaticMarkup(createElement(PageLoadingState, { message: "正在加载" })), /aria-busy="true"/);
 assert.match(renderToStaticMarkup(createElement(PageEmptyState, { title: "暂无数据", description: "请先同步", actionLabel: "去同步", onAction: () => undefined })), /<button[^>]*>去同步<\/button>/);
 assert.match(renderToStaticMarkup(createElement(PageErrorState, { message: "读取失败", onRetry: () => undefined })), /role="alert"/);
 assert.match(renderToStaticMarkup(createElement(StatusPill, { tone: "success", children: "已完成" })), /已完成/);
@@ -359,6 +359,7 @@ Expected: FAIL，模块 `src/shared/page-shell/index` 尚不存在。
 ```tsx
 export type PageHeaderProps = { title: string; description: string; actions?: ReactNode; className?: string };
 export type PageSeasonSelectProps = { value: number | undefined; seasons: readonly number[]; onChange: (season: number | undefined) => void; disabled?: boolean; label?: string; includeAll?: boolean; allLabel?: string };
+export type PageLoadingStateProps = { message: string };
 export type PageEmptyStateProps = { title: string; description: string; actionLabel: string; onAction: () => void };
 export type PageErrorStateProps = { message: string; onRetry: () => void };
 export type StatusPillProps = { tone?: "neutral" | "success" | "danger" | "warning"; children: ReactNode };
