@@ -4,7 +4,8 @@ use crate::browser_session::{
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_role_id, is_signature_helper_missing, BattleTagExtraction,
+    extract_battle_tag, extract_login_role_id, is_signature_helper_missing, BattleTagExtraction,
+    RoleIdExtraction,
 };
 use crate::login_flow::{LoginPhase, LoginProgress};
 use crate::models::{CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus};
@@ -176,7 +177,11 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             let previous_role_id = identity.complete().map(|(role_id, _)| role_id.to_string());
             let (role_id, battle_tag) = collect_login_identity(&mut page)
                 .await
-                .unwrap_or((None, BattleTagExtraction::Missing));
+                .unwrap_or((RoleIdExtraction::Missing, BattleTagExtraction::Missing));
+            let role_id = match role_id {
+                RoleIdExtraction::Found(role_id) => Some(role_id),
+                RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
+            };
             identity.observe(role_id, battle_tag);
             if identity.complete().is_some()
                 && identity.complete().map(|(role_id, _)| role_id) != previous_role_id.as_deref()
@@ -263,17 +268,32 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
 
 async fn collect_login_identity(
     page: &mut CdpPage,
-) -> Option<(Option<String>, BattleTagExtraction)> {
+) -> Option<(RoleIdExtraction, BattleTagExtraction)> {
     let collected = page
         .evaluate(&build_collect_candidates_script(), false)
         .await
         .ok()?;
     let page_text = collected.get("pageText")?.as_str()?;
-    let candidates = collected
-        .get("candidates")?
-        .as_array()?
-        .iter()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect::<Vec<_>>();
-    Some((extract_role_id(&candidates), extract_battle_tag(page_text)))
+    let role_candidates = collected.get("roleCandidates")?;
+    let current_candidates = string_candidates(role_candidates.get("current")?)?;
+    let storage_candidates = string_candidates(role_candidates.get("storage")?)?;
+    let resource_candidates = string_candidates(role_candidates.get("resources")?)?;
+    Some((
+        extract_login_role_id(
+            &current_candidates,
+            &storage_candidates,
+            &resource_candidates,
+        ),
+        extract_battle_tag(page_text),
+    ))
+}
+
+fn string_candidates(value: &serde_json::Value) -> Option<Vec<String>> {
+    Some(
+        value
+            .as_array()?
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect(),
+    )
 }

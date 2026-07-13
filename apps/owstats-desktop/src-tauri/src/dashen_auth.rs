@@ -1,11 +1,19 @@
 use crate::credential_store::DashenCredentials;
 use anyhow::Result;
 use serde_json::json;
+use std::collections::BTreeSet;
 
 const GET_REPORT_TOKEN_URL: &str = "https://inf.ds.163.com/v1/web/game/report/getReportToken";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BattleTagExtraction {
+    Missing,
+    Found(String),
+    Conflict,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoleIdExtraction {
     Missing,
     Found(String),
     Conflict,
@@ -59,9 +67,54 @@ pub fn extract_role_id(candidates: &[String]) -> Option<String> {
     None
 }
 
+pub fn extract_login_role_id(
+    current_candidates: &[String],
+    storage_candidates: &[String],
+    resource_candidates: &[String],
+) -> RoleIdExtraction {
+    let current_role_ids = extract_role_ids(current_candidates);
+    let auxiliary_role_ids = extract_role_ids(
+        &storage_candidates
+            .iter()
+            .chain(resource_candidates)
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+
+    if current_role_ids.len() > 1 || (current_role_ids.is_empty() && auxiliary_role_ids.len() > 1) {
+        return RoleIdExtraction::Conflict;
+    }
+
+    let Some(current_role_id) = current_role_ids.into_iter().next() else {
+        return RoleIdExtraction::Missing;
+    };
+    if auxiliary_role_ids
+        .iter()
+        .any(|role_id| role_id != &current_role_id)
+    {
+        return RoleIdExtraction::Conflict;
+    }
+
+    RoleIdExtraction::Found(current_role_id)
+}
+
+fn extract_role_ids(candidates: &[String]) -> BTreeSet<String> {
+    let mut role_ids = BTreeSet::new();
+    for candidate in candidates {
+        role_ids.extend(extract_all_digits_after_key(candidate, "role_id"));
+        role_ids.extend(extract_all_digits_after_key(candidate, "roleid"));
+    }
+    role_ids
+}
+
 fn extract_digits_after_key(text: &str, key: &str) -> Option<String> {
+    extract_all_digits_after_key(text, key).into_iter().next()
+}
+
+fn extract_all_digits_after_key(text: &str, key: &str) -> Vec<String> {
     let lower = text.to_ascii_lowercase();
     let mut start = 0;
+    let mut found = Vec::new();
     while let Some(offset) = lower[start..].find(key) {
         let key_end = start + offset + key.len();
         let mut digit_start = None;
@@ -80,35 +133,48 @@ fn extract_digits_after_key(text: &str, key: &str) -> Option<String> {
                 .take_while(|ch| ch.is_ascii_digit())
                 .collect::<String>();
             if digits.len() >= 5 {
-                return Some(digits);
+                start = digit_start + digits.len();
+                found.push(digits);
+                continue;
             }
         }
         start = key_end;
     }
-    None
+    found
 }
 
 pub fn build_collect_candidates_script() -> String {
     r#"
 (() => {
   const pageText = document.documentElement?.innerText ?? '';
-  const values = [];
-  const add = (value) => {
+  const currentValues = [];
+  const storageValues = [];
+  const resourceValues = [];
+  const add = (values, value) => {
     if (value === undefined || value === null) return;
     const text = String(value);
     if (text) values.push(text);
   };
-  add(location.href);
-  add(pageText);
+  add(currentValues, location.href);
+  add(currentValues, pageText);
   for (const storage of [localStorage, sessionStorage]) {
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index);
-      add(key);
-      add(storage.getItem(key));
+      add(storageValues, key);
+      add(storageValues, storage.getItem(key));
     }
   }
-  for (const entry of performance.getEntriesByType('resource')) add(entry.name);
-  return { pageText: pageText, candidates: values.slice(0, 1000) };
+  for (const entry of performance.getEntriesByType('resource')) {
+    add(resourceValues, entry.name);
+  }
+  return {
+    pageText: pageText,
+    roleCandidates: {
+      current: currentValues,
+      storage: storageValues.slice(0, 500),
+      resources: resourceValues.slice(0, 500),
+    },
+  };
 })()
 "#
     .trim()

@@ -5,7 +5,8 @@ use owstats_desktop_lib::credential_store::{
 use owstats_desktop_lib::credentials::LoginIdentityTracker;
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_role_id, is_signature_helper_missing, BattleTagExtraction,
+    extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
+    BattleTagExtraction, RoleIdExtraction,
 };
 use owstats_desktop_lib::login_flow::{LoginPhase, LoginProgress};
 
@@ -149,28 +150,86 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     let script = build_collect_candidates_script();
 
     assert!(script.contains("pageText:"));
-    assert!(script.contains("candidates:"));
+    assert!(script.contains("roleCandidates:"));
+    assert!(script.contains("current:"));
+    assert!(script.contains("storage:"));
+    assert!(script.contains("resources:"));
     assert!(script.contains("location.href"));
     assert!(script.contains("document.documentElement"));
     assert!(script.contains("performance.getEntriesByType"));
     assert!(script.contains("localStorage"));
     assert!(script.contains("sessionStorage"));
-    assert!(
-        script.find("for (const storage").unwrap()
-            < script.find("performance.getEntriesByType").unwrap()
+}
+
+#[test]
+fn login_role_rejects_conflicting_storage_and_resource_without_current_evidence() {
+    let current = vec![
+        "https://ds.163.com/".to_string(),
+        "战网昵称：Second#2222".to_string(),
+    ];
+    let storage = vec![r#"{"roleId":"101101"}"#.to_string()];
+    let resources = vec!["https://new.example/?role_id=202202".to_string()];
+
+    assert_eq!(
+        extract_login_role_id(&current, &storage, &resources),
+        RoleIdExtraction::Conflict
     );
 }
 
 #[test]
-fn current_storage_role_precedes_historical_resource_role() {
-    let candidates = vec![
+fn login_role_rejects_auxiliary_only_evidence_even_when_it_agrees() {
+    let current = vec![
         "https://ds.163.com/".to_string(),
-        "当前页面".to_string(),
-        r#"{"roleId":"202202"}"#.to_string(),
-        "https://old.example/?role_id=101101".to_string(),
+        "战网昵称：Second#2222".to_string(),
+    ];
+    let storage = vec![r#"{"roleId":"101101"}"#.to_string()];
+    let resources = vec!["https://old.example/?role_id=101101".to_string()];
+
+    assert_eq!(
+        extract_login_role_id(&current, &storage, &resources),
+        RoleIdExtraction::Missing
+    );
+}
+
+#[test]
+fn login_role_rejects_auxiliary_role_that_conflicts_with_current_role() {
+    let current = vec![
+        "https://ds.163.com/?role_id=202202".to_string(),
+        "战网昵称：Second#2222".to_string(),
+    ];
+    let storage = vec![r#"{"roleId":"101101"}"#.to_string()];
+
+    assert_eq!(
+        extract_login_role_id(&current, &storage, &[]),
+        RoleIdExtraction::Conflict
+    );
+}
+
+#[test]
+fn login_role_rejects_conflicting_roles_within_current_page_evidence() {
+    let current = vec![
+        "https://ds.163.com/".to_string(),
+        "role_id=101101 role_id=202202 战网昵称：Second#2222".to_string(),
     ];
 
-    assert_eq!(extract_role_id(&candidates), Some("202202".to_string()));
+    assert_eq!(
+        extract_login_role_id(&current, &[], &[]),
+        RoleIdExtraction::Conflict
+    );
+}
+
+#[test]
+fn login_role_accepts_current_role_when_auxiliary_evidence_agrees() {
+    let current = vec![
+        "https://ds.163.com/?role_id=202202".to_string(),
+        "战网昵称：Second#2222".to_string(),
+    ];
+    let storage = vec![r#"{"roleId":"202202"}"#.to_string()];
+
+    assert_eq!(
+        extract_login_role_id(&current, &storage, &[]),
+        RoleIdExtraction::Found("202202".to_string())
+    );
 }
 
 #[test]
