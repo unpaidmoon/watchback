@@ -18,7 +18,7 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
 }
 
 const navLabels = phase6NavItems.map((item) => item.label).join(",");
-assertEqual(navLabels, "指挥台,对局,战报,生涯 MMR,排行", "phase 6 navigation labels");
+assertEqual(navLabels, "对局,战报,生涯 MMR,排行,指挥台", "phase 6 navigation labels");
 assertEqual(phase6NavItems.some((item) => item.path === "/sync"), false, "sync page is removed from capsule navigation");
 assertEqual(typeof getPlayerProfile, "function", "player profile API wrapper exists");
 assertEqual(typeof getUserSettings, "function", "user settings API wrapper exists");
@@ -27,10 +27,17 @@ assertEqual(typeof checkAppUpdate, "function", "update check API wrapper exists"
 assertEqual(typeof logout, "function", "logout API wrapper exists");
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const seasonHealthSource = readFileSync(new URL("../src/features/command-center/SeasonHealthPanel.tsx", import.meta.url), "utf8");
 const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
+assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
+assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
+assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
+assertEqual(appSource.includes("Bell"), false, "global shell removes the non-functional notification bell");
+assertEqual(appSource.includes("preloadDefaultMatchesPage"), false, "global shell no longer preloads matches");
+assertEqual(appSource.includes("<RouteFocusManager />"), true, "global shell manages route hash focus");
 assertEqual(
   /\.phase6CommandCenter\s*\{\s*max-width:\s*var\(--phase6-content-max\);\s*margin-inline:\s*auto;/.test(styles),
   true,
