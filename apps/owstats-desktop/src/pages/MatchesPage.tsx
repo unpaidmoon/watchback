@@ -376,6 +376,22 @@ export function MatchesPage() {
     else if (document.scrollingElement) document.scrollingElement.scrollTop = scrollTop;
   }
 
+  const selectedMatchIndex = selectedMatchId
+    ? matches.findIndex((match) => match.matchId === selectedMatchId)
+    : -1;
+  const previousMatchId = selectedMatchIndex > 0
+    ? matches[selectedMatchIndex - 1]?.matchId ?? null
+    : null;
+  const nextMatchId = selectedMatchIndex >= 0 && selectedMatchIndex < matches.length - 1
+    ? matches[selectedMatchIndex + 1]?.matchId ?? null
+    : null;
+
+  function selectAdjacentMatch(matchId: string | null) {
+    if (!matchId) return;
+    rememberScroll();
+    setSelectedMatchIdSafely(matchId);
+  }
+
   return (
     <div className="matchesPage">
       <PageHeader
@@ -425,6 +441,10 @@ export function MatchesPage() {
           loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
           error={detailStateMatchId === selectedMatchId ? detailError : null}
           matchId={selectedMatchId}
+          hasPrevious={previousMatchId !== null}
+          hasNext={nextMatchId !== null}
+          onPrevious={() => selectAdjacentMatch(previousMatchId)}
+          onNext={() => selectAdjacentMatch(nextMatchId)}
         />
       </section>
     </div>

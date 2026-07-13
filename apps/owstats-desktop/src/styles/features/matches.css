@@ -221,3 +221,261 @@
   color: var(--text-tertiary);
   font-size: 22px;
 }
+
+.phase6CompactDetail {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.phase7CompactArenaDetail {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.matchDetailHeader {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.matchDetailHeaderIdentity,
+.matchDetailHeaderResult,
+.matchDetailHeaderMeta,
+.matchDetailHeaderNavigation {
+  display: flex;
+  align-items: center;
+}
+
+.matchDetailHeaderIdentity {
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.matchDetailHeaderResult {
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.matchDetailHeaderResultMarker {
+  width: 8px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--data-neutral);
+}
+
+.matchDetailHeader.result-win .matchDetailHeaderResultMarker {
+  background: var(--status-success);
+}
+
+.matchDetailHeader.result-loss .matchDetailHeaderResultMarker {
+  background: var(--status-danger);
+}
+
+.matchDetailHeaderCopy {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.matchDetailHeaderCopy h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 18px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchDetailHeaderMeta {
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.matchDetailHeaderScore {
+  color: var(--text-primary);
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.matchDetailHeaderNavigation {
+  gap: var(--space-2);
+}
+
+.matchDetailHeaderNavigation .ghostButton {
+  padding-inline: var(--space-3);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.matchDetailHeaderNavigation .ghostButton:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--data-primary) 30%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-control));
+}
+
+.matchDetailPerformance,
+.matchDetailTeamComparison {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.matchDetailPerformance {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.matchDetailPerformance > div {
+  display: grid;
+  gap: 2px;
+}
+
+.matchDetailPerformance h2,
+.matchDetailTeamComparison > h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 17px;
+}
+
+.matchDetailPerformance p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.matchDetailTeamComparison {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.matchDetailTeamTables {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.matchTeamTable {
+  position: relative;
+  min-width: 0;
+  overflow: visible;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.matchTeamTableMarker {
+  position: absolute;
+  left: -1px;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: var(--data-secondary);
+}
+
+.matchTeamTableMarker.enemy {
+  background: var(--status-danger);
+}
+
+.matchTeamTable h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.matchTeamTable .phase6CompactPlayerRow,
+.matchTeamTable.enemy .phase6CompactPlayerRow {
+  min-height: 68px;
+  padding-right: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--data-secondary);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.matchTeamTable.enemy .phase6CompactPlayerRow {
+  border-left-color: var(--status-danger);
+}
+
+.matchTeamTable .phase6CompactAvatarPlate {
+  min-height: 66px;
+  background: var(--surface-control);
+}
+
+.matchTeamTable .phase6CompactAvatarPlate::after {
+  display: none;
+}
+
+.matchTeamTable .phase6CompactPlayerRow .phase6HeroAvatarShared {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.matchTeamTable .phase6CompactPlayerRow strong,
+.matchTeamTable .phase7CompactRankBadge {
+  color: var(--text-primary);
+}
+
+.matchTeamTable .phase6CompactPlayerName {
+  padding-block: var(--space-2);
+  border-bottom-color: var(--border-subtle);
+}
+
+.matchTeamTable .phase6CompactPlayerMetric small,
+.matchTeamTable .phase6CompactPerkEmpty,
+.matchTeamTable .phase7CompactRankBadge {
+  color: var(--text-secondary);
+}
+
+.matchTeamTable .phase6CompactPerkIcon {
+  border-color: var(--border-subtle);
+}
+
+.matchTeamTable .phase6StatHighlight {
+  color: var(--data-primary);
+}
+
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable:hover,
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--data-primary) 5%, var(--surface-secondary));
+  filter: none;
+}
+
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable:focus-visible {
+  outline: 2px solid var(--data-primary) !important;
+  outline-offset: 2px !important;
+}
+
+.matchTeamTableEmpty {
+  padding: var(--space-4);
+  color: var(--text-secondary);
+  text-align: center;
+}

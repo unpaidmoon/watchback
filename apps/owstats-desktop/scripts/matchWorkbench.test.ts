@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
+import type { MatchDetailView, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const detailHeaderSource = readFileSync(new URL("../src/features/matches/MatchDetailHeader.tsx", import.meta.url), "utf8");
+const teamTableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
 const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCard.tsx", import.meta.url), "utf8");
 const listPaneSource = readFileSync(new URL("../src/features/matches/MatchListPane.tsx", import.meta.url), "utf8");
@@ -43,8 +49,22 @@ assert.equal(
   true,
   "detail errors are only rendered for the selected match that owns the state",
 );
+assert.equal(matchesPageSource.includes("const previousMatchId = selectedMatchIndex > 0"), true, "detail navigation should derive the previous visible match");
+assert.equal(matchesPageSource.includes("const nextMatchId = selectedMatchIndex >= 0"), true, "detail navigation should derive the next visible match");
+assert.equal(matchesPageSource.includes("hasPrevious={previousMatchId !== null}"), true, "detail navigation should expose the previous boundary");
+assert.equal(matchesPageSource.includes("hasNext={nextMatchId !== null}"), true, "detail navigation should expose the next boundary");
 assert.equal(detailPaneSource.includes("CompactMatchDetail"), true, "MatchDetailPane should own compact detail rendering");
 assert.equal(detailPaneSource.includes("选择左侧对局查看详情。"), true, "MatchDetailPane should own the unchanged empty state");
+assert.equal(detailHeaderSource.includes("上一场"), true, "the shared detail header should keep previous navigation visible");
+assert.equal(detailHeaderSource.includes("下一场"), true, "the shared detail header should keep next navigation visible");
+assert.equal(detailHeaderSource.includes("disabled={!hasPrevious}"), true, "previous navigation should remain visibly disabled at the boundary");
+assert.equal(detailHeaderSource.includes("disabled={!hasNext}"), true, "next navigation should remain visibly disabled at the boundary");
+assert.equal(teamTableSource.includes("matchTeamTableMarker"), true, "team tables should use a narrow semantic marker");
+assert.equal(teamTableSource.includes("renderExpansion"), true, "the shared table should preserve arena expansion content");
+assert.match(matchStyleSource, /\.matchTeamTableMarker\s*\{[\s\S]*background:\s*var\(--data-secondary\)/);
+assert.match(matchStyleSource, /\.matchTeamTableMarker\.enemy\s*\{[\s\S]*background:\s*var\(--status-danger\)/);
+assert.match(matchStyleSource, /\.matchTeamTable\.enemy \.phase6CompactPlayerRow\s*\{[\s\S]*border-left-color:\s*var\(--status-danger\)/);
+assert.doesNotMatch(matchStyleSource, /#1e8ee7|#dc304f/i, "feature styles should not restore saturated team-row fills");
 assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), true, "MatchListPane should preserve the timeline ref boundary");
 assert.equal(listPaneSource.includes("<MatchTimeline"), true, "MatchListPane should delegate streak rendering to MatchTimeline");
 
@@ -101,19 +121,126 @@ assert.equal(compactDetailSource.includes("CompactPlayerInsightCard"), false, "c
 assert.equal(compactDetailSource.includes("resolveHeroStatInfo"), false, "compact detail no longer needs hero stat label translation");
 assert.equal(styleSource.includes(".phase6PlayerInsightCard"), false, "styles should remove the slide-out hero stat card");
 
-assert.equal(compactDetailSource.includes("phase6CompactPerkStrip"), true, "compact detail player rows should render perk icons under the player id");
-assert.equal(compactDetailSource.includes("phase6PerkTooltip"), true, "perk icons should expose a visible hover tooltip with descriptions");
-assert.equal(compactDetailSource.includes("player.damageTaken"), true, "compact detail player rows should render damage taken");
-assert.equal(compactDetailSource.includes("player.healingTaken"), true, "compact detail player rows should render healing taken");
-assert.equal(compactDetailSource.includes("player.finalHits"), true, "compact detail player rows should render final hits");
-assert.equal(compactDetailSource.includes("最后一击"), true, "compact detail player rows should label final hits in Chinese");
-assert.equal(compactDetailSource.includes("player.mitigation"), true, "compact detail should render raw mitigation values in player rows");
-assert.equal(compactDetailSource.includes("formatCompactNumber(player.mitigation)"), false, "compact detail should not compact mitigation values in player rows");
+assert.equal(teamTableSource.includes("phase6CompactPerkStrip"), true, "shared player rows should render perk icons under the player id");
+assert.equal(teamTableSource.includes("phase6PerkTooltip"), true, "perk icons should expose a visible hover tooltip with descriptions");
+assert.equal(teamTableSource.includes("player.damageTaken"), true, "shared player rows should render damage taken");
+assert.equal(teamTableSource.includes("player.healingTaken"), true, "shared player rows should render healing taken");
+assert.equal(teamTableSource.includes("player.finalHits"), true, "shared player rows should render final hits");
+assert.equal(teamTableSource.includes("最后一击"), true, "shared player rows should label final hits in Chinese");
+assert.equal(teamTableSource.includes("player.mitigation"), true, "shared player rows should render raw mitigation values");
+assert.equal(teamTableSource.includes("formatCompactNumber(player.mitigation)"), false, "shared player rows should not compact mitigation values");
 assert.equal(compactDetailSource.includes("phase7CompactExpandButton"), false, "compact arena rows should not use a separate expansion button");
-assert.equal(compactDetailSource.includes("phase7CompactPlayerExpandable"), true, "compact arena rows should restore row-click expansion");
+assert.equal(teamTableSource.includes("phase7CompactPlayerExpandable"), true, "compact arena rows should preserve row-click expansion");
 assert.equal(styleSource.includes("minmax(96px, 0.34fr)"), true, "player rows should reserve a compact final-hit column");
 
 assert.equal(compactDetailSource.includes("compactHeroStats"), false, "compact detail should remove hero stat card helpers");
 assert.equal(compactDetailSource.includes("heroUsagePercent"), false, "compact detail should remove hero usage percent helper");
 assert.equal(compactDetailSource.includes("fallbackHeroStats"), false, "compact detail should not synthesize base-field fallback stats");
 assert.equal(compactDetailSource.includes("slice(0, 6)"), true, "compact detail should support 6v6 rows");
+
+assert.ok(
+  compactDetailSource.indexOf("MatchDetailHeader") < compactDetailSource.indexOf("本人表现") &&
+    compactDetailSource.indexOf("本人表现") < compactDetailSource.indexOf("队伍对比") &&
+    compactDetailSource.indexOf("队伍对比") < compactDetailSource.indexOf('title="队友数据"') &&
+    compactDetailSource.indexOf('title="队友数据"') < compactDetailSource.indexOf('title="对手数据"'),
+  "normal detail should keep the agreed information order",
+);
+
+const anonymousPlayer: PlayerRow = {
+  side: "teammate",
+  name: "匿名队友",
+  bnetId: "",
+  rankLabel: null,
+  rankKey: null,
+  heroGuid: "",
+  heroName: "匿名英雄",
+  kills: 12,
+  assists: 8,
+  deaths: 4,
+  damage: 12345,
+  healing: 2345,
+  mitigation: 3456,
+  finalHits: 5,
+  targetTimeSec: 30,
+  healingTaken: 4567,
+  damageTaken: 6789,
+  worth: null,
+  endWorth: null,
+  worthMax: false,
+  modGuids: [],
+  traitGuids: [],
+  hasSourceMaxFlags: false,
+  killMax: false,
+  heroDamageMax: false,
+  cureMax: false,
+  resistDamageMax: false,
+  perks: [],
+  heroStats: [],
+};
+
+const normalDetail: MatchDetailView = {
+  matchId: "anonymous-normal",
+  gameMode: "QuickPlay",
+  modeLabel: "快速比赛",
+  result: "win",
+  resultLabel: "胜利",
+  mapGuid: "",
+  mapName: "匿名地图",
+  heroGuid: "",
+  heroName: "匿名英雄",
+  beginTs: 0,
+  beginLabel: "70/01/01 08:00",
+  teamScore: 3,
+  opponentScore: 1,
+  durationSec: 600,
+  teammates: [anonymousPlayer],
+  enemies: [{ ...anonymousPlayer, side: "enemy", name: "匿名对手" }],
+  arenaDetail: null,
+  evaluation: null,
+  teamAwards: [],
+  sameRoleComparison: null,
+  rawJson: null,
+};
+
+const navigationProps = {
+  hasPrevious: false,
+  hasNext: true,
+  onPrevious: () => undefined,
+  onNext: () => undefined,
+};
+const normalMarkup = renderToStaticMarkup(
+  createElement(CompactMatchDetail, { detail: normalDetail, loading: false, error: null, matchId: normalDetail.matchId, ...navigationProps }),
+);
+assert.match(normalMarkup, /aria-label="普通对局详情"/);
+assert.match(normalMarkup, />本人表现</);
+assert.match(normalMarkup, />队友数据</);
+assert.match(normalMarkup, />对手数据</);
+
+const arenaDetail: MatchDetailView = {
+  ...normalDetail,
+  matchId: "anonymous-arena",
+  gameMode: "LeisureFight",
+  modeLabel: "角斗竞技",
+  arenaDetail: {
+    summary: {
+      key: "summary",
+      label: "角斗汇总",
+      result: "win",
+      resultLabel: "胜利",
+      teamScore: 4,
+      opponentScore: 2,
+      durationSec: 720,
+      beginTs: 0,
+      beginLabel: "70/01/01 08:00",
+      mapGuid: "",
+      mapName: "匿名角斗地图",
+      teammates: [anonymousPlayer],
+      enemies: [{ ...anonymousPlayer, side: "enemy", name: "匿名角斗对手" }],
+    },
+    rounds: [],
+  },
+};
+const arenaMarkup = renderToStaticMarkup(
+  createElement(CompactMatchDetail, { detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps }),
+);
+assert.match(arenaMarkup, /aria-label="角斗对局详情"/);

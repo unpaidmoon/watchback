@@ -19,6 +19,7 @@ assert.equal(arenaHeaderTitle(round), "地图：阿努比斯王座");
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 const detailSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const compactSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const teamTableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 
 assert.equal(styleSource.includes(".phase7ArenaTab + .phase7ArenaTab"), true, "arena tabs should overlap adjacent slants");
 assert.equal(styleSource.includes("gap: 0"), true, "arena selector should not leave gaps between tabs");
@@ -28,8 +29,8 @@ assert.match(
   /\.phase7CompactArenaDetail\s*\{[^}]*grid-template-rows:\s*auto\s+124px\s+minmax\(0,\s*1fr\)/s,
   "compact arena detail should reserve separate rows for tabs, hero banner, and scroll content",
 );
-assert.equal(compactSource.includes("phase7CompactPlayerNameLine"), true, "compact rank should sit in the player id line");
-assert.equal(compactSource.includes("playerHighlightMap"), true, "compact arena rows should use source max highlights");
+assert.equal(teamTableSource.includes("phase7CompactPlayerNameLine"), true, "compact rank should sit in the player id line");
+assert.equal(teamTableSource.includes("playerHighlightMap"), true, "compact arena rows should use source max highlights");
 assert.equal(compactSource.includes("const [expandedCompactArenaPlayerKeys"), true, "compact arena detail expansion state should live in MatchesPage");
 assert.equal(compactSource.includes("setExpandedCompactArenaPlayerKeys(new Set())"), true, "compact arena expansion state should reset when match or slice changes");
 assert.equal(compactSource.includes("function selectCompactArenaSlice"), true, "compact arena slice changes should synchronously clear expansion state");
@@ -38,9 +39,9 @@ assert.equal(detailSource.includes("const [expandedArenaPlayerKeys"), false, "fu
 assert.equal(detailSource.includes('allowExpansion={true}'), false, "full arena detail should not enable expansion in this compact-only slice");
 assert.equal(detailSource.includes("const [expanded, setExpanded] = useState(false)"), false, "player rows should not keep isolated local expansion state");
 assert.equal(compactSource.includes("phase7CompactExpandButton"), false, "compact detail should not show a separate expansion button");
-assert.equal(compactSource.includes("phase7CompactPlayerExpandable"), true, "compact arena player rows should be directly clickable for expansion");
-assert.equal(compactSource.includes("onClick={onToggle}"), true, "compact arena player rows should toggle expansion from the row itself");
-assert.equal(compactSource.includes("aria-expanded={expanded}"), true, "clickable compact arena rows should expose expanded state");
+assert.equal(teamTableSource.includes("phase7CompactPlayerExpandable"), true, "compact arena player rows should be directly clickable for expansion");
+assert.equal(teamTableSource.includes("onClick={onToggle}"), true, "compact arena player rows should toggle expansion from the row itself");
+assert.equal(teamTableSource.includes("aria-expanded={expanded}"), true, "clickable compact arena rows should expose expanded state");
 assert.equal(detailSource.includes('className="phase7ExpandButton"'), false, "full detail should not keep the mistaken expansion button");
 assert.match(styleSource, /\.phase7PlayerCardMain\s*\{[^}]*grid-template-columns:\s*168px\s+minmax\(0,\s*1fr\)/s, "expanded arena rows should reserve stable portrait and content columns");
 assert.match(styleSource, /\.phase6PlayerStats header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s, "expand control should stay in a dedicated header column");
