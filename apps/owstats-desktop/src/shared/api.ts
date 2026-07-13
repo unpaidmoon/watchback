@@ -22,7 +22,7 @@ import type {
   PersonalSeasonReview,
   PlayerProfile,
   PlayerTargetStatus,
-  BindPlayerTargetResult,
+  LoginTargetStatus,
   ClearPlayerTargetResult,
   PlayerSearchOption,
   RankingResponse,
@@ -113,8 +113,20 @@ export function getPlayerTargetStatus() {
   return invoke<PlayerTargetStatus>("get_player_target_status");
 }
 
-export function bindPlayerTarget(bnet: string) {
-  return invoke<BindPlayerTargetResult>("bind_player_target", { request: { bnet } });
+export function getLoginTargetStatus() {
+  return invoke<LoginTargetStatus>("get_login_target_status");
+}
+
+export function confirmLoginTargetSwitch() {
+  return invoke<LoginTargetStatus>("confirm_login_target_switch");
+}
+
+export function keepCurrentPlayerTarget() {
+  return invoke<LoginTargetStatus>("keep_current_player_target");
+}
+
+export function retryLoginTargetBinding() {
+  return invoke<LoginTargetStatus>("retry_login_target_binding");
 }
 
 export function clearPlayerTarget() {

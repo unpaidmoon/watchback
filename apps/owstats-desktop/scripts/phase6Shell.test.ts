@@ -90,7 +90,19 @@ assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data are
 assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads the selected season status from onboarding status");
 assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), false, "command center does not fix the season list");
 assertEqual(onboardingSource.includes("seasonInput"), true, "command center accepts an explicit season number");
-assertEqual(onboardingSource.includes("BattleTag"), true, "command center exposes BattleTag binding");
+assertEqual(onboardingSource.includes("BattleTag"), false, "command center never exposes BattleTag input or manual binding copy");
+assertEqual(onboardingSource.includes('aria-label="BattleTag"'), false, "command center removes the BattleTag input");
+assertEqual(onboardingSource.includes("battleTag"), false, "command center removes BattleTag input state");
+assertEqual(onboardingSource.includes("runBindTarget"), false, "command center removes manual target binding");
+assertEqual(onboardingSource.includes("切换到此账号"), true, "account mismatch offers an explicit switch action");
+assertEqual(onboardingSource.includes("保留原目标"), true, "account mismatch offers an explicit keep action");
+assertEqual(onboardingSource.includes("重新绑定"), true, "retryable binding failure offers a retry action");
+assertEqual(onboardingSource.includes("重新识别"), true, "unidentified account offers a fresh login identification action");
+assertEqual(
+  onboardingSource.includes("credentialReady && Boolean(targetStatus?.syncAllowed)"),
+  true,
+  "season sync requires both ready credentials and an allowed login target",
+);
 assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
 assertEqual(onboardingSource.includes("S21"), false, "command center does not hard-code S21");

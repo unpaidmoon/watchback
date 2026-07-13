@@ -18,13 +18,15 @@ import { useEffect, useState } from "react";
 import {
   cancelDashenLogin,
   checkAppUpdate,
+  confirmLoginTargetSwitch,
   getOnboardingStatus,
   getPersonalSeasonReview,
   getPlayerProfile,
-  getPlayerTargetStatus,
-  bindPlayerTarget,
+  getLoginTargetStatus,
   clearPlayerTarget,
+  keepCurrentPlayerTarget,
   logout,
+  retryLoginTargetBinding,
   startDashenLogin,
   syncSeason,
 } from "../shared/api";
@@ -36,14 +38,16 @@ import { activeBadgeLevel, activeTopAchievements, romanLevels } from "../shared/
 import type { ReviewAchievement } from "../shared/reviewAchievements";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
-import type { CredentialLoginProgress, OnboardingStatus, PersonalSeasonReview, PlayerProfile, PlayerTargetStatus, SyncProgress } from "../shared/types";
+import type { CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PersonalSeasonReview, PlayerProfile, SyncProgress } from "../shared/types";
 
 type DashboardSnapshot = {
   status: OnboardingStatus;
   profile: PlayerProfile;
   review: PersonalSeasonReview | null;
-  targetStatus: PlayerTargetStatus;
+  targetStatus: LoginTargetStatus;
 };
+
+type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
 const PROFILE_REVIEW_SEASON = 22;
 const dashboardCache = new Map<number, DashboardSnapshot>();
@@ -52,13 +56,15 @@ export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [review, setReview] = useState<PersonalSeasonReview | null>(null);
-  const [targetStatus, setTargetStatus] = useState<PlayerTargetStatus | null>(null);
-  const [battleTag, setBattleTag] = useState("");
+  const [targetStatus, setTargetStatus] = useState<LoginTargetStatus | null>(null);
   const [seasonInput, setSeasonInput] = useState("23");
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [cancellingLogin, setCancellingLogin] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +103,7 @@ export function OnboardingPage() {
         getOnboardingStatus(),
         getPlayerProfile(),
         getPersonalSeasonReview(PROFILE_REVIEW_SEASON).catch(() => null),
-        getPlayerTargetStatus(),
+        getLoginTargetStatus(),
       ]);
       const snapshot = { status: nextStatus, profile: nextProfile, review: nextReview, targetStatus: nextTargetStatus };
       dashboardCache.set(PROFILE_REVIEW_SEASON, snapshot);
@@ -121,9 +127,11 @@ export function OnboardingPage() {
     try {
       const result = await startDashenLogin();
       setStatus((current) => (current ? { ...current, credentialStatus: result.status } : current));
+      setTargetStatus(result.target);
+      setNotice(result.target.message);
       await loadDashboard();
     } catch (err) {
-      setError(productErrorMessage(err));
+      setError(`登录或识别失败：${productErrorMessage(err)}。请重新识别。`);
       await loadDashboard();
     } finally {
       setLoggingIn(false);
@@ -131,14 +139,16 @@ export function OnboardingPage() {
   }
 
   async function cancelLogin() {
+    setCancellingLogin(true);
     setError(null);
     try {
       await cancelDashenLogin();
       setLoginProgress({ phase: "cancelled", message: "已取消登录等待。" });
     } catch (err) {
-      setError(productErrorMessage(err));
+      setError(`取消登录失败：${productErrorMessage(err)}。请重试。`);
     } finally {
       setLoggingIn(false);
+      setCancellingLogin(false);
     }
   }
 
@@ -159,36 +169,68 @@ export function OnboardingPage() {
     }
   }
 
-  async function runBindTarget() {
-    const bnet = battleTag.trim();
-    if (!bnet) {
-      setError("请输入 BattleTag，例如 Player#12345");
-      return;
-    }
+  async function runConfirmTargetSwitch() {
+    setTargetAction("confirm");
     setError(null);
     setNotice(null);
     try {
-      const result = await bindPlayerTarget(bnet);
-      setTargetStatus(result.status);
-      setBattleTag("");
-      setNotice("BattleTag 已绑定，可以选择赛季同步");
+      const nextTarget = await confirmLoginTargetSwitch();
+      setTargetStatus(nextTarget);
+      setNotice(nextTarget.message);
     } catch (err) {
-      setError(productErrorMessage(err));
+      setError(`切换目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+    } finally {
+      setTargetAction(null);
+    }
+  }
+
+  async function runKeepCurrentTarget() {
+    setTargetAction("keep");
+    setError(null);
+    setNotice(null);
+    try {
+      const nextTarget = await keepCurrentPlayerTarget();
+      setTargetStatus(nextTarget);
+      setNotice(nextTarget.message);
+    } catch (err) {
+      setError(`保留原目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+    } finally {
+      setTargetAction(null);
+    }
+  }
+
+  async function runRetryTargetBinding() {
+    setTargetAction("retry");
+    setError(null);
+    setNotice(null);
+    try {
+      const nextTarget = await retryLoginTargetBinding();
+      setTargetStatus(nextTarget);
+      setNotice(nextTarget.message);
+    } catch (err) {
+      setError(`重新绑定失败：${productErrorMessage(err)}。请重试或重新识别。`);
+    } finally {
+      setTargetAction(null);
     }
   }
 
   async function runClearTarget() {
+    setTargetAction("clear");
+    setNotice(null);
     setError(null);
     try {
       const result = await clearPlayerTarget();
-      setTargetStatus(result.status);
-      setNotice("已清除当前 BattleTag 目标");
+      setTargetStatus(result.target);
+      setNotice("已清除当前目标，请重新识别登录账号。");
     } catch (err) {
-      setError(productErrorMessage(err));
+      setError(`清除目标失败：${productErrorMessage(err)}。请重试。`);
+    } finally {
+      setTargetAction(null);
     }
   }
 
   async function runLogout() {
+    setLoggingOut(true);
     setNotice(null);
     setError(null);
     try {
@@ -198,7 +240,9 @@ export function OnboardingPage() {
       dashboardCache.delete(PROFILE_REVIEW_SEASON);
       await loadDashboard();
     } catch (err) {
-      setError(productErrorMessage(err));
+      setError(`退出登录失败：${productErrorMessage(err)}。请重试。`);
+    } finally {
+      setLoggingOut(false);
     }
   }
 
@@ -217,7 +261,8 @@ export function OnboardingPage() {
   }
 
   const credentialReady = status?.credentialStatus.state === "ready";
-  const targetReady = targetStatus?.state === "bound";
+  const syncTargetReady = credentialReady && Boolean(targetStatus?.syncAllowed);
+  const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
   const warnings = status?.health.warnings ?? [];
   const displayName = profile?.playerId ?? (status?.credentialStatus.roleId ? `角色 ${status.credentialStatus.roleId}` : "未登录玩家");
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
@@ -244,7 +289,11 @@ export function OnboardingPage() {
   return (
     <section className="workspace onboardingWorkspace phase6CommandCenter">
       {(error || notice) && (
-        <div className={`errorBanner inline phase6RecoverableError ${notice && !error ? "good" : ""}`}>
+        <div
+          className={`errorBanner inline phase6RecoverableError ${notice && !error ? "good" : ""}`}
+          role={error ? "alert" : "status"}
+          aria-live={error ? "assertive" : "polite"}
+        >
           {error ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
           <span>{error ?? notice}</span>
         </div>
@@ -330,13 +379,39 @@ export function OnboardingPage() {
               <section className="syncTargetStrip" aria-label="当前目标玩家">
                 <div className="phase8TargetPlayerSummary">
                   <span className="phase6Eyebrow">当前目标玩家</span>
-                  <strong>{targetReady ? targetStatus?.resolvedBnet ?? targetStatus?.inputBnet : "尚未绑定 BattleTag"}</strong>
-                  <p>{credentialReady ? "登录凭据可用；绑定 BattleTag 后可同步任意单赛季" : status?.credentialStatus.message ?? "请登录网易大神"}</p>
+                  <strong>{targetStatus?.currentBnet ?? targetStatus?.detectedBnet ?? "尚未识别账号"}</strong>
+                  {targetStatus?.state === "switchRequired" && (
+                    <div className="syncTargetComparison" aria-label="账号切换确认">
+                      <span>原目标 <strong>{targetStatus.currentBnet ?? "未知"}</strong></span>
+                      <span>本次账号 <strong>{targetStatus.detectedBnet ?? "未识别"}</strong></span>
+                    </div>
+                  )}
+                  <p>{targetStatus?.message ?? status?.credentialStatus.message ?? "请登录网易大神并自动识别当前账号"}</p>
                 </div>
-                <div className="syncTargetEditor">
-                  <input className="phase8TargetPlayerInput" aria-label="BattleTag" value={battleTag} onChange={(event) => setBattleTag(event.target.value)} placeholder="BattleTag，例如 Player#12345" />
-                  <button className="primaryButton" type="button" onClick={runBindTarget} disabled={!credentialReady}>{targetReady ? "更换目标" : "绑定 BattleTag"}</button>
-                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!targetReady}>清除</button>
+                <div className="syncTargetDecision">
+                  {targetStatus?.state === "ready" && <span className="good">当前目标已确认，可同步</span>}
+                  {targetStatus?.state === "switchRequired" && (
+                    <>
+                      <button className="primaryButton" type="button" onClick={runConfirmTargetSwitch} disabled={targetAction !== null || loggingIn || !targetStatus.canConfirmSwitch}>
+                        {targetAction === "confirm" ? "切换中…" : "切换到此账号"}
+                      </button>
+                      <button className="ghostButton" type="button" onClick={runKeepCurrentTarget} disabled={targetAction !== null || loggingIn}>
+                        {targetAction === "keep" ? "保留中…" : "保留原目标"}
+                      </button>
+                    </>
+                  )}
+                  {targetStatus?.state === "bindFailed" && targetStatus.canRetry ? (
+                    <button className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={targetAction !== null || loggingIn}>
+                      {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
+                    </button>
+                  ) : targetStatus && ["unidentified", "verificationRequired", "mismatchKept", "bindFailed"].includes(targetStatus.state) ? (
+                    <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn || targetAction !== null}>
+                      {loggingIn ? "识别中…" : "重新识别"}
+                    </button>
+                  ) : null}
+                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || targetAction !== null || loggingIn}>
+                    {targetAction === "clear" ? "清除中…" : "清除"}
+                  </button>
                 </div>
               </section>
               <section className="syncSeasonWorkbench" aria-label="赛季同步">
@@ -354,7 +429,7 @@ export function OnboardingPage() {
                     <SeasonStatusCard
                       key={seasonStatus.season}
                       seasonStatus={seasonStatus}
-                      credentialReady={credentialReady && targetReady}
+                      credentialReady={syncTargetReady}
                       syncingSeason={syncingSeason}
                       progress={syncProgress?.season === seasonStatus.season ? syncProgress : null}
                       onSync={() => runSeasonSync(seasonStatus.season)}
@@ -364,23 +439,23 @@ export function OnboardingPage() {
               </section>
 
               <div className="phase6SettingsLauncherGrid syncSecondaryActions">
-                <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn}>
+                <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn || cancellingLogin || targetAction !== null}>
                   <LogIn size={18} />
-                  {credentialReady ? "重新登录" : "登录网易大神"}
+                  {loggingIn ? "登录识别中…" : credentialReady ? "重新登录" : "登录网易大神"}
                 </button>
                 {loggingIn && (
-                  <button className="ghostButton" type="button" onClick={cancelLogin}>
+                  <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
                     <X size={18} />
-                    取消
+                    {cancellingLogin ? "取消中…" : "取消"}
                   </button>
                 )}
                 <button className="ghostButton" type="button" onClick={runUpdateCheck} disabled={checkingUpdate}>
                   <Download size={18} />
                   {checkingUpdate ? "检查中" : "检查更新"}
                 </button>
-                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady}>
+                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || loggingOut}>
                   <LogOut size={18} />
-                  退出登录
+                  {loggingOut ? "退出中…" : "退出登录"}
                 </button>
                 <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setNotice("版本号入口后续提供")} />
                 <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => setNotice("日志文件入口后续提供")} />
