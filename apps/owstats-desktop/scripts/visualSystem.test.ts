@@ -9,10 +9,28 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function declarationsForSelector(css: string, selector: string) {
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = match[1].split(",").map((candidate) => candidate.trim());
+    if (selectors.includes(selector)) return match[2];
+  }
+  assert.fail(`${selector} is present`);
+}
+
+function assertDeclaration(declarations: string, property: string, value: string, message: string) {
+  assert.match(
+    declarations,
+    new RegExp(`(?:^|;)\\s*${escapeRegExp(property)}\\s*:\\s*${escapeRegExp(value)}\\s*;`, "i"),
+    message,
+  );
+}
+
 const tokens = withoutComments(readFileSync(new URL("../src/styles/tokens.css", import.meta.url), "utf8"));
 const base = withoutComments(readFileSync(new URL("../src/styles/base.css", import.meta.url), "utf8"));
 const shell = withoutComments(readFileSync(new URL("../src/styles/shell.css", import.meta.url), "utf8"));
+const shared = withoutComments(readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8"));
 const entry = withoutComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
+const app = withoutComments(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"));
 
 const approvedTokens = {
   "--app-outside": "#F5F5F3",
@@ -70,3 +88,44 @@ assert.deepEqual(
 assert.ok(imports.slice(4).every((path) => path.startsWith("./styles/features/")), "feature styles load after the shell layer");
 
 assert.doesNotMatch(shell, /#ff8a24|#d45f14|blue.*orange|orange.*blue/i, "new shell contains no orange brand or blue-orange gradient");
+
+declarationsForSelector(shared, ".phase6ProductNav a");
+declarationsForSelector(shared, ".phase6ProductNav a.active");
+assert.match(app, /className="appNav phase6ProductNav"/, "App combines the semantic and legacy nav container classes");
+assert.match(app, /isActive\s*\?\s*"appNavLink active"\s*:\s*"appNavLink"/, "App combines semantic nav links with the active state");
+
+const compatibleNavLink = declarationsForSelector(shell, ".phase6ProductNav a.appNavLink");
+for (const [property, value] of Object.entries({
+  color: "var(--text-secondary)",
+  background: "var(--surface-control)",
+  border: "1px solid var(--surface-control)",
+  "border-radius": "var(--radius-control)",
+  "font-size": "13px",
+  "font-weight": "500",
+  "box-shadow": "none",
+})) {
+  assertDeclaration(compatibleNavLink, property, value, `legacy-compatible nav ${property} uses the semantic visual system`);
+}
+
+const compatibleNavHover = declarationsForSelector(shell, ".phase6ProductNav a.appNavLink:hover");
+assertDeclaration(compatibleNavHover, "color", "var(--text-primary)", "legacy-compatible hover uses semantic text");
+assertDeclaration(compatibleNavHover, "background", "var(--surface-secondary)", "legacy-compatible hover uses semantic background");
+
+const compatibleNavFocus = declarationsForSelector(shell, ".phase6ProductNav a.appNavLink:focus-visible");
+assertDeclaration(compatibleNavFocus, "color", "var(--text-primary)", "legacy-compatible focus uses semantic text");
+assertDeclaration(compatibleNavFocus, "background", "var(--surface-secondary)", "legacy-compatible focus uses semantic background");
+
+const compatibleNavActive = declarationsForSelector(shell, ".phase6ProductNav a.appNavLink.active");
+assert.equal(
+  compatibleNavActive,
+  declarationsForSelector(shell, '.phase6ProductNav a.appNavLink[aria-current="page"]'),
+  "class and aria-current active states share one rule",
+);
+assertDeclaration(compatibleNavActive, "color", "var(--action-on-primary)", "legacy-compatible active uses action text");
+assertDeclaration(compatibleNavActive, "background", "var(--action-primary)", "legacy-compatible active uses action background");
+assertDeclaration(compatibleNavActive, "border-color", "var(--action-primary)", "legacy-compatible active uses action border");
+assertDeclaration(compatibleNavActive, "box-shadow", "none", "legacy-compatible active removes the old orange shadow");
+
+const activeRuleIndex = shell.indexOf(".phase6ProductNav a.appNavLink.active");
+assert.ok(activeRuleIndex > shell.indexOf(".phase6ProductNav a.appNavLink:hover"), "active styling wins while hovered");
+assert.ok(activeRuleIndex > shell.indexOf(".phase6ProductNav a.appNavLink:focus-visible"), "active styling wins while focused");
