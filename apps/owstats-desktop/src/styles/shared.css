@@ -1608,6 +1608,7 @@ select {
 
 .phase6CommandCenter {
   max-width: var(--phase6-content-max);
+  margin-inline: auto;
 }
 
 .phase6PlayerPass {
@@ -2149,6 +2150,129 @@ select {
   gap: 12px;
 }
 
+.syncTargetStrip,
+.syncSeasonWorkbench {
+  min-width: 0;
+  border: 1px solid rgb(219 229 240 / 0.9);
+  border-radius: var(--phase6-radius-sm);
+  background: rgb(255 255 255 / 0.82);
+}
+
+.syncTargetStrip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1.25fr);
+  gap: 20px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
+.syncTargetEditor {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.syncSeasonWorkbench {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgb(248 250 252 / 0.9), rgb(255 255 255 / 0.82));
+}
+
+.syncSeasonPicker {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  padding-right: 18px;
+  border-right: 1px solid rgb(219 229 240 / 0.9);
+}
+
+.syncSeasonPicker > div {
+  display: grid;
+  grid-template-columns: auto minmax(104px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.syncSeasonPicker label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--phase6-ink);
+  font-weight: 800;
+  font-size: 22px;
+}
+
+.syncSeasonPicker input {
+  width: 72px;
+  height: 40px;
+  border: 1px solid rgb(203 213 225 / 0.95);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--phase6-ink);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.syncSeasonPicker p {
+  margin: 0;
+  color: var(--phase6-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.syncSeasonWorkbench .phase8SeasonStatusGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.syncSeasonWorkbench .phase8SeasonStatusCard {
+  grid-template-columns: minmax(160px, 0.45fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.syncSeasonWorkbench .phase8SeasonStatusStats,
+.syncSeasonWorkbench .phase8SeasonStatusHeader,
+.syncSeasonWorkbench .phase8SeasonCoverage,
+.syncSeasonWorkbench .phase8SeasonSyncFooter {
+  grid-column: 1 / -1;
+}
+
+.syncSecondaryActions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 920px) {
+  .syncTargetStrip,
+  .syncSeasonWorkbench {
+    grid-template-columns: 1fr;
+  }
+
+  .syncSeasonPicker {
+    padding-right: 0;
+    padding-bottom: 14px;
+    border-right: 0;
+    border-bottom: 1px solid rgb(219 229 240 / 0.9);
+  }
+
+  .syncSecondaryActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .syncTargetEditor {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .syncTargetEditor input {
+    grid-column: 1 / -1;
+  }
+}
+
 .phase8SeasonStatusCard {
   min-width: 0;
   display: grid;
@@ -2195,32 +2319,36 @@ select {
 
 .phase8SeasonStatusStats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
 }
 
 .phase8SeasonStatusStats > span {
   min-width: 0;
-  min-height: 54px;
   display: grid;
   align-content: center;
-  gap: 4px;
-  padding: 8px 9px;
+  gap: 3px;
+  padding: 8px 7px;
   border: 1px solid rgb(219 229 240 / 0.85);
-  border-radius: 10px;
+  border-radius: 9px;
   background: rgb(255 255 255 / 0.74);
 }
 
 .phase8SeasonStatusStats > span > span {
+  overflow: hidden;
   color: var(--phase6-muted);
-  font-size: 12px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .phase8SeasonStatusStats > span > strong {
+  overflow: hidden;
   color: var(--phase6-ink);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .phase8SeasonStatusStats > span.good strong {
@@ -2229,6 +2357,12 @@ select {
 
 .phase8SeasonStatusStats > span.warn strong {
   color: var(--phase6-warn);
+}
+
+@media (max-width: 920px) {
+  .phase8SeasonStatusStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .phase8SeasonCoverage {
@@ -2601,21 +2735,6 @@ select {
 .phase6WorkbenchList .phase6MatchRowSelected {
   border-color: var(--phase6-accent);
   box-shadow: 0 0 0 1px var(--phase6-accent), 0 16px 32px rgb(249 115 22 / 0.16);
-}
-
-.phase6WorkbenchList .phase6MatchRowSelected::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: -1px;
-  width: 0;
-  height: 0;
-  border-top: 10px solid transparent;
-  border-bottom: 10px solid transparent;
-  border-right: 0;
-  border-left: 10px solid var(--phase6-accent);
-  transform: translateY(-50%);
-  z-index: 5;
 }
 
 .phase6WorkbenchList .phase6MatchBanner {
@@ -3934,6 +4053,7 @@ select {
 
 .phase6RankingWorkspace {
   max-width: var(--phase6-content-max);
+  margin-inline: auto;
 }
 
 .phase6RankingToolbar {

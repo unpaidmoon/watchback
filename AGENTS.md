@@ -29,7 +29,7 @@
 
 - UI、错误消息、日志、测试输出、诊断 JSON 和会返回给前端的 raw JSON 都必须递归脱敏 token-like 字段。
 - 任何新增的持久化 payload 或 SQLite raw JSON 都要先确认不会保留敏感字段；仅 Git 忽略不足以构成安全边界。
-- 显示名、英雄、地图等 fallback 不得直接向发布 UI 泄露原始 GUID 或隐私 ID；使用中文稳定兜底。
+- 显示名、英雄、地图等 fallback 不得直接向发布 UI 泄露原始 GUID 或隐私 ID；使用中文稳定兜底。角斗详情的 `traitGuids` 与 `modGuids` 是资产校对例外：无法映射时必须向发布 UI 显示原始 GUID，不能显示“待补充”文本；此例外不得扩展到玩家、英雄、地图、凭据或其他隐私标识。
 
 ## 资源与安装版要求
 
@@ -37,6 +37,13 @@
 - 构建或运行时必需的 JSON、图片、字典必须被跟踪并由 Vite/Tauri 正式打包，或通过 Tauri 的资源目录与 app data 目录解析；不得依赖被 `.gitignore` 忽略的本机文件。
 - 同步、导入与设置必须使用 Tauri `app_data_dir`/资源目录，不得用 `CARGO_MANIFEST_DIR` 推导安装版数据路径。
 - 涉及发布、资源或路径的改动，至少验证干净 checkout 构建和安装后烟测；仅本机 `tauri build` 成功不能证明异机可用。
+
+## 角斗映射协作
+
+- 人工编辑主表：`docs/superpowers/specs/2026-07-13-stadium-asset-mapping.xlsx`。中立单独 sheet、每位英雄各自一个 sheet，固定五列：GUID、装备/异能、名称、描述、资产路径。
+- 主表中的 GUID 使用十进制文本，必须存在；名称、描述、资产路径可以留空。运行时 manifest 与文件名继续使用十六进制 GUID。
+- 用户编辑主表后，以“同步角斗映射表”为指令：先校验十进制 GUID、sheet 归属、资产路径和重复项，再将名称、描述与已验证的资产路径同步到 `assets/stadium/manifest.json`，随后运行 `npm run prepare:assets` 和资源测试。
+- 对于新增或替换图标，用户可以先填可访问的本地源文件路径；同步时将其复制/转换到正式 `assets/stadium/` 路径，并把主表回写为该正式路径。不得把开发机绝对路径写入 manifest 或运行时 UI。
 
 ## 数据库与同步
 

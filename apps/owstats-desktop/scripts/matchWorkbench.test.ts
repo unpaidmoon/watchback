@@ -38,6 +38,11 @@ assert.equal(styleSource.includes("overflow-y: auto"), true, "workbench list sho
 assert.equal(styleSource.includes("grid-template-columns: 380px minmax(0, 1fr)"), true, "workbench should reserve more width for the detail panel");
 assert.equal(styleSource.includes("grid-template-columns: 1fr"), true, "compact player teams should stack vertically");
 assert.equal(styleSource.includes(".phase6CompactDetailScroll"), true, "compact detail should have a scrollable content body");
+assert.doesNotMatch(
+  styleSource,
+  /\.phase6WorkbenchList \.phase6MatchRowSelected::after\s*\{/,
+  "selected row should not add a duplicate orange arrow",
+);
 
 assert.equal(compactDetailSource.includes("expandedPlayerKey,"), false, "compact detail should remove the old player insight expansion state");
 assert.equal(compactDetailSource.includes("expandedCompactArenaPlayerKeys"), true, "compact arena detail may store arena player expansion state");

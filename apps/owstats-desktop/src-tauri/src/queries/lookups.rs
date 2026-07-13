@@ -1,14 +1,26 @@
 use super::*;
 
+const MATCH_FILTER_MODES: &[&str] = &[
+    "Leisure6v6",
+    "LeisurePreset",
+    "SportPreset",
+    "SportOpen",
+    "SportFight",
+    "LeisureFight",
+];
+
 pub(super) fn list_filter_options_impl(db: &OwDatabase) -> Result<FilterOptions> {
     db.initialize()?;
     let conn = db.connect()?;
     Ok(FilterOptions {
         seasons: distinct_i64(&conn, "season")?,
         heroes: distinct_named_options(&conn, "hero_guid", "hero_name", "未知英雄")?,
-        maps: distinct_named_options(&conn, "map_guid", "map_name", "未知地图")?,
+        maps: distinct_map_options(&conn, &map_lookup(&conn)?)?,
         results: distinct_text(&conn, "result")?,
-        modes: distinct_text(&conn, "game_mode")?,
+        modes: MATCH_FILTER_MODES
+            .iter()
+            .map(|mode| (*mode).to_string())
+            .collect(),
     })
 }
 
@@ -94,8 +106,27 @@ pub(super) fn hero_lookup(conn: &rusqlite::Connection) -> Result<HashMap<String,
 pub(super) fn map_lookup(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
     let mut stmt = conn.prepare("SELECT guid, name FROM map_dict")?;
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-    rows.collect::<rusqlite::Result<HashMap<_, _>>>()
-        .map_err(Into::into)
+    let mut maps = rows.collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    for (guid, name) in manual_arena_map_names() {
+        maps.entry(guid.to_string())
+            .or_insert_with(|| name.to_string());
+    }
+    Ok(maps)
+}
+
+pub(super) fn resolved_map_name(
+    map_names: &HashMap<String, String>,
+    map_guid: &str,
+    persisted_name: &str,
+) -> String {
+    map_names
+        .get(map_guid)
+        .cloned()
+        .or_else(|| {
+            let name = persisted_name.trim();
+            (!name.is_empty() && name != map_guid).then(|| name.to_string())
+        })
+        .unwrap_or_else(|| "未知地图".to_string())
 }
 
 pub(super) fn distinct_i64(conn: &rusqlite::Connection, expr: &str) -> Result<Vec<i64>> {
@@ -142,6 +173,21 @@ pub(super) fn distinct_named_options(
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
+}
+
+fn distinct_map_options(
+    conn: &rusqlite::Connection,
+    map_names: &HashMap<String, String>,
+) -> Result<Vec<FilterOption>> {
+    distinct_named_options(conn, "map_guid", "map_name", "未知地图").map(|options| {
+        options
+            .into_iter()
+            .map(|option| FilterOption {
+                label: resolved_map_name(map_names, &option.id, &option.label),
+                id: option.id,
+            })
+            .collect()
+    })
 }
 
 pub(super) fn non_empty(value: &Option<String>) -> Option<String> {
@@ -196,6 +242,23 @@ pub(super) fn fallback_name(value: String, guid: &str, fallback: &str) -> String
     } else {
         value
     }
+}
+
+pub(super) fn manual_arena_map_name(guid: &str) -> Option<&'static str> {
+    manual_arena_map_names()
+        .iter()
+        .find_map(|(item_guid, name)| (*item_guid == guid).then_some(*name))
+}
+
+fn manual_arena_map_names() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("576460752303428183", "泰晤士区"),
+        ("576460752303428209", "火药桶矿井"),
+        ("576460752303428223", "绿洲城 - 花园"),
+        ("576460752303428272", "埃斯佩兰萨"),
+        ("576460752303428212", "塞伦扎"),
+        ("576460752303428683", "漓江塔 - 夜市"),
+    ]
 }
 
 pub(super) fn result_label(result: &str) -> &'static str {

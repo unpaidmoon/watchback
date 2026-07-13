@@ -2,6 +2,7 @@ import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-rea
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
+import { resolveHeroDisplayName, resolveMapDisplayName } from "../shared/assets";
 import { HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import {
@@ -18,7 +19,6 @@ type RankingTab = "heroes" | "maps";
 
 const heroSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
 const mapSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
-const selectableSeasons = [23, 22, 21] as const;
 
 export function createLatestRankingRequestGuard() {
   let latestRequest = 0;
@@ -73,8 +73,13 @@ export function RankingPage() {
       .then((nextRanking) => {
         if (!rankingRequestGuard.current.isCurrent(request)) return;
         setRanking(nextRanking);
-        if (selectedSeason === undefined && nextRanking.season) {
-          setSelectedSeason(nextRanking.season);
+        const nextSeason = nextRanking.season ?? undefined;
+        if (nextSeason !== selectedSeason) {
+          setSelectedSeason(nextSeason);
+          const nextParams = new URLSearchParams(params);
+          if (nextSeason === undefined) nextParams.delete("season");
+          else nextParams.set("season", String(nextSeason));
+          setParams(nextParams, { replace: true });
         }
       })
       .catch((err) => {
@@ -88,7 +93,14 @@ export function RankingPage() {
   }, [selectedSeason]);
 
   const rows = useMemo(() => {
-    const source = tab === "maps" ? ranking?.maps ?? [] : ranking?.heroes ?? [];
+    const source = (tab === "maps" ? ranking?.maps ?? [] : ranking?.heroes ?? []).map((row) => ({
+      ...row,
+      name: tab === "maps" ? resolveMapDisplayName(row.key, row.name) : resolveHeroDisplayName(row.key, row.name),
+      bestHeroName:
+        tab === "maps" && row.bestHeroName
+          ? resolveHeroDisplayName(row.bestHeroGuid, row.bestHeroName)
+          : row.bestHeroName,
+    }));
     const keyword = search.trim().toLowerCase();
     const filtered = keyword
       ? source.filter((row) => {
@@ -100,6 +112,7 @@ export function RankingPage() {
   }, [ranking, search, sort, tab]);
 
   const sourceCount = tab === "maps" ? ranking?.maps.length ?? 0 : ranking?.heroes.length ?? 0;
+  const availableSeasons = ranking?.availableSeasons ?? [];
 
   function switchTab(next: RankingTab) {
     setTab(next);
@@ -148,8 +161,12 @@ export function RankingPage() {
         </label>
         <label className="seasonSelect phase8SeasonSelect">
           <span>赛季</span>
-          <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(Number(event.target.value))}>
-            {selectableSeasons.map((season) => (
+          <select
+            value={selectedSeason ?? ""}
+            disabled={availableSeasons.length === 0}
+            onChange={(event) => changeSeason(Number(event.target.value))}
+          >
+            {availableSeasons.map((season) => (
               <option key={season} value={season}>
                 S{season}
               </option>
@@ -171,7 +188,7 @@ export function RankingPage() {
 export function parseSeasonParam(value: string | null) {
   if (!value) return undefined;
   const season = Number(value);
-  return selectableSeasons.includes(season as (typeof selectableSeasons)[number]) ? season : undefined;
+  return Number.isInteger(season) && season > 0 ? season : undefined;
 }
 
 function RankingTable({

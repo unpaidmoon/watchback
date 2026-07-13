@@ -1,0 +1,4 @@
+﻿填写状态,回合开始时间,对局列表时间,第几回合,缺少什么,mapGuid(文本),S23出现次数,当前比分(本方-对方),模式,人工确认名称,截图或图片文件,备注
+待人工补全,2026/7/12 16:50,2026/7/12 17:01,1,mapGuid到专属预览图映射；本地专属预览图文件；地图名称,576460752303428223,12,0-1,SportFight,绿洲城 - 花园,"""D:\Codex\OW_data\owstats-local\assets\maps\oasis3.png""",来源：2026-07-12 SQLite 数据库 roundCountList
+待人工补全,2026/7/12 16:19,2026/7/12 16:38,4,mapGuid到专属预览图映射；本地专属预览图文件；地图名称,576460752303428212,24,2月2日,SportFight,塞伦扎,"""D:\Codex\OW_data\owstats-local\assets\maps\serenza.png""",来源：2026-07-12 SQLite 数据库 roundCountList
+待人工补全,2026/7/12 15:16,2026/7/12 15:33,1,mapGuid到专属预览图映射；本地专属预览图文件；地图名称,576460752303428683,12,0-1,SportFight,漓江塔 - 夜市,"""D:\Codex\OW_data\owstats-local\assets\maps\lijiangtower2.png""",来源：2026-07-12 SQLite 数据库 roundCountList

@@ -29,7 +29,7 @@ export function SeasonStatusCard({
     <article className="phase8SeasonStatusCard">
       <div className="phase8SeasonStatusHeader">
         <div>
-          <span className="phase6Eyebrow">固定赛季</span>
+          <span className="phase6Eyebrow">当前赛季</span>
           <h3>{`S${seasonStatus.season}`}</h3>
         </div>
         <span className={credentialReady ? "good" : "warn"}>{statusLabel}</span>
@@ -40,7 +40,7 @@ export function SeasonStatusCard({
         <DataFact label="普通对局" value={`${seasonStatus.normalMatchCount} 场`} tone="neutral" />
         <DataFact label="角斗对局" value={`${seasonStatus.arenaMatchCount} 场`} tone="neutral" />
         <DataFact label="待补详情" value={`${seasonStatus.failedDetailCount} 条`} tone={seasonStatus.failedDetailCount > 0 ? "warn" : "good"} />
-        <DataFact label="最近同步/导入" value={formatTimestamp(seasonStatus.lastSyncedOrImportedAt)} tone={seasonStatus.lastSyncedOrImportedAt ? "neutral" : "warn"} />
+        <DataFact label="最近同步/导入" value={formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)} tone={seasonStatus.lastSyncedOrImportedAt ? "neutral" : "warn"} />
       </div>
       <div className="phase8SeasonCoverage">
         <div>
@@ -57,7 +57,7 @@ export function SeasonStatusCard({
             ? readableSyncProgress(progress)
             : !credentialReady
               ? "登录后可同步"
-              : "当前登录账号可用"}
+              : "当前目标可同步"}
         </span>
         <button className="primaryButton" type="button" onClick={onSync} disabled={!credentialReady || isSyncBlocked || isSyncing}>
           <RefreshCw size={18} />
@@ -89,4 +89,9 @@ export function formatTimestamp(value: string | null | undefined) {
 
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+export function formatCompactTimestamp(value: string | null | undefined) {
+  const formatted = formatTimestamp(value);
+  return /^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}$/.test(formatted) ? formatted.slice(5) : formatted;
 }

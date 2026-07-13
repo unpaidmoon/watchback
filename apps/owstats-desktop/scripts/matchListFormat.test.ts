@@ -31,6 +31,17 @@ const baseMatch: MatchSummary = {
 
 assert.equal(formatScoreLine(baseMatch), "胜：3-0");
 assert.equal(formatMatchBannerTitle(baseMatch), "苏拉瓦萨 \\ 闪点作战");
+assert.equal(
+  formatMatchBannerTitle({
+    ...baseMatch,
+    matchKind: "fight",
+    gameMode: "SportFight",
+    modeLabel: "角斗竞技",
+    mapGuid: "576460752303428223",
+    mapName: "绿洲城 - 花园",
+  }),
+  "角斗竞技",
+);
 assert.equal(formatCompactStat(5960), "5960");
 assert.equal(formatCompactStat(15000), "1.5w");
 assert.equal(formatCompactStat(10000), "1w");

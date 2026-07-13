@@ -79,6 +79,9 @@ pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<M
     let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
     let hero_names = hero_lookup(&conn)?;
     let map_names = map_lookup(&conn)?;
+    let display_map_name = map_guid
+        .as_deref()
+        .map(|guid| resolved_map_name(&map_names, guid, map_name.as_deref().unwrap_or_default()));
     let arena_detail = if match_kind == "fight" {
         build_arena_detail(data, result.as_deref(), begin_ts, &hero_names, &map_names)
     } else {
@@ -115,7 +118,7 @@ pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<M
         game_mode,
         result,
         map_guid,
-        map_name,
+        map_name: display_map_name,
         hero_guid,
         hero_name,
         begin_label: begin_ts.map(format_begin_ts),

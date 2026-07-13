@@ -6,26 +6,26 @@ use std::collections::HashMap;
 
 pub fn get_rankings(db: &OwDatabase, season: Option<i64>) -> Result<RankingResponse> {
     db.initialize()?;
-    let selected = season.or_else(|| latest_season(db).ok().flatten());
+    let available_seasons = available_seasons(db)?;
+    let selected = season
+        .filter(|requested| available_seasons.contains(requested))
+        .or_else(|| available_seasons.first().copied());
     Ok(RankingResponse {
         season: selected,
+        available_seasons,
         heroes: ranking_rows(db, selected, "hero_guid", "COALESCE(hero_name, hero_guid)")?,
         maps: map_rows_with_labels(db, selected)?,
     })
 }
 
-fn latest_season(db: &OwDatabase) -> Result<Option<i64>> {
+fn available_seasons(db: &OwDatabase) -> Result<Vec<i64>> {
     let conn = db.connect()?;
-    let season = conn.query_row(
-        "SELECT season FROM matches WHERE bucket='preset' ORDER BY season DESC LIMIT 1",
-        [],
-        |row| row.get(0),
-    );
-    match season {
-        Ok(value) => Ok(Some(value)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(error) => Err(error.into()),
-    }
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT season FROM matches WHERE bucket='preset' ORDER BY season DESC",
+    )?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 fn map_rows_with_labels(db: &OwDatabase, season: Option<i64>) -> Result<Vec<RankingRow>> {

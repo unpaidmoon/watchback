@@ -63,7 +63,7 @@ fn seed_error(db: &OwDatabase, season: i64, match_id: &str) {
 }
 
 #[test]
-fn command_center_status_returns_fixed_empty_seasons() {
+fn command_center_status_returns_no_seasons_for_an_empty_database() {
     let db = status_db();
 
     let status = get_onboarding_status(&db, OnboardingStatusRequest { season: None }).unwrap();
@@ -73,16 +73,7 @@ fn command_center_status_returns_fixed_empty_seasons() {
         .iter()
         .map(|item| item.season)
         .collect::<Vec<_>>();
-    assert_eq!(seasons, vec![21, 22, 23]);
-    assert!(status.season_statuses.iter().all(|item| {
-        item.match_count == 0
-            && item.detail_count == 0
-            && item.normal_match_count == 0
-            && item.arena_match_count == 0
-            && item.failed_detail_count == 0
-            && item.coverage_percent == 0
-            && item.last_synced_or_imported_at.is_none()
-    }));
+    assert!(seasons.is_empty());
 }
 
 #[test]
@@ -109,24 +100,12 @@ fn command_center_status_does_not_fabricate_missing_seasons() {
     seed_error(&db, 22, "s22-arena");
 
     let status = get_onboarding_status(&db, OnboardingStatusRequest { season: Some(22) }).unwrap();
-    let s21 = status
-        .season_statuses
-        .iter()
-        .find(|item| item.season == 21)
-        .unwrap();
     let s22 = status
         .season_statuses
         .iter()
         .find(|item| item.season == 22)
         .unwrap();
-    let s23 = status
-        .season_statuses
-        .iter()
-        .find(|item| item.season == 23)
-        .unwrap();
-
-    assert_eq!(s21.match_count, 0);
-    assert_eq!(s23.match_count, 0);
+    assert_eq!(status.season_statuses.len(), 1);
     assert_eq!(s22.match_count, 2);
     assert_eq!(s22.detail_count, 1);
     assert_eq!(s22.normal_match_count, 1);

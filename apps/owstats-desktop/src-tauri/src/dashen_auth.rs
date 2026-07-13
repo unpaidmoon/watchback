@@ -134,12 +134,6 @@ pub fn build_get_report_token_script(role_id: &str, server: i64) -> String {
     status: resp.status,
     role_id: String(result.roleId || payload.roleId || ''),
     token: String(result.token || ''),
-    customer_token: String(
-      result.customerToken ||
-      result.customer_token ||
-      result.customer?.token ||
-      ''
-    ),
     error: result.token ? '' : String(json.msg || json.message || 'token missing'),
   }};
 }})()
@@ -182,17 +176,10 @@ pub fn credentials_from_report_result(
         .and_then(|item| item.as_str())
         .unwrap_or(fallback_role_id)
         .parse::<i64>()?;
-    let customer_token = result
-        .get("customer_token")
-        .or_else(|| result.get("customerToken"))
-        .and_then(|item| item.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
     Ok(Some(DashenCredentials {
         role_id,
         token: token.to_string(),
-        customer_token,
+        customer_token: None,
         dts: None,
         server,
         saved_at: saved_at.to_string(),

@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
-use rusqlite::{Connection, Transaction};
+use chrono::Utc;
+use rusqlite::{params, Connection, Transaction};
+use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 struct Migration {
     version: i64,
@@ -29,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 4,
         name: "sync error latest snapshot",
         apply: migrate_v4,
+    },
+    Migration {
+        version: 5,
+        name: "built-in map dictionary backfill",
+        apply: migrate_v5,
     },
 ];
 
@@ -101,6 +108,52 @@ fn migrate_v4(transaction: &Transaction<'_>) -> Result<()> {
                 IFNULL(message, '')
             );
         "#,
+    )?;
+    Ok(())
+}
+
+fn migrate_v5(transaction: &Transaction<'_>) -> Result<()> {
+    let lookup: Value =
+        serde_json::from_str(include_str!("../../../runtime-config/ow-lookups.json"))?;
+    let maps = lookup
+        .get("maps")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow!("内置地图字典缺少 maps"))?;
+    let now = Utc::now().to_rfc3339();
+    for (guid, item) in maps {
+        let Some(name) = item
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        transaction.execute(
+            r#"
+            INSERT INTO map_dict (guid, name, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(guid) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at
+            "#,
+            params![guid, name, now],
+        )?;
+    }
+    transaction.execute(
+        r#"
+        UPDATE matches
+        SET map_name = (
+            SELECT name
+            FROM map_dict
+            WHERE map_dict.guid = matches.map_guid
+        )
+        WHERE (map_name IS NULL OR TRIM(map_name) = '' OR map_name = map_guid)
+          AND EXISTS (
+            SELECT 1
+            FROM map_dict
+            WHERE map_dict.guid = matches.map_guid
+          )
+        "#,
+        [],
     )?;
     Ok(())
 }
