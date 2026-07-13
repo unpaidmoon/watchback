@@ -141,6 +141,26 @@ impl LoginTargetCoordinator {
         )
     }
 
+    fn replace_persisted_ready(
+        &self,
+        source_role_id: i64,
+        current_bnet: &str,
+    ) -> LoginTargetStatus {
+        self.replace(
+            source_role_id,
+            None,
+            status(
+                "ready",
+                None,
+                Some(current_bnet),
+                "已验证当前登录账号与已保存目标一致，可以同步赛季数据。",
+                true,
+                false,
+                false,
+            ),
+        )
+    }
+
     pub fn replace_switch_required(
         &self,
         source_role_id: i64,
@@ -241,7 +261,7 @@ impl LoginTargetCoordinator {
         };
         let current_bnet = target_display_bnet(&target);
         if target_matches_login_role(&target, credentials.role_id) {
-            self.replace_ready(credentials.role_id, &current_bnet, &current_bnet)
+            self.replace_persisted_ready(credentials.role_id, &current_bnet)
         } else {
             self.replace_verification_required(
                 credentials.role_id,

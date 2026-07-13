@@ -5,8 +5,8 @@ use owstats_desktop_lib::login_target::{
     TargetAction, SYNC_TARGET_CONFIRMATION_ERROR,
 };
 use owstats_desktop_lib::player_target::{
-    read_player_target_for_path, save_player_target_for_path, target_matches_login_role,
-    PlayerTarget,
+    clear_player_target_for_path, read_player_target_for_path, save_player_target_for_path,
+    target_matches_login_role, PlayerTarget,
 };
 use owstats_desktop_lib::{CredentialLoginResult, CredentialStatus, LoginTargetStatus};
 use std::io::{Read, Write};
@@ -252,6 +252,44 @@ fn clearing_a_target_keeps_retry_only_for_a_reliable_current_session_tag() {
     assert_eq!(logged_out.state, "unidentified");
     assert!(!logged_out.can_retry);
     assert_eq!(logged_out.detected_bnet, None);
+}
+
+#[tokio::test]
+async fn persisted_ready_target_never_becomes_a_retryable_detected_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(
+        &target_path,
+        "Injected#9999",
+        101,
+        "synthetic-persisted-key",
+    );
+    let coordinator = LoginTargetCoordinator::default();
+    let credentials = credentials(101);
+
+    let restored = coordinator.status_or_persisted(Some(&credentials), &target_path);
+    let repeated = coordinator.status_or_persisted(Some(&credentials), &target_path);
+    clear_player_target_for_path(&target_path).unwrap();
+    let cleared = coordinator.target_cleared(Some(101));
+    let server = spawn_request_counting_server();
+    let retry = retry_binding(&coordinator, &credentials, &target_path, &server.base_url).await;
+    let requests = server.requests.lock().unwrap().clone();
+    server.join();
+
+    assert_eq!(restored.state, "ready");
+    assert!(restored.sync_allowed);
+    assert_eq!(restored.current_bnet.as_deref(), Some("Injected#9999"));
+    assert_eq!(restored.detected_bnet, None);
+    assert_eq!(repeated.state, "ready");
+    assert_eq!(repeated.detected_bnet, None);
+    assert_eq!(cleared.state, "unidentified");
+    assert!(!cleared.can_retry);
+    assert_eq!(cleared.detected_bnet, None);
+    assert_eq!(retry.state, "verificationRequired");
+    assert!(
+        requests.is_empty(),
+        "persisted BattleTag must never be retried"
+    );
 }
 
 #[tokio::test]
@@ -783,6 +821,72 @@ struct SequenceServer {
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
     handle: Option<thread::JoinHandle<()>>,
+}
+
+struct RequestCountingServer {
+    base_url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl RequestCountingServer {
+    fn join(mut self) {
+        self.stop.take().unwrap().send(()).unwrap();
+        self.handle.take().unwrap().join().unwrap();
+    }
+}
+
+impl Drop for RequestCountingServer {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn spawn_request_counting_server() -> RequestCountingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || loop {
+        if stop_rx.try_recv().is_ok() {
+            break;
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                let request = read_complete_http_request(&mut stream);
+                let first_line = String::from_utf8_lossy(&request)
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                captured.lock().unwrap().push(first_line);
+                stream
+                    .write_all(
+                        b"HTTP/1.1 500 Synthetic Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::yield_now();
+            }
+            Err(error) => panic!("request counting server failed: {error}"),
+        }
+    });
+    RequestCountingServer {
+        base_url: format!("http://{address}"),
+        requests,
+        stop: Some(stop_tx),
+        handle: Some(handle),
+    }
 }
 
 impl SequenceServer {
