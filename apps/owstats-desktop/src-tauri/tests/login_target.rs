@@ -177,6 +177,7 @@ async fn automatic_binding_searches_then_queries_and_persists_only_target_secret
     let persisted = std::fs::read_to_string(&target_path).unwrap();
     assert!(persisted.contains("synthetic-player-key"));
     assert!(!persisted.contains("synthetic-account-secret"));
+    server.join();
 }
 
 #[tokio::test]
@@ -231,6 +232,7 @@ async fn same_tag_from_a_different_role_is_resolved_again_for_current_login() {
     let target = read_player_target_for_path(&target_path).unwrap();
     assert_eq!(target.source_role_id, Some(202));
     assert_eq!(target.customer_token, "new-player-key");
+    server.join();
 }
 
 #[tokio::test]
@@ -288,6 +290,7 @@ async fn confirming_switch_uses_only_the_current_session_detected_tag() {
     let target = read_player_target_for_path(&target_path).unwrap();
     assert_eq!(target.input_bnet, "Second#2000");
     assert_eq!(target.source_role_id, Some(202));
+    server.join();
 }
 
 #[tokio::test]
@@ -344,6 +347,7 @@ async fn bind_failure_keeps_old_target_and_can_retry_with_session_tag() {
             .customer_token,
         "new-player-key"
     );
+    server.join();
 }
 
 #[test]
@@ -499,6 +503,7 @@ async fn direct_binding_does_not_replace_target_when_query_card_fails() {
     let target = read_player_target_for_path(&target_path).unwrap();
     assert_eq!(target.input_bnet, "Old#1000");
     assert_eq!(target.customer_token, "old-player-key");
+    server.join();
 }
 
 #[tokio::test]
@@ -529,6 +534,7 @@ async fn query_card_business_failure_does_not_replace_the_existing_target() {
     let target = read_player_target_for_path(&target_path).unwrap();
     assert_eq!(target.input_bnet, "Old#1000");
     assert_eq!(target.customer_token, "old-player-key");
+    server.join();
 }
 
 #[tokio::test]
