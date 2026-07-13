@@ -39,6 +39,36 @@ const seasonSelectId = season.match(/<select id="([^"]+)"/)?.[1];
 assert.ok(seasonLabelTarget);
 assert.equal(seasonLabelTarget, seasonSelectId);
 
+const seasonWithoutAll = renderToStaticMarkup(
+  createElement(PageSeasonSelect, {
+    value: undefined,
+    seasons: [21, 22, 23],
+    onChange: () => undefined,
+  }),
+);
+assert.match(seasonWithoutAll, /<option value="" disabled="" selected="">请选择赛季<\/option>/);
+assert.doesNotMatch(seasonWithoutAll, /<option value="21" selected="">S21<\/option>/);
+
+const unavailableSeason = renderToStaticMarkup(
+  createElement(PageSeasonSelect, {
+    value: 24,
+    seasons: [21, 22, 23],
+    includeAll: true,
+    onChange: () => undefined,
+  }),
+);
+assert.match(unavailableSeason, /<option value="24" disabled="" selected="">S24 不可用<\/option>/);
+assert.doesNotMatch(unavailableSeason, /<option value="" selected="">全部赛季<\/option>/);
+
+const selectedSeason = renderToStaticMarkup(
+  createElement(PageSeasonSelect, {
+    value: 22,
+    seasons: [21, 22, 23],
+    onChange: () => undefined,
+  }),
+);
+assert.match(selectedSeason, /<option value="22" selected="">S22<\/option>/);
+
 const emptySeasonList = renderToStaticMarkup(
   createElement(PageSeasonSelect, {
     value: undefined,
