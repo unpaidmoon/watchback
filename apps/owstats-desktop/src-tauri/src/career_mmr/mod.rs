@@ -1,5 +1,8 @@
 pub mod evaluation;
 pub mod input;
+pub mod performance;
+pub mod performance_forward;
+pub mod performance_stability;
 pub mod query;
 pub mod rating;
 pub mod replay;
