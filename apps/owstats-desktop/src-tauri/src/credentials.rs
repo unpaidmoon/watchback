@@ -4,7 +4,7 @@ use crate::browser_session::{
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_role_id, is_signature_helper_missing,
+    extract_battle_tag, extract_role_id, is_signature_helper_missing, BattleTagExtraction,
 };
 use crate::login_flow::{LoginPhase, LoginProgress};
 use crate::models::{CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus};
@@ -29,6 +29,50 @@ const SERVER_ID: i64 = 1;
 
 static LOGIN_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LoginIdentityTracker {
+    role_id: Option<String>,
+    battle_tag: Option<String>,
+}
+
+impl LoginIdentityTracker {
+    pub fn observe(&mut self, role_id: Option<String>, battle_tag: BattleTagExtraction) {
+        if let Some(role_id) = role_id {
+            if self.role_id.as_deref() != Some(role_id.as_str()) {
+                self.role_id = Some(role_id);
+                self.battle_tag = None;
+            }
+        }
+
+        match battle_tag {
+            BattleTagExtraction::Missing => {}
+            BattleTagExtraction::Conflict => self.battle_tag = None,
+            BattleTagExtraction::Found(battle_tag) => {
+                if self.role_id.is_some() {
+                    self.battle_tag = Some(battle_tag);
+                }
+            }
+        }
+    }
+
+    pub fn role_id(&self) -> Option<&str> {
+        self.role_id.as_deref()
+    }
+
+    pub fn battle_tag(&self) -> Option<&str> {
+        self.battle_tag.as_deref()
+    }
+
+    pub fn complete(&self) -> Option<(&str, &str)> {
+        self.role_id().zip(self.battle_tag())
+    }
+}
+
+pub struct BrowserLoginOutcome {
+    pub credentials: DashenCredentials,
+    pub detected_bnet: Option<String>,
+}
+
 pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
     Ok(crate::app_paths::AppPaths::from_app(app)?.credentials())
 }
@@ -42,6 +86,15 @@ pub fn clear_credentials(app: &AppHandle) -> Result<bool> {
 }
 
 pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult> {
+    start_dashen_login_capture(app.clone()).await?;
+    let path = credential_path(&app)?;
+
+    Ok(CredentialLoginResult {
+        status: credential_status_for_path(&path)?,
+    })
+}
+
+pub async fn start_dashen_login_capture(app: AppHandle) -> Result<BrowserLoginOutcome> {
     LOGIN_CANCELLED.store(false, Ordering::SeqCst);
 
     emit_login_progress(
@@ -64,15 +117,13 @@ pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult>
         "请在浏览器中完成登录，应用会自动识别登录状态。",
     );
 
-    let credentials = fetch_credentials_from_browser(&app, port).await?;
+    let outcome = fetch_credentials_from_browser(&app, port).await?;
     emit_login_progress(&app, LoginPhase::Saving, "正在保存本地登录凭证。");
     let path = credential_path(&app)?;
-    save_credentials_atomic(&path, &credentials)?;
+    save_credentials_atomic(&path, &outcome.credentials)?;
     emit_login_progress(&app, LoginPhase::Ready, "已保存登录凭证，可以开始同步。");
 
-    Ok(CredentialLoginResult {
-        status: credential_status_for_path(&path)?,
-    })
+    Ok(outcome)
 }
 
 pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResult> {
@@ -101,11 +152,11 @@ pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials 
     }
 }
 
-async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<DashenCredentials> {
+async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<BrowserLoginOutcome> {
     let websocket_url = open_or_find_page(LOGIN_URL, port).await?;
     let mut page = CdpPage::connect(&websocket_url).await?;
     let deadline = Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECONDS);
-    let mut last_role_id: Option<String> = None;
+    let mut identity = LoginIdentityTracker::default();
 
     while Instant::now() < deadline {
         if LOGIN_CANCELLED.load(Ordering::SeqCst) {
@@ -113,18 +164,19 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Da
             return Err(anyhow!("已取消登录等待。"));
         }
 
-        if let Some(role_id) = collect_role_id(&mut page).await {
-            if last_role_id.as_deref() != Some(role_id.as_str()) {
+        if let Some((role_id, battle_tag)) = collect_login_identity(&mut page).await {
+            let previous_role_id = identity.role_id().map(str::to_string);
+            identity.observe(role_id, battle_tag);
+            if identity.role_id().is_some() && identity.role_id() != previous_role_id.as_deref() {
                 emit_login_progress(
                     app,
                     LoginPhase::RoleFound,
                     "已识别玩家身份，正在换取同步凭证。",
                 );
             }
-            last_role_id = Some(role_id);
         }
 
-        if let Some(role_id) = &last_role_id {
+        if let Some(role_id) = identity.role_id() {
             let result = page
                 .evaluate(&build_get_report_token_script(role_id, SERVER_ID), true)
                 .await?;
@@ -134,7 +186,10 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Da
                 SERVER_ID,
                 &Utc::now().to_rfc3339(),
             )? {
-                return Ok(credentials);
+                return Ok(BrowserLoginOutcome {
+                    credentials,
+                    detected_bnet: identity.battle_tag().map(str::to_string),
+                });
             }
 
             if is_signature_helper_missing(&result) {
@@ -172,7 +227,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Da
     }
 
     emit_login_progress(app, LoginPhase::Failed, "登录超时，未能完成凭证换取。");
-    if last_role_id.is_some() {
+    if identity.role_id().is_some() {
         Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
     } else {
         Err(anyhow!(
@@ -181,15 +236,19 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Da
     }
 }
 
-async fn collect_role_id(page: &mut CdpPage) -> Option<String> {
-    let candidates = page
+async fn collect_login_identity(
+    page: &mut CdpPage,
+) -> Option<(Option<String>, BattleTagExtraction)> {
+    let collected = page
         .evaluate(&build_collect_candidates_script(), false)
         .await
         .ok()?;
-    let texts = candidates
+    let page_text = collected.get("pageText")?.as_str()?;
+    let candidates = collected
+        .get("candidates")?
         .as_array()?
         .iter()
         .filter_map(|value| value.as_str().map(str::to_string))
         .collect::<Vec<_>>();
-    extract_role_id(&texts)
+    Some((extract_role_id(&candidates), extract_battle_tag(page_text)))
 }

@@ -91,6 +91,7 @@ fn extract_digits_after_key(text: &str, key: &str) -> Option<String> {
 pub fn build_collect_candidates_script() -> String {
     r#"
 (() => {
+  const pageText = document.documentElement?.innerText ?? '';
   const values = [];
   const add = (value) => {
     if (value === undefined || value === null) return;
@@ -98,7 +99,7 @@ pub fn build_collect_candidates_script() -> String {
     if (text) values.push(text);
   };
   add(location.href);
-  add(document.documentElement ? document.documentElement.innerText : '');
+  add(pageText);
   for (const entry of performance.getEntriesByType('resource')) add(entry.name);
   for (const storage of [localStorage, sessionStorage]) {
     for (let index = 0; index < storage.length; index += 1) {
@@ -107,7 +108,7 @@ pub fn build_collect_candidates_script() -> String {
       add(storage.getItem(key));
     }
   }
-  return values.slice(0, 1000);
+  return { pageText: pageText, candidates: values.slice(0, 1000) };
 })()
 "#
     .trim()

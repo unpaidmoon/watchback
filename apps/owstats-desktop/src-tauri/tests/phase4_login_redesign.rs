@@ -2,6 +2,7 @@ use owstats_desktop_lib::browser_session::{build_browser_command, choose_debug_p
 use owstats_desktop_lib::credential_store::{
     credential_status_for_path, redact_sensitive_text, save_credentials_atomic, DashenCredentials,
 };
+use owstats_desktop_lib::credentials::LoginIdentityTracker;
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
     extract_battle_tag, extract_role_id, is_signature_helper_missing, BattleTagExtraction,
@@ -147,11 +148,102 @@ fn token_script_builds_signed_request_without_embedding_existing_secret() {
 fn collect_script_reads_page_storage_and_resource_urls() {
     let script = build_collect_candidates_script();
 
+    assert!(script.contains("pageText:"));
+    assert!(script.contains("candidates:"));
     assert!(script.contains("location.href"));
     assert!(script.contains("document.documentElement"));
     assert!(script.contains("performance.getEntriesByType"));
     assert!(script.contains("localStorage"));
     assert!(script.contains("sessionStorage"));
+}
+
+#[test]
+fn login_identity_tracker_completes_role_and_battletag_from_one_observation() {
+    let mut tracker = LoginIdentityTracker::default();
+
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    assert_eq!(tracker.role_id(), Some("101"));
+    assert_eq!(tracker.battle_tag(), Some("First#1111"));
+    assert_eq!(tracker.complete(), Some(("101", "First#1111")));
+}
+
+#[test]
+fn login_identity_tracker_keeps_paired_identity_during_signature_page_gap() {
+    let mut tracker = LoginIdentityTracker::default();
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    tracker.observe(None, BattleTagExtraction::Missing);
+
+    assert_eq!(tracker.complete(), Some(("101", "First#1111")));
+}
+
+#[test]
+fn login_identity_tracker_clears_old_battletag_as_soon_as_role_changes() {
+    let mut tracker = LoginIdentityTracker::default();
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    tracker.observe(Some("202".to_string()), BattleTagExtraction::Missing);
+
+    assert_eq!(tracker.role_id(), Some("202"));
+    assert_eq!(tracker.battle_tag(), None);
+    assert_eq!(tracker.complete(), None);
+}
+
+#[test]
+fn login_identity_tracker_conflict_clears_current_battletag() {
+    let mut tracker = LoginIdentityTracker::default();
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    tracker.observe(None, BattleTagExtraction::Conflict);
+
+    assert_eq!(tracker.role_id(), Some("101"));
+    assert_eq!(tracker.battle_tag(), None);
+    assert_eq!(tracker.complete(), None);
+}
+
+#[test]
+fn login_identity_tracker_pairs_new_role_and_battletag_from_same_observation() {
+    let mut tracker = LoginIdentityTracker::default();
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    tracker.observe(
+        Some("202".to_string()),
+        BattleTagExtraction::Found("Second#2222".to_string()),
+    );
+
+    assert_eq!(tracker.complete(), Some(("202", "Second#2222")));
+}
+
+#[test]
+fn login_identity_tracker_does_not_use_storage_candidate_as_battletag() {
+    let page_text = "当前页面没有战网昵称标签";
+    let candidates = vec![
+        "https://ds.163.com/?role_id=101101".to_string(),
+        "战网昵称：Other#9999".to_string(),
+    ];
+    let mut tracker = LoginIdentityTracker::default();
+
+    tracker.observe(extract_role_id(&candidates), extract_battle_tag(page_text));
+
+    assert_eq!(tracker.role_id(), Some("101101"));
+    assert_eq!(tracker.battle_tag(), None);
+    assert_eq!(tracker.complete(), None);
 }
 
 #[test]
