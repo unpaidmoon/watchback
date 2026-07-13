@@ -6,12 +6,14 @@ export type MatchDetailPaneProps = {
   loading: boolean;
   error: string | null;
   matchId: string | null;
+  onBack: () => void;
 } & Pick<CompactMatchDetailProps, "hasPrevious" | "hasNext" | "onPrevious" | "onNext">;
 
 export function MatchDetailPane(props: MatchDetailPaneProps) {
-  const { matchId, ...detailProps } = props;
+  const { matchId, onBack, ...detailProps } = props;
   return (
     <aside className="matchDetailPane phase6WorkbenchDetail" aria-label="对局详情">
+      <button type="button" className="ghostButton matchDetailBackButton" onClick={onBack}>返回对局列表</button>
       {matchId ? (
         <CompactMatchDetail {...detailProps} matchId={matchId} />
       ) : (

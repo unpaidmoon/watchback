@@ -479,3 +479,108 @@
   color: var(--text-secondary);
   text-align: center;
 }
+
+.matchesPage {
+  height: calc(100dvh - var(--app-shell-header-height, 78px));
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: var(--space-4);
+  overflow: hidden;
+}
+
+.matchesPageControls {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.matchesPageControls .phase6FilterBar {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.matchesWorkbench.phase6MatchWorkbench {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 32fr) minmax(0, 68fr);
+  gap: var(--space-4);
+  overflow: hidden;
+}
+
+.matchListPane,
+.matchDetailPane {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.matchListPane > .phase6QaRegion {
+  height: auto;
+  min-height: 100%;
+}
+
+.matchListPane .phase6Timeline,
+.matchDetailPane .phase6CompactDetailScroll {
+  height: auto;
+  overflow: visible;
+  padding-right: 0;
+  overscroll-behavior: auto;
+}
+
+.matchDetailPane .phase6CompactDetail {
+  height: auto;
+  min-height: 100%;
+  grid-template-rows: auto auto;
+}
+
+.matchDetailPane .phase7CompactArenaDetail {
+  grid-template-rows: auto auto auto;
+}
+
+.matchDetailBackButton {
+  display: none;
+}
+
+@media (max-width: 1099px) {
+  .matchesWorkbench.phase6MatchWorkbench {
+    grid-template-columns: 1fr;
+  }
+
+  .matchesWorkbench.detailOpen .matchListPane {
+    display: none;
+  }
+
+  .matchesWorkbench:not(.detailOpen) .matchDetailPane {
+    display: none;
+  }
+
+  .matchDetailBackButton {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: inline-flex;
+    margin-bottom: var(--space-3);
+    border-color: var(--border-subtle);
+    border-radius: var(--radius-control);
+    background: var(--surface-control);
+    color: var(--text-primary);
+    box-shadow: none;
+  }
+
+  .matchDetailHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .matchDetailHeaderNavigation {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}

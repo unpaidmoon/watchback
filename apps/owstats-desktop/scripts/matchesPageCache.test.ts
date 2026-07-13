@@ -571,6 +571,11 @@ assert.deepEqual(
 );
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+assert.match(
+  matchesPageSource,
+  /<div\s+ref=\{timelineRef\}\s+className="matchListPane phase6WorkbenchList"\s+onScroll=\{rememberScroll\}>/,
+  "the cache and anchor ref should stay on the actual list-pane scroll owner",
+);
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const hydrateInitialMatchesSource = matchesPageSource.slice(
   matchesPageSource.indexOf("async function hydrateInitialMatches"),

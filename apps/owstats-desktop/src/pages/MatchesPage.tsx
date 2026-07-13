@@ -78,6 +78,7 @@ export function MatchesPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   useEffect(() => () => {
     pageDataRequestIdRef.current += 1;
@@ -153,6 +154,7 @@ export function MatchesPage() {
       setSelectedDetail(null);
       setDetailError(null);
       setDetailLoading(false);
+      setMobileDetailOpen(false);
       return;
     }
     let cancelled = false;
@@ -392,6 +394,12 @@ export function MatchesPage() {
     setSelectedMatchIdSafely(matchId);
   }
 
+  function selectMatch(matchId: string) {
+    rememberScroll();
+    setSelectedMatchIdSafely(matchId);
+    setMobileDetailOpen(true);
+  }
+
   return (
     <div className="matchesPage">
       <PageHeader
@@ -412,27 +420,23 @@ export function MatchesPage() {
           />
         )}
       />
-      {error && (
-        <div className="errorBanner phase6RecoverableError">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
+      <div className="matchesPageControls">
+        {error && (
+          <div className="errorBanner phase6RecoverableError">
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+        <FilterBar filters={filters} options={options} onChange={setFilters} />
+      </div>
 
-      <FilterBar filters={filters} options={options} onChange={setFilters} />
-
-      <section className="matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench">
-        <div className="matchListPane phase6WorkbenchList">
+      <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${mobileDetailOpen ? "detailOpen" : ""}`}>
+        <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={rememberScroll}>
           <QaRegion id="MAT-LIST">
             <MatchListPane
-              ref={timelineRef}
               matches={matches}
               selectedMatchId={selectedMatchId}
-              onScroll={rememberScroll}
-              onSelect={(matchId) => {
-                rememberScroll();
-                setSelectedMatchIdSafely(matchId);
-              }}
+              onSelect={selectMatch}
             />
           </QaRegion>
         </div>
@@ -445,6 +449,7 @@ export function MatchesPage() {
           hasNext={nextMatchId !== null}
           onPrevious={() => selectAdjacentMatch(previousMatchId)}
           onNext={() => selectAdjacentMatch(nextMatchId)}
+          onBack={() => setMobileDetailOpen(false)}
         />
       </section>
     </div>

@@ -53,6 +53,10 @@ assert.equal(matchesPageSource.includes("const previousMatchId = selectedMatchIn
 assert.equal(matchesPageSource.includes("const nextMatchId = selectedMatchIndex >= 0"), true, "detail navigation should derive the next visible match");
 assert.equal(matchesPageSource.includes("hasPrevious={previousMatchId !== null}"), true, "detail navigation should expose the previous boundary");
 assert.equal(matchesPageSource.includes("hasNext={nextMatchId !== null}"), true, "detail navigation should expose the next boundary");
+assert.equal(matchesPageSource.includes("mobileDetailOpen"), true, "MatchesPage should own the narrow detail-entry state");
+assert.equal(matchesPageSource.includes("setMobileDetailOpen(true)"), true, "selecting a match should open narrow detail");
+assert.equal(detailPaneSource.includes("onBack"), true, "detail pane should expose narrow back navigation");
+assert.equal(detailPaneSource.includes("matchDetailBackButton"), true, "detail pane should render a real narrow back button");
 assert.equal(detailPaneSource.includes("CompactMatchDetail"), true, "MatchDetailPane should own compact detail rendering");
 assert.equal(detailPaneSource.includes("选择左侧对局查看详情。"), true, "MatchDetailPane should own the unchanged empty state");
 assert.equal(detailHeaderSource.includes("上一场"), true, "the shared detail header should keep previous navigation visible");
@@ -65,8 +69,9 @@ assert.match(matchStyleSource, /\.matchTeamTableMarker\s*\{[\s\S]*background:\s*
 assert.match(matchStyleSource, /\.matchTeamTableMarker\.enemy\s*\{[\s\S]*background:\s*var\(--status-danger\)/);
 assert.match(matchStyleSource, /\.matchTeamTable\.enemy \.phase6CompactPlayerRow\s*\{[\s\S]*border-left-color:\s*var\(--status-danger\)/);
 assert.doesNotMatch(matchStyleSource, /#1e8ee7|#dc304f/i, "feature styles should not restore saturated team-row fills");
-assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), true, "MatchListPane should preserve the timeline ref boundary");
+assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), false, "MatchListPane should no longer own the scroll ref");
 assert.equal(listPaneSource.includes("<MatchTimeline"), true, "MatchListPane should delegate streak rendering to MatchTimeline");
+assert.equal(matchesPageSource.includes("ref={timelineRef}"), true, "MatchesPage should attach the cache ref to the pane scroll owner");
 
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
 assert.equal(timelineSource.includes("<MatchListCard"), true, "MatchTimeline should map streak segments to list cards");
@@ -98,6 +103,12 @@ assert.match(matchStyleSource, /\.matchListCardResult\.result-win \.matchListCar
 assert.match(matchStyleSource, /\.matchListCardResult\.result-loss \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-danger\)/);
 assert.match(matchStyleSource, /\.matchListCard \.matchListCardMap[\s\S]*position:\s*static/);
 assert.match(matchStyleSource, /\.matchListCardHeroLine \.phase6VerticalPerformanceTag[\s\S]*writing-mode:\s*horizontal-tb/);
+assert.match(matchStyleSource, /grid-template-columns:\s*minmax\([^)]*,\s*32fr\)\s+minmax\(0,\s*68fr\)/);
+assert.match(matchStyleSource, /@media\s*\(max-width:\s*1099px\)/);
+assert.match(matchStyleSource, /\.matchesWorkbench\.detailOpen\s+\.matchListPane\s*\{[^}]*display:\s*none/s);
+assert.match(matchStyleSource, /\.matchesWorkbench:not\(\.detailOpen\)\s+\.matchDetailPane\s*\{[^}]*display:\s*none/s);
+assert.match(matchStyleSource, /\.matchListPane,\s*\.matchDetailPane\s*\{[^}]*overflow-y:\s*auto/s);
+assert.match(matchStyleSource, /\.matchListPane \.phase6Timeline,\s*\.matchDetailPane \.phase6CompactDetailScroll\s*\{[^}]*overflow:\s*visible/s);
 
 assert.equal(detailPageSource.includes("export function MatchDetailReport"), true, "Match detail page should export reusable detail content for the workbench");
 
