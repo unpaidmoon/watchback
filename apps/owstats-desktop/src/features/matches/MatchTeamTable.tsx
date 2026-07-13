@@ -107,9 +107,9 @@ function MatchTeamPlayerRow({
         )}
       </span>
       <span className="phase6CompactPlayerMetric">
-        <small>K/A/D</small>
+        <small>K/D/A</small>
         <strong>
-          <MatchTeamHighlight value={player.kills} active={highlights.has("kills")} />/{player.assists}/{player.deaths}
+          <MatchTeamHighlight value={player.kills} active={highlights.has("kills")} />/{player.deaths}/{player.assists}
         </strong>
       </span>
       <span className="phase6CompactPlayerMetric phase6CompactPlayerMetricWide">

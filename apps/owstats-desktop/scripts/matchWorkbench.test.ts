@@ -65,6 +65,8 @@ assert.equal(detailHeaderSource.includes("disabled={!hasPrevious}"), true, "prev
 assert.equal(detailHeaderSource.includes("disabled={!hasNext}"), true, "next navigation should remain visibly disabled at the boundary");
 assert.equal(teamTableSource.includes("matchTeamTableMarker"), true, "team tables should use a narrow semantic marker");
 assert.equal(teamTableSource.includes("renderExpansion"), true, "the shared table should preserve arena expansion content");
+assert.equal(teamTableSource.includes("<small>K/D/A</small>"), true, "detail tables should use the same K/D/A order as list cards");
+assert.match(teamTableSource, /value=\{player\.kills\}[\s\S]*\/>\/\{player\.deaths\}\/\{player\.assists\}/);
 assert.match(matchStyleSource, /\.matchTeamTableMarker\s*\{[\s\S]*background:\s*var\(--data-secondary\)/);
 assert.match(matchStyleSource, /\.matchTeamTableMarker\.enemy\s*\{[\s\S]*background:\s*var\(--status-danger\)/);
 assert.match(matchStyleSource, /\.matchTeamTable\.enemy \.phase6CompactPlayerRow\s*\{[\s\S]*border-left-color:\s*var\(--status-danger\)/);
@@ -109,6 +111,11 @@ assert.match(matchStyleSource, /\.matchesWorkbench\.detailOpen\s+\.matchListPane
 assert.match(matchStyleSource, /\.matchesWorkbench:not\(\.detailOpen\)\s+\.matchDetailPane\s*\{[^}]*display:\s*none/s);
 assert.match(matchStyleSource, /\.matchListPane,\s*\.matchDetailPane\s*\{[^}]*overflow-y:\s*auto/s);
 assert.match(matchStyleSource, /\.matchListPane \.phase6Timeline,\s*\.matchDetailPane \.phase6CompactDetailScroll\s*\{[^}]*overflow:\s*visible/s);
+assert.match(matchStyleSource, /\.filterBar\.phase6FilterBar\s*\{[^}]*background:\s*var\(--surface-secondary\)/s);
+assert.match(matchStyleSource, /\.activeFilterChips button\s*\{[^}]*border-radius:\s*999px/s);
+assert.match(matchStyleSource, /\.matchDetailPerformance \.phase6Eyebrow\s*\{[^}]*color:\s*var\(--data-primary\)/s);
+assert.match(matchStyleSource, /\.phase7CompactArenaDetail \.phase7ArenaTab\.active\s*\{[^}]*background:\s*var\(--data-primary\)/s);
+assert.match(matchStyleSource, /\.matchTeamTable \.phase6CompactPlayerMetric strong\s*\{[^}]*white-space:\s*nowrap/s);
 
 assert.equal(detailPageSource.includes("export function MatchDetailReport"), true, "Match detail page should export reusable detail content for the workbench");
 

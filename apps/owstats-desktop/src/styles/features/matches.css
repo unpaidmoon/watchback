@@ -584,3 +584,157 @@
     justify-content: flex-end;
   }
 }
+
+.filterBar.phase6FilterBar {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.filterBar.phase6FilterBar label {
+  color: var(--text-secondary);
+}
+
+.filterBar.phase6FilterBar select,
+.filterBar.phase6FilterBar input,
+.filterBar.phase6FilterBar .phase6PlayerSearchBox {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+}
+
+.matchFilterToolbar.phase6FilterRowPrimary {
+  grid-template-columns: minmax(128px, 0.75fr) minmax(112px, 0.65fr) minmax(220px, 1.5fr) auto auto;
+  align-items: end;
+}
+
+.matchAdvancedToggle,
+.matchClearFilters {
+  width: auto;
+  padding-inline: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.matchAdvancedToggle {
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.matchClearFilters {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.matchAdvancedToggle:hover,
+.matchClearFilters:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--data-primary) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.advancedMatchFilters.phase6FilterRowSecondary {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.activeFilterChips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.activeFilterChips button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--data-primary) 24%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-secondary));
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.activeFilterChips button:hover {
+  background: color-mix(in srgb, var(--data-primary) 10%, var(--surface-secondary));
+}
+
+.matchDetailPerformance .phase6Eyebrow {
+  color: var(--data-primary);
+  font-weight: 700;
+}
+
+.phase7CompactArenaDetail .phase7ArenaSelector {
+  gap: var(--space-2);
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab {
+  min-height: 44px;
+  margin-left: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  clip-path: none;
+  box-shadow: none;
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab strong,
+.phase7CompactArenaDetail .phase7ArenaTab.win:not(.active) strong,
+.phase7CompactArenaDetail .phase7ArenaTab.loss:not(.active) strong {
+  color: var(--text-primary);
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab.active {
+  border-color: var(--data-primary);
+  background: var(--data-primary);
+  color: var(--action-on-primary);
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab.active strong {
+  color: var(--action-on-primary);
+}
+
+.matchTeamTable .phase6CompactPlayerRow,
+.matchTeamTable.enemy .phase6CompactPlayerRow {
+  grid-template-columns:
+    64px minmax(120px, 1fr) minmax(88px, 0.35fr) minmax(160px, 0.7fr)
+    minmax(126px, 0.5fr) minmax(76px, 0.3fr);
+  gap: var(--space-2);
+}
+
+.matchTeamTable .phase6CompactPlayerName strong {
+  font-size: 16px;
+}
+
+.matchTeamTable .phase6CompactPlayerMetric strong {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1099px) {
+  .matchFilterToolbar.phase6FilterRowPrimary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .matchFilterToolbar .phase6PlayerSearchLabel {
+    grid-column: 1 / -1;
+  }
+
+  .advancedMatchFilters.phase6FilterRowSecondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
