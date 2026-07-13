@@ -20,6 +20,12 @@ assert.match(
   /setDetailLoading\(true\);\s*setSelectedDetail\(null\);\s*setDetailError\(null\);\s*void getMatchDetails\(selectedMatchId\)/,
   "MatchesPage should clear stale detail before requesting the newly selected match",
 );
+assert.equal(
+  matchesPageSource.includes("detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}"),
+  true,
+  "MatchesPage should hide detail that does not belong to the current selection before effects run",
+);
+assert.equal(matchesPageSource.includes("detail={selectedDetail}"), false, "MatchesPage should not pass unbound detail to the workbench");
 
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
 assert.equal(timelineSource.includes("phase6MatchRowSelected"), true, "MatchTimeline should render selected state on the active row");

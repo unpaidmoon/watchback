@@ -35,7 +35,12 @@ export function getMatchesPageCache() {
 }
 
 export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
-  matchesPageCache = {
+  matchesPageCache = createMatchesPageCache(patch);
+  return matchesPageCache;
+}
+
+function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
+  return {
     overview: null,
     summary: null,
     options: { seasons: [], heroes: [], maps: [], results: [], modes: [] },
@@ -49,7 +54,6 @@ export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
     ...matchesPageCache,
     ...patch,
   };
-  return matchesPageCache;
 }
 
 export function clearMatchesPageCache() {
@@ -75,10 +79,41 @@ export function chooseInitialMatchId(
   return urlMatchId ?? (canHydrateCache ? cachedMatchId ?? null : null);
 }
 
+export function chooseMatchesPageNavigationState(
+  urlFilters: MatchFilters,
+  urlMatchId: string | null,
+  cache: MatchesPageCache | null,
+  hasExplicitFilters: boolean,
+) {
+  const filters = chooseInitialMatchFilters(urlFilters, cache?.filters, hasExplicitFilters);
+  const canHydrateCache = canHydrateMatchesPageCache(cache, filters, hasExplicitFilters);
+  return {
+    filters,
+    selectedMatchId: chooseInitialMatchId(urlMatchId, cache?.selectedMatchId, canHydrateCache),
+    canHydrateCache,
+  };
+}
+
+export function chooseMatchIdForLoadedMatches(
+  selectedMatchId: string | null,
+  matches: Array<{ matchId: string }>,
+  isCurrentFilterLoaded: boolean,
+) {
+  if (!isCurrentFilterLoaded) return selectedMatchId;
+  if (matches.length === 0) return null;
+  if (selectedMatchId && matches.some((match) => match.matchId === selectedMatchId)) return selectedMatchId;
+  return matches[0].matchId;
+}
+
+export function isLatestMatchRequest(requestId: number, latestRequestId: number) {
+  return requestId === latestRequestId;
+}
+
 export function canHydrateMatchesPageCache(cache: MatchesPageCache | null, filters: MatchFilters, hasExplicitFilters: boolean) {
   if (!cache?.hasLoaded) return false;
+  if (cache.loadedFilterKey === "" || cache.loadedFilterKey !== matchFiltersKey(cache.filters)) return false;
   if (!hasExplicitFilters) return true;
-  return cache.loadedFilterKey !== "" && cache.loadedFilterKey === matchFiltersKey(filters);
+  return cache.loadedFilterKey === matchFiltersKey(filters);
 }
 
 export function selectMatchScrollAnchor(candidates: MatchScrollAnchorCandidate[], containerTop: number): MatchScrollAnchor | null {
@@ -122,7 +157,11 @@ export type MatchesPagePreloadLoaders = {
   listMatchTimeline: (filters: MatchFilters) => Promise<MatchSummary[]>;
 };
 
-export function preloadMatchesPageCache(loaders: MatchesPagePreloadLoaders, filters: MatchFilters = {}) {
+export function preloadMatchesPageCache(
+  loaders: MatchesPagePreloadLoaders,
+  filters: MatchFilters = {},
+  options: { cacheResult?: boolean } = {},
+) {
   const filterKey = matchFiltersKey(filters);
   if (matchesPageCache?.hasLoaded && matchesPageCache.loadedFilterKey === filterKey) {
     return Promise.resolve(matchesPageCache);
@@ -131,17 +170,18 @@ export function preloadMatchesPageCache(loaders: MatchesPagePreloadLoaders, filt
 
   preloadFilterKey = filterKey;
   preloadPromise = Promise.all([loaders.getOverview(), loaders.listMatchFilters(), loaders.listMatchTimeline(filters)])
-    .then(([overview, options, matches]) =>
-      updateMatchesPageCache({
+    .then(([overview, filterOptions, matches]) => {
+      const snapshot = createMatchesPageCache({
         overview,
         summary: overview.importSummary,
-        options,
+        options: filterOptions,
         filters,
         matches,
         loadedFilterKey: filterKey,
         hasLoaded: true,
-      }),
-    )
+      });
+      return options.cacheResult === false ? snapshot : updateMatchesPageCache(snapshot);
+    })
     .finally(() => {
       preloadPromise = null;
       preloadFilterKey = "";

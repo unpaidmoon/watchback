@@ -4,10 +4,13 @@ import {
   canHydrateMatchesPageCache,
   chooseInitialMatchId,
   chooseInitialMatchFilters,
+  chooseMatchIdForLoadedMatches,
+  chooseMatchesPageNavigationState,
   clearMatchesPageCache,
   computeMatchAnchorScrollTop,
   getMatchesPageCache,
   hasExplicitMatchFilterParams,
+  isLatestMatchRequest,
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
@@ -27,6 +30,27 @@ assert.equal(getMatchesPageCache()?.scrollTop, 420, "cache keeps scroll position
 assert.equal(chooseInitialMatchId("url-match", "cached-match", true), "url-match", "URL match id wins over cached selection");
 assert.equal(chooseInitialMatchId(null, "cached-match", true), "cached-match", "cached selection is restored with the cached list");
 assert.equal(chooseInitialMatchId(null, "cached-match", false), null, "cached selection is ignored when the cached list cannot hydrate");
+
+const loadedMatchIds = [{ matchId: "first-match" }, { matchId: "selected-match" }];
+assert.equal(
+  chooseMatchIdForLoadedMatches("url-match", [], false),
+  "url-match",
+  "selection reconciliation preserves a deep-linked match before the current filter loads",
+);
+assert.equal(chooseMatchIdForLoadedMatches("url-match", [], true), null, "a loaded empty list clears selection");
+assert.equal(
+  chooseMatchIdForLoadedMatches("selected-match", loadedMatchIds, true),
+  "selected-match",
+  "a loaded list preserves a selection it contains",
+);
+assert.equal(
+  chooseMatchIdForLoadedMatches("missing-match", loadedMatchIds, true),
+  "first-match",
+  "a loaded list falls back to its first row when selection is missing",
+);
+
+assert.equal(isLatestMatchRequest(1, 2), false, "an older match-list request cannot apply after a newer request starts");
+assert.equal(isLatestMatchRequest(2, 2), true, "the latest match-list request may apply its result");
 
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
@@ -72,6 +96,31 @@ assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, tr
 updateMatchesPageCache({ loadedFilterKey: matchFiltersKey(cachedFilters), hasLoaded: true });
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), true, "cache hydrates normal route re-entry");
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, true), true, "cache hydrates explicit filters when loaded key matches");
+
+const explicitNavigation = chooseMatchesPageNavigationState({ season: 21 }, "url-match", getMatchesPageCache(), true);
+assert.deepEqual(explicitNavigation.filters, { season: 21 }, "an external explicit query replaces cached filters");
+assert.equal(explicitNavigation.selectedMatchId, "url-match", "an external explicit query keeps its URL match id");
+assert.equal(explicitNavigation.canHydrateCache, false, "an external explicit query does not hydrate a different cached list");
+
+const matchOnlyNavigation = chooseMatchesPageNavigationState({}, "url-match", getMatchesPageCache(), false);
+assert.deepEqual(matchOnlyNavigation.filters, cachedFilters, "a matchId-only URL keeps cached filter semantics");
+assert.equal(matchOnlyNavigation.selectedMatchId, "url-match", "a matchId-only URL wins over cached selection");
+assert.equal(matchOnlyNavigation.canHydrateCache, true, "a matchId-only URL can hydrate the valid cached list");
+
+const bareNavigation = chooseMatchesPageNavigationState({}, null, getMatchesPageCache(), false);
+assert.deepEqual(bareNavigation.filters, cachedFilters, "a bare URL restores cached filters");
+assert.equal(bareNavigation.selectedMatchId, "cached-match", "a bare URL restores valid cached selection");
+assert.equal(bareNavigation.canHydrateCache, true, "a bare URL hydrates a valid cached list");
+
+assert.equal(
+  canHydrateMatchesPageCache(
+    { ...getMatchesPageCache()!, loadedFilterKey: matchFiltersKey({ hero: "genji" }) },
+    cachedFilters,
+    false,
+  ),
+  false,
+  "cache does not hydrate when its filter snapshot and loaded key disagree",
+);
 assert.equal(
   canHydrateMatchesPageCache(getMatchesPageCache(), { hero: "genji" }, true),
   false,
@@ -194,6 +243,19 @@ assert.deepEqual(season21LoaderFilters, { season: 21 }, "S21 preload passes the 
 assert.equal(season21Preloaded.loadedFilterKey, matchFiltersKey({ season: 21 }), "S21 preload stores the S21 cache key");
 assert.equal(getMatchesPageCache()?.loadedFilterKey, matchFiltersKey({ season: 21 }), "S21 preload caches its own loaded key");
 
+clearMatchesPageCache();
+const detachedPreload = await preloadMatchesPageCache(
+  {
+    getOverview: async () => overview,
+    listMatchFilters: async () => options,
+    listMatchTimeline: async () => matches,
+  },
+  {},
+  { cacheResult: false },
+);
+assert.equal(detachedPreload.hasLoaded, true, "a detached preload still returns a complete page snapshot");
+assert.equal(getMatchesPageCache(), null, "a detached preload leaves cache commit to the current page request");
+
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 assert.equal(matchesPageSource.includes("window.scrollY"), false, "MatchesPage should not save window scroll for the match list");
@@ -205,6 +267,54 @@ assert.equal(
   true,
   "MatchesPage should listen to document scrolling before navigating away from the list",
 );
+assert.match(
+  matchesPageSource,
+  /const isCurrentFilterLoaded = loadedFilterKeyRef\.current === matchFiltersKey\(filters\);\s*const nextSelectedMatchId = chooseMatchIdForLoadedMatches\(\s*selectedMatchId,\s*matches,\s*isCurrentFilterLoaded,\s*\);/s,
+  "selection reconciliation waits until the current filter list is loaded",
+);
+assert.equal(matchesPageSource.includes("const searchParamsKey = searchParams.toString();"), true, "MatchesPage tracks same-instance URL changes");
+assert.match(
+  matchesPageSource,
+  /useEffect\(\(\) => \{\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) setFilters\(navigation\.filters\);[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
+  "same-instance URL navigation updates filters and selection without redundant state writes",
+);
+assert.equal(matchesPageSource.includes("const matchRequestIdRef = useRef(0);"), true, "MatchesPage tracks the latest timeline request");
+assert.match(
+  matchesPageSource,
+  /useEffect\(\(\) => \(\) => \{\s*matchRequestIdRef\.current \+= 1;\s*\}, \[\]\);/,
+  "leaving MatchesPage invalidates pending timeline requests before a later re-entry",
+);
+assert.match(
+  matchesPageSource,
+  /const cache = await preloadMatchesPageCache\([\s\S]*?\{ cacheResult: false \},\s*\);\s*if \(!isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) return;/,
+  "initial hydration checks request currency before applying its detached preload",
+);
+assert.match(
+  matchesPageSource,
+  /const nextMatches = await listMatchTimeline\(nextFilters\);\s*if \(!isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) return;/,
+  "filter loading checks request currency before applying list results",
+);
+assert.match(
+  matchesPageSource,
+  /refreshMatchEvaluations\(\)\s*\.then\(\(\) => \{\s*if \(!isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) return;\s*void loadMatches\(nextFilters\);\s*\}\)/,
+  "evaluation refresh cannot restart an obsolete initial filter request",
+);
+assert.match(
+  matchesPageSource,
+  /if \(matchFiltersKey\(filters\) === loadedFilterKeyRef\.current\) \{\s*matchRequestIdRef\.current \+= 1;\s*setBusy\(false\);\s*return;\s*\}/,
+  "returning to the loaded filter invalidates an obsolete pending request",
+);
+assert.equal(
+  matchesPageSource.includes("if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;"),
+  true,
+  "cache snapshots are only written for the list loaded under current filters",
+);
+assert.doesNotMatch(
+  matchesPageSource,
+  /updateMatchesPageCache\(\{\s*filters\s*\}\)/,
+  "pending filters must not be mixed into the last completed cache snapshot",
+);
+assert.equal(matchesPageSource.includes("commitLoadedMatches(nextFilters, nextMatches"), true, "successful list requests use one atomic commit path");
 assert.match(
   onboardingSource,
   /import\s*\{[^}]*clearMatchesPageCache[^}]*\}\s*from\s*["']\.\.\/shared\/matchesPageCache["']/s,
