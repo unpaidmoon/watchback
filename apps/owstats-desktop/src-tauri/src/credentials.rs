@@ -33,24 +33,27 @@ static LOGIN_CANCELLED: AtomicBool = AtomicBool::new(false);
 pub struct LoginIdentityTracker {
     role_id: Option<String>,
     battle_tag: Option<String>,
+    stable_observations: u8,
 }
 
 impl LoginIdentityTracker {
     pub fn observe(&mut self, role_id: Option<String>, battle_tag: BattleTagExtraction) {
-        if let Some(role_id) = role_id {
-            if self.role_id.as_deref() != Some(role_id.as_str()) {
-                self.role_id = Some(role_id);
-                self.battle_tag = None;
-            }
-        }
-
-        match battle_tag {
-            BattleTagExtraction::Missing => {}
-            BattleTagExtraction::Conflict => self.battle_tag = None,
-            BattleTagExtraction::Found(battle_tag) => {
-                if self.role_id.is_some() {
+        match (role_id, battle_tag) {
+            (Some(role_id), BattleTagExtraction::Found(battle_tag)) => {
+                if self.role_id.as_deref() == Some(role_id.as_str())
+                    && self.battle_tag.as_deref() == Some(battle_tag.as_str())
+                {
+                    self.stable_observations = self.stable_observations.saturating_add(1);
+                } else {
+                    self.role_id = Some(role_id);
                     self.battle_tag = Some(battle_tag);
+                    self.stable_observations = 1;
                 }
+            }
+            _ => {
+                self.role_id = None;
+                self.battle_tag = None;
+                self.stable_observations = 0;
             }
         }
     }
@@ -64,13 +67,17 @@ impl LoginIdentityTracker {
     }
 
     pub fn complete(&self) -> Option<(&str, &str)> {
+        if self.stable_observations < 2 {
+            return None;
+        }
         self.role_id().zip(self.battle_tag())
     }
 }
 
-pub struct BrowserLoginOutcome {
-    pub credentials: DashenCredentials,
-    pub detected_bnet: Option<String>,
+pub(crate) struct BrowserLoginOutcome {
+    pub(crate) credentials: DashenCredentials,
+    #[allow(dead_code)]
+    pub(crate) detected_battle_tag: Option<String>,
 }
 
 pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
@@ -94,7 +101,7 @@ pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult>
     })
 }
 
-pub async fn start_dashen_login_capture(app: AppHandle) -> Result<BrowserLoginOutcome> {
+pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<BrowserLoginOutcome> {
     LOGIN_CANCELLED.store(false, Ordering::SeqCst);
 
     emit_login_progress(
@@ -157,6 +164,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
     let mut page = CdpPage::connect(&websocket_url).await?;
     let deadline = Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECONDS);
     let mut identity = LoginIdentityTracker::default();
+    let mut locked_identity: Option<(String, String)> = None;
 
     while Instant::now() < deadline {
         if LOGIN_CANCELLED.load(Ordering::SeqCst) {
@@ -164,10 +172,15 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             return Err(anyhow!("已取消登录等待。"));
         }
 
-        if let Some((role_id, battle_tag)) = collect_login_identity(&mut page).await {
-            let previous_role_id = identity.role_id().map(str::to_string);
+        if locked_identity.is_none() {
+            let previous_role_id = identity.complete().map(|(role_id, _)| role_id.to_string());
+            let (role_id, battle_tag) = collect_login_identity(&mut page)
+                .await
+                .unwrap_or((None, BattleTagExtraction::Missing));
             identity.observe(role_id, battle_tag);
-            if identity.role_id().is_some() && identity.role_id() != previous_role_id.as_deref() {
+            if identity.complete().is_some()
+                && identity.complete().map(|(role_id, _)| role_id) != previous_role_id.as_deref()
+            {
                 emit_login_progress(
                     app,
                     LoginPhase::RoleFound,
@@ -176,34 +189,46 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             }
         }
 
-        if let Some(role_id) = identity.role_id() {
+        let request_identity = locked_identity.clone().or_else(|| {
+            identity
+                .complete()
+                .map(|(role_id, battle_tag)| (role_id.to_string(), battle_tag.to_string()))
+        });
+
+        if let Some((role_id, battle_tag)) = request_identity {
             let result = page
-                .evaluate(&build_get_report_token_script(role_id, SERVER_ID), true)
+                .evaluate(&build_get_report_token_script(&role_id, SERVER_ID), true)
                 .await?;
             if let Some(credentials) = credentials_from_report_result(
                 &result,
-                role_id,
+                &role_id,
                 SERVER_ID,
                 &Utc::now().to_rfc3339(),
             )? {
+                let role_matches = credentials.role_id.to_string() == role_id;
                 return Ok(BrowserLoginOutcome {
                     credentials,
-                    detected_bnet: identity.battle_tag().map(str::to_string),
+                    detected_battle_tag: role_matches.then_some(battle_tag),
                 });
             }
 
             if is_signature_helper_missing(&result) {
-                emit_login_progress(
-                    app,
-                    LoginPhase::LoadingSignPage,
-                    "正在打开签名页面以完成凭证换取。",
-                );
-                let script = format!(
-                    "location.href = {}; true",
-                    serde_json::to_string(SIGN_PAGE_URL)?
-                );
-                let _ = page.evaluate(&script, false).await;
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                if locked_identity.is_none() {
+                    locked_identity = Some((role_id, battle_tag));
+                    emit_login_progress(
+                        app,
+                        LoginPhase::LoadingSignPage,
+                        "正在打开签名页面以完成凭证换取。",
+                    );
+                    let script = format!(
+                        "location.href = {}; true",
+                        serde_json::to_string(SIGN_PAGE_URL)?
+                    );
+                    page.evaluate(&script, false).await?;
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                } else {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
             } else {
                 let detail = result
                     .get("error")
@@ -227,7 +252,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
     }
 
     emit_login_progress(app, LoginPhase::Failed, "登录超时，未能完成凭证换取。");
-    if identity.role_id().is_some() {
+    if locked_identity.is_some() || identity.complete().is_some() {
         Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
     } else {
         Err(anyhow!(

@@ -155,10 +155,26 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     assert!(script.contains("performance.getEntriesByType"));
     assert!(script.contains("localStorage"));
     assert!(script.contains("sessionStorage"));
+    assert!(
+        script.find("for (const storage").unwrap()
+            < script.find("performance.getEntriesByType").unwrap()
+    );
 }
 
 #[test]
-fn login_identity_tracker_completes_role_and_battletag_from_one_observation() {
+fn current_storage_role_precedes_historical_resource_role() {
+    let candidates = vec![
+        "https://ds.163.com/".to_string(),
+        "当前页面".to_string(),
+        r#"{"roleId":"202202"}"#.to_string(),
+        "https://old.example/?role_id=101101".to_string(),
+    ];
+
+    assert_eq!(extract_role_id(&candidates), Some("202202".to_string()));
+}
+
+#[test]
+fn login_identity_tracker_requires_two_stable_complete_observations() {
     let mut tracker = LoginIdentityTracker::default();
 
     tracker.observe(
@@ -168,20 +184,52 @@ fn login_identity_tracker_completes_role_and_battletag_from_one_observation() {
 
     assert_eq!(tracker.role_id(), Some("101"));
     assert_eq!(tracker.battle_tag(), Some("First#1111"));
-    assert_eq!(tracker.complete(), Some(("101", "First#1111")));
-}
+    assert_eq!(tracker.complete(), None);
 
-#[test]
-fn login_identity_tracker_keeps_paired_identity_during_signature_page_gap() {
-    let mut tracker = LoginIdentityTracker::default();
     tracker.observe(
         Some("101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
 
+    assert_eq!(tracker.complete(), Some(("101", "First#1111")));
+}
+
+#[test]
+fn login_identity_tracker_invalidates_unlocked_pair_on_missing_observation() {
+    let mut tracker = LoginIdentityTracker::default();
+    for _ in 0..2 {
+        tracker.observe(
+            Some("101".to_string()),
+            BattleTagExtraction::Found("First#1111".to_string()),
+        );
+    }
+    let locked = tracker
+        .complete()
+        .map(|(role_id, battle_tag)| (role_id.to_string(), battle_tag.to_string()));
+
     tracker.observe(None, BattleTagExtraction::Missing);
 
-    assert_eq!(tracker.complete(), Some(("101", "First#1111")));
+    assert_eq!(tracker.complete(), None);
+    assert_eq!(tracker.role_id(), None);
+    assert_eq!(tracker.battle_tag(), None);
+    assert_eq!(locked, Some(("101".to_string(), "First#1111".to_string())));
+}
+
+#[test]
+fn login_identity_tracker_never_pairs_new_tag_with_old_role() {
+    let mut tracker = LoginIdentityTracker::default();
+    for _ in 0..2 {
+        tracker.observe(
+            Some("101".to_string()),
+            BattleTagExtraction::Found("First#1111".to_string()),
+        );
+    }
+
+    tracker.observe(None, BattleTagExtraction::Found("Second#2222".to_string()));
+
+    assert_eq!(tracker.role_id(), None);
+    assert_eq!(tracker.battle_tag(), None);
+    assert_eq!(tracker.complete(), None);
 }
 
 #[test]
@@ -191,10 +239,14 @@ fn login_identity_tracker_clears_old_battletag_as_soon_as_role_changes() {
         Some("101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
 
     tracker.observe(Some("202".to_string()), BattleTagExtraction::Missing);
 
-    assert_eq!(tracker.role_id(), Some("202"));
+    assert_eq!(tracker.role_id(), None);
     assert_eq!(tracker.battle_tag(), None);
     assert_eq!(tracker.complete(), None);
 }
@@ -206,10 +258,14 @@ fn login_identity_tracker_conflict_clears_current_battletag() {
         Some("101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
 
     tracker.observe(None, BattleTagExtraction::Conflict);
 
-    assert_eq!(tracker.role_id(), Some("101"));
+    assert_eq!(tracker.role_id(), None);
     assert_eq!(tracker.battle_tag(), None);
     assert_eq!(tracker.complete(), None);
 }
@@ -221,6 +277,17 @@ fn login_identity_tracker_pairs_new_role_and_battletag_from_same_observation() {
         Some("101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
+    tracker.observe(
+        Some("101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    tracker.observe(
+        Some("202".to_string()),
+        BattleTagExtraction::Found("Second#2222".to_string()),
+    );
+
+    assert_eq!(tracker.complete(), None);
 
     tracker.observe(
         Some("202".to_string()),
@@ -241,7 +308,7 @@ fn login_identity_tracker_does_not_use_storage_candidate_as_battletag() {
 
     tracker.observe(extract_role_id(&candidates), extract_battle_tag(page_text));
 
-    assert_eq!(tracker.role_id(), Some("101101"));
+    assert_eq!(tracker.role_id(), None);
     assert_eq!(tracker.battle_tag(), None);
     assert_eq!(tracker.complete(), None);
 }

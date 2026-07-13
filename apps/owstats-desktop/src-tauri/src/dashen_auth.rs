@@ -100,7 +100,6 @@ pub fn build_collect_candidates_script() -> String {
   };
   add(location.href);
   add(pageText);
-  for (const entry of performance.getEntriesByType('resource')) add(entry.name);
   for (const storage of [localStorage, sessionStorage]) {
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index);
@@ -108,6 +107,7 @@ pub fn build_collect_candidates_script() -> String {
       add(storage.getItem(key));
     }
   }
+  for (const entry of performance.getEntriesByType('resource')) add(entry.name);
   return { pageText: pageText, candidates: values.slice(0, 1000) };
 })()
 "#
