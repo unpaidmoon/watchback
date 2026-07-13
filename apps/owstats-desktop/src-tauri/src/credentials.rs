@@ -4,8 +4,8 @@ use crate::browser_session::{
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_login_role_id, is_signature_helper_missing, BattleTagExtraction,
-    RoleIdExtraction,
+    extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
+    BattleTagExtraction, RoleIdExtraction,
 };
 use crate::login_flow::{LoginPhase, LoginProgress};
 use crate::models::{CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus};
@@ -72,6 +72,41 @@ impl LoginIdentityTracker {
             return None;
         }
         self.role_id().zip(self.battle_tag())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LoginCaptureIdentity {
+    credential_role_id: Option<String>,
+    paired_identity: LoginIdentityTracker,
+}
+
+impl LoginCaptureIdentity {
+    pub fn observe(
+        &mut self,
+        credential_role_id: Option<String>,
+        paired_role_id: RoleIdExtraction,
+        battle_tag: BattleTagExtraction,
+    ) {
+        self.credential_role_id = credential_role_id;
+        let paired_role_id = match paired_role_id {
+            RoleIdExtraction::Found(role_id) => Some(role_id),
+            RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
+        };
+        self.paired_identity.observe(paired_role_id, battle_tag);
+    }
+
+    pub fn credential_role_id(&self) -> Option<&str> {
+        self.credential_role_id.as_deref()
+    }
+
+    pub fn confirmed_pair(&self) -> Option<(&str, &str)> {
+        self.paired_identity.complete()
+    }
+
+    pub fn detected_battle_tag(&self, credential_role_id: &str) -> Option<&str> {
+        self.confirmed_pair()
+            .and_then(|(role_id, battle_tag)| (role_id == credential_role_id).then_some(battle_tag))
     }
 }
 
@@ -164,8 +199,9 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
     let websocket_url = open_or_find_page(LOGIN_URL, port).await?;
     let mut page = CdpPage::connect(&websocket_url).await?;
     let deadline = Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECONDS);
-    let mut identity = LoginIdentityTracker::default();
-    let mut locked_identity: Option<(String, String)> = None;
+    let mut identity = LoginCaptureIdentity::default();
+    let mut locked_credential_role_id: Option<String> = None;
+    let mut locked_paired_identity: Option<(String, String)> = None;
 
     while Instant::now() < deadline {
         if LOGIN_CANCELLED.load(Ordering::SeqCst) {
@@ -173,18 +209,17 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             return Err(anyhow!("已取消登录等待。"));
         }
 
-        if locked_identity.is_none() {
-            let previous_role_id = identity.complete().map(|(role_id, _)| role_id.to_string());
-            let (role_id, battle_tag) = collect_login_identity(&mut page)
-                .await
-                .unwrap_or((RoleIdExtraction::Missing, BattleTagExtraction::Missing));
-            let role_id = match role_id {
-                RoleIdExtraction::Found(role_id) => Some(role_id),
-                RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
-            };
-            identity.observe(role_id, battle_tag);
-            if identity.complete().is_some()
-                && identity.complete().map(|(role_id, _)| role_id) != previous_role_id.as_deref()
+        if locked_credential_role_id.is_none() {
+            let previous_role_id = identity.credential_role_id().map(str::to_string);
+            let (credential_role_id, paired_role_id, battle_tag) =
+                collect_login_identity(&mut page).await.unwrap_or((
+                    None,
+                    RoleIdExtraction::Missing,
+                    BattleTagExtraction::Missing,
+                ));
+            identity.observe(credential_role_id, paired_role_id, battle_tag);
+            if identity.credential_role_id().is_some()
+                && identity.credential_role_id() != previous_role_id.as_deref()
             {
                 emit_login_progress(
                     app,
@@ -194,13 +229,18 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             }
         }
 
-        let request_identity = locked_identity.clone().or_else(|| {
-            identity
-                .complete()
-                .map(|(role_id, battle_tag)| (role_id.to_string(), battle_tag.to_string()))
-        });
+        let request_role_id = locked_credential_role_id
+            .clone()
+            .or_else(|| identity.credential_role_id().map(str::to_string));
 
-        if let Some((role_id, battle_tag)) = request_identity {
+        if let Some(role_id) = request_role_id {
+            let paired_identity = if locked_credential_role_id.is_some() {
+                locked_paired_identity.clone()
+            } else {
+                identity
+                    .confirmed_pair()
+                    .map(|(role_id, battle_tag)| (role_id.to_string(), battle_tag.to_string()))
+            };
             let result = page
                 .evaluate(&build_get_report_token_script(&role_id, SERVER_ID), true)
                 .await?;
@@ -210,16 +250,24 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                 SERVER_ID,
                 &Utc::now().to_rfc3339(),
             )? {
-                let role_matches = credentials.role_id.to_string() == role_id;
+                if credentials.role_id.to_string() != role_id {
+                    return Err(anyhow!("凭证角色与当前登录角色不一致。"));
+                }
+                let detected_battle_tag =
+                    paired_identity.and_then(|(paired_role_id, battle_tag)| {
+                        (paired_role_id == role_id).then_some(battle_tag)
+                    });
                 return Ok(BrowserLoginOutcome {
                     credentials,
-                    detected_battle_tag: role_matches.then_some(battle_tag),
+                    detected_battle_tag,
                 });
             }
 
             if is_signature_helper_missing(&result) {
-                if locked_identity.is_none() {
-                    locked_identity = Some((role_id, battle_tag));
+                if locked_credential_role_id.is_none() {
+                    locked_paired_identity =
+                        paired_identity.filter(|(paired_role_id, _)| paired_role_id == &role_id);
+                    locked_credential_role_id = Some(role_id);
                     emit_login_progress(
                         app,
                         LoginPhase::LoadingSignPage,
@@ -257,7 +305,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
     }
 
     emit_login_progress(app, LoginPhase::Failed, "登录超时，未能完成凭证换取。");
-    if locked_identity.is_some() || identity.complete().is_some() {
+    if locked_credential_role_id.is_some() || identity.credential_role_id().is_some() {
         Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
     } else {
         Err(anyhow!(
@@ -268,7 +316,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
 
 async fn collect_login_identity(
     page: &mut CdpPage,
-) -> Option<(RoleIdExtraction, BattleTagExtraction)> {
+) -> Option<(Option<String>, RoleIdExtraction, BattleTagExtraction)> {
     let collected = page
         .evaluate(&build_collect_candidates_script(), false)
         .await
@@ -281,7 +329,14 @@ async fn collect_login_identity(
         role_candidate_group(role_candidates.get("storage")?)?;
     let (resource_candidates, resource_truncated) =
         role_candidate_group(role_candidates.get("resources")?)?;
+    let credential_candidates = current_candidates
+        .iter()
+        .chain(&storage_candidates)
+        .chain(&resource_candidates)
+        .cloned()
+        .collect::<Vec<_>>();
     Some((
+        extract_role_id(&credential_candidates),
         extract_login_role_id(
             &current_candidates,
             &storage_candidates,

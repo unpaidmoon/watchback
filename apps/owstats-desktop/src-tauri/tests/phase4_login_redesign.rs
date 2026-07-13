@@ -2,7 +2,7 @@ use owstats_desktop_lib::browser_session::{build_browser_command, choose_debug_p
 use owstats_desktop_lib::credential_store::{
     credential_status_for_path, redact_sensitive_text, save_credentials_atomic, DashenCredentials,
 };
-use owstats_desktop_lib::credentials::LoginIdentityTracker;
+use owstats_desktop_lib::credentials::{LoginCaptureIdentity, LoginIdentityTracker};
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
     extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
@@ -247,6 +247,42 @@ fn login_role_rejects_conflict_hidden_after_bounded_auxiliary_evidence() {
         extract_login_role_id(&current, &returned_storage, &[], true),
         RoleIdExtraction::Conflict
     );
+}
+
+#[test]
+fn login_capture_keeps_storage_credential_role_when_battletag_is_missing() {
+    let current = vec!["https://ds.163.com/".to_string()];
+    let storage = vec![r#"{"roleId":"101101"}"#.to_string()];
+    let credential_role_id = extract_role_id(&storage);
+    let paired_role_id = extract_login_role_id(&current, &storage, &[], false);
+    let mut identity = LoginCaptureIdentity::default();
+
+    identity.observe(
+        credential_role_id,
+        paired_role_id,
+        BattleTagExtraction::Missing,
+    );
+
+    assert_eq!(identity.credential_role_id(), Some("101101"));
+    assert_eq!(identity.detected_battle_tag("101101"), None);
+}
+
+#[test]
+fn login_capture_keeps_resource_credential_role_when_battletag_conflicts() {
+    let current = vec!["https://ds.163.com/".to_string()];
+    let resources = vec!["https://api.example/?role_id=202202".to_string()];
+    let credential_role_id = extract_role_id(&resources);
+    let paired_role_id = extract_login_role_id(&current, &[], &resources, false);
+    let mut identity = LoginCaptureIdentity::default();
+
+    identity.observe(
+        credential_role_id,
+        paired_role_id,
+        BattleTagExtraction::Conflict,
+    );
+
+    assert_eq!(identity.credential_role_id(), Some("202202"));
+    assert_eq!(identity.detected_battle_tag("202202"), None);
 }
 
 #[test]
