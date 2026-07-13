@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   canHydrateMatchesPageCache,
+  chooseInitialMatchId,
   chooseInitialMatchFilters,
   clearMatchesPageCache,
   computeMatchAnchorScrollTop,
@@ -17,10 +18,15 @@ import type { FilterOptions, MatchFilters, MatchSummary, Overview } from "../src
 clearMatchesPageCache();
 
 const cachedFilters: MatchFilters = { hero: "ana", result: "win", dateFrom: "2026-06-01" };
-updateMatchesPageCache({ filters: cachedFilters, scrollTop: 420 });
+updateMatchesPageCache({ filters: cachedFilters, selectedMatchId: "cached-match", scrollTop: 420 });
 
 assert.deepEqual(getMatchesPageCache()?.filters, cachedFilters, "cache keeps match filters in memory");
+assert.equal(getMatchesPageCache()?.selectedMatchId, "cached-match", "cache keeps the selected match in memory");
 assert.equal(getMatchesPageCache()?.scrollTop, 420, "cache keeps scroll position in memory");
+
+assert.equal(chooseInitialMatchId("url-match", "cached-match", true), "url-match", "URL match id wins over cached selection");
+assert.equal(chooseInitialMatchId(null, "cached-match", true), "cached-match", "cached selection is restored with the cached list");
+assert.equal(chooseInitialMatchId(null, "cached-match", false), null, "cached selection is ignored when the cached list cannot hydrate");
 
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");

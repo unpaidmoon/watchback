@@ -8,6 +8,7 @@ import { filtersFromParams, hasLoadedOptions, paramsFromFilters, validateFilters
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
 import {
   canHydrateMatchesPageCache,
+  chooseInitialMatchId,
   chooseInitialMatchFilters,
   computeMatchAnchorScrollTop,
   getMatchesPageCache,
@@ -48,7 +49,9 @@ export function MatchesPage() {
   const [options, setOptions] = useState<FilterOptions>(canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions);
   const [filters, setFilters] = useState<MatchFilters>(initialFilters);
   const [matches, setMatches] = useState<MatchSummary[]>(canHydrateCache ? cachedPage?.matches ?? [] : []);
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() => searchParams.get("matchId"));
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() =>
+    chooseInitialMatchId(searchParams.get("matchId"), cachedPage?.selectedMatchId, canHydrateCache),
+  );
   const [selectedDetail, setSelectedDetail] = useState<MatchDetailView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -96,6 +99,7 @@ export function MatchesPage() {
     }
     let cancelled = false;
     setDetailLoading(true);
+    setSelectedDetail(null);
     setDetailError(null);
     void getMatchDetails(selectedMatchId)
       .then((detail) => {
@@ -116,8 +120,8 @@ export function MatchesPage() {
   }, [selectedMatchId]);
 
   useEffect(() => {
-    updateMatchesPageCache({ overview, summary, options, filters, matches, loadedFilterKey: loadedFilterKeyRef.current });
-  }, [overview, summary, options, filters, matches]);
+    updateMatchesPageCache({ overview, summary, options, filters, matches, selectedMatchId, loadedFilterKey: loadedFilterKeyRef.current });
+  }, [overview, summary, options, filters, matches, selectedMatchId]);
 
   useEffect(() => {
     window.addEventListener("scroll", rememberScroll, { passive: true });

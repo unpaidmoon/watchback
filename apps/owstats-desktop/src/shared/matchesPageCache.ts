@@ -6,6 +6,7 @@ export type MatchesPageCache = {
   options: FilterOptions;
   filters: MatchFilters;
   matches: MatchSummary[];
+  selectedMatchId: string | null;
   loadedFilterKey: string;
   scrollTop: number;
   scrollAnchor: MatchScrollAnchor | null;
@@ -40,6 +41,7 @@ export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
     options: { seasons: [], heroes: [], maps: [], results: [], modes: [] },
     filters: {},
     matches: [],
+    selectedMatchId: null,
     loadedFilterKey: "",
     scrollTop: 0,
     scrollAnchor: null,
@@ -63,6 +65,14 @@ export function hasExplicitMatchFilterParams(params: URLSearchParams) {
 export function chooseInitialMatchFilters(urlFilters: MatchFilters, cachedFilters: MatchFilters | undefined, hasExplicitFilters: boolean) {
   if (hasExplicitFilters) return urlFilters;
   return cachedFilters ?? urlFilters;
+}
+
+export function chooseInitialMatchId(
+  urlMatchId: string | null,
+  cachedMatchId: string | null | undefined,
+  canHydrateCache: boolean,
+) {
+  return urlMatchId ?? (canHydrateCache ? cachedMatchId ?? null : null);
 }
 
 export function canHydrateMatchesPageCache(cache: MatchesPageCache | null, filters: MatchFilters, hasExplicitFilters: boolean) {

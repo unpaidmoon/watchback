@@ -15,6 +15,11 @@ assert.equal(matchesPageSource.includes("CompactMatchDetail"), true, "MatchesPag
 assert.equal(matchesPageSource.includes("MatchDetailReport"), false, "MatchesPage should not reuse the full-size match detail page inside the workbench");
 assert.equal(matchesPageSource.includes("selectedMatchId"), true, "MatchesPage should keep selected match state");
 assert.equal(matchesPageSource.includes("navigate(`/matches/${matchId}`)"), false, "MatchesPage should not navigate away when selecting a match row");
+assert.match(
+  matchesPageSource,
+  /setDetailLoading\(true\);\s*setSelectedDetail\(null\);\s*setDetailError\(null\);\s*void getMatchDetails\(selectedMatchId\)/,
+  "MatchesPage should clear stale detail before requesting the newly selected match",
+);
 
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
 assert.equal(timelineSource.includes("phase6MatchRowSelected"), true, "MatchTimeline should render selected state on the active row");
