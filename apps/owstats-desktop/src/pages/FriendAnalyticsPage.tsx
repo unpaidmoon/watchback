@@ -153,35 +153,88 @@ export function SeasonAnalysisModules({
   loading: boolean;
   error: string | null;
 }) {
+  if (error) {
+    return (
+      <div className="errorBanner phase6RecoverableError">
+        <AlertCircle size={18} />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  if (loading) return <div className="emptyState">正在加载好友分析...</div>;
+
   return (
     <>
-      {error && (
-        <div className="errorBanner phase6RecoverableError">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
+      <FriendAnalysisModules analytics={analytics} loading={false} error={null} />
+      <MapAnalysisModules analysis={analysis} loading={false} error={null} />
+    </>
+  );
+}
 
-      {loading && <div className="emptyState">正在加载好友分析...</div>}
-      {!loading && analytics && (
-        <>
-          <FriendPhase5Summary analytics={analytics} />
-          <div className="boardGrid topGap phase6FriendBoardGrid">
-            {analytics.boards.map((board) => (
-              <FriendBoardCard key={board.key} board={board} />
-            ))}
-          </div>
-        </>
-      )}
+export function FriendAnalysisModules({
+  analytics,
+  loading,
+  error,
+}: {
+  analytics: FriendAnalytics | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (error) {
+    return (
+      <div className="errorBanner phase6RecoverableError">
+        <AlertCircle size={18} />
+        <span>{error}</span>
+      </div>
+    );
+  }
 
-      <header className="sectionHeader topGap phase6InlineHeader">
+  if (loading) return <div className="emptyState">正在加载队友协作分析...</div>;
+  if (!analytics) return <div className="emptyState compact">暂无可用队友协作数据。</div>;
+
+  return (
+    <>
+      <FriendPhase5Summary analytics={analytics} />
+      <div className="boardGrid topGap phase6FriendBoardGrid">
+        {analytics.boards.map((board) => (
+          <FriendBoardCard key={board.key} board={board} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function MapAnalysisModules({
+  analysis,
+  loading,
+  error,
+}: {
+  analysis: SeasonAnalysis | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (error) {
+    return (
+      <div className="errorBanner phase6RecoverableError">
+        <AlertCircle size={18} />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  if (loading) return <div className="emptyState">正在加载地图分析...</div>;
+
+  return (
+    <>
+      <header className="sectionHeader phase6InlineHeader">
         <div>
           <span className="phase6Eyebrow">地图分析</span>
           <h2>地图表现概览</h2>
         </div>
         <Map size={22} />
       </header>
-      {analysis && <MapCardGrid analysis={analysis} />}
+      {analysis ? <MapCardGrid analysis={analysis} /> : <div className="emptyState compact">暂无可用地图数据。</div>}
     </>
   );
 }

@@ -1,16 +1,12 @@
-import {
-  AlertCircle,
-  BarChart3,
-  ExternalLink,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { SeasonAnalysisModules } from "./FriendAnalyticsPage";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { FriendAnalysisModules, MapAnalysisModules } from "./FriendAnalyticsPage";
+import { parseReviewView, type ReviewView } from "../features/review/reviewNavigation";
 import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
 import { achievementBadgeUrl, rankAssetUrl } from "../shared/assets";
-import { GlassPanel, HeroAvatar, MapPreview, StatusBadge } from "../shared/phase6Components";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
+import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { formatWinRate } from "../shared/rankingUtils";
 import { buildReviewAchievements as buildSharedReviewAchievements } from "../shared/reviewAchievements";
@@ -33,6 +29,13 @@ type AchievementKey = "win-streak" | "win-rate" | "s-grade" | "carry" | "signatu
 
 const romanLevels = ["I", "II", "III"] as const;
 const selectableSeasons = [23, 22, 21] as const;
+const reviewViewLabels: Record<ReviewView, string> = {
+  overview: "概览",
+  roles: "职责与英雄",
+  friends: "队友协作",
+  maps: "地图",
+  achievements: "成就",
+};
 
 export function createLatestRequestGuard() {
   let latestRequest = 0;
@@ -55,20 +58,22 @@ export function hasReviewSeasonData(review: Pick<PersonalSeasonReview, "summary"
   return typeof review.summary.season === "number" && review.summary.season > 0;
 }
 
-export function ReviewEmptyState() {
+export function ReviewEmptyState({ onAction = () => undefined }: { onAction?: () => void }) {
   return (
-    <section className="workspace reviewWorkspace phase6ReviewWorkspace">
-      <GlassPanel className="phase6RoleReport" tone="solid">
-        <h2>暂无可用赛季战报</h2>
-        <p>当前本地数据库没有可用于复盘的赛季数据。</p>
-      </GlassPanel>
-    </section>
+    <PageEmptyState
+      title="暂无可用赛季战报"
+      description="当前本地数据库没有可用于复盘的赛季数据。"
+      actionLabel="前往指挥台"
+      onAction={onAction}
+    />
   );
 }
 
 export function PersonalReviewPage() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const requestedSeason = parseSeasonParam(params.get("season"));
+  const view = parseReviewView(params.get("view"));
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [review, setReview] = useState<PersonalSeasonReview | null>(null);
   const [analysis, setAnalysis] = useState<SeasonAnalysis | null>(null);
@@ -78,6 +83,13 @@ export function PersonalReviewPage() {
   const [selectedAchievement, setSelectedAchievement] = useState<ReviewAchievement | null>(null);
   const reviewRequestGuard = useRef(createLatestRequestGuard());
   const analysisRequestGuard = useRef(createLatestRequestGuard());
+
+  useEffect(() => {
+    if (params.get("view") === view) return;
+    const nextParams = new URLSearchParams(params);
+    nextParams.set("view", view);
+    setParams(nextParams, { replace: true });
+  }, [params, setParams, view]);
 
   useEffect(() => {
     reviewRequestGuard.current.invalidate();
@@ -90,7 +102,7 @@ export function PersonalReviewPage() {
     setAnalysisLoading(false);
   }, [requestedSeason]);
 
-  useEffect(() => {
+  function requestReview() {
     const request = reviewRequestGuard.current.begin();
     setReview(null);
     setError(null);
@@ -108,7 +120,9 @@ export function PersonalReviewPage() {
       });
 
     return () => reviewRequestGuard.current.invalidate(request);
-  }, [selectedSeason]);
+  }
+
+  useEffect(() => requestReview(), [selectedSeason]);
 
   useEffect(() => {
     if (selectedSeason === undefined) {
@@ -144,18 +158,57 @@ export function PersonalReviewPage() {
     setParams(nextParams);
   }
 
-  if (error) {
+  function changeView(nextView: ReviewView) {
+    const nextParams = new URLSearchParams(params);
+    nextParams.set("view", nextView);
+    setSelectedAchievement(null);
+    setParams(nextParams);
+  }
+
+  function renderHeader(titleSeason: number | null | undefined) {
     return (
-      <div className="errorBanner phase6RecoverableError">
-        <AlertCircle size={18} />
-        <span>{error}</span>
-      </div>
+      <PageHeader
+        title="战报"
+        description={titleSeason ? `S${titleSeason} 赛季表现与协作复盘` : "查看赛季表现与协作复盘"}
+        actions={
+          <PageSeasonSelect
+            value={selectedSeason}
+            seasons={selectableSeasons}
+            onChange={(season) => {
+              if (season !== undefined) changeSeason(season);
+            }}
+          />
+        }
+      />
     );
   }
 
-  if (!review) return <section className="workspace">正在加载个人赛季战报...</section>;
+  if (error) {
+    return (
+      <section className="workspace reviewWorkspace phase6ReviewWorkspace">
+        {renderHeader(selectedSeason)}
+        <PageErrorState message={error} onRetry={() => void requestReview()} />
+      </section>
+    );
+  }
 
-  if (!hasReviewSeasonData(review)) return <ReviewEmptyState />;
+  if (!review) {
+    return (
+      <section className="workspace reviewWorkspace phase6ReviewWorkspace">
+        {renderHeader(selectedSeason)}
+        <PageLoadingState message="正在加载个人赛季战报..." />
+      </section>
+    );
+  }
+
+  if (!hasReviewSeasonData(review)) {
+    return (
+      <section className="workspace reviewWorkspace phase6ReviewWorkspace">
+        {renderHeader(selectedSeason)}
+        <ReviewEmptyState onAction={() => navigate("/onboarding")} />
+      </section>
+    );
+  }
 
   const achievements = buildSharedReviewAchievements(review);
   const analytics = analysis?.friend ?? null;
@@ -163,59 +216,120 @@ export function PersonalReviewPage() {
 
   return (
     <section className="workspace reviewWorkspace phase6ReviewWorkspace">
-      <GlassPanel className="phase6RoleReport" tone="solid">
-        <div className="phase6RoleReportHeader">
-          <div>
-            <span className="phase6Eyebrow">战报</span>
-            <h2>{titleSeason ? `S${titleSeason} 赛季表现报告` : "赛季表现报告"}</h2>
-            <p>按职责汇总当前段位、胜率、样本和 KDA，下面保留可追溯的复盘证据。</p>
-          </div>
-          <div className="phase6CommandStatus">
-            <label className="seasonSelect phase8SeasonSelect">
-              <span>赛季</span>
-              <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(Number(event.target.value))}>
-                {selectableSeasons.map((season) => (
-                  <option key={season} value={season}>
-                    S{season}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <StatusBadge tone="good">
-              <BarChart3 size={15} /> {review.summary.totalMatches} 场
-            </StatusBadge>
-            <StatusBadge>
-              <Sparkles size={15} /> {review.phase5Highlights.sGradeCount} 场 S 级
-            </StatusBadge>
-          </div>
-        </div>
+      {renderHeader(titleSeason)}
 
-        <div className="phase6RoleRankGrid">
-          {review.roleSummaries.map((role) => (
-            <RoleRankCard key={role.roleType} role={role} />
-          ))}
-        </div>
-      </GlassPanel>
+      <nav className="reviewTabs" aria-label="战报内容">
+        <ReviewTabButton value="overview" view={view} onSelect={changeView} />
+        <ReviewTabButton value="roles" view={view} onSelect={changeView} />
+        <ReviewTabButton value="friends" view={view} onSelect={changeView} />
+        <ReviewTabButton value="maps" view={view} onSelect={changeView} />
+        <ReviewTabButton value="achievements" view={view} onSelect={changeView} />
+      </nav>
 
-      <GlassPanel className="phase6AchievementPanel" tone="solid">
-        <header className="phase6AchievementHeader">
-          <div>
-            <h3>成就墙</h3>
-          </div>
-        </header>
-        <div className="phase6AchievementWall">
-          {achievements.map((achievement) => (
-            <AchievementCard key={achievement.key} achievement={achievement} onOpen={() => setSelectedAchievement(achievement)} />
-          ))}
-        </div>
-      </GlassPanel>
+      <div className="reviewViewGrid" data-view={view}>
+        {view === "overview" && <ReviewOverview review={review} />}
+        {view === "roles" && <RoleAndHeroView review={review} />}
+        {view === "friends" && <FriendAnalysisModules analytics={analytics} loading={analysisLoading} error={analysisError} />}
+        {view === "maps" && <MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} />}
+        {view === "achievements" && (
+          <GlassPanel className="phase6AchievementPanel" tone="solid">
+            <header className="phase6AchievementHeader">
+              <div>
+                <h3>成就墙</h3>
+              </div>
+            </header>
+            <div className="phase6AchievementWall">
+              {achievements.map((achievement) => (
+                <AchievementCard key={achievement.key} achievement={achievement} onOpen={() => setSelectedAchievement(achievement)} />
+              ))}
+            </div>
+          </GlassPanel>
+        )}
+      </div>
 
-      {selectedAchievement ? (
-        <AchievementDialog achievement={selectedAchievement} onClose={() => setSelectedAchievement(null)} />
-      ) : null}
-
-      <SeasonAnalysisModules analysis={analysis} analytics={analytics} loading={analysisLoading} error={analysisError} />
+      {selectedAchievement ? <AchievementDialog achievement={selectedAchievement} onClose={() => setSelectedAchievement(null)} /> : null}
     </section>
+  );
+}
+
+function ReviewTabButton({
+  value,
+  view,
+  onSelect,
+}: {
+  value: ReviewView;
+  view: ReviewView;
+  onSelect: (view: ReviewView) => void;
+}) {
+  const active = value === view;
+  return (
+    <button
+      type="button"
+      value={value}
+      aria-current={active ? "page" : undefined}
+      className={active ? "active" : ""}
+      onClick={() => onSelect(value)}
+    >
+      {reviewViewLabels[value]}
+    </button>
+  );
+}
+
+function ReviewOverview({ review }: { review: PersonalSeasonReview }) {
+  return (
+    <>
+      <GlassPanel className="reviewOverviewPanel reviewOverviewPrimary" tone="solid">
+        <header>
+          <span className="phase6Eyebrow">赛季概览</span>
+          <h2>稳定表现</h2>
+          <p>以完整赛季样本汇总胜负、胜率与高光表现。</p>
+        </header>
+        <div className="reviewOverviewMetrics">
+          <Metric label="对局" value={`${review.summary.totalMatches} 场`} />
+          <Metric label="胜负" value={`${review.summary.wins} 胜 / ${review.summary.losses} 负`} />
+          <Metric label="胜率" value={formatWinRate(review.summary.winRate, 0)} />
+          <Metric label="S 级" value={`${review.phase5Highlights.sGradeCount} 场`} />
+        </div>
+      </GlassPanel>
+      <GlassPanel className="reviewOverviewPanel reviewOverviewSecondary" tone="solid">
+        <header>
+          <span className="phase6Eyebrow">本季摘要</span>
+          <h2>关键表现</h2>
+        </header>
+        <div className="reviewOverviewMetrics compact">
+          <Metric label="最长连胜" value={`${review.streaks.longestWinStreak} 局`} />
+          <Metric label="带飞局" value={`${review.phase5Highlights.carryCount} 场`} />
+          <Metric label="主职责" value={review.roleSummaries[0]?.roleLabel ?? "样本不足"} />
+        </div>
+      </GlassPanel>
+    </>
+  );
+}
+
+function RoleAndHeroView({ review }: { review: PersonalSeasonReview }) {
+  const mainHero = review.heroPool.mainHeroes[0];
+
+  return (
+    <GlassPanel className="phase6RoleReport reviewRoleHeroPanel" tone="solid">
+      <div className="phase6RoleReportHeader">
+        <div>
+          <span className="phase6Eyebrow">职责与英雄</span>
+          <h2>职责段位与英雄池</h2>
+          <p>保留三职责摘要，并用稳定指标说明英雄选择范围。</p>
+        </div>
+      </div>
+      <div className="phase6RoleRankGrid">
+        {review.roleSummaries.map((role) => (
+          <RoleRankCard key={role.roleType} role={role} />
+        ))}
+      </div>
+      <div className="reviewHeroSummary">
+        <Metric label="英雄池" value={`${review.heroPool.totalHeroes} 名`} />
+        <Metric label="主要英雄" value={mainHero?.hero ?? "样本不足"} />
+        <Metric label="第一英雄占比" value={formatWinRate(review.heroPool.top1Share, 0)} />
+        <Metric label="场均英雄数" value={review.heroPool.avgHeroesPerMatch.toFixed(1)} />
+      </div>
+    </GlassPanel>
   );
 }
 
