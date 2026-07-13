@@ -1,12 +1,14 @@
 use owstats_desktop_lib::credential_store::DashenCredentials;
 use owstats_desktop_lib::login_target::{
     bind_detected_target_with_base_url, confirm_switch, decide_target_action,
-    reconcile_detected_target, retry_binding, LoginTargetCoordinator, TargetAction,
+    ensure_sync_target_ready, reconcile_detected_target, retry_binding, LoginTargetCoordinator,
+    TargetAction, SYNC_TARGET_CONFIRMATION_ERROR,
 };
 use owstats_desktop_lib::player_target::{
     read_player_target_for_path, save_player_target_for_path, target_matches_login_role,
     PlayerTarget,
 };
+use owstats_desktop_lib::{CredentialLoginResult, CredentialStatus, LoginTargetStatus};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -119,6 +121,131 @@ fn public_status_json_contains_no_role_or_token_fields() {
             .to_ascii_lowercase()
             .contains(&forbidden.to_ascii_lowercase()));
     }
+}
+
+#[test]
+fn login_result_exposes_credential_and_target_status_without_secrets() {
+    let result = CredentialLoginResult {
+        status: CredentialStatus {
+            state: "ready".to_string(),
+            message: "已登录".to_string(),
+            exposes_secret: false,
+            role_id: None,
+            saved_at: None,
+        },
+        target: LoginTargetStatus {
+            state: "ready".to_string(),
+            detected_bnet: Some("Current#1000".to_string()),
+            current_bnet: Some("Current#1000".to_string()),
+            message: "已绑定".to_string(),
+            sync_allowed: true,
+            can_confirm_switch: false,
+            can_retry: false,
+        },
+    };
+
+    let json = serde_json::to_string(&result).unwrap();
+
+    assert!(json.contains("\"target\""));
+    for forbidden in ["roleId", "role_id", "token", "customerToken"] {
+        assert!(!json
+            .to_ascii_lowercase()
+            .contains(&forbidden.to_ascii_lowercase()));
+    }
+}
+
+#[test]
+fn persisted_target_from_current_login_role_allows_sync_after_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Current#1000", 101, "synthetic-player-key");
+
+    let status = ensure_sync_target_ready(
+        &LoginTargetCoordinator::default(),
+        &credentials(101),
+        &target_path,
+    )
+    .unwrap();
+
+    assert_eq!(status.state, "ready");
+    assert!(status.sync_allowed);
+}
+
+#[test]
+fn target_from_another_login_role_is_rejected_before_sync() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Other#2000", 202, "synthetic-player-key");
+
+    let error = ensure_sync_target_ready(
+        &LoginTargetCoordinator::default(),
+        &credentials(101),
+        &target_path,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+    for secret in ["101", "202", "Other#2000", "synthetic-player-key", "token"] {
+        assert!(!error.contains(secret));
+    }
+}
+
+#[test]
+fn legacy_target_without_source_role_is_rejected_before_sync() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    let legacy = PlayerTarget {
+        input_bnet: "Legacy#1000".to_string(),
+        resolved_bnet: Some("Legacy#1000".to_string()),
+        customer_token: "synthetic-player-key".to_string(),
+        bound_at: "2026-07-14T00:00:00Z".to_string(),
+        source_role_id: None,
+    };
+    save_player_target_for_path(&target_path, &legacy).unwrap();
+
+    let error = ensure_sync_target_ready(
+        &LoginTargetCoordinator::default(),
+        &credentials(101),
+        &target_path,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+}
+
+#[test]
+fn non_ready_login_session_rejects_sync_even_when_persisted_target_matches() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Current#1000", 101, "synthetic-player-key");
+    let coordinator = LoginTargetCoordinator::default();
+    coordinator.replace_unidentified(101);
+
+    let error = ensure_sync_target_ready(&coordinator, &credentials(101), &target_path)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+}
+
+#[test]
+fn clearing_a_target_keeps_retry_only_for_a_reliable_current_session_tag() {
+    let coordinator = LoginTargetCoordinator::default();
+    coordinator.replace_ready(101, "Current#1000", "Current#1000");
+
+    let retryable = coordinator.target_cleared(Some(101));
+
+    assert_eq!(retryable.state, "bindFailed");
+    assert!(retryable.can_retry);
+    assert_eq!(retryable.detected_bnet.as_deref(), Some("Current#1000"));
+
+    coordinator.clear();
+    let unidentified = coordinator.target_cleared(Some(101));
+    assert_eq!(unidentified.state, "unidentified");
+    assert!(!unidentified.can_retry);
+    assert_eq!(unidentified.detected_bnet, None);
 }
 
 #[tokio::test]

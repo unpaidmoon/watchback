@@ -14,6 +14,9 @@ use std::sync::{Arc, Mutex};
 
 static TARGET_TEMP_NONCE: AtomicU64 = AtomicU64::new(0);
 
+pub const SYNC_TARGET_CONFIRMATION_ERROR: &str =
+    "当前登录账号与同步目标尚未确认，请重新登录或确认切换";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetAction {
     AutoBind,
@@ -67,6 +70,30 @@ impl LoginTargetCoordinator {
             .expect("login target session poisoned")
             .as_ref()
             .map(|session| session.status.clone())
+    }
+
+    pub fn target_cleared(&self, source_role_id: Option<i64>) -> LoginTargetStatus {
+        let detected_bnet = {
+            let guard = self.session.lock().expect("login target session poisoned");
+            guard
+                .as_ref()
+                .filter(|session| Some(session.source_role_id) == source_role_id)
+                .and_then(|session| session.detected_bnet.clone())
+                .filter(|value| !value.trim().is_empty())
+        };
+
+        match (source_role_id, detected_bnet) {
+            (Some(role_id), Some(detected_bnet)) => self.replace_bind_failed(
+                role_id,
+                &detected_bnet,
+                "本地同步目标已清除，请重试自动绑定。",
+            ),
+            (Some(role_id), None) => self.replace_unidentified(role_id),
+            (None, _) => {
+                self.clear();
+                verification_status(None, "请先登录并重新识别当前账号。")
+            }
+        }
     }
 
     pub fn replace_unidentified(&self, source_role_id: i64) -> LoginTargetStatus {
@@ -382,6 +409,22 @@ impl LoginTargetCoordinator {
             status: status.clone(),
         });
         status
+    }
+}
+
+pub fn ensure_sync_target_ready(
+    coordinator: &LoginTargetCoordinator,
+    credentials: &DashenCredentials,
+    target_path: &Path,
+) -> Result<LoginTargetStatus> {
+    let status = coordinator.status_or_persisted(Some(credentials), target_path);
+    let target_is_current = read_player_target_for_path(target_path)
+        .map(|target| target_matches_login_role(&target, credentials.role_id))
+        .unwrap_or(false);
+    if status.state == "ready" && status.sync_allowed && target_is_current {
+        Ok(status)
+    } else {
+        Err(anyhow!(SYNC_TARGET_CONFIRMATION_ERROR))
     }
 }
 

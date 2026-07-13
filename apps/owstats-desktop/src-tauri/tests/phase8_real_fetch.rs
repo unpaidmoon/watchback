@@ -1,9 +1,12 @@
 use futures_util::future::join_all;
+use owstats_desktop_lib::login_target::SYNC_TARGET_CONFIRMATION_ERROR;
 use owstats_desktop_lib::player_target::{
     clear_player_target_for_path, player_target_status_for_path, save_player_target_for_path,
     PlayerTarget,
 };
-use owstats_desktop_lib::OwDatabase;
+use owstats_desktop_lib::{
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, OwDatabase,
+};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -80,6 +83,58 @@ fn extracts_customer_token_from_search_payload() {
     assert_eq!(parsed.resolved_bnet.as_deref(), Some("Tester#12345"));
     assert_eq!(parsed.customer_token, "player-customer-token");
     assert_eq!(parsed.source_role_id, Some(123));
+}
+
+#[tokio::test]
+async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    let database_path = temp.path().join("sync.sqlite3");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":101,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Other#2000".to_string(),
+            resolved_bnet: Some("Other#2000".to_string()),
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-14T00:00:00Z".to_string(),
+            source_role_id: Some(202),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(&database_path);
+
+    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        "http://127.0.0.1:1/customer",
+        |_| {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+    assert!(
+        !database_path.exists(),
+        "gate must run before db initialization"
+    );
+    assert!(
+        !season_dir.exists(),
+        "gate must run before season output writes"
+    );
+    for secret in ["101", "202", "Other#2000", "synthetic-player-key", "token"] {
+        assert!(!error.contains(secret));
+    }
 }
 
 #[tokio::test]

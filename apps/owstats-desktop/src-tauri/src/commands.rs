@@ -3,18 +3,19 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_credentials_and_target_paths_output_dir_base_url, BindPlayerTargetRequest,
-    BindPlayerTargetResult, ClearPlayerTargetResult, CredentialLoginCancelResult,
-    CredentialLoginResult, CredentialStatus, FilterOptions, FriendAnalytics,
-    FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult, MatchDetailView,
-    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
-    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
-    UpdateCheckResult, UserSettings,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, ClearPlayerTargetResult,
+    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
+    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LoginTargetStatus,
+    LogoutResult, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
+    OnboardingStatusRequest, OwDatabase, PersonalReviewRequest, PersonalSeasonReview,
+    PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis,
+    SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
+
+const DASHEN_ROOT_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,7 +127,11 @@ pub fn save_user_settings(app: AppHandle, settings: UserSettings) -> Result<User
 }
 
 #[tauri::command]
-pub fn logout(app: AppHandle) -> Result<LogoutResult, String> {
+pub fn logout(
+    app: AppHandle,
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<LogoutResult, String> {
+    coordinator.clear();
     let cleared = crate::credentials::clear_credentials(&app).map_err(to_message)?;
     Ok(LogoutResult {
         credential_cleared: cleared,
@@ -146,10 +151,26 @@ pub fn check_app_update() -> Result<UpdateCheckResult, String> {
 }
 
 #[tauri::command]
-pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult, String> {
-    crate::credentials::start_dashen_login(app)
+pub async fn start_dashen_login(
+    app: AppHandle,
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<CredentialLoginResult, String> {
+    coordinator.clear();
+    let outcome = crate::credentials::start_dashen_login_capture(app.clone())
         .await
-        .map_err(to_message)
+        .map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let target = crate::login_target::reconcile_detected_target(
+        coordinator.inner(),
+        &outcome.credentials,
+        outcome.detected_battle_tag.as_deref(),
+        &target_path,
+        DASHEN_ROOT_BASE,
+    )
+    .await;
+    let mut status = crate::credentials::get_credential_status(&app).map_err(to_message)?;
+    status.role_id = None;
+    Ok(CredentialLoginResult { status, target })
 }
 
 #[tauri::command]
@@ -164,54 +185,67 @@ pub fn get_player_target_status(app: AppHandle) -> Result<PlayerTargetStatus, St
 }
 
 #[tauri::command]
-pub async fn bind_player_target(
+pub fn get_login_target_status(
     app: AppHandle,
-    request: BindPlayerTargetRequest,
-) -> Result<BindPlayerTargetResult, String> {
-    let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
-    let saved: crate::credential_store::DashenCredentials =
-        serde_json::from_str(&std::fs::read_to_string(&credential_path).map_err(to_message)?)
-            .map_err(to_message)?;
-    let source_role_id = saved.role_id;
-    let client = crate::dashen_client::DashenClient::new(
-        crate::dashen_client::DashenCredentials {
-            role_id: saved.role_id,
-            token: saved.token,
-            dts: saved.dts.and_then(|value| value.parse().ok()),
-            server: saved.server,
-        },
-        "https://datamsapi.ds.163.com/v1/a19ld5tool".to_string(),
-    )
-    .map_err(to_message)?;
-    let payload = client
-        .search_bnet_account(&request.bnet)
-        .await
-        .map_err(to_message)?;
-    let target = crate::player_target::target_from_search_payload(
-        &request.bnet,
-        &payload,
-        source_role_id,
-        &chrono::Utc::now().to_rfc3339(),
-    )
-    .map_err(to_message)?;
-    client
-        .query_card(&target.customer_token)
-        .await
-        .map_err(to_message)?;
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    crate::player_target::save_player_target_for_path(&path, &target).map_err(to_message)?;
-    Ok(BindPlayerTargetResult {
-        status: crate::player_target::player_target_status_for_path(&path).map_err(to_message)?,
-    })
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<LoginTargetStatus, String> {
+    let credentials = read_optional_saved_credentials(&app)?;
+    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    Ok(coordinator.status_or_persisted(credentials.as_ref(), &target_path))
 }
 
 #[tauri::command]
-pub fn clear_player_target(app: AppHandle) -> Result<ClearPlayerTargetResult, String> {
+pub async fn confirm_login_target_switch(
+    app: AppHandle,
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<LoginTargetStatus, String> {
+    let credentials = read_saved_credentials(&app)?;
+    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    Ok(crate::login_target::confirm_switch(
+        coordinator.inner(),
+        &credentials,
+        &target_path,
+        DASHEN_ROOT_BASE,
+    )
+    .await)
+}
+
+#[tauri::command]
+pub fn keep_current_player_target(
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<LoginTargetStatus, String> {
+    coordinator.keep_current().map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn retry_login_target_binding(
+    app: AppHandle,
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<LoginTargetStatus, String> {
+    let credentials = read_saved_credentials(&app)?;
+    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    Ok(crate::login_target::retry_binding(
+        coordinator.inner(),
+        &credentials,
+        &target_path,
+        DASHEN_ROOT_BASE,
+    )
+    .await)
+}
+
+#[tauri::command]
+pub fn clear_player_target(
+    app: AppHandle,
+    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+) -> Result<ClearPlayerTargetResult, String> {
     let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let cleared = crate::player_target::clear_player_target_for_path(&path).map_err(to_message)?;
+    let source_role_id = read_optional_saved_credentials(&app)?
+        .as_ref()
+        .map(|credentials| credentials.role_id);
     Ok(ClearPlayerTargetResult {
         cleared,
-        status: crate::player_target::player_target_status_for_path(&path).map_err(to_message)?,
+        target: coordinator.target_cleared(source_role_id),
     })
 }
 
@@ -316,14 +350,22 @@ pub fn get_career_mmr_build_status(app: AppHandle) -> Result<crate::CareerMmrBui
 pub async fn sync_season(
     app: AppHandle,
     request: SyncRequest,
-    coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    sync_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<SyncSummary, String> {
-    let _permit = coordinator.try_acquire().map_err(str::to_string)?;
-    let db = app_database(&app)?;
+    let _permit = sync_coordinator.try_acquire().map_err(str::to_string)?;
     let paths = app_paths(&app)?;
     let root = paths.seasons();
     let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
     let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let credentials = read_saved_credentials(&app)?;
+    crate::login_target::ensure_sync_target_ready(
+        login_coordinator.inner(),
+        &credentials,
+        &target_path,
+    )
+    .map_err(to_message)?;
+    let db = app_database(&app)?;
     let emit_app = app.clone();
     sync_season_with_credentials_and_target_paths_output_dir_base_url(
         &db,
@@ -338,6 +380,25 @@ pub async fn sync_season(
     )
     .await
     .map_err(to_message)
+}
+
+fn read_saved_credentials(
+    app: &AppHandle,
+) -> Result<crate::credential_store::DashenCredentials, String> {
+    let path = crate::credentials::credential_path(app).map_err(to_message)?;
+    let text = std::fs::read_to_string(path).map_err(to_message)?;
+    serde_json::from_str(&text).map_err(to_message)
+}
+
+fn read_optional_saved_credentials(
+    app: &AppHandle,
+) -> Result<Option<crate::credential_store::DashenCredentials>, String> {
+    let path = crate::credentials::credential_path(app).map_err(to_message)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(path).map_err(to_message)?;
+    serde_json::from_str(&text).map(Some).map_err(to_message)
 }
 
 fn app_database(app: &AppHandle) -> Result<OwDatabase, String> {

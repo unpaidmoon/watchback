@@ -8,7 +8,7 @@ use crate::dashen_auth::{
     BattleTagExtraction, RoleIdExtraction,
 };
 use crate::login_flow::{LoginPhase, LoginProgress};
-use crate::models::{CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus};
+use crate::models::{CredentialLoginCancelResult, CredentialStatus};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use std::path::PathBuf;
@@ -166,15 +166,6 @@ pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
 
 pub fn clear_credentials(app: &AppHandle) -> Result<bool> {
     clear_credentials_for_path(&credential_path(app)?)
-}
-
-pub async fn start_dashen_login(app: AppHandle) -> Result<CredentialLoginResult> {
-    start_dashen_login_capture(app.clone()).await?;
-    let path = credential_path(&app)?;
-
-    Ok(CredentialLoginResult {
-        status: credential_status_for_path(&path)?,
-    })
 }
 
 pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<BrowserLoginOutcome> {

@@ -48,6 +48,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(sync_coordinator::SyncCoordinator::default())
+        .manage(login_target::LoginTargetCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
             commands::list_match_filters,
@@ -68,7 +69,10 @@ pub fn run() {
             commands::start_dashen_login,
             commands::cancel_dashen_login,
             commands::get_player_target_status,
-            commands::bind_player_target,
+            commands::get_login_target_status,
+            commands::confirm_login_target_switch,
+            commands::keep_current_player_target,
+            commands::retry_login_target_binding,
             commands::clear_player_target,
             commands::get_rankings,
             commands::get_season_analysis,
