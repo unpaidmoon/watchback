@@ -11,32 +11,36 @@ pub enum BattleTagExtraction {
     Conflict,
 }
 
-pub fn extract_battle_tag(candidates: &[String]) -> BattleTagExtraction {
+pub fn extract_battle_tag(page_text: &str) -> BattleTagExtraction {
     let mut found = None;
 
-    for candidate in candidates {
-        for line in candidate.lines() {
-            let line = line.trim();
-            let value = line
-                .strip_prefix("战网昵称：")
-                .or_else(|| line.strip_prefix("战网昵称:"))
-                .map(str::trim);
-            let Some(value) = value else {
-                continue;
-            };
-            let Some((name, suffix)) = value.rsplit_once('#') else {
-                continue;
-            };
-            if name.is_empty() || suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit())
-            {
-                continue;
-            }
+    for line in page_text.lines() {
+        let line = line.trim();
+        let Some(after_label) = line.strip_prefix("战网昵称") else {
+            continue;
+        };
+        let after_label = after_label.trim_start();
+        let after_colon = after_label
+            .strip_prefix('：')
+            .or_else(|| after_label.strip_prefix(':'));
+        let Some(value) = after_colon.and_then(|text| text.split_whitespace().next()) else {
+            continue;
+        };
+        let Some((name, suffix)) = value.split_once('#') else {
+            continue;
+        };
+        if name.is_empty()
+            || suffix.is_empty()
+            || suffix.contains('#')
+            || !suffix.chars().all(|ch| ch.is_ascii_digit())
+        {
+            continue;
+        }
 
-            match &found {
-                Some(existing) if existing != value => return BattleTagExtraction::Conflict,
-                Some(_) => {}
-                None => found = Some(value.to_string()),
-            }
+        match &found {
+            Some(existing) if existing != value => return BattleTagExtraction::Conflict,
+            Some(_) => {}
+            None => found = Some(value.to_string()),
         }
     }
 

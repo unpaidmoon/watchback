@@ -70,69 +70,64 @@ fn extracts_role_id_from_url_json_and_text_candidates() {
 
 #[test]
 fn battletag_extraction_uses_only_the_labeled_page_line() {
-    let candidates = vec![
-        "Other#9999\n战网昵称： 风偏偏呢#5479\n更多页面文本".to_string(),
-        "Another#1234".to_string(),
-    ];
+    let page_text = "Other#9999\n战网昵称： 风偏偏呢#5479\nAnother#1234\n更多页面文本";
 
     assert_eq!(
-        extract_battle_tag(&candidates),
+        extract_battle_tag(page_text),
         BattleTagExtraction::Found("风偏偏呢#5479".to_string())
     );
 }
 
 #[test]
-fn battletag_extraction_accepts_chinese_and_ascii_colons() {
+fn battletag_extraction_accepts_unicode_whitespace_around_both_colons() {
     assert_eq!(
-        extract_battle_tag(&["  战网昵称： 风偏偏呢#5479  ".to_string()]),
+        extract_battle_tag("  战网昵称　：　风偏偏呢#5479  "),
         BattleTagExtraction::Found("风偏偏呢#5479".to_string())
     );
     assert_eq!(
-        extract_battle_tag(&["\n战网昵称: Tracer#12345\n".to_string()]),
+        extract_battle_tag("\n战网昵称\t:\tTracer#12345\n"),
         BattleTagExtraction::Found("Tracer#12345".to_string())
     );
 }
 
 #[test]
 fn battletag_extraction_reports_conflicting_labeled_values() {
-    let candidates = vec![
-        "战网昵称： 风偏偏呢#5479".to_string(),
-        "战网昵称: Other#9999".to_string(),
-    ];
+    let page_text = "战网昵称： 风偏偏呢#5479\n战网昵称: Other#9999";
 
-    assert_eq!(
-        extract_battle_tag(&candidates),
-        BattleTagExtraction::Conflict
-    );
+    assert_eq!(extract_battle_tag(page_text), BattleTagExtraction::Conflict);
 }
 
 #[test]
 fn battletag_extraction_returns_missing_without_a_valid_labeled_value() {
-    let candidates = vec![
-        "Other#9999".to_string(),
-        "说明 战网昵称： Inline#1234".to_string(),
-        "战网昵称：".to_string(),
-        "战网昵称: MissingHash".to_string(),
-        "战网昵称： Invalid#12A".to_string(),
-    ];
-
-    assert_eq!(
-        extract_battle_tag(&candidates),
-        BattleTagExtraction::Missing
+    let page_text = concat!(
+        "Other#9999\n",
+        "说明 战网昵称： Inline#1234\n",
+        "战网昵称：\n",
+        "战网昵称: MissingHash\n",
+        "战网昵称： Invalid#12A\n",
+        "战网昵称： #1234\n",
+        "战网昵称： Foo#Bar#1234\n",
+        "战网昵称： Foo##1234\n",
     );
+
+    assert_eq!(extract_battle_tag(page_text), BattleTagExtraction::Missing);
 }
 
 #[test]
 fn battletag_extraction_deduplicates_identical_labeled_values() {
-    let candidates = vec![
-        "战网昵称： 风偏偏呢#5479".to_string(),
-        "战网昵称: 风偏偏呢#5479".to_string(),
-        "战网昵称：风偏偏呢#5479".to_string(),
-    ];
+    let page_text = "战网昵称： 风偏偏呢#5479\n战网昵称: 风偏偏呢#5479\n战网昵称：风偏偏呢#5479";
 
     assert_eq!(
-        extract_battle_tag(&candidates),
+        extract_battle_tag(page_text),
         BattleTagExtraction::Found("风偏偏呢#5479".to_string())
+    );
+}
+
+#[test]
+fn battletag_extraction_reads_only_the_first_token_after_the_colon() {
+    assert_eq!(
+        extract_battle_tag("战网昵称： Player#1234 切换"),
+        BattleTagExtraction::Found("Player#1234".to_string())
     );
 }
 
