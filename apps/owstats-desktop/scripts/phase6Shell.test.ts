@@ -17,7 +17,7 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
 }
 
 const navLabels = phase6NavItems.map((item) => item.label).join(",");
-assertEqual(navLabels, "指挥台,对局,战报,排行", "phase 6 navigation labels");
+assertEqual(navLabels, "指挥台,对局,战报,生涯 MMR,排行", "phase 6 navigation labels");
 assertEqual(phase6NavItems.some((item) => item.path === "/sync"), false, "sync page is removed from capsule navigation");
 assertEqual(typeof getPlayerProfile, "function", "player profile API wrapper exists");
 assertEqual(typeof getUserSettings, "function", "user settings API wrapper exists");

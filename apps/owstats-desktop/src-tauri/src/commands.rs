@@ -166,6 +166,93 @@ pub fn get_season_analysis(app: AppHandle, season: Option<i64>) -> Result<Season
 }
 
 #[tauri::command]
+pub fn get_career_mmr_overview(app: AppHandle) -> Result<crate::CareerMmrOverview, String> {
+    crate::career_mmr::query::get_career_mmr_overview(&app_database(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_role_mmr_history(
+    app: AppHandle,
+    role: String,
+    season: Option<i64>,
+    from: Option<i64>,
+    to: Option<i64>,
+    granularity: Option<String>,
+    limit: Option<usize>,
+    before: Option<i64>,
+    before_hash: Option<String>,
+    before_bucket: Option<i64>,
+    before_season: Option<i64>,
+) -> Result<crate::CareerMmrHistory, String> {
+    crate::career_mmr::query::get_role_mmr_history(
+        &app_database(&app)?,
+        crate::CareerMmrHistoryRequest {
+            role,
+            season,
+            from,
+            to,
+            granularity,
+            limit,
+            before,
+            before_hash,
+            before_bucket,
+            before_season,
+        },
+    )
+    .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_role_mmr_mode_breakdown(
+    app: AppHandle,
+    role: String,
+) -> Result<crate::CareerMmrModeBreakdown, String> {
+    crate::career_mmr::query::get_role_mmr_mode_breakdown(&app_database(&app)?, &role)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_role_mmr_season_breakdown(
+    app: AppHandle,
+    role: String,
+) -> Result<crate::CareerMmrSeasonBreakdown, String> {
+    crate::career_mmr::query::get_role_mmr_season_breakdown(&app_database(&app)?, &role)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_mmr_match_explanation(
+    app: AppHandle,
+    match_id: String,
+    role: String,
+) -> Result<crate::CareerMmrMatchExplanation, String> {
+    crate::career_mmr::query::get_mmr_match_explanation(&app_database(&app)?, &match_id, &role)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_recent_mmr_explanations(
+    app: AppHandle,
+    role: String,
+    limit: usize,
+) -> Result<crate::CareerMmrRecentExplanations, String> {
+    crate::career_mmr::query::get_recent_mmr_explanations(&app_database(&app)?, &role, limit)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn rebuild_career_mmr(
+    app: AppHandle,
+) -> Result<crate::career_mmr::replay::CareerMmrBuildSummary, String> {
+    crate::career_mmr::replay::rebuild_career_mmr(&app_database(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_career_mmr_build_status(app: AppHandle) -> Result<crate::CareerMmrBuildStatus, String> {
+    crate::career_mmr::query::get_career_mmr_build_status(&app_database(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
 pub async fn sync_season(
     app: AppHandle,
     request: SyncRequest,

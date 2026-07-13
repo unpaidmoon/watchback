@@ -238,14 +238,20 @@ fn import_payload_value_with_lookups(
     let _ = refresh_match_evaluations_conn(&tx);
     tx.commit()?;
 
-    Ok(ImportSummary {
+    let mut summary = ImportSummary {
         season,
         matches_seen: entries.len(),
         details_seen: details.len(),
         preset_matches,
         stadium_matches,
         imported_at: now,
-    })
+        mmr_warning: None,
+    };
+    if crate::career_mmr::replay::rebuild_career_mmr(db).is_err() {
+        summary.mmr_warning =
+            Some("比赛已成功导入，但生涯分重建失败；已保留上一套完整结果。".to_string());
+    }
+    Ok(summary)
 }
 
 pub fn rebuild_match_players_from_existing_details(db: &OwDatabase) -> Result<()> {
@@ -930,6 +936,7 @@ pub fn existing_import_summary(db: &OwDatabase) -> Result<Option<ImportSummary>>
                     imported_at: row.get(3)?,
                     preset_matches: row.get(4)?,
                     stadium_matches: row.get(5)?,
+                    mmr_warning: None,
                 })
             },
         )

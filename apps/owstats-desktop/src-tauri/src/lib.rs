@@ -1,6 +1,7 @@
 mod analytics;
 pub mod app_paths;
 pub mod browser_session;
+pub mod career_mmr;
 mod commands;
 pub mod credential_store;
 pub mod credentials;
@@ -25,7 +26,9 @@ mod sync_coordinator;
 
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
-pub use importer::{import_full_season_payload, import_payload_value};
+pub use importer::{
+    import_full_season_payload, import_payload_value, import_payload_value_embedded,
+};
 pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSION};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
@@ -65,6 +68,14 @@ pub fn run() {
             commands::cancel_dashen_login,
             commands::get_rankings,
             commands::get_season_analysis,
+            commands::get_career_mmr_overview,
+            commands::get_role_mmr_history,
+            commands::get_role_mmr_mode_breakdown,
+            commands::get_role_mmr_season_breakdown,
+            commands::get_mmr_match_explanation,
+            commands::get_recent_mmr_explanations,
+            commands::rebuild_career_mmr,
+            commands::get_career_mmr_build_status,
             commands::sync_season,
         ])
         .run(tauri::generate_context!())

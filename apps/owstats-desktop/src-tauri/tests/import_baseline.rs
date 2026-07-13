@@ -639,7 +639,7 @@ fn database_initialize_sets_schema_version_idempotently() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(version, 4);
+    assert_eq!(version, 6);
 }
 
 #[test]
@@ -699,7 +699,7 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 6);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
 }
@@ -844,7 +844,7 @@ fn database_migrates_v2_arena_player_index_idempotently() {
         )
         .unwrap();
 
-    assert_eq!(version, 4);
+    assert_eq!(version, 6);
     assert_eq!(arena_table_count, 1);
     assert_eq!(
         arena_columns,
