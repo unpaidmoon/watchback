@@ -58,7 +58,7 @@ export function App() {
             <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />
             <Route path="/analytics/friends" element={<FriendAnalyticsPage />} />
-            <Route path="/analytics/friends/:bnetId" element={<FriendDetailPage />} />
+            <Route path="/analytics/friends/detail" element={<FriendDetailPage />} />
           </Routes>
         </div>
       </main>

@@ -3,6 +3,7 @@ import {
   buildFriendDetailState,
   buildReviewHref,
   buildReviewRankingHref,
+  parseFriendDetailState,
   parseReviewView,
   reviewScrollKey,
 } from "../src/features/review/reviewNavigation";
@@ -26,3 +27,8 @@ assert.deepEqual(detailState.returnTo, {
 });
 assert.equal(reviewScrollKey("/review?season=21&view=maps"), detailState.returnTo.scrollKey);
 assert.equal(detailState.returnTo.href.includes("private-id"), false);
+assert.equal(parseFriendDetailState(null), null);
+assert.equal(parseFriendDetailState({ ...detailState, season: 0 }), null);
+assert.equal(parseFriendDetailState({ ...detailState, returnTo: { ...detailState.returnTo, href: "/matches" } }), null);
+assert.equal(parseFriendDetailState({ ...detailState, returnTo: { ...detailState.returnTo, href: "http://[" } }), null);
+assert.deepEqual(parseFriendDetailState(detailState), detailState);

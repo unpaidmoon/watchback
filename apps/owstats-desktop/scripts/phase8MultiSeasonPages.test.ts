@@ -15,6 +15,7 @@ import {
 const reviewSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
+const friendDetailSource = readFileSync(new URL("../src/pages/FriendDetailPage.tsx", import.meta.url), "utf8");
 const matchesSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
 const matchFiltersSource = readFileSync(new URL("../src/features/matches/matchFilters.ts", import.meta.url), "utf8");
@@ -52,6 +53,12 @@ assert.deepEqual(
 assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S]*setLoading\(false\);/, "a URL season change must clear stale friend analysis state");
 assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
+assert.match(analyticsSource, /buildReviewRankingHref\(season\)/);
+assert.match(analyticsSource, /buildFriendDetailState\(friend\.bnetId, season, sourceView, window\.scrollY\)/);
+assert.match(friendDetailSource, /getFriendDetails\(state\.bnetId, \{ season: state\.season \}\)/);
+assert.match(friendDetailSource, /sessionStorage\.setItem\(state\.returnTo\.scrollKey/);
+assert.match(friendDetailSource, /navigate\(state\.returnTo\.href\)/);
+assert.doesNotMatch(friendDetailSource, /detail\?\.name \?\? bnetId/);
 
 assert.match(matchesSource, /chooseInitialMatchFilters\(filtersFromParams\(searchParams\), cachedPage\?\.filters, hasExplicitFilters\)/, "matches page should restore URL season filters before considering cached filters");
 assert.match(matchesSource, /<PageSeasonSelect/, "matches page should render its season selector in the page header");

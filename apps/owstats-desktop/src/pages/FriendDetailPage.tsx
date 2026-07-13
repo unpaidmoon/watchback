@@ -1,49 +1,73 @@
-import { AlertCircle, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { parseFriendDetailState } from "../features/review/reviewNavigation";
 import { getFriendDetails } from "../shared/api";
+import { PageEmptyState, PageErrorState, PageLoadingState } from "../shared/page-shell";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { formatWinRate } from "../shared/rankingUtils";
 import type { FriendBreakdown, FriendDetail, FriendRecentMatch } from "../shared/types";
 
 export function FriendDetailPage() {
-  const { bnetId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
+  const state = parseFriendDetailState(location.state);
   const [detail, setDetail] = useState<FriendDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!bnetId) return;
+  function requestDetail() {
+    if (!state) return;
     setLoading(true);
     setError(null);
-    void getFriendDetails(decodeURIComponent(bnetId), {})
+    void getFriendDetails(state.bnetId, { season: state.season })
       .then(setDetail)
       .catch((err) => setError(productErrorMessage(err)))
       .finally(() => setLoading(false));
-  }, [bnetId]);
+  }
+
+  useEffect(() => {
+    requestDetail();
+  }, [state?.bnetId, state?.season]);
+
+  function returnToReview() {
+    if (!state) {
+      navigate("/review");
+      return;
+    }
+    sessionStorage.setItem(state.returnTo.scrollKey, String(state.returnTo.scrollY));
+    navigate(state.returnTo.href);
+  }
+
+  if (!state) {
+    return (
+      <section className="detailPage phase6DetailPage">
+        <PageEmptyState
+          title="无法打开好友详情"
+          description="详情入口已失效，请从战报的队友协作页重新进入。"
+          actionLabel="返回战报"
+          onAction={() => navigate("/review")}
+        />
+      </section>
+    );
+  }
 
   return (
     <section className="detailPage phase6DetailPage">
       <header className="detailHero phase6DetailHero">
-        <button type="button" className="ghostButton" onClick={() => navigate("/analytics/friends")}>
+        <button type="button" className="ghostButton" onClick={returnToReview}>
           <ArrowLeft size={18} />
-          返回分析
+          返回战报
         </button>
         <div>
           <span className="phase6Eyebrow">好友详情</span>
-          <h2>{detail?.name ?? bnetId}</h2>
+          <h2>{detail?.name ?? "好友详情"}</h2>
         </div>
       </header>
 
-      {error && (
-        <div className="errorBanner phase6RecoverableError">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
-      {loading && <div className="emptyState">正在读取好友详情...</div>}
+      {error && <PageErrorState message={error} onRetry={requestDetail} />}
+      {loading && <PageLoadingState message="正在读取好友详情..." />}
       {detail && (
         <div className="detailContent friendDetailContent">
           <GlassPanel className="phase6ReviewPanel" tone="solid">

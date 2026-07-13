@@ -1,6 +1,11 @@
 import { AlertCircle, Map } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import {
+  buildFriendDetailState,
+  buildReviewRankingHref,
+  type ReviewView,
+} from "../features/review/reviewNavigation";
 import { getSeasonAnalysis } from "../shared/api";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
@@ -137,7 +142,14 @@ export function FriendAnalyticsPage() {
           </select>
         </label>
       </header>
-      <SeasonAnalysisModules analysis={analysis} analytics={analytics} loading={loading} error={error} />
+      <SeasonAnalysisModules
+        analysis={analysis}
+        analytics={analytics}
+        loading={loading}
+        error={error}
+        season={selectedSeason ?? analysis?.season ?? undefined}
+        sourceView="friends"
+      />
     </section>
   );
 }
@@ -147,11 +159,15 @@ export function SeasonAnalysisModules({
   analytics,
   loading,
   error,
+  season,
+  sourceView = "friends",
 }: {
   analysis: SeasonAnalysis | null;
   analytics: FriendAnalytics | null;
   loading: boolean;
   error: string | null;
+  season?: number;
+  sourceView?: ReviewView;
 }) {
   if (error) {
     return (
@@ -164,10 +180,13 @@ export function SeasonAnalysisModules({
 
   if (loading) return <div className="emptyState">正在加载好友分析...</div>;
 
+  const resolvedSeason = season ?? analysis?.season;
+  if (!resolvedSeason) return <div className="emptyState compact">暂无可用好友分析数据。</div>;
+
   return (
     <>
-      <FriendAnalysisModules analytics={analytics} loading={false} error={null} />
-      <MapAnalysisModules analysis={analysis} loading={false} error={null} />
+      <FriendAnalysisModules analytics={analytics} loading={false} error={null} season={resolvedSeason} sourceView={sourceView} />
+      <MapAnalysisModules analysis={analysis} loading={false} error={null} season={resolvedSeason} />
     </>
   );
 }
@@ -176,10 +195,14 @@ export function FriendAnalysisModules({
   analytics,
   loading,
   error,
+  season,
+  sourceView,
 }: {
   analytics: FriendAnalytics | null;
   loading: boolean;
   error: string | null;
+  season: number;
+  sourceView: ReviewView;
 }) {
   if (error) {
     return (
@@ -198,7 +221,7 @@ export function FriendAnalysisModules({
       <FriendPhase5Summary analytics={analytics} />
       <div className="boardGrid topGap phase6FriendBoardGrid">
         {analytics.boards.map((board) => (
-          <FriendBoardCard key={board.key} board={board} />
+          <FriendBoardCard key={board.key} board={board} season={season} sourceView={sourceView} />
         ))}
       </div>
     </>
@@ -209,10 +232,12 @@ export function MapAnalysisModules({
   analysis,
   loading,
   error,
+  season,
 }: {
   analysis: SeasonAnalysis | null;
   loading: boolean;
   error: string | null;
+  season: number;
 }) {
   if (error) {
     return (
@@ -234,7 +259,7 @@ export function MapAnalysisModules({
         </div>
         <Map size={22} />
       </header>
-      {analysis ? <MapCardGrid analysis={analysis} /> : <div className="emptyState compact">暂无可用地图数据。</div>}
+      {analysis ? <MapCardGrid analysis={analysis} season={season} /> : <div className="emptyState compact">暂无可用地图数据。</div>}
     </>
   );
 }
@@ -312,7 +337,7 @@ function FriendPhase5Summary({ analytics }: { analytics: FriendAnalytics }) {
   );
 }
 
-function MapCardGrid({ analysis }: { analysis: SeasonAnalysis }) {
+function MapCardGrid({ analysis, season }: { analysis: SeasonAnalysis; season: number }) {
   const cards = [
     ["王牌地图", analysis.mapCards.aceMap],
     ["翻车路段", analysis.mapCards.throwZone],
@@ -322,7 +347,7 @@ function MapCardGrid({ analysis }: { analysis: SeasonAnalysis }) {
   return (
     <div className="mapAnalysisGrid phase6MapAnalysisGrid">
       {cards.map(([title, card]) => (
-        <MapAnalysisCardView key={title} title={title} card={card} minSample={analysis.mapCards.minSample} />
+        <MapAnalysisCardView key={title} title={title} card={card} minSample={analysis.mapCards.minSample} season={season} />
       ))}
     </div>
   );
@@ -332,10 +357,12 @@ function MapAnalysisCardView({
   title,
   card,
   minSample,
+  season,
 }: {
   title: string;
   card: MapAnalysisCard | null;
   minSample: number;
+  season: number;
 }) {
   if (!card) {
     return (
@@ -346,7 +373,7 @@ function MapAnalysisCardView({
     );
   }
   return (
-    <Link className="mapAnalysisCard phase6MapAnalysisCard" to="/ranking?tab=maps">
+    <Link className="mapAnalysisCard phase6MapAnalysisCard" to={buildReviewRankingHref(season)}>
       <MapPreview mapKey={card.key || card.name} name={card.name} className="phase6AnalysisMapPreview" />
       <div>
         <h3>{title}</h3>
@@ -360,8 +387,12 @@ function MapAnalysisCardView({
 
 function FriendBoardCard({
   board,
+  season,
+  sourceView,
 }: {
   board: FriendBoard;
+  season: number;
+  sourceView: ReviewView;
 }) {
   return (
     <GlassPanel className="friendBoard phase6FriendBoard" tone="solid">
@@ -372,13 +403,32 @@ function FriendBoardCard({
         </div>
       </header>
       <div className="friendCardList">
-        {board.friends.slice(0, 2).map((friend) => (
-          <article className="friendCard phase6FriendCard" key={`${board.key}-${friend.bnetId}`}>
-            <strong>{friend.name}</strong>
-            <span>{friend.boardLabel}</span>
-            <MetricList friend={friend} compact />
-          </article>
-        ))}
+        {board.friends.slice(0, 2).map((friend) => {
+          function detailState() {
+            if (typeof window === "undefined") return buildFriendDetailState(friend.bnetId, season, sourceView, 0);
+            return buildFriendDetailState(friend.bnetId, season, sourceView, window.scrollY);
+          }
+
+          return (
+            <Link
+              className="friendCardLink"
+              key={`${board.key}-${friend.bnetId}`}
+              to="/analytics/friends/detail"
+              state={detailState()}
+              onClick={() => {
+                const state = detailState();
+                sessionStorage.setItem(state.returnTo.scrollKey, String(state.returnTo.scrollY));
+              }}
+              aria-label={`查看${friend.name}详情`}
+            >
+              <article className="friendCard phase6FriendCard">
+                <strong>{friend.name}</strong>
+                <span>{friend.boardLabel}</span>
+                <MetricList friend={friend} compact />
+              </article>
+            </Link>
+          );
+        })}
         {board.friends.length === 0 && <div className="emptyState compact">暂无符合样本的好友。</div>}
       </div>
     </GlassPanel>

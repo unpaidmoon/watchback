@@ -1,8 +1,13 @@
 import { ExternalLink, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { FriendAnalysisModules, MapAnalysisModules } from "./FriendAnalyticsPage";
-import { parseReviewView, type ReviewView } from "../features/review/reviewNavigation";
+import {
+  buildReviewHref,
+  parseReviewView,
+  reviewScrollKey,
+  type ReviewView,
+} from "../features/review/reviewNavigation";
 import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
 import { achievementBadgeUrl, rankAssetUrl } from "../shared/assets";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
@@ -54,7 +59,9 @@ export function createLatestRequestGuard() {
   };
 }
 
-export function hasReviewSeasonData(review: Pick<PersonalSeasonReview, "summary">) {
+export function hasReviewSeasonData(
+  review: Pick<PersonalSeasonReview, "summary">,
+): review is Pick<PersonalSeasonReview, "summary"> & { summary: PersonalSeasonReview["summary"] & { season: number } } {
   return typeof review.summary.season === "number" && review.summary.season > 0;
 }
 
@@ -217,6 +224,7 @@ export function PersonalReviewPage() {
   return (
     <section className="workspace reviewWorkspace phase6ReviewWorkspace">
       {renderHeader(titleSeason)}
+      <ReviewScrollRestorer season={titleSeason} view={view} />
 
       <nav className="reviewTabs" aria-label="战报内容">
         <ReviewTabButton value="overview" view={view} onSelect={changeView} />
@@ -229,8 +237,16 @@ export function PersonalReviewPage() {
       <div className="reviewViewGrid" data-view={view}>
         {view === "overview" && <ReviewOverview review={review} />}
         {view === "roles" && <RoleAndHeroView review={review} />}
-        {view === "friends" && <FriendAnalysisModules analytics={analytics} loading={analysisLoading} error={analysisError} />}
-        {view === "maps" && <MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} />}
+        {view === "friends" && (
+          <FriendAnalysisModules
+            analytics={analytics}
+            loading={analysisLoading}
+            error={analysisError}
+            season={titleSeason}
+            sourceView={view}
+          />
+        )}
+        {view === "maps" && <MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} season={titleSeason} />}
         {view === "achievements" && (
           <GlassPanel className="phase6AchievementPanel" tone="solid">
             <header className="phase6AchievementHeader">
@@ -250,6 +266,20 @@ export function PersonalReviewPage() {
       {selectedAchievement ? <AchievementDialog achievement={selectedAchievement} onClose={() => setSelectedAchievement(null)} /> : null}
     </section>
   );
+}
+
+function ReviewScrollRestorer({ season, view }: { season: number; view: ReviewView }) {
+  useLayoutEffect(() => {
+    const href = buildReviewHref(season, view);
+    const key = reviewScrollKey(href);
+    const stored = sessionStorage.getItem(key);
+    if (stored === null) return;
+    sessionStorage.removeItem(key);
+    const scrollY = Number(stored);
+    if (Number.isFinite(scrollY)) requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
+  }, [season, view]);
+
+  return null;
 }
 
 function ReviewTabButton({

@@ -44,3 +44,28 @@ export function buildFriendDetailState(
     returnTo: { href, scrollKey: reviewScrollKey(href), scrollY },
   };
 }
+
+export function parseFriendDetailState(value: unknown): FriendDetailLocationState | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<FriendDetailLocationState>;
+  if (typeof candidate.bnetId !== "string" || candidate.bnetId.length === 0) return null;
+  if (typeof candidate.season !== "number" || !Number.isInteger(candidate.season) || candidate.season <= 0) return null;
+  if (!candidate.returnTo || typeof candidate.returnTo !== "object") return null;
+
+  const { href, scrollKey, scrollY } = candidate.returnTo;
+  if (typeof href !== "string" || typeof scrollKey !== "string" || typeof scrollY !== "number" || !Number.isFinite(scrollY) || scrollY < 0) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(href, "http://owstats.local");
+  } catch {
+    return null;
+  }
+  const view = parseReviewView(parsed.searchParams.get("view"));
+  if (`${parsed.pathname}${parsed.search}` !== buildReviewHref(candidate.season, view)) return null;
+  if (scrollKey !== reviewScrollKey(href)) return null;
+
+  return candidate as FriendDetailLocationState;
+}
