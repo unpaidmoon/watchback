@@ -83,6 +83,7 @@ const tokens = withoutComments(readFileSync(new URL("../src/styles/tokens.css", 
 const base = withoutComments(readFileSync(new URL("../src/styles/base.css", import.meta.url), "utf8"));
 const shell = withoutComments(readFileSync(new URL("../src/styles/shell.css", import.meta.url), "utf8"));
 const pageShell = withoutComments(readFileSync(new URL("../src/styles/page-shell.css", import.meta.url), "utf8"));
+const matchesFeature = withoutComments(readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8"));
 const shared = withoutComments(readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8"));
 const entry = withoutComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
 const app = withoutComments(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"));
@@ -129,6 +130,11 @@ for (const [name, value] of Object.entries(approvedTokens)) {
     new RegExp(`${escapeRegExp(name)}\\s*:\\s*${escapeRegExp(value)}\\s*;`, "i"),
     `${name} matches the approved value`,
   );
+}
+
+const declaredVisualTokens = new Set([...tokens.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]));
+for (const reference of matchesFeature.matchAll(/var\((--[a-z0-9-]+)/gi)) {
+  assert.equal(declaredVisualTokens.has(reference[1]), true, `matches feature references declared token ${reference[1]}`);
 }
 
 const systemFontStack = '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif';

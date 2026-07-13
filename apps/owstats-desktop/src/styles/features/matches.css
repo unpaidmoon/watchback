@@ -31,7 +31,7 @@
 }
 
 .phase6WorkbenchList button.matchListCard:not(.phase6MatchRowSelected):hover {
-  border-color: var(--border-strong);
+  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--border-subtle));
   box-shadow: none;
   transform: translateY(-1px);
 }
@@ -146,8 +146,8 @@
   min-height: 20px;
   padding: 2px 6px;
   border-color: var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--surface-tertiary);
+  border-radius: 999px;
+  background: var(--surface-control);
   box-shadow: none;
   color: var(--text-secondary);
   font-size: 10px;
