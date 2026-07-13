@@ -43,6 +43,17 @@ const css = [
   "features/ranking.css",
   "features/friends.css",
 ].map((file) => readFileSync(join(root, "styles", file), "utf8")).join("\n");
+const matchesCss = readFileSync(join(root, "styles", "features", "matches.css"), "utf8");
+for (const selector of [
+  ".matchesPage",
+  ".matchesWorkbench",
+  ".matchListPane",
+  ".matchListCard",
+  ".matchDetailPane",
+  ".matchTeamTable",
+]) {
+  assert.ok(matchesCss.includes(selector), `${selector} is owned by matches.css`);
+}
 for (const selector of [".phase6ProductShell", ".phase6MatchWorkbench", ".phase6CommandCenter", ".phase6RankingTable", ".phase6Friend", ".phase6AchievementWall", ".phase7ArenaSelector"]) {
   assert.ok(css.includes(selector), `${selector} should remain available across style modules`);
 }

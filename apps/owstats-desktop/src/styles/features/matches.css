@@ -1,1 +1,15 @@
-/* Match feature rules remain in shared.css until their declaration-only extraction. */
+.matchesPage,
+.matchesWorkbench,
+.matchListPane,
+.matchListCard,
+.matchDetailPane,
+.matchTeamTable {
+  min-width: 0;
+}
+
+.matchListCard,
+.matchDetailPane,
+.matchTeamTable {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-secondary);
+}
