@@ -40,7 +40,7 @@ export function App() {
           </QaRegion>
 
           <div className="phase6ShellStatus" aria-label="全局状态">
-            <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据">
+            <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据" aria-current={false}>
               <CircleDot size={14} aria-hidden="true" />
               本地数据
             </NavLink>

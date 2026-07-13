@@ -35,6 +35,7 @@ const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url)
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
+assertEqual(appSource.includes("aria-current={false}"), true, "local data entry does not duplicate the current page announcement");
 assertEqual(appSource.includes("Bell"), false, "global shell removes the non-functional notification bell");
 assertEqual(appSource.includes("preloadDefaultMatchesPage"), false, "global shell no longer preloads matches");
 assertEqual(appSource.includes("<RouteFocusManager />"), true, "global shell manages route hash focus");
