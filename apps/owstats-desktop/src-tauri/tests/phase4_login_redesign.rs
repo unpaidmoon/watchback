@@ -2,7 +2,9 @@ use owstats_desktop_lib::browser_session::{build_browser_command, choose_debug_p
 use owstats_desktop_lib::credential_store::{
     credential_status_for_path, redact_sensitive_text, save_credentials_atomic, DashenCredentials,
 };
-use owstats_desktop_lib::credentials::{LoginCaptureIdentity, LoginIdentityTracker};
+use owstats_desktop_lib::credentials::{
+    LoginCaptureIdentity, LoginIdentityTracker, PairedIdentityStatus,
+};
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
     extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
@@ -264,6 +266,7 @@ fn login_capture_keeps_storage_credential_role_when_battletag_is_missing() {
     );
 
     assert_eq!(identity.credential_role_id(), Some("101101"));
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
     assert_eq!(identity.detected_battle_tag("101101"), None);
 }
 
@@ -282,7 +285,103 @@ fn login_capture_keeps_resource_credential_role_when_battletag_conflicts() {
     );
 
     assert_eq!(identity.credential_role_id(), Some("202202"));
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
     assert_eq!(identity.detected_battle_tag("202202"), None);
+}
+
+#[test]
+fn login_capture_confirms_pending_pair_before_immediate_token_success() {
+    let mut identity = LoginCaptureIdentity::default();
+    identity.observe(
+        Some("101101".to_string()),
+        RoleIdExtraction::Found("101101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Pending);
+
+    identity.confirm_pending_pair(
+        RoleIdExtraction::Found("101101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    assert_eq!(
+        identity.paired_status(),
+        PairedIdentityStatus::Confirmed {
+            role_id: "101101".to_string(),
+            battle_tag: "First#1111".to_string(),
+        }
+    );
+    assert_eq!(identity.detected_battle_tag("101101"), Some("First#1111"));
+}
+
+#[test]
+fn login_capture_confirms_pending_pair_before_signature_lock() {
+    let mut identity = LoginCaptureIdentity::default();
+    identity.observe(
+        Some("101101".to_string()),
+        RoleIdExtraction::Found("101101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Pending);
+    identity.confirm_pending_pair(
+        RoleIdExtraction::Found("101101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+    let locked_pair = identity
+        .confirmed_pair()
+        .map(|(role_id, battle_tag)| (role_id.to_string(), battle_tag.to_string()));
+
+    assert_eq!(
+        locked_pair,
+        Some(("101101".to_string(), "First#1111".to_string()))
+    );
+}
+
+#[test]
+fn login_capture_drops_changed_pending_pair_without_losing_credential_role() {
+    let mut identity = LoginCaptureIdentity::default();
+    identity.observe(
+        Some("101101".to_string()),
+        RoleIdExtraction::Found("101101".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    identity.confirm_pending_pair(
+        RoleIdExtraction::Found("202202".to_string()),
+        BattleTagExtraction::Found("Second#2222".to_string()),
+    );
+
+    assert_eq!(identity.credential_role_id(), Some("101101"));
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
+    assert_eq!(identity.detected_battle_tag("101101"), None);
+}
+
+#[test]
+fn login_capture_drops_failed_or_conflicting_confirmation_without_losing_credential_role() {
+    let confirmations = [
+        (RoleIdExtraction::Missing, BattleTagExtraction::Missing),
+        (
+            RoleIdExtraction::Found("101101".to_string()),
+            BattleTagExtraction::Conflict,
+        ),
+    ];
+
+    for (paired_role_id, battle_tag) in confirmations {
+        let mut identity = LoginCaptureIdentity::default();
+        identity.observe(
+            Some("101101".to_string()),
+            RoleIdExtraction::Found("101101".to_string()),
+            BattleTagExtraction::Found("First#1111".to_string()),
+        );
+
+        identity.confirm_pending_pair(paired_role_id, battle_tag);
+
+        assert_eq!(identity.credential_role_id(), Some("101101"));
+        assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
+        assert_eq!(identity.detected_battle_tag("101101"), None);
+    }
 }
 
 #[test]
