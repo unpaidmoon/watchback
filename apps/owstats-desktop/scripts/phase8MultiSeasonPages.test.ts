@@ -54,12 +54,14 @@ assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
 
 assert.match(matchesSource, /chooseInitialMatchFilters\(filtersFromParams\(searchParams\), cachedPage\?\.filters, hasExplicitFilters\)/, "matches page should restore URL season filters before considering cached filters");
+assert.match(matchesSource, /<PageSeasonSelect/, "matches page should render its season selector in the page header");
+assert.match(matchesSource, /seasons=\{options\.seasons\}/, "matches page should use locally available season options");
 assert.match(matchesSource, /<FilterBar filters=\{filters\} options=\{options\} onChange=\{setFilters\} \/>/, "matches page should bind the filter bar to the page-local filter state");
 assert.match(matchesSource, /paramsFromFilters\(filters, selectedMatchId\)/, "matches page should persist its current filter state, including season, to the URL");
 assert.match(matchFiltersSource, /if \(next\.season !== undefined && !options\.seasons\.includes\(next\.season\)\) delete next\.season;/, "matches page should clear an unavailable URL season instead of querying a stale season");
 
-assert.match(filterBarSource, /<select value=\{filters\.season \?\? ""\} onChange=\{\(event\) => patch\(\{ season: numberOrUndefined\(event\.target\.value\) \}\)\}>/, "match filter bar should keep its season selector bound to the page-local season filter");
-assert.match(filterBarSource, /\{options\.seasons\.map\(\(season\) => \(/, "match filter bar should render the locally available season options");
+assert.doesNotMatch(filterBarSource, />\s*赛季\s*</, "match filter bar should not duplicate the page-level season selector");
+assert.equal(filterBarSource.includes("PageSeasonSelect"), false, "match filter bar should not own the page season selector");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

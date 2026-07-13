@@ -42,6 +42,9 @@ const matchesSource = readFileSync(join(root, "pages", "MatchesPage.tsx"), "utf8
 for (const file of ["MatchListPane.tsx", "MatchListCard.tsx", "MatchDetailPane.tsx"]) {
   assert.ok(existsSync(join(root, "features", "matches", file)), `${file} must exist`);
 }
+for (const file of ["MatchFilterToolbar.tsx", "AdvancedMatchFilters.tsx", "ActiveFilterChips.tsx"]) {
+  assert.ok(existsSync(join(root, "features", "matches", file)), `${file} must exist`);
+}
 assert.match(matchesSource, /<MatchListPane/);
 assert.match(matchesSource, /<MatchDetailPane/);
 assert.doesNotMatch(matchesSource, /<MatchTimeline/);

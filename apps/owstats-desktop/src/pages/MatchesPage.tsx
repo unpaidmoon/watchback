@@ -28,6 +28,7 @@ import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
+import { PageHeader, PageSeasonSelect } from "../shared/page-shell";
 import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
@@ -376,7 +377,25 @@ export function MatchesPage() {
   }
 
   return (
-    <>
+    <div className="matchesPage">
+      <PageHeader
+        title="对局记录"
+        description={`${matches.length} 场本地对局`}
+        actions={(
+          <PageSeasonSelect
+            value={filters.season}
+            seasons={options.seasons}
+            includeAll
+            allLabel="全部赛季"
+            onChange={(season) => {
+              const nextFilters = { ...filters };
+              if (season === undefined) delete nextFilters.season;
+              else nextFilters.season = season;
+              setFilters(nextFilters);
+            }}
+          />
+        )}
+      />
       {error && (
         <div className="errorBanner phase6RecoverableError">
           <AlertCircle size={18} />
@@ -408,7 +427,7 @@ export function MatchesPage() {
           matchId={selectedMatchId}
         />
       </section>
-    </>
+    </div>
   );
 }
 
