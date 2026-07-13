@@ -266,13 +266,15 @@ pub async fn bind_detected_target_with_base_url(
         root_base_url.to_string(),
     )?;
     let payload = client.search_bnet_account(detected_bnet).await?;
+    ensure_business_success(&payload, "搜索当前账号")?;
     let target = target_from_search_payload(
         detected_bnet,
         &payload,
         credentials.role_id,
         &Utc::now().to_rfc3339(),
     )?;
-    client.query_card(&target.customer_token).await?;
+    let card = client.query_card(&target.customer_token).await?;
+    ensure_business_success(&card, "读取资料卡")?;
     save_target_atomic(target_path, &target)?;
     player_target_status_for_path(target_path)
 }
@@ -427,6 +429,19 @@ fn persisted_display_bnet(path: &Path) -> Option<String> {
     read_player_target_for_path(path)
         .ok()
         .map(|target| target_display_bnet(&target))
+}
+
+fn ensure_business_success(payload: &serde_json::Value, operation: &str) -> Result<()> {
+    let succeeded = payload.get("code").and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
+    }) == Some(0);
+    if succeeded {
+        Ok(())
+    } else {
+        Err(anyhow!("{operation}返回业务错误"))
+    }
 }
 
 fn status(

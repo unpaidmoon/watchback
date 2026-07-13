@@ -398,6 +398,63 @@ async fn direct_binding_does_not_replace_target_when_query_card_fails() {
     assert_eq!(target.customer_token, "old-player-key");
 }
 
+#[tokio::test]
+async fn query_card_business_failure_does_not_replace_the_existing_target() {
+    let server = spawn_sequence_server(vec![
+        Response::ok(
+            "/searchBnetAccount",
+            r#"{"code":0,"data":{"customerToken":"new-player-key","bnetId":"New#2000"}}"#,
+        ),
+        Response::ok(
+            "/customer/queryCard",
+            r#"{"code":401,"message":"synthetic business rejection"}"#,
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Old#1000", 101, "old-player-key");
+
+    let result = bind_detected_target_with_base_url(
+        &credentials(202),
+        "New#2000",
+        &target_path,
+        &server.base_url,
+    )
+    .await;
+
+    assert!(result.is_err());
+    let target = read_player_target_for_path(&target_path).unwrap();
+    assert_eq!(target.input_bnet, "Old#1000");
+    assert_eq!(target.customer_token, "old-player-key");
+}
+
+#[tokio::test]
+async fn search_business_failure_does_not_continue_to_save_a_target() {
+    let server = spawn_sequence_server(vec![
+        Response::ok(
+            "/searchBnetAccount",
+            r#"{"code":403,"data":{"customerToken":"new-player-key","bnetId":"New#2000"}}"#,
+        ),
+        Response::ok("/customer/queryCard", r#"{"code":0,"data":{}}"#),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.json");
+    save_target(&target_path, "Old#1000", 101, "old-player-key");
+
+    let result = bind_detected_target_with_base_url(
+        &credentials(202),
+        "New#2000",
+        &target_path,
+        &server.base_url,
+    )
+    .await;
+
+    assert!(result.is_err());
+    let target = read_player_target_for_path(&target_path).unwrap();
+    assert_eq!(target.input_bnet, "Old#1000");
+    assert_eq!(target.customer_token, "old-player-key");
+}
+
 fn credentials(role_id: i64) -> DashenCredentials {
     DashenCredentials {
         role_id,
@@ -460,9 +517,8 @@ fn spawn_sequence_server(responses: Vec<Response>) -> SequenceServer {
     thread::spawn(move || {
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0_u8; 8192];
-            let read = stream.read(&mut buffer).unwrap();
-            let request = String::from_utf8_lossy(&buffer[..read]);
+            let request_bytes = read_complete_http_request(&mut stream);
+            let request = String::from_utf8_lossy(&request_bytes);
             let first_line = request.lines().next().unwrap_or_default().to_string();
             assert!(
                 first_line.contains(response.path),
@@ -488,5 +544,32 @@ fn spawn_sequence_server(responses: Vec<Response>) -> SequenceServer {
     SequenceServer {
         base_url: format!("http://{address}"),
         requests,
+    }
+}
+
+fn read_complete_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    loop {
+        let mut buffer = [0_u8; 4096];
+        let read = stream.read(&mut buffer).unwrap();
+        assert!(read > 0, "connection closed before request was complete");
+        request.extend_from_slice(&buffer[..read]);
+
+        let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or(0);
+        if request.len() >= header_end + 4 + content_length {
+            return request;
+        }
     }
 }
