@@ -107,6 +107,7 @@
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .pageStateAction:hover {

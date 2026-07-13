@@ -23,10 +23,34 @@ body {
 button,
 input,
 select {
+  min-height: 44px;
   color: inherit;
   font: inherit;
 }
 
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
+}
+
+.phase6PlayerSearchBox input:focus-visible,
+.searchBox input:focus-visible,
+.seasonSelect select:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
+}
+
 [data-numeric] {
   font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

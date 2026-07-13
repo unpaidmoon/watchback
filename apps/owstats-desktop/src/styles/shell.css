@@ -66,7 +66,7 @@
 
 .appNavLink,
 .phase6ProductNav a.appNavLink {
-  min-height: 40px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -80,7 +80,6 @@
   font-weight: 500;
   text-decoration: none;
   white-space: nowrap;
-  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
 }
 
 .appNavLink:hover,
@@ -113,7 +112,7 @@
 }
 
 .appDataEntry {
-  min-height: 40px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -9,9 +9,27 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function splitSelectors(selectorList: string) {
+  const selectors: string[] = [];
+  let start = 0;
+  let parenthesisDepth = 0;
+
+  for (let index = 0; index < selectorList.length; index += 1) {
+    if (selectorList[index] === "(") parenthesisDepth += 1;
+    if (selectorList[index] === ")") parenthesisDepth -= 1;
+    if (selectorList[index] === "," && parenthesisDepth === 0) {
+      selectors.push(selectorList.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+
+  selectors.push(selectorList.slice(start).trim());
+  return selectors;
+}
+
 function declarationsForSelector(css: string, selector: string) {
   for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const selectors = match[1].split(",").map((candidate) => candidate.trim());
+    const selectors = splitSelectors(match[1]);
     if (selectors.includes(selector)) return match[2];
   }
   assert.fail(`${selector} is present`);
@@ -25,9 +43,37 @@ function assertDeclaration(declarations: string, property: string, value: string
   );
 }
 
+function blockForAtRule(css: string, atRule: string) {
+  const atRuleStart = css.indexOf(atRule);
+  assert.notEqual(atRuleStart, -1, `${atRule} is present`);
+
+  const blockStart = css.indexOf("{", atRuleStart);
+  assert.notEqual(blockStart, -1, `${atRule} has a block`);
+
+  let depth = 1;
+  for (let index = blockStart + 1; index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    if (css[index] === "}") depth -= 1;
+    if (depth === 0) return css.slice(blockStart + 1, index);
+  }
+
+  assert.fail(`${atRule} has a closing brace`);
+}
+
+function transitionValues(css: string) {
+  const values: string[] = [];
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    for (const declaration of match[2].matchAll(/(?:^|;)\s*transition\s*:\s*([^;]+)\s*;/gi)) {
+      values.push(declaration[1].trim());
+    }
+  }
+  return values;
+}
+
 const tokens = withoutComments(readFileSync(new URL("../src/styles/tokens.css", import.meta.url), "utf8"));
 const base = withoutComments(readFileSync(new URL("../src/styles/base.css", import.meta.url), "utf8"));
 const shell = withoutComments(readFileSync(new URL("../src/styles/shell.css", import.meta.url), "utf8"));
+const pageShell = withoutComments(readFileSync(new URL("../src/styles/page-shell.css", import.meta.url), "utf8"));
 const shared = withoutComments(readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8"));
 const entry = withoutComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
 const app = withoutComments(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"));
@@ -79,6 +125,39 @@ for (const [name, value] of Object.entries(approvedTokens)) {
 const systemFontStack = '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif';
 assert.match(base, new RegExp(`font-family:\\s*${escapeRegExp(systemFontStack)}\\s*;`), "base uses the approved system font stack");
 
+const baseControls = declarationsForSelector(base, "button");
+assert.equal(baseControls, declarationsForSelector(base, "input"), "buttons and inputs share the base control rule");
+assert.equal(baseControls, declarationsForSelector(base, "select"), "buttons and selects share the base control rule");
+assertDeclaration(baseControls, "min-height", "44px", "base controls keep a 44px hit target");
+
+const baseFocusRing = declarationsForSelector(base, ":where(a, button, input, select, [tabindex]):focus-visible");
+assertDeclaration(baseFocusRing, "outline", "2px solid var(--data-primary)", "keyboard focus uses the purple 2px ring");
+assertDeclaration(baseFocusRing, "outline-offset", "2px", "keyboard focus ring is offset by 2px");
+
+for (const [legacySelector, outlineValue, compatibleSelector] of [
+  [".phase6PlayerSearchBox input", "none", ".phase6PlayerSearchBox input:focus-visible"],
+  [".searchBox input", "0", ".searchBox input:focus-visible"],
+  [".seasonSelect select", "0", ".seasonSelect select:focus-visible"],
+] as const) {
+  assertDeclaration(declarationsForSelector(shared, legacySelector), "outline", outlineValue, `${legacySelector} keeps its legacy reset`);
+  const compatibleFocusRing = declarationsForSelector(base, compatibleSelector);
+  assertDeclaration(compatibleFocusRing, "outline", "2px solid var(--data-primary)", `${compatibleSelector} restores the purple focus ring`);
+  assertDeclaration(compatibleFocusRing, "outline-offset", "2px", `${compatibleSelector} restores the focus offset`);
+}
+
+const reducedMotion = blockForAtRule(base, "@media (prefers-reduced-motion: reduce)");
+const reducedMotionReset = declarationsForSelector(reducedMotion, "*");
+assert.equal(reducedMotionReset, declarationsForSelector(reducedMotion, "*::before"), "reduced motion covers before pseudo-elements");
+assert.equal(reducedMotionReset, declarationsForSelector(reducedMotion, "*::after"), "reduced motion covers after pseudo-elements");
+for (const [property, value] of Object.entries({
+  "scroll-behavior": "auto !important",
+  "animation-duration": "0.01ms !important",
+  "animation-iteration-count": "1 !important",
+  "transition-duration": "0.01ms !important",
+})) {
+  assertDeclaration(reducedMotionReset, property, value, `reduced motion sets ${property} safely`);
+}
+
 const imports = [...entry.matchAll(/@import\s+"([^"]+)"\s*;/g)].map((match) => match[1]);
 assert.deepEqual(
   imports.slice(0, 5),
@@ -102,6 +181,7 @@ assert.match(app, /isActive\s*\?\s*"appNavLink active"\s*:\s*"appNavLink"/, "App
 
 const compatibleNavLink = declarationsForSelector(shell, ".phase6ProductNav a.appNavLink");
 for (const [property, value] of Object.entries({
+  "min-height": "44px",
   color: "var(--text-secondary)",
   background: "var(--surface-control)",
   border: "1px solid var(--surface-control)",
@@ -111,6 +191,30 @@ for (const [property, value] of Object.entries({
   "box-shadow": "none",
 })) {
   assertDeclaration(compatibleNavLink, property, value, `legacy-compatible nav ${property} uses the semantic visual system`);
+}
+
+const semanticNavLink = declarationsForSelector(shell, ".appNavLink");
+assertDeclaration(semanticNavLink, "min-height", "44px", "semantic navigation keeps a 44px hit target");
+assert.doesNotMatch(semanticNavLink, /(?:^|;)\s*transition\s*:/i, "navigation does not declare a transition without an opacity or transform state change");
+const dataEntry = declarationsForSelector(shell, ".appDataEntry");
+assertDeclaration(dataEntry, "min-height", "44px", "local data entry keeps a 44px hit target");
+
+assertDeclaration(declarationsForSelector(shared, ".phase6ProductNav a"), "min-height", "36px", "the test tracks the legacy nav height override");
+
+const pageStateAction = declarationsForSelector(pageShell, ".pageStateAction");
+assertDeclaration(pageStateAction, "min-height", "44px", "page state actions keep a 44px hit target");
+assertDeclaration(pageStateAction, "transition", "opacity var(--motion-fast) ease", "page state hover opacity uses the fast motion token");
+
+const regularTransitions = [...transitionValues(shell), ...transitionValues(pageShell)];
+assert.ok(regularTransitions.length > 0, "shell layers define intentional interaction transitions");
+for (const transition of regularTransitions) {
+  for (const item of transition.split(",")) {
+    assert.match(
+      item.trim(),
+      /^(?:opacity|transform)\s+var\(--motion-fast\)(?:\s+[a-z-]+(?:\([^)]*\))?)?$/i,
+      `shell transition only animates opacity or transform with --motion-fast: ${item.trim()}`,
+    );
+  }
 }
 
 const compatibleNavHover = declarationsForSelector(shell, ".phase6ProductNav a.appNavLink:hover");
