@@ -154,6 +154,10 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     assert!(script.contains("current:"));
     assert!(script.contains("storage:"));
     assert!(script.contains("resources:"));
+    assert!(script.contains("truncated:"));
+    assert!(script.contains("MAX_ROLE_EVIDENCE_VALUES"));
+    assert!(script.contains("group.truncated = true"));
+    assert!(!script.contains("slice(0, 500)"));
     assert!(script.contains("location.href"));
     assert!(script.contains("document.documentElement"));
     assert!(script.contains("performance.getEntriesByType"));
@@ -171,7 +175,7 @@ fn login_role_rejects_conflicting_storage_and_resource_without_current_evidence(
     let resources = vec!["https://new.example/?role_id=202202".to_string()];
 
     assert_eq!(
-        extract_login_role_id(&current, &storage, &resources),
+        extract_login_role_id(&current, &storage, &resources, false),
         RoleIdExtraction::Conflict
     );
 }
@@ -186,7 +190,7 @@ fn login_role_rejects_auxiliary_only_evidence_even_when_it_agrees() {
     let resources = vec!["https://old.example/?role_id=101101".to_string()];
 
     assert_eq!(
-        extract_login_role_id(&current, &storage, &resources),
+        extract_login_role_id(&current, &storage, &resources, false),
         RoleIdExtraction::Missing
     );
 }
@@ -200,7 +204,7 @@ fn login_role_rejects_auxiliary_role_that_conflicts_with_current_role() {
     let storage = vec![r#"{"roleId":"101101"}"#.to_string()];
 
     assert_eq!(
-        extract_login_role_id(&current, &storage, &[]),
+        extract_login_role_id(&current, &storage, &[], false),
         RoleIdExtraction::Conflict
     );
 }
@@ -213,7 +217,7 @@ fn login_role_rejects_conflicting_roles_within_current_page_evidence() {
     ];
 
     assert_eq!(
-        extract_login_role_id(&current, &[], &[]),
+        extract_login_role_id(&current, &[], &[], false),
         RoleIdExtraction::Conflict
     );
 }
@@ -227,8 +231,21 @@ fn login_role_accepts_current_role_when_auxiliary_evidence_agrees() {
     let storage = vec![r#"{"roleId":"202202"}"#.to_string()];
 
     assert_eq!(
-        extract_login_role_id(&current, &storage, &[]),
+        extract_login_role_id(&current, &storage, &[], false),
         RoleIdExtraction::Found("202202".to_string())
+    );
+}
+
+#[test]
+fn login_role_rejects_conflict_hidden_after_bounded_auxiliary_evidence() {
+    let current = vec!["https://ds.163.com/?role_id=101101".to_string()];
+    let mut all_storage = vec![r#"{"roleId":"101101"}"#.to_string(); 500];
+    all_storage.push(r#"{"roleId":"202202"}"#.to_string());
+    let returned_storage = all_storage[..500].to_vec();
+
+    assert_eq!(
+        extract_login_role_id(&current, &returned_storage, &[], true),
+        RoleIdExtraction::Conflict
     );
 }
 

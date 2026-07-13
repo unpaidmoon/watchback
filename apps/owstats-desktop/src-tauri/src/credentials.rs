@@ -275,16 +275,27 @@ async fn collect_login_identity(
         .ok()?;
     let page_text = collected.get("pageText")?.as_str()?;
     let role_candidates = collected.get("roleCandidates")?;
-    let current_candidates = string_candidates(role_candidates.get("current")?)?;
-    let storage_candidates = string_candidates(role_candidates.get("storage")?)?;
-    let resource_candidates = string_candidates(role_candidates.get("resources")?)?;
+    let (current_candidates, current_truncated) =
+        role_candidate_group(role_candidates.get("current")?)?;
+    let (storage_candidates, storage_truncated) =
+        role_candidate_group(role_candidates.get("storage")?)?;
+    let (resource_candidates, resource_truncated) =
+        role_candidate_group(role_candidates.get("resources")?)?;
     Some((
         extract_login_role_id(
             &current_candidates,
             &storage_candidates,
             &resource_candidates,
+            current_truncated || storage_truncated || resource_truncated,
         ),
         extract_battle_tag(page_text),
+    ))
+}
+
+fn role_candidate_group(value: &serde_json::Value) -> Option<(Vec<String>, bool)> {
+    Some((
+        string_candidates(value.get("values")?)?,
+        value.get("truncated")?.as_bool()?,
     ))
 }
 

@@ -71,7 +71,12 @@ pub fn extract_login_role_id(
     current_candidates: &[String],
     storage_candidates: &[String],
     resource_candidates: &[String],
+    evidence_truncated: bool,
 ) -> RoleIdExtraction {
+    if evidence_truncated {
+        return RoleIdExtraction::Conflict;
+    }
+
     let current_role_ids = extract_role_ids(current_candidates);
     let auxiliary_role_ids = extract_role_ids(
         &storage_candidates
@@ -146,33 +151,40 @@ fn extract_all_digits_after_key(text: &str, key: &str) -> Vec<String> {
 pub fn build_collect_candidates_script() -> String {
     r#"
 (() => {
+  const MAX_ROLE_EVIDENCE_VALUES = 500;
   const pageText = document.documentElement?.innerText ?? '';
-  const currentValues = [];
-  const storageValues = [];
-  const resourceValues = [];
-  const add = (values, value) => {
+  const createGroup = () => ({ values: [], truncated: false });
+  const currentGroup = createGroup();
+  const storageGroup = createGroup();
+  const resourceGroup = createGroup();
+  const add = (group, value) => {
     if (value === undefined || value === null) return;
     const text = String(value);
-    if (text) values.push(text);
+    if (!text) return;
+    if (group.values.length >= MAX_ROLE_EVIDENCE_VALUES) {
+      group.truncated = true;
+      return;
+    }
+    group.values.push(text);
   };
-  add(currentValues, location.href);
-  add(currentValues, pageText);
+  add(currentGroup, location.href);
+  add(currentGroup, pageText);
   for (const storage of [localStorage, sessionStorage]) {
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index);
-      add(storageValues, key);
-      add(storageValues, storage.getItem(key));
+      add(storageGroup, key);
+      add(storageGroup, storage.getItem(key));
     }
   }
   for (const entry of performance.getEntriesByType('resource')) {
-    add(resourceValues, entry.name);
+    add(resourceGroup, entry.name);
   }
   return {
     pageText: pageText,
     roleCandidates: {
-      current: currentValues,
-      storage: storageValues.slice(0, 500),
-      resources: resourceValues.slice(0, 500),
+      current: currentGroup,
+      storage: storageGroup,
+      resources: resourceGroup,
     },
   };
 })()
