@@ -11,6 +11,7 @@ mod database;
 mod db;
 mod importer;
 pub mod login_flow;
+pub mod login_target;
 mod match_evaluation;
 mod models;
 pub mod player_target;

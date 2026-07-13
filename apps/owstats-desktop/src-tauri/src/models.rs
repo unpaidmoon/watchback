@@ -527,6 +527,18 @@ pub struct PlayerTargetStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct LoginTargetStatus {
+    pub state: String,
+    pub detected_bnet: Option<String>,
+    pub current_bnet: Option<String>,
+    pub message: String,
+    pub sync_allowed: bool,
+    pub can_confirm_switch: bool,
+    pub can_retry: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BindPlayerTargetRequest {
     pub bnet: String,
 }
