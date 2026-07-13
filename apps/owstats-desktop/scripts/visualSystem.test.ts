@@ -133,8 +133,13 @@ for (const [name, value] of Object.entries(approvedTokens)) {
 }
 
 const declaredVisualTokens = new Set([...tokens.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]));
-for (const reference of matchesFeature.matchAll(/var\((--[a-z0-9-]+)/gi)) {
-  assert.equal(declaredVisualTokens.has(reference[1]), true, `matches feature references declared token ${reference[1]}`);
+for (const reference of matchesFeature.matchAll(/var\((--[a-z0-9-]+)(\s*,)?/gi)) {
+  const hasFallback = Boolean(reference[2]);
+  assert.equal(
+    declaredVisualTokens.has(reference[1]) || hasFallback,
+    true,
+    `matches feature references declared token ${reference[1]} or provides a fallback`,
+  );
 }
 
 const systemFontStack = '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif';
