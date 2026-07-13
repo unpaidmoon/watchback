@@ -33,6 +33,10 @@ assert.doesNotMatch(onboarding, /aria-label="BattleTag"|placeholder="BattleTag|s
 for (const label of ["切换到此账号", "保留原目标", "重新绑定", "重新识别"]) {
   assert.match(onboarding, new RegExp(label), `command center exposes ${label}`);
 }
+assert.match(onboarding, /const showDetectedLogin = Boolean\(/, "target comparison is derived independently of the workflow state");
+assert.match(onboarding, /targetStatus\?\.currentBnet &&[\s\S]*?targetStatus\.detectedBnet &&[\s\S]*?normalizeLoginTargetName/, "target comparison checks normalized current and detected accounts");
+assert.match(onboarding, /\{showDetectedLogin && \([\s\S]*?当前目标[\s\S]*?检测到的登录账号/, "kept mismatches continue to show both account names");
+assert.doesNotMatch(onboarding, /state === "switchRequired" && \([\s\S]{0,80}?syncTargetComparison/, "account comparison is not limited to switch confirmation");
 assert.match(onboarding, /credentialReady && Boolean\(targetStatus\?\.syncAllowed\)/, "sync eligibility includes backend target authorization");
 assert.match(onboarding, /role=\{error \? "alert" : "status"\}/, "recoverable messages expose an accessible role");
 assert.match(onboarding, /aria-live=\{error \? "assertive" : "polite"\}/, "recoverable messages are announced accessibly");

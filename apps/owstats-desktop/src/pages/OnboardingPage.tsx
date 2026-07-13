@@ -52,6 +52,10 @@ type TargetAction = "confirm" | "keep" | "retry" | "clear";
 const PROFILE_REVIEW_SEASON = 22;
 const dashboardCache = new Map<number, DashboardSnapshot>();
 
+function normalizeLoginTargetName(value: string) {
+  return value.trim().normalize("NFKC").toLowerCase();
+}
+
 export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
@@ -263,6 +267,11 @@ export function OnboardingPage() {
   const credentialReady = status?.credentialStatus.state === "ready";
   const syncTargetReady = credentialReady && Boolean(targetStatus?.syncAllowed);
   const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
+  const showDetectedLogin = Boolean(
+    targetStatus?.currentBnet &&
+    targetStatus.detectedBnet &&
+    normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
+  );
   const warnings = status?.health.warnings ?? [];
   const displayName = profile?.playerId ?? (status?.credentialStatus.roleId ? `角色 ${status.credentialStatus.roleId}` : "未登录玩家");
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
@@ -380,10 +389,10 @@ export function OnboardingPage() {
                 <div className="phase8TargetPlayerSummary">
                   <span className="phase6Eyebrow">当前目标玩家</span>
                   <strong>{targetStatus?.currentBnet ?? targetStatus?.detectedBnet ?? "尚未识别账号"}</strong>
-                  {targetStatus?.state === "switchRequired" && (
-                    <div className="syncTargetComparison" aria-label="账号切换确认">
-                      <span>原目标 <strong>{targetStatus.currentBnet ?? "未知"}</strong></span>
-                      <span>本次账号 <strong>{targetStatus.detectedBnet ?? "未识别"}</strong></span>
+                  {showDetectedLogin && (
+                    <div className="syncTargetComparison" aria-label="当前目标与检测到的登录账号">
+                      <span>当前目标 <strong>{targetStatus?.currentBnet}</strong></span>
+                      <span>检测到的登录账号 <strong>{targetStatus?.detectedBnet}</strong></span>
                     </div>
                   )}
                   <p>{targetStatus?.message ?? status?.credentialStatus.message ?? "请登录网易大神并自动识别当前账号"}</p>
