@@ -20,8 +20,8 @@
 .careerMmrToolbar label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
 .careerMmrToolbar select { min-width: 150px; padding: 8px 11px; border: 1px solid var(--border-subtle); border-radius: 10px; color: inherit; background: var(--surface-raised); }
 .careerMmrMainGrid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, .8fr); gap: 14px; }
-.careerMmrLowerGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .careerMmrPanel { min-width: 0; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 18px; background: var(--surface-raised); }
+.careerMmrSeasonPanel { width: 100%; }
 .careerMmrPanelTitle, .careerMmrPanelTitle > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .careerMmrPanelTitle > span { color: var(--text-secondary); font-size: 12px; }
 .careerMmrHistoryPanel { min-height: 290px; }
@@ -29,13 +29,11 @@
 .careerMmrChart polyline { fill: none; stroke: #7599ff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; filter: drop-shadow(0 4px 6px rgba(71, 112, 255, .35)); }
 .careerMmrChart polygon { fill: rgba(117, 153, 255, .13); stroke: none; }
 .careerMmrChart > div { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 11px; }.careerMmrChart b { color: var(--text-primary); }
-.careerMmrModeList, .careerMmrEventList { display: grid; gap: 10px; margin-top: 15px; }
+.careerMmrModeList { display: grid; gap: 10px; margin-top: 15px; }
 .careerMmrModeItem { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 11px 12px; border-radius: 12px; background: var(--surface-soft); }
 .careerMmrModeItem div { display: grid; }.careerMmrModeItem span, .careerMmrModeItem small { color: var(--text-secondary); font-size: 11px; }.careerMmrModeItem small { grid-column: 1 / -1; }
 .careerMmrModeItem .positive, .careerMmrSeasonTable strong { color: #54c9a9; }.careerMmrModeItem .negative { color: #ff7b82; }
 .careerMmrSeasonTable { display: grid; margin-top: 12px; }.careerMmrSeasonTable > div:not(.careerMmrEmpty) { display: grid; grid-template-columns: 55px 70px 1fr auto; gap: 10px; padding: 11px 4px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
-.careerMmrEventList > div:not(.careerMmrEmpty) { padding: 10px 12px; border-left: 2px solid #7599ff; background: var(--surface-soft); }.careerMmrEventList div div { display: flex; justify-content: space-between; }.careerMmrEventList span, .careerMmrEventList p { color: var(--text-secondary); font-size: 11px; }.careerMmrEventList p { margin: 5px 0 0; line-height: 1.5; }
-.careerMmrEventList ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; margin: 8px 0 0; padding: 0; list-style: none; }.careerMmrEventList li { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }.careerMmrEventList li strong { font-variant-numeric: tabular-nums; }
 .careerMmrEmpty { display: grid; min-height: 120px; place-items: center; color: var(--text-secondary); text-align: center; }
 .careerMmrFootnote { color: var(--text-secondary); font-size: 12px; text-align: center; }
-@media (max-width: 900px) { .careerMmrRoleGrid, .careerMmrMainGrid, .careerMmrLowerGrid { grid-template-columns: 1fr; }.careerMmrHero { flex-direction: column; }.careerMmrComposite { align-items: flex-start; }.careerMmrToolbar { align-items: stretch; flex-direction: column; } }
+@media (max-width: 900px) { .careerMmrRoleGrid, .careerMmrMainGrid { grid-template-columns: 1fr; }.careerMmrHero { flex-direction: column; }.careerMmrComposite { align-items: flex-start; }.careerMmrToolbar { align-items: stretch; flex-direction: column; } }

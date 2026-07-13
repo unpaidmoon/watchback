@@ -18,7 +18,13 @@ assert.doesNotMatch(pageSource, /S21.*S22.*S23/s, "赛季选项不得硬编码")
 assert.match(pageSource, /overview\.discoveredSeasons\.map/, "赛季筛选必须来自后端动态发现结果");
 assert.match(pageSource, /getCareerMmrOverview\(/, "页面必须通过 API 获取总览");
 assert.match(pageSource, /getRoleMmrHistory\(/, "页面必须通过 API 获取历史");
-assert.match(pageSource, /getRecentMmrExplanations\(/, "近期解释必须来自隐私安全的后端查询");
+assert.doesNotMatch(pageSource, /getRecentMmrExplanations/);
+assert.doesNotMatch(pageSource, /recentExplanations/);
+assert.doesNotMatch(pageSource, /近期单场解释/);
+assert.doesNotMatch(pageSource, /CareerMmrRecentExplanations/);
+assert.match(pageSource, /Promise\.all\(\[\s*getRoleMmrHistory[\s\S]*getRoleMmrModeBreakdown[\s\S]*getRoleMmrSeasonBreakdown[\s\S]*\]\)/);
+assert.match(pageSource, /className="careerMmrPanel careerMmrSeasonPanel"/);
+assert.doesNotMatch(pageSource, /careerMmrLowerGrid/);
 assert.match(pageSource, /formatCareerDate\(summary\?\.peakAt/, "职责卡必须展示后端峰值日期");
 assert.match(apiSource, /invoke<CareerMmrOverview>\("get_career_mmr_overview"\)/);
 assert.match(apiSource, /invoke<CareerMmrHistory>\("get_role_mmr_history"/);
@@ -30,7 +36,7 @@ assert.doesNotMatch(pageSource, /胜负、对局难度与数据质量共同形�
 assert.doesNotMatch(pageSource, /cursorHash/, "页面不能读取或展示内部游标哈希");
 assert.doesNotMatch(pageSource, /matchId|playerId|bnetId|rawJson/, "页面不能读取或展示隐私标识");
 assert.match(pageSource, /aria-pressed=\{selectedRole === role\}/, "职责按钮必须暴露选中状态");
-assert.match(pageSource, /setHistory\(null\);[\s\S]*setModes\(null\);[\s\S]*setSeasons\(null\);[\s\S]*setRecentExplanations\(null\)/, "切换职责必须立即清空旧详情");
+assert.match(pageSource, /setHistory\(null\);[\s\S]*setModes\(null\);[\s\S]*setSeasons\(null\)/, "切换职责必须立即清空旧详情");
 
 assert.equal(buildCareerMmrChart([], 760, 210), null, "空历史不应构造图表");
 const flat = buildCareerMmrChart([{ mmr: 2500, confidence: 1 }, { mmr: 2500, confidence: 1 }], 760, 210)!;

@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getCareerMmrBuildStatus,
   getCareerMmrOverview,
-  getRecentMmrExplanations,
   getRoleMmrHistory,
   getRoleMmrModeBreakdown,
   getRoleMmrSeasonBreakdown,
@@ -25,7 +24,6 @@ import type {
   CareerMmrHistory,
   CareerMmrModeBreakdown,
   CareerMmrOverview,
-  CareerMmrRecentExplanations,
   CareerMmrSeasonBreakdown,
   CareerRole,
 } from "../shared/types";
@@ -41,7 +39,6 @@ export function CareerMmrPage() {
   const [modes, setModes] = useState<CareerMmrModeBreakdown | null>(null);
   const [seasons, setSeasons] = useState<CareerMmrSeasonBreakdown | null>(null);
   const [buildStatus, setBuildStatus] = useState<CareerMmrBuildStatus | null>(null);
-  const [recentExplanations, setRecentExplanations] = useState<CareerMmrRecentExplanations | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,19 +73,16 @@ export function CareerMmrPage() {
     setHistory(null);
     setModes(null);
     setSeasons(null);
-    setRecentExplanations(null);
     Promise.all([
       getRoleMmrHistory({ role: selectedRole, season: selectedSeason, granularity: "match", limit: 80 }),
       getRoleMmrModeBreakdown(selectedRole),
       getRoleMmrSeasonBreakdown(selectedRole),
-      getRecentMmrExplanations(selectedRole, 4),
     ])
-      .then(([nextHistory, nextModes, nextSeasons, nextExplanations]) => {
+      .then(([nextHistory, nextModes, nextSeasons]) => {
         if (!detailRequestGuard.current.isCurrent(request)) return;
         setHistory(nextHistory);
         setModes(nextModes);
         setSeasons(nextSeasons);
-        setRecentExplanations(nextExplanations);
       })
       .catch((reason) => {
         if (detailRequestGuard.current.isCurrent(request)) setError(productErrorMessage(reason));
@@ -174,36 +168,17 @@ export function CareerMmrPage() {
         </article>
       </div>
 
-      <div className="careerMmrLowerGrid">
-        <article className="careerMmrPanel">
-          <div className="careerMmrPanelTitle"><div><Clock3 size={17} /><b>赛季分解</b></div></div>
-          <div className="careerMmrSeasonTable">
-            {visibleSeasonItems.map((item) => <div key={item.season}><b>S{item.season}</b><span>{item.matchesCount} 场</span><span>{item.startMmr} → {item.endMmr}</span><strong>{signedCareerDelta(item.netDelta)}</strong></div>)}
-            {!visibleSeasonItems.length && <div className="careerMmrEmpty">当前筛选下暂无赛季记录</div>}
-          </div>
-        </article>
-        <article className="careerMmrPanel">
-          <div className="careerMmrPanelTitle"><div><ShieldCheck size={17} /><b>近期单场解释</b></div><span>只展示聚合因素</span></div>
-          <div className="careerMmrEventList">
-            {recentExplanations?.items.map((item, index) => (
-              <div key={`${item.timestamp}-${index}`}>
-                <div><b>{item.summary}</b><span>S{item.season} · {formatCareerDate(item.timestamp)}</span></div>
-                <ul>{item.factors.filter((factor) => factor.label !== "最终变化").map((factor) => <li key={`${factor.kind}-${factor.label}`}><span>{factor.label}</span><strong>{formatExplanationFactor(factor.value, factor.unit)}</strong></li>)}</ul>
-              </div>
-            ))}
-            {!recentExplanations?.items.length && <div className="careerMmrEmpty">暂无可解释的对局变化</div>}
-          </div>
-        </article>
-      </div>
+      <article className="careerMmrPanel careerMmrSeasonPanel">
+        <div className="careerMmrPanelTitle"><div><Clock3 size={17} /><b>赛季分解</b></div></div>
+        <div className="careerMmrSeasonTable">
+          {visibleSeasonItems.map((item) => <div key={item.season}><b>S{item.season}</b><span>{item.matchesCount} 场</span><span>{item.startMmr} → {item.endMmr}</span><strong>{signedCareerDelta(item.netDelta)}</strong></div>)}
+          {!visibleSeasonItems.length && <div className="careerMmrEmpty">当前筛选下暂无赛季记录</div>}
+        </div>
+      </article>
 
       <footer className="careerMmrFootnote">当前 {careerRoleLabels[selectedRole]}：{formatCareerMmr(roleSummary?.currentMmr ?? null)} · 生涯估算会在本地数据更新后重放全部动态赛季。</footer>
     </section>
   );
-}
-
-function formatExplanationFactor(value: number, unit: string) {
-  if (unit === "percent") return `${Math.round(value)}%`;
-  return signedCareerDelta(value);
 }
 
 function HistoryChart({ history }: { history: CareerMmrHistory | null }) {
