@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { filtersFromParams, validateFilters } from "../src/features/matches/matchFilters.ts";
 import {
   canHydrateMatchesPageCache,
   chooseInitialMatchId,
@@ -14,9 +15,18 @@ import {
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
+  shouldLoadMatchesForFilter,
   updateMatchesPageCache,
 } from "../src/shared/matchesPageCache.ts";
 import type { FilterOptions, MatchFilters, MatchSummary, Overview } from "../src/shared/types.ts";
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise();
+  });
+  return { promise, resolve };
+}
 
 clearMatchesPageCache();
 
@@ -51,6 +61,39 @@ assert.equal(
 
 assert.equal(isLatestMatchRequest(1, 2), false, "an older match-list request cannot apply after a newer request starts");
 assert.equal(isLatestMatchRequest(2, 2), true, "the latest match-list request may apply its result");
+
+const initialHydrationFilterKey = matchFiltersKey({ season: 22 });
+assert.equal(
+  shouldLoadMatchesForFilter(initialHydrationFilterKey, "", initialHydrationFilterKey),
+  false,
+  "the first StrictMode filter effect lets initial hydration own its filter",
+);
+assert.equal(
+  shouldLoadMatchesForFilter(initialHydrationFilterKey, "", initialHydrationFilterKey),
+  false,
+  "the replayed StrictMode filter effect still lets initial hydration own its filter",
+);
+assert.equal(
+  shouldLoadMatchesForFilter(matchFiltersKey({ season: 23 }), "", initialHydrationFilterKey),
+  true,
+  "a genuinely different filter starts a timeline load",
+);
+assert.equal(
+  shouldLoadMatchesForFilter(initialHydrationFilterKey, initialHydrationFilterKey, null),
+  false,
+  "an already loaded filter never starts another timeline load",
+);
+assert.deepEqual(
+  validateFilters(filtersFromParams(new URLSearchParams("season=22&mode=bogus")), {
+    seasons: [22],
+    heroes: [],
+    maps: [],
+    results: [],
+    modes: ["SportPreset"],
+  }),
+  { season: 22 },
+  "URL filters remove an unsupported mode after options load",
+);
 
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
@@ -298,6 +341,55 @@ const detachedPreload = await preloadMatchesPageCache(
 assert.equal(detachedPreload.hasLoaded, true, "a detached preload still returns a complete page snapshot");
 assert.equal(getMatchesPageCache(), null, "a detached preload leaves cache commit to the current page request");
 
+clearMatchesPageCache();
+const policyGate = createDeferred();
+let detachedPolicyLoaderCalls = 0;
+let cachedPolicyLoaderCalls = 0;
+const detachedPolicyMatches = [{ ...matches[0], matchId: "detached-policy-match" }] satisfies MatchSummary[];
+const cachedPolicyMatches = [{ ...matches[0], matchId: "cached-policy-match" }] satisfies MatchSummary[];
+const detachedPolicyPromise = preloadMatchesPageCache(
+  {
+    getOverview: async () => {
+      detachedPolicyLoaderCalls += 1;
+      return overview;
+    },
+    listMatchFilters: async () => {
+      detachedPolicyLoaderCalls += 1;
+      return options;
+    },
+    listMatchTimeline: async () => {
+      detachedPolicyLoaderCalls += 1;
+      await policyGate.promise;
+      return detachedPolicyMatches;
+    },
+  },
+  {},
+  { cacheResult: false },
+);
+const cachedPolicyPromise = preloadMatchesPageCache({
+  getOverview: async () => {
+    cachedPolicyLoaderCalls += 1;
+    return overview;
+  },
+  listMatchFilters: async () => {
+    cachedPolicyLoaderCalls += 1;
+    return options;
+  },
+  listMatchTimeline: async () => {
+    cachedPolicyLoaderCalls += 1;
+    await policyGate.promise;
+    return cachedPolicyMatches;
+  },
+});
+policyGate.resolve();
+const [detachedPolicyResult, cachedPolicyResult] = await Promise.all([detachedPolicyPromise, cachedPolicyPromise]);
+
+assert.equal(detachedPolicyLoaderCalls, 3, "detached preload runs its own loader set");
+assert.equal(cachedPolicyLoaderCalls, 3, "cache-writing preload does not inherit detached preload side effects");
+assert.deepEqual(detachedPolicyResult.matches, detachedPolicyMatches, "detached preload returns its own result");
+assert.deepEqual(cachedPolicyResult.matches, cachedPolicyMatches, "cache-writing preload returns its own result");
+assert.deepEqual(getMatchesPageCache()?.matches, cachedPolicyMatches, "only the default preload policy updates the global cache");
+
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 assert.equal(matchesPageSource.includes("window.scrollY"), false, "MatchesPage should not save window scroll for the match list");
@@ -321,6 +413,23 @@ assert.match(
   "same-instance URL navigation updates filters and selection without redundant state writes",
 );
 assert.equal(matchesPageSource.includes("const matchRequestIdRef = useRef(0);"), true, "MatchesPage tracks the latest timeline request");
+assert.equal(
+  matchesPageSource.includes("skipInitialFilterLoadRef"),
+  false,
+  "MatchesPage no longer uses a one-shot filter-effect skip that breaks StrictMode replay",
+);
+assert.equal(
+  matchesPageSource.includes(
+    "const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));",
+  ),
+  true,
+  "MatchesPage gives initial hydration durable ownership of its filter across StrictMode replay",
+);
+assert.match(
+  matchesPageSource,
+  /const currentFilterKey = matchFiltersKey\(filters\);\s*if \(currentFilterKey === loadedFilterKeyRef\.current\) \{\s*matchRequestIdRef\.current \+= 1;\s*initialHydrationFilterKeyRef\.current = null;\s*setBusy\(false\);\s*return;\s*\}\s*if \(!shouldLoadMatchesForFilter\(\s*currentFilterKey,\s*loadedFilterKeyRef\.current,\s*initialHydrationFilterKeyRef\.current,\s*\)\) return;\s*initialHydrationFilterKeyRef\.current = null;\s*void loadMatches\(filters\);/,
+  "filter effects preserve the initial hydration owner, but clear it before a genuinely different load",
+);
 assert.match(
   matchesPageSource,
   /useEffect\(\(\) => \(\) => \{\s*matchRequestIdRef\.current \+= 1;\s*\}, \[\]\);/,
@@ -343,8 +452,13 @@ assert.match(
 );
 assert.match(
   matchesPageSource,
-  /if \(matchFiltersKey\(filters\) === loadedFilterKeyRef\.current\) \{\s*matchRequestIdRef\.current \+= 1;\s*setBusy\(false\);\s*return;\s*\}/,
-  "returning to the loaded filter invalidates an obsolete pending request",
+  /finally \{\s*if \(isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) \{\s*if \(initialHydrationFilterKeyRef\.current === matchFiltersKey\(nextFilters\)\) \{\s*initialHydrationFilterKeyRef\.current = null;\s*\}\s*setBusy\(false\);\s*\}\s*\}/,
+  "the current hydration request releases filter ownership on success or failure without stale StrictMode cleanup doing so",
+);
+assert.match(
+  matchesPageSource,
+  /const cleaned = validateFilters\(filters, options\);[\s\S]*?\}, \[filters, options\]\);/,
+  "filter validation reruns after URL navigation changes filters as well as after options load",
 );
 assert.equal(
   matchesPageSource.includes("if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;"),

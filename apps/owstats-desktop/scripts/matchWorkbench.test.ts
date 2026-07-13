@@ -17,8 +17,8 @@ assert.equal(matchesPageSource.includes("selectedMatchId"), true, "MatchesPage s
 assert.equal(matchesPageSource.includes("navigate(`/matches/${matchId}`)"), false, "MatchesPage should not navigate away when selecting a match row");
 assert.match(
   matchesPageSource,
-  /setDetailLoading\(true\);\s*setSelectedDetail\(null\);\s*setDetailError\(null\);\s*void getMatchDetails\(selectedMatchId\)/,
-  "MatchesPage should clear stale detail before requesting the newly selected match",
+  /setDetailStateMatchId\(selectedMatchId\);\s*setDetailLoading\(true\);\s*setSelectedDetail\(null\);\s*setDetailError\(null\);\s*void getMatchDetails\(selectedMatchId\)/,
+  "MatchesPage should bind loading and error state to the requested match before loading detail",
 );
 assert.equal(
   matchesPageSource.includes("detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}"),
@@ -26,6 +26,16 @@ assert.equal(
   "MatchesPage should hide detail that does not belong to the current selection before effects run",
 );
 assert.equal(matchesPageSource.includes("detail={selectedDetail}"), false, "MatchesPage should not pass unbound detail to the workbench");
+assert.equal(
+  matchesPageSource.includes("loading={detailStateMatchId === selectedMatchId ? detailLoading : true}"),
+  true,
+  "a new selection renders loading immediately instead of inheriting the previous request state",
+);
+assert.equal(
+  matchesPageSource.includes("error={detailStateMatchId === selectedMatchId ? detailError : null}"),
+  true,
+  "detail errors are only rendered for the selected match that owns the state",
+);
 
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
 assert.equal(timelineSource.includes("phase6MatchRowSelected"), true, "MatchTimeline should render selected state on the active row");

@@ -19,6 +19,7 @@ import {
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
+  shouldLoadMatchesForFilter,
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
 import type { MatchesPageCache } from "../shared/matchesPageCache";
@@ -47,7 +48,7 @@ export function MatchesPage() {
   const canHydrateCache = useMemo(() => canHydrateMatchesPageCache(cachedPage, initialFilters, hasExplicitFilters), []);
   const initialCacheRef = useRef(cachedPage);
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const skipInitialFilterLoadRef = useRef(true);
+  const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));
   const loadedFilterKeyRef = useRef(canHydrateCache ? cachedPage?.loadedFilterKey ?? "" : "");
   const [overview, setOverview] = useState<Overview | null>(canHydrateCache ? cachedPage?.overview ?? null : null);
   const [summary, setSummary] = useState<ImportSummary | null>(canHydrateCache ? cachedPage?.summary ?? null : null);
@@ -60,6 +61,7 @@ export function MatchesPage() {
   const selectedMatchIdRef = useRef(selectedMatchId);
   const matchRequestIdRef = useRef(0);
   const [selectedDetail, setSelectedDetail] = useState<MatchDetailView | null>(null);
+  const [detailStateMatchId, setDetailStateMatchId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -96,15 +98,19 @@ export function MatchesPage() {
   }, [filters, selectedMatchId]);
 
   useEffect(() => {
-    if (skipInitialFilterLoadRef.current) {
-      skipInitialFilterLoadRef.current = false;
-      return;
-    }
-    if (matchFiltersKey(filters) === loadedFilterKeyRef.current) {
+    const currentFilterKey = matchFiltersKey(filters);
+    if (currentFilterKey === loadedFilterKeyRef.current) {
       matchRequestIdRef.current += 1;
+      initialHydrationFilterKeyRef.current = null;
       setBusy(false);
       return;
     }
+    if (!shouldLoadMatchesForFilter(
+      currentFilterKey,
+      loadedFilterKeyRef.current,
+      initialHydrationFilterKeyRef.current,
+    )) return;
+    initialHydrationFilterKeyRef.current = null;
     void loadMatches(filters);
   }, [filters]);
 
@@ -120,12 +126,14 @@ export function MatchesPage() {
 
   useEffect(() => {
     if (!selectedMatchId) {
+      setDetailStateMatchId(null);
       setSelectedDetail(null);
       setDetailError(null);
       setDetailLoading(false);
       return;
     }
     let cancelled = false;
+    setDetailStateMatchId(selectedMatchId);
     setDetailLoading(true);
     setSelectedDetail(null);
     setDetailError(null);
@@ -170,7 +178,7 @@ export function MatchesPage() {
     if (JSON.stringify(cleaned) !== JSON.stringify(filters)) {
       setFilters(cleaned);
     }
-  }, [options]);
+  }, [filters, options]);
 
   async function hydrateInitialMatches(nextFilters: MatchFilters) {
     const requestId = ++matchRequestIdRef.current;
@@ -200,7 +208,12 @@ export function MatchesPage() {
     } catch (err) {
       if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) setError(productErrorMessage(err));
     } finally {
-      if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) setBusy(false);
+      if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) {
+        if (initialHydrationFilterKeyRef.current === matchFiltersKey(nextFilters)) {
+          initialHydrationFilterKeyRef.current = null;
+        }
+        setBusy(false);
+      }
     }
   }
 
@@ -332,8 +345,8 @@ export function MatchesPage() {
           {selectedMatchId ? (
             <CompactMatchDetail
               detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}
-              loading={detailLoading}
-              error={detailError}
+              loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
+              error={detailStateMatchId === selectedMatchId ? detailError : null}
               matchId={selectedMatchId}
             />
           ) : (

@@ -27,8 +27,7 @@ export type MatchScrollAnchorCandidate = {
 const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"];
 
 let matchesPageCache: MatchesPageCache | null = null;
-let preloadPromise: Promise<MatchesPageCache> | null = null;
-let preloadFilterKey = "";
+const preloadPromises = new Map<string, Promise<MatchesPageCache>>();
 
 export function getMatchesPageCache() {
   return matchesPageCache;
@@ -58,8 +57,7 @@ function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
 
 export function clearMatchesPageCache() {
   matchesPageCache = null;
-  preloadPromise = null;
-  preloadFilterKey = "";
+  preloadPromises.clear();
 }
 
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {
@@ -107,6 +105,15 @@ export function chooseMatchIdForLoadedMatches(
 
 export function isLatestMatchRequest(requestId: number, latestRequestId: number) {
   return requestId === latestRequestId;
+}
+
+export function shouldLoadMatchesForFilter(
+  currentFilterKey: string,
+  loadedFilterKey: string,
+  initialHydrationFilterKey: string | null,
+) {
+  if (currentFilterKey === loadedFilterKey) return false;
+  return initialHydrationFilterKey !== currentFilterKey;
 }
 
 export function isValidMatchesPageCacheSnapshot(cache: MatchesPageCache | null): cache is MatchesPageCache {
@@ -166,13 +173,15 @@ export function preloadMatchesPageCache(
   options: { cacheResult?: boolean } = {},
 ) {
   const filterKey = matchFiltersKey(filters);
+  const preloadKey = `${filterKey}:${options.cacheResult === false ? "detached" : "cache"}`;
   const cache = matchesPageCache;
   if (isValidMatchesPageCacheSnapshot(cache) && cache.loadedFilterKey === filterKey) {
     return Promise.resolve(cache);
   }
-  if (preloadPromise && preloadFilterKey === filterKey) return preloadPromise;
+  const pendingPreload = preloadPromises.get(preloadKey);
+  if (pendingPreload) return pendingPreload;
 
-  preloadFilterKey = filterKey;
+  let preloadPromise!: Promise<MatchesPageCache>;
   preloadPromise = Promise.all([loaders.getOverview(), loaders.listMatchFilters(), loaders.listMatchTimeline(filters)])
     .then(([overview, filterOptions, matches]) => {
       const snapshot = createMatchesPageCache({
@@ -187,9 +196,9 @@ export function preloadMatchesPageCache(
       return options.cacheResult === false ? snapshot : updateMatchesPageCache(snapshot);
     })
     .finally(() => {
-      preloadPromise = null;
-      preloadFilterKey = "";
+      if (preloadPromises.get(preloadKey) === preloadPromise) preloadPromises.delete(preloadKey);
     });
 
+  preloadPromises.set(preloadKey, preloadPromise);
   return preloadPromise;
 }
