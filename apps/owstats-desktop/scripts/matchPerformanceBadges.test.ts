@@ -37,14 +37,23 @@ assert.equal(primaryTagBadgeTone("躺赢局"), "blue", "free-win tag should shar
 assert.equal(primaryTagBadgeTone("背锅局"), "blue", "blame tag should share the blue badge tone");
 
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
-const heroIndex = timelineSource.indexOf("phase6HeroStackCell");
-const verticalTagIndex = timelineSource.indexOf("phase6VerticalPerformanceTag");
-const statsIndex = timelineSource.indexOf("phase6MatchListStats");
+const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCard.tsx", import.meta.url), "utf8");
+const matchStyleSource = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
+assert.equal(timelineSource.includes("<MatchListCard"), true, "the timeline should delegate card rendering");
+const heroIndex = listCardSource.indexOf("<HeroAvatar");
+const heroNameIndex = listCardSource.indexOf("matchListCardHeroName");
+const performanceTagIndex = listCardSource.indexOf("phase6VerticalPerformanceTag");
+const statsIndex = listCardSource.indexOf("phase6MatchListStats");
 assert.ok(
-  heroIndex > -1 && verticalTagIndex > heroIndex && statsIndex > verticalTagIndex,
-  "match list should keep the hero avatar first, then show the vertical performance tag before stats",
+  heroIndex > -1 && heroNameIndex > heroIndex && performanceTagIndex > heroNameIndex && statsIndex > performanceTagIndex,
+  "match cards should show avatar, hero name, secondary performance tag, then grouped statistics",
 );
-assert.equal(timelineSource.includes("phase6MatchGrade"), false, "match list should not render the old horizontal match performance block");
+assert.match(
+  matchStyleSource,
+  /\.matchListCardHeroLine \.phase6VerticalPerformanceTag[\s\S]*writing-mode:\s*horizontal-tb/,
+  "the retained legacy class should be visually reset to a horizontal secondary tag",
+);
+assert.equal(listCardSource.includes("phase6MatchGrade"), false, "match list should not render the old match performance block");
 
 const badgesSource = readFileSync(new URL("../src/shared/PerformanceBadgesView.tsx", import.meta.url), "utf8");
 const primaryTagIndex = badgesSource.indexOf("primaryTagBadgeTone(evaluation.primaryTag)");
