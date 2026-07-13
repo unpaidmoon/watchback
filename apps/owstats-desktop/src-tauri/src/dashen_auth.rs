@@ -4,6 +4,45 @@ use serde_json::json;
 
 const GET_REPORT_TOKEN_URL: &str = "https://inf.ds.163.com/v1/web/game/report/getReportToken";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BattleTagExtraction {
+    Missing,
+    Found(String),
+    Conflict,
+}
+
+pub fn extract_battle_tag(candidates: &[String]) -> BattleTagExtraction {
+    let mut found = None;
+
+    for candidate in candidates {
+        for line in candidate.lines() {
+            let line = line.trim();
+            let value = line
+                .strip_prefix("战网昵称：")
+                .or_else(|| line.strip_prefix("战网昵称:"))
+                .map(str::trim);
+            let Some(value) = value else {
+                continue;
+            };
+            let Some((name, suffix)) = value.rsplit_once('#') else {
+                continue;
+            };
+            if name.is_empty() || suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit())
+            {
+                continue;
+            }
+
+            match &found {
+                Some(existing) if existing != value => return BattleTagExtraction::Conflict,
+                Some(_) => {}
+                None => found = Some(value.to_string()),
+            }
+        }
+    }
+
+    found.map_or(BattleTagExtraction::Missing, BattleTagExtraction::Found)
+}
+
 pub fn extract_role_id(candidates: &[String]) -> Option<String> {
     for candidate in candidates {
         if let Some(role_id) = extract_digits_after_key(candidate, "role_id") {
