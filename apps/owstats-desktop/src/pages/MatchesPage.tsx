@@ -7,12 +7,14 @@ import { MatchTimeline } from "../features/matches/MatchTimeline";
 import { filtersFromParams, hasLoadedOptions, paramsFromFilters, validateFilters } from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
 import {
+  canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
   chooseInitialMatchId,
   chooseInitialMatchFilters,
   chooseMatchIdForLoadedMatches,
   chooseMatchesPageNavigationState,
   computeMatchAnchorScrollTop,
+  consumeMatchesSearchParamsNavigation,
   getMatchesPageCache,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
@@ -48,18 +50,27 @@ export function MatchesPage() {
   const canHydrateCache = useMemo(() => canHydrateMatchesPageCache(cachedPage, initialFilters, hasExplicitFilters), []);
   const initialCacheRef = useRef(cachedPage);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);
   const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));
   const loadedFilterKeyRef = useRef(canHydrateCache ? cachedPage?.loadedFilterKey ?? "" : "");
+  const currentFiltersRef = useRef(initialFilters);
+  const pageDataReadyRef = useRef(canHydrateCache);
+  const pageDataRef = useRef<Pick<MatchesPageCache, "overview" | "summary" | "options">>({
+    overview: canHydrateCache ? cachedPage?.overview ?? null : null,
+    summary: canHydrateCache ? cachedPage?.summary ?? null : null,
+    options: canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions,
+  });
   const [overview, setOverview] = useState<Overview | null>(canHydrateCache ? cachedPage?.overview ?? null : null);
   const [summary, setSummary] = useState<ImportSummary | null>(canHydrateCache ? cachedPage?.summary ?? null : null);
   const [options, setOptions] = useState<FilterOptions>(canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions);
-  const [filters, setFilters] = useState<MatchFilters>(initialFilters);
+  const [filters, setFiltersState] = useState<MatchFilters>(initialFilters);
   const [matches, setMatches] = useState<MatchSummary[]>(canHydrateCache ? cachedPage?.matches ?? [] : []);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() =>
     chooseInitialMatchId(searchParams.get("matchId"), cachedPage?.selectedMatchId, canHydrateCache),
   );
   const selectedMatchIdRef = useRef(selectedMatchId);
-  const matchRequestIdRef = useRef(0);
+  const pageDataRequestIdRef = useRef(0);
+  const timelineRequestIdRef = useRef(0);
   const [selectedDetail, setSelectedDetail] = useState<MatchDetailView | null>(null);
   const [detailStateMatchId, setDetailStateMatchId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -68,7 +79,8 @@ export function MatchesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => () => {
-    matchRequestIdRef.current += 1;
+    pageDataRequestIdRef.current += 1;
+    timelineRequestIdRef.current += 1;
   }, []);
 
   useEffect(() => {
@@ -82,6 +94,12 @@ export function MatchesPage() {
   }, [matches.length]);
 
   useEffect(() => {
+    const navigationDecision = consumeMatchesSearchParamsNavigation(
+      searchParamsKey,
+      lastWrittenSearchParamsKeyRef.current,
+    );
+    lastWrittenSearchParamsKeyRef.current = navigationDecision.nextLastWrittenSearchParamsKey;
+    if (!navigationDecision.shouldApplyNavigation) return;
     const navigation = chooseMatchesPageNavigationState(
       filtersFromParams(searchParams),
       searchParams.get("matchId"),
@@ -94,13 +112,17 @@ export function MatchesPage() {
 
   useEffect(() => {
     rememberScroll();
-    setSearchParams(preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId)), { replace: true });
+    const nextSearchParams = preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId));
+    const nextSearchParamsKey = nextSearchParams.toString();
+    if (nextSearchParamsKey === searchParamsKey) return;
+    lastWrittenSearchParamsKeyRef.current = nextSearchParamsKey;
+    setSearchParams(nextSearchParams, { replace: true });
   }, [filters, selectedMatchId]);
 
   useEffect(() => {
     const currentFilterKey = matchFiltersKey(filters);
     if (currentFilterKey === loadedFilterKeyRef.current) {
-      matchRequestIdRef.current += 1;
+      timelineRequestIdRef.current += 1;
       initialHydrationFilterKeyRef.current = null;
       setBusy(false);
       return;
@@ -157,7 +179,16 @@ export function MatchesPage() {
 
   useEffect(() => {
     if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;
-    updateMatchesPageCache({ overview, summary, options, filters, matches, selectedMatchId, loadedFilterKey: loadedFilterKeyRef.current });
+    updateMatchesPageCache({
+      overview,
+      summary,
+      options,
+      filters,
+      matches,
+      selectedMatchId,
+      loadedFilterKey: loadedFilterKeyRef.current,
+      hasLoaded: pageDataReadyRef.current,
+    });
   }, [overview, summary, options, filters, matches, selectedMatchId]);
 
   useEffect(() => {
@@ -181,7 +212,9 @@ export function MatchesPage() {
   }, [filters, options]);
 
   async function hydrateInitialMatches(nextFilters: MatchFilters) {
-    const requestId = ++matchRequestIdRef.current;
+    const pageDataRequestId = ++pageDataRequestIdRef.current;
+    const timelineRequestId = ++timelineRequestIdRef.current;
+    const hydrationFilterKey = matchFiltersKey(nextFilters);
     setBusy(true);
     setError(null);
     try {
@@ -190,25 +223,35 @@ export function MatchesPage() {
         nextFilters,
         { cacheResult: false },
       );
-      if (!isLatestMatchRequest(requestId, matchRequestIdRef.current)) return;
-      setOverview(cache.overview);
-      setSummary(cache.summary);
-      setOptions(cache.options);
-      commitLoadedMatches(nextFilters, cache.matches, {
+      if (!isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) return;
+      const pageData = {
         overview: cache.overview,
         summary: cache.summary,
         options: cache.options,
-      });
+      };
+      pageDataRef.current = pageData;
+      pageDataReadyRef.current = true;
+      setOverview(pageData.overview);
+      setSummary(pageData.summary);
+      setOptions(pageData.options);
+      if (canCommitMatchTimelineRequest(
+        timelineRequestId,
+        timelineRequestIdRef.current,
+        hydrationFilterKey,
+        matchFiltersKey(currentFiltersRef.current),
+      )) {
+        commitLoadedMatches(nextFilters, cache.matches, pageData);
+      }
       void refreshMatchEvaluations()
         .then(() => {
-          if (!isLatestMatchRequest(requestId, matchRequestIdRef.current)) return;
-          void loadMatches(nextFilters);
+          if (!isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) return;
+          void loadMatches(currentFiltersRef.current);
         })
         .catch(() => undefined);
     } catch (err) {
-      if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) setError(productErrorMessage(err));
+      if (isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) setError(productErrorMessage(err));
     } finally {
-      if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) {
+      if (isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) {
         if (initialHydrationFilterKeyRef.current === matchFiltersKey(nextFilters)) {
           initialHydrationFilterKeyRef.current = null;
         }
@@ -218,16 +261,32 @@ export function MatchesPage() {
   }
 
   async function loadMatches(nextFilters: MatchFilters) {
-    const requestId = ++matchRequestIdRef.current;
+    const timelineRequestId = ++timelineRequestIdRef.current;
+    const timelineFilterKey = matchFiltersKey(nextFilters);
     try {
       const nextMatches = await listMatchTimeline(nextFilters);
-      if (!isLatestMatchRequest(requestId, matchRequestIdRef.current)) return;
+      if (!canCommitMatchTimelineRequest(
+        timelineRequestId,
+        timelineRequestIdRef.current,
+        timelineFilterKey,
+        matchFiltersKey(currentFiltersRef.current),
+      )) return;
       commitLoadedMatches(nextFilters, nextMatches);
     } catch (err) {
-      if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) setError(productErrorMessage(err));
+      if (canCommitMatchTimelineRequest(
+        timelineRequestId,
+        timelineRequestIdRef.current,
+        timelineFilterKey,
+        matchFiltersKey(currentFiltersRef.current),
+      )) setError(productErrorMessage(err));
     } finally {
-      if (isLatestMatchRequest(requestId, matchRequestIdRef.current)) setBusy(false);
+      if (isLatestMatchRequest(timelineRequestId, timelineRequestIdRef.current)) setBusy(false);
     }
+  }
+
+  function setFilters(nextFilters: MatchFilters) {
+    currentFiltersRef.current = nextFilters;
+    setFiltersState(nextFilters);
   }
 
   function setSelectedMatchIdSafely(nextSelectedMatchId: string | null) {
@@ -241,17 +300,18 @@ export function MatchesPage() {
     pageData?: Pick<MatchesPageCache, "overview" | "summary" | "options">,
   ) {
     const loadedFilterKey = matchFiltersKey(nextFilters);
+    const cachePageData = pageData ?? (pageDataReadyRef.current ? pageDataRef.current : {});
     const nextSelectedMatchId = chooseMatchIdForLoadedMatches(selectedMatchIdRef.current, nextMatches, true);
     loadedFilterKeyRef.current = loadedFilterKey;
     setMatches(nextMatches);
     setSelectedMatchIdSafely(nextSelectedMatchId);
     updateMatchesPageCache({
-      ...(pageData ?? {}),
+      ...cachePageData,
       filters: nextFilters,
       matches: nextMatches,
       selectedMatchId: nextSelectedMatchId,
       loadedFilterKey,
-      hasLoaded: true,
+      hasLoaded: pageDataReadyRef.current,
       scrollTop: readMatchListScrollTop(),
       scrollAnchor: readMatchScrollAnchor(),
     });

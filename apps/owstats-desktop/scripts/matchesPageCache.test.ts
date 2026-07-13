@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { filtersFromParams, validateFilters } from "../src/features/matches/matchFilters.ts";
 import {
+  canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
   chooseInitialMatchId,
   chooseInitialMatchFilters,
   chooseMatchIdForLoadedMatches,
   chooseMatchesPageNavigationState,
   clearMatchesPageCache,
+  consumeMatchesSearchParamsNavigation,
   computeMatchAnchorScrollTop,
   getMatchesPageCache,
   hasExplicitMatchFilterParams,
@@ -83,6 +85,21 @@ assert.equal(
   false,
   "an already loaded filter never starts another timeline load",
 );
+assert.equal(
+  canCommitMatchTimelineRequest(2, 2, matchFiltersKey({ season: 22 }), matchFiltersKey({ season: 22 })),
+  true,
+  "the latest timeline request may commit while its filter is still current",
+);
+assert.equal(
+  canCommitMatchTimelineRequest(1, 2, matchFiltersKey({ season: 22 }), matchFiltersKey({ season: 22 })),
+  false,
+  "an obsolete timeline request cannot commit even when its old filter returns",
+);
+assert.equal(
+  canCommitMatchTimelineRequest(2, 2, matchFiltersKey({ season: 22 }), matchFiltersKey({ season: 23 })),
+  false,
+  "a hydration timeline for filter A cannot overwrite the current filter B",
+);
 assert.deepEqual(
   validateFilters(filtersFromParams(new URLSearchParams("season=22&mode=bogus")), {
     seasons: [22],
@@ -154,6 +171,31 @@ const bareNavigation = chooseMatchesPageNavigationState({}, null, getMatchesPage
 assert.deepEqual(bareNavigation.filters, cachedFilters, "a bare URL restores cached filters");
 assert.equal(bareNavigation.selectedMatchId, "cached-match", "a bare URL restores valid cached selection");
 assert.equal(bareNavigation.canHydrateCache, true, "a bare URL hydrates a valid cached list");
+
+const localBareSearchParamsKey = new URLSearchParams().toString();
+const localBareEcho = consumeMatchesSearchParamsNavigation(localBareSearchParamsKey, localBareSearchParamsKey);
+assert.equal(localBareEcho.shouldApplyNavigation, false, "a locally written bare URL is consumed as an echo");
+assert.equal(localBareEcho.nextLastWrittenSearchParamsKey, null, "consuming a local URL echo clears its source marker");
+const locallyClearedFilters: MatchFilters = {};
+const filtersAfterLocalEcho = localBareEcho.shouldApplyNavigation
+  ? chooseMatchesPageNavigationState({}, null, getMatchesPageCache(), false).filters
+  : locallyClearedFilters;
+assert.deepEqual(filtersAfterLocalEcho, {}, "a local clear-all action is not replaced by the previous cached filters");
+assert.equal(
+  shouldLoadMatchesForFilter(matchFiltersKey(filtersAfterLocalEcho), matchFiltersKey(cachedFilters), null),
+  true,
+  "the retained empty filters start an unfiltered timeline load",
+);
+const laterExternalBareNavigation = consumeMatchesSearchParamsNavigation(
+  localBareSearchParamsKey,
+  localBareEcho.nextLastWrittenSearchParamsKey,
+);
+assert.equal(laterExternalBareNavigation.shouldApplyNavigation, true, "the consumed marker cannot hide a later external bare URL");
+assert.deepEqual(
+  chooseMatchesPageNavigationState({}, null, getMatchesPageCache(), false).filters,
+  cachedFilters,
+  "an external bare URL keeps restoring a valid cached filter snapshot",
+);
 
 assert.equal(
   canHydrateMatchesPageCache(
@@ -486,8 +528,62 @@ assert.deepEqual(newPreloadResult.matches, newPreloadMatches, "the post-clear pr
 assert.deepEqual(joinedNewPreloadResult.matches, newPreloadMatches, "the joined caller receives the post-clear snapshot");
 assert.deepEqual(getMatchesPageCache()?.matches, newPreloadMatches, "the post-clear preload may update the global cache normally");
 
+clearMatchesPageCache();
+const olderFilterGate = createDeferred();
+const newerFilterGate = createDeferred();
+const olderFilterMatches = [{ ...matches[0], matchId: "older-filter-write", season: 21 }] satisfies MatchSummary[];
+const newerFilterMatches = [{ ...matches[0], matchId: "newer-filter-write", season: 23 }] satisfies MatchSummary[];
+const olderFilterPreload = preloadMatchesPageCache(
+  {
+    getOverview: async () => overview,
+    listMatchFilters: async () => options,
+    listMatchTimeline: async () => {
+      await olderFilterGate.promise;
+      return olderFilterMatches;
+    },
+  },
+  { season: 21 },
+);
+const newerFilterPreload = preloadMatchesPageCache(
+  {
+    getOverview: async () => overview,
+    listMatchFilters: async () => options,
+    listMatchTimeline: async () => {
+      await newerFilterGate.promise;
+      return newerFilterMatches;
+    },
+  },
+  { season: 23 },
+);
+
+newerFilterGate.resolve();
+const newerFilterResult = await newerFilterPreload;
+assert.deepEqual(newerFilterResult.matches, newerFilterMatches, "the later-started default preload returns its own snapshot");
+assert.deepEqual(getMatchesPageCache()?.matches, newerFilterMatches, "the later-started default preload writes the global cache");
+
+olderFilterGate.resolve();
+const olderFilterResult = await olderFilterPreload;
+assert.deepEqual(olderFilterResult.matches, olderFilterMatches, "the older default preload caller still receives its result");
+assert.deepEqual(
+  getMatchesPageCache()?.matches,
+  newerFilterMatches,
+  "a late older default preload cannot overwrite the later-started filter snapshot",
+);
+
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
+const hydrateInitialMatchesSource = matchesPageSource.slice(
+  matchesPageSource.indexOf("async function hydrateInitialMatches"),
+  matchesPageSource.indexOf("async function loadMatches"),
+);
+const loadMatchesSource = matchesPageSource.slice(
+  matchesPageSource.indexOf("async function loadMatches"),
+  matchesPageSource.indexOf("function setSelectedMatchIdSafely"),
+);
+const commitLoadedMatchesSource = matchesPageSource.slice(
+  matchesPageSource.indexOf("function commitLoadedMatches"),
+  matchesPageSource.indexOf("function rememberScroll"),
+);
 assert.equal(matchesPageSource.includes("window.scrollY"), false, "MatchesPage should not save window scroll for the match list");
 assert.equal(matchesPageSource.includes("window.scrollTo"), false, "MatchesPage should not restore window scroll for the match list");
 assert.equal(matchesPageSource.includes("readMatchScrollAnchor"), true, "MatchesPage should save a match-id scroll anchor");
@@ -505,10 +601,29 @@ assert.match(
 assert.equal(matchesPageSource.includes("const searchParamsKey = searchParams.toString();"), true, "MatchesPage tracks same-instance URL changes");
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \{\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) setFilters\(navigation\.filters\);[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
-  "same-instance URL navigation updates filters and selection without redundant state writes",
+  /useEffect\(\(\) => \{\s*const navigationDecision = consumeMatchesSearchParamsNavigation\(\s*searchParamsKey,\s*lastWrittenSearchParamsKeyRef\.current,\s*\);\s*lastWrittenSearchParamsKeyRef\.current = navigationDecision\.nextLastWrittenSearchParamsKey;\s*if \(!navigationDecision\.shouldApplyNavigation\) return;\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) setFilters\(navigation\.filters\);[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
+  "URL navigation consumes local echoes while external navigation still updates filters and selection",
 );
-assert.equal(matchesPageSource.includes("const matchRequestIdRef = useRef(0);"), true, "MatchesPage tracks the latest timeline request");
+assert.equal(
+  matchesPageSource.includes("const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);"),
+  true,
+  "MatchesPage tracks the canonical key of its last local URL write",
+);
+assert.match(
+  matchesPageSource,
+  /const nextSearchParams = preserveQaParam\(searchParams, paramsFromFilters\(filters, selectedMatchId\)\);\s*const nextSearchParamsKey = nextSearchParams\.toString\(\);\s*if \(nextSearchParamsKey === searchParamsKey\) return;\s*lastWrittenSearchParamsKeyRef\.current = nextSearchParamsKey;\s*setSearchParams\(nextSearchParams, \{ replace: true \}\);/,
+  "state-to-URL sync records the same canonical key before writing only a changed URL",
+);
+assert.equal(matchesPageSource.includes("matchRequestIdRef"), false, "metadata and timeline no longer share one cancellation domain");
+assert.equal(matchesPageSource.includes("const pageDataRequestIdRef = useRef(0);"), true, "MatchesPage tracks metadata hydration separately");
+assert.equal(matchesPageSource.includes("const timelineRequestIdRef = useRef(0);"), true, "MatchesPage tracks timeline requests separately");
+assert.equal(matchesPageSource.includes("const pageDataReadyRef = useRef(canHydrateCache);"), true, "cache hydration waits for real page metadata");
+assert.equal(matchesPageSource.includes("const currentFiltersRef = useRef(initialFilters);"), true, "async timeline commits read the current filter key");
+assert.match(
+  matchesPageSource,
+  /function setFilters\(nextFilters: MatchFilters\) \{\s*currentFiltersRef\.current = nextFilters;\s*setFiltersState\(nextFilters\);\s*\}/,
+  "every filter state write synchronizes the current-filter ref",
+);
 assert.equal(
   matchesPageSource.includes("skipInitialFilterLoadRef"),
   false,
@@ -523,33 +638,58 @@ assert.equal(
 );
 assert.match(
   matchesPageSource,
-  /const currentFilterKey = matchFiltersKey\(filters\);\s*if \(currentFilterKey === loadedFilterKeyRef\.current\) \{\s*matchRequestIdRef\.current \+= 1;\s*initialHydrationFilterKeyRef\.current = null;\s*setBusy\(false\);\s*return;\s*\}\s*if \(!shouldLoadMatchesForFilter\(\s*currentFilterKey,\s*loadedFilterKeyRef\.current,\s*initialHydrationFilterKeyRef\.current,\s*\)\) return;\s*initialHydrationFilterKeyRef\.current = null;\s*void loadMatches\(filters\);/,
+  /const currentFilterKey = matchFiltersKey\(filters\);\s*if \(currentFilterKey === loadedFilterKeyRef\.current\) \{\s*timelineRequestIdRef\.current \+= 1;\s*initialHydrationFilterKeyRef\.current = null;\s*setBusy\(false\);\s*return;\s*\}\s*if \(!shouldLoadMatchesForFilter\(\s*currentFilterKey,\s*loadedFilterKeyRef\.current,\s*initialHydrationFilterKeyRef\.current,\s*\)\) return;\s*initialHydrationFilterKeyRef\.current = null;\s*void loadMatches\(filters\);/,
   "filter effects preserve the initial hydration owner, but clear it before a genuinely different load",
 );
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \(\) => \{\s*matchRequestIdRef\.current \+= 1;\s*\}, \[\]\);/,
-  "leaving MatchesPage invalidates pending timeline requests before a later re-entry",
+  /useEffect\(\(\) => \(\) => \{\s*pageDataRequestIdRef\.current \+= 1;\s*timelineRequestIdRef\.current \+= 1;\s*\}, \[\]\);/,
+  "leaving MatchesPage invalidates both metadata and timeline requests before a later re-entry",
+);
+assert.equal(hydrateInitialMatchesSource.includes("const pageDataRequestId = ++pageDataRequestIdRef.current;"), true, "hydration owns a metadata request id");
+assert.equal(hydrateInitialMatchesSource.includes("const timelineRequestId = ++timelineRequestIdRef.current;"), true, "hydration separately owns its A timeline id");
+assert.equal(
+  hydrateInitialMatchesSource.includes("if (!isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) return;"),
+  true,
+  "only an obsolete metadata request can discard hydrated page data",
+);
+assert.ok(
+  hydrateInitialMatchesSource.indexOf("pageDataReadyRef.current = true;") <
+    hydrateInitialMatchesSource.indexOf("canCommitMatchTimelineRequest("),
+  "metadata becomes ready before the old hydration timeline is considered for commit",
 );
 assert.match(
-  matchesPageSource,
-  /const cache = await preloadMatchesPageCache\([\s\S]*?\{ cacheResult: false \},\s*\);\s*if \(!isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) return;/,
-  "initial hydration checks request currency before applying its detached preload",
+  hydrateInitialMatchesSource,
+  /pageDataRef\.current = pageData;\s*pageDataReadyRef\.current = true;\s*setOverview\(pageData\.overview\);\s*setSummary\(pageData\.summary\);\s*setOptions\(pageData\.options\);/,
+  "metadata hydration commits overview, summary, and options independently of the current timeline filter",
 );
 assert.match(
-  matchesPageSource,
-  /const nextMatches = await listMatchTimeline\(nextFilters\);\s*if \(!isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) return;/,
-  "filter loading checks request currency before applying list results",
+  hydrateInitialMatchesSource,
+  /if \(canCommitMatchTimelineRequest\(\s*timelineRequestId,\s*timelineRequestIdRef\.current,\s*hydrationFilterKey,\s*matchFiltersKey\(currentFiltersRef\.current\),\s*\)\) \{\s*commitLoadedMatches\(nextFilters, cache\.matches, pageData\);\s*\}/,
+  "hydration timeline A cannot overwrite a newer current filter B",
 );
 assert.match(
-  matchesPageSource,
-  /refreshMatchEvaluations\(\)\s*\.then\(\(\) => \{\s*if \(!isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) return;\s*void loadMatches\(nextFilters\);\s*\}\)/,
-  "evaluation refresh cannot restart an obsolete initial filter request",
+  hydrateInitialMatchesSource,
+  /refreshMatchEvaluations\(\)\s*\.then\(\(\) => \{\s*if \(!isLatestMatchRequest\(pageDataRequestId, pageDataRequestIdRef\.current\)\) return;\s*void loadMatches\(currentFiltersRef\.current\);\s*\}\)/,
+  "evaluation refresh follows the current filter and remains scoped to the live metadata request",
 );
 assert.match(
-  matchesPageSource,
-  /finally \{\s*if \(isLatestMatchRequest\(requestId, matchRequestIdRef\.current\)\) \{\s*if \(initialHydrationFilterKeyRef\.current === matchFiltersKey\(nextFilters\)\) \{\s*initialHydrationFilterKeyRef\.current = null;\s*\}\s*setBusy\(false\);\s*\}\s*\}/,
-  "the current hydration request releases filter ownership on success or failure without stale StrictMode cleanup doing so",
+  hydrateInitialMatchesSource,
+  /finally \{\s*if \(isLatestMatchRequest\(pageDataRequestId, pageDataRequestIdRef\.current\)\) \{\s*if \(initialHydrationFilterKeyRef\.current === matchFiltersKey\(nextFilters\)\) \{\s*initialHydrationFilterKeyRef\.current = null;\s*\}\s*setBusy\(false\);\s*\}\s*\}/,
+  "only the live metadata hydration releases the StrictMode filter owner",
+);
+assert.equal(loadMatchesSource.includes("pageDataRequestIdRef"), false, "loading timeline B never invalidates metadata hydration A");
+assert.equal(loadMatchesSource.includes("const timelineRequestId = ++timelineRequestIdRef.current;"), true, "filter loading only advances the timeline domain");
+assert.equal(loadMatchesSource.includes("canCommitMatchTimelineRequest("), true, "filter loading checks both request id and current filter before commit");
+assert.match(
+  commitLoadedMatchesSource,
+  /const cachePageData = pageData \?\? \(pageDataReadyRef\.current \? pageDataRef\.current : \{\}\);[\s\S]*?\.\.\.cachePageData,[\s\S]*?hasLoaded: pageDataReadyRef\.current,/,
+  "a B timeline caches as partial until metadata is ready and includes metadata when it is available",
+);
+assert.equal(
+  (matchesPageSource.match(/hasLoaded: pageDataReadyRef\.current/g) ?? []).length >= 2,
+  true,
+  "metadata state promotes both an existing B snapshot and later B commits to a hydratable cache",
 );
 assert.match(
   matchesPageSource,

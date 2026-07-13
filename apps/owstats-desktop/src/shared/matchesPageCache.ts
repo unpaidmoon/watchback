@@ -28,6 +28,7 @@ const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag"
 
 let matchesPageCache: MatchesPageCache | null = null;
 let cacheGeneration = 0;
+let latestCacheWriteId = 0;
 const preloadPromises = new Map<string, Promise<MatchesPageCache>>();
 
 export function getMatchesPageCache() {
@@ -94,6 +95,16 @@ export function chooseMatchesPageNavigationState(
   };
 }
 
+export function consumeMatchesSearchParamsNavigation(
+  currentSearchParamsKey: string,
+  lastWrittenSearchParamsKey: string | null,
+) {
+  return {
+    shouldApplyNavigation: currentSearchParamsKey !== lastWrittenSearchParamsKey,
+    nextLastWrittenSearchParamsKey: null,
+  };
+}
+
 export function chooseMatchIdForLoadedMatches(
   selectedMatchId: string | null,
   matches: Array<{ matchId: string }>,
@@ -107,6 +118,15 @@ export function chooseMatchIdForLoadedMatches(
 
 export function isLatestMatchRequest(requestId: number, latestRequestId: number) {
   return requestId === latestRequestId;
+}
+
+export function canCommitMatchTimelineRequest(
+  requestId: number,
+  latestRequestId: number,
+  requestedFilterKey: string,
+  currentFilterKey: string,
+) {
+  return isLatestMatchRequest(requestId, latestRequestId) && requestedFilterKey === currentFilterKey;
 }
 
 export function shouldLoadMatchesForFilter(
@@ -184,6 +204,7 @@ export function preloadMatchesPageCache(
   if (pendingPreload) return pendingPreload;
 
   const preloadGeneration = cacheGeneration;
+  const cacheWriteId = options.cacheResult === false ? null : ++latestCacheWriteId;
   let preloadPromise!: Promise<MatchesPageCache>;
   preloadPromise = Promise.all([loaders.getOverview(), loaders.listMatchFilters(), loaders.listMatchTimeline(filters)])
     .then(([overview, filterOptions, matches]) => {
@@ -196,7 +217,8 @@ export function preloadMatchesPageCache(
         loadedFilterKey: filterKey,
         hasLoaded: true,
       });
-      const canCacheResult = options.cacheResult !== false && preloadGeneration === cacheGeneration;
+      const canCacheResult =
+        cacheWriteId !== null && preloadGeneration === cacheGeneration && cacheWriteId === latestCacheWriteId;
       return canCacheResult ? updateMatchesPageCache(snapshot) : snapshot;
     })
     .finally(() => {
