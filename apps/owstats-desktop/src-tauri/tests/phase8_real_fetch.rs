@@ -21,6 +21,7 @@ fn player_target_status_does_not_expose_customer_token() {
             resolved_bnet: Some("Tester#12345".to_string()),
             customer_token: "secret-customer-token".to_string(),
             bound_at: "2026-07-03T00:00:00Z".to_string(),
+            source_role_id: None,
         },
     )
     .unwrap();
@@ -45,6 +46,7 @@ fn clearing_player_target_removes_saved_target() {
             resolved_bnet: None,
             customer_token: "secret-customer-token".to_string(),
             bound_at: "2026-07-03T00:00:00Z".to_string(),
+            source_role_id: None,
         },
     )
     .unwrap();
@@ -69,6 +71,7 @@ fn extracts_customer_token_from_search_payload() {
     let parsed = owstats_desktop_lib::player_target::target_from_search_payload(
         "Tester#12345",
         &payload,
+        123,
         "2026-07-03T00:00:00Z",
     )
     .unwrap();
@@ -76,6 +79,7 @@ fn extracts_customer_token_from_search_payload() {
     assert_eq!(parsed.input_bnet, "Tester#12345");
     assert_eq!(parsed.resolved_bnet.as_deref(), Some("Tester#12345"));
     assert_eq!(parsed.customer_token, "player-customer-token");
+    assert_eq!(parsed.source_role_id, Some(123));
 }
 
 #[tokio::test]

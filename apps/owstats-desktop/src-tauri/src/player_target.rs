@@ -11,6 +11,12 @@ pub struct PlayerTarget {
     pub resolved_bnet: Option<String>,
     pub customer_token: String,
     pub bound_at: String,
+    #[serde(default)]
+    pub source_role_id: Option<i64>,
+}
+
+pub fn target_matches_login_role(target: &PlayerTarget, role_id: i64) -> bool {
+    target.source_role_id == Some(role_id)
 }
 
 pub fn player_target_path(app: &AppHandle) -> Result<PathBuf> {
@@ -65,6 +71,7 @@ pub fn clear_player_target_for_path(path: &Path) -> Result<bool> {
 pub fn target_from_search_payload(
     input_bnet: &str,
     payload: &serde_json::Value,
+    source_role_id: i64,
     bound_at: &str,
 ) -> Result<PlayerTarget> {
     let data = payload
@@ -91,6 +98,7 @@ pub fn target_from_search_payload(
         resolved_bnet,
         customer_token: customer_token.to_string(),
         bound_at: bound_at.to_string(),
+        source_role_id: Some(source_role_id),
     })
 }
 

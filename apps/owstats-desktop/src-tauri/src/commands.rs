@@ -172,6 +172,7 @@ pub async fn bind_player_target(
     let saved: crate::credential_store::DashenCredentials =
         serde_json::from_str(&std::fs::read_to_string(&credential_path).map_err(to_message)?)
             .map_err(to_message)?;
+    let source_role_id = saved.role_id;
     let client = crate::dashen_client::DashenClient::new(
         crate::dashen_client::DashenCredentials {
             role_id: saved.role_id,
@@ -189,6 +190,7 @@ pub async fn bind_player_target(
     let target = crate::player_target::target_from_search_payload(
         &request.bnet,
         &payload,
+        source_role_id,
         &chrono::Utc::now().to_rfc3339(),
     )
     .map_err(to_message)?;
