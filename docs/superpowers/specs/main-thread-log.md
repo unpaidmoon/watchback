@@ -834,3 +834,36 @@ First implementation direction:
 Start with backend multi-season isolation tests before changing UI. Then adapt
 personal review, ranking, friend analytics, and matches/detail behavior in
 narrow slices, preserving Chinese-only visible UI text and privacy constraints.
+
+## 2026-07-09 S23 Arena Map Preview Mapping
+
+Goal:
+Use S23 arena round data plus manual game-side confirmation to replace the
+generic stadium preview with per-map previews where available.
+
+Accepted mappings:
+- `576460752303428278` -> `assets/maps/hanaoka.jpg` (`花冈`)
+- `576460752303428219` -> `assets/maps/ilios2.png` (`伊利奥斯 - 废墟`)
+- `576460752303428209` -> `assets/maps/powder-keg-mine.jpg` (`火药桶矿井`)
+- `576460752303428192` -> `assets/maps/redwood-dam.jpg` (`红杉水坝`)
+- `576460752303428277` -> `assets/maps/throne-of-anubis.jpg` (`阿努比斯王座`)
+- `576460752303428337` -> `assets/maps/nepal2.png` (`尼泊尔 - 圣坛`)
+- `576460752303428272` -> `assets/maps/esperanca2.png` (`埃斯佩兰萨`)
+- `576460752303428437` -> `assets/maps/samoa2.png` (`萨摩亚`)
+- `576460752303428190` -> `assets/maps/place-lacroix.jpg` (`拉克瓦广场`)
+- `576460752303428183` -> `assets/maps/thames-district.jpg` (`泰晤士区`)
+- `576460752303429014` -> `assets/maps/oasis-university.png` (`绿洲城 - 大学`)
+- `576460752303428279` -> `assets/maps/colosseo.jpg` (`斗兽场`)
+- `576460752303428469` -> `assets/maps/wuxing-university.jpg` (`五行大学 - 水学院`)
+- `576460752303428266` -> `assets/maps/arena-victoriae.jpg` (`维多利亚竞技场`)
+- `576460752303428488` -> `assets/maps/powder-keg-mine.jpg` (`火药桶矿井`)
+- `576460752303428186` -> `assets/maps/gogadoro.jpg` (`高架车站`)
+
+Deferred map GUIDs:
+- `576460752303428212`
+- `576460752303428683`
+- `576460752303428223`
+
+Implementation note:
+The deferred GUIDs should continue to fall back to `query_tool.fightMapUrl`
+until a later S23+ data sample confirms their map names and preview files.

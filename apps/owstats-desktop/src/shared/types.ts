@@ -573,3 +573,103 @@ export type SeasonDataStatus = {
   lastSyncedOrImportedAt: string | null;
   coveragePercent: number;
 };
+
+export type CareerRole = "tank" | "damage" | "support";
+
+export type CareerMmrRoleSummary = {
+  role: CareerRole;
+  currentMmr: number | null;
+  confidence: number;
+  confidenceLabel: string;
+  peakMmr: number | null;
+  peakAt: number | null;
+  effectiveMatches: number;
+  effectiveHours: number;
+};
+
+export type CareerMmrOverview = {
+  modelVersion: number | null;
+  compositeMmr: number | null;
+  roles: CareerMmrRoleSummary[];
+  discoveredSeasons: number[];
+  disclaimer: string;
+};
+
+export type CareerMmrHistoryRequest = {
+  role: CareerRole;
+  season?: number;
+  from?: number;
+  to?: number;
+  granularity?: "match" | "day" | "week";
+  limit?: number;
+  before?: number;
+  beforeHash?: string;
+  beforeBucket?: number;
+  beforeSeason?: number;
+};
+
+export type CareerMmrHistoryPoint = {
+  timestamp: number;
+  season: number;
+  mmr: number;
+  confidence: number;
+  delta: number;
+};
+
+export type CareerMmrHistory = {
+  role: CareerRole;
+  granularity: string;
+  points: CareerMmrHistoryPoint[];
+};
+
+export type CareerMmrModeItem = {
+  modeFamily: string;
+  matchesCount: number;
+  durationSec: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  cumulativeDelta: number;
+};
+
+export type CareerMmrModeBreakdown = { role: CareerRole; items: CareerMmrModeItem[] };
+
+export type CareerMmrSeasonItem = {
+  season: number;
+  matchesCount: number;
+  startMmr: number;
+  endMmr: number;
+  peakMmr: number;
+  netDelta: number;
+  firstMatchAt: number | null;
+  lastMatchAt: number | null;
+};
+
+export type CareerMmrSeasonBreakdown = { role: CareerRole; items: CareerMmrSeasonItem[] };
+
+export type CareerMmrBuildStatus = {
+  modelVersion: number | null;
+  summaryCount: number;
+  isBuilt: boolean;
+};
+
+export type CareerMmrExplanationFactor = {
+  kind: string;
+  label: string;
+  value: number;
+  unit: string;
+};
+
+export type CareerMmrRecentExplanation = {
+  timestamp: number;
+  season: number;
+  delta: number;
+  summary: string;
+  factors: CareerMmrExplanationFactor[];
+  dataQuality: number;
+};
+
+export type CareerMmrRecentExplanations = {
+  role: CareerRole;
+  items: CareerMmrRecentExplanation[];
+};

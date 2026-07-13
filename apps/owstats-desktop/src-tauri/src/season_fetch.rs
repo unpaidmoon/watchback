@@ -319,6 +319,7 @@ async fn fetch_details(
     (details, detail_errors)
 }
 
+#[allow(clippy::too_many_arguments)] // Fetch stages remain explicit to preserve request ordering and error boundaries.
 fn build_payload(
     request: &FullSeasonRequest,
     profile_card: Value,
@@ -329,10 +330,9 @@ fn build_payload(
     detail_errors: Vec<Value>,
     list_pages: Vec<Value>,
 ) -> Value {
-    json!({
+    let payload = json!({
         "input_bnet": request.input_bnet,
         "resolved_bnet": request.resolved_bnet,
-        "customer_token": request.customer_token,
         "profile_card": profile_card,
         "count_info": {
             "sport": sport_count,
@@ -347,7 +347,8 @@ fn build_payload(
             "detail_errors": detail_errors,
             "list_pages": list_pages,
         }
-    })
+    });
+    crate::redaction::sanitize_persisted_json(&payload)
 }
 
 fn extract_match_entries(payload: &Value) -> Vec<Value> {
@@ -432,14 +433,8 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
 }
 
 fn safe_error_message(message: &str) -> String {
-    let mut parts = Vec::new();
-    for part in message.split_whitespace() {
-        let lower = part.to_ascii_lowercase();
-        if lower.contains("token") || lower.contains("cookie") {
-            parts.push("[REDACTED]".to_string());
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    parts.join(" ").chars().take(240).collect()
+    crate::redaction::redact_sensitive_text(message)
+        .chars()
+        .take(240)
+        .collect()
 }

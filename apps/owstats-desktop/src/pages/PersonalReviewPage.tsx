@@ -5,7 +5,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { SeasonAnalysisModules } from "./FriendAnalyticsPage";
 import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
@@ -32,32 +32,117 @@ type ReviewAchievement = {
 type AchievementKey = "win-streak" | "win-rate" | "s-grade" | "carry" | "signature" | "peak" | "hero-focus" | "switching";
 
 const romanLevels = ["I", "II", "III"] as const;
+const selectableSeasons = [23, 22, 21] as const;
+
+export function createLatestRequestGuard() {
+  let latestRequest = 0;
+
+  return {
+    begin() {
+      latestRequest += 1;
+      return latestRequest;
+    },
+    isCurrent(request: number) {
+      return latestRequest === request;
+    },
+    invalidate(request?: number) {
+      if (request === undefined || latestRequest === request) latestRequest += 1;
+    },
+  };
+}
+
+export function hasReviewSeasonData(review: Pick<PersonalSeasonReview, "summary">) {
+  return typeof review.summary.season === "number" && review.summary.season > 0;
+}
+
+export function ReviewEmptyState() {
+  return (
+    <section className="workspace reviewWorkspace phase6ReviewWorkspace">
+      <GlassPanel className="phase6RoleReport" tone="solid">
+        <h2>暂无可用赛季战报</h2>
+        <p>当前本地数据库没有可用于复盘的赛季数据。</p>
+      </GlassPanel>
+    </section>
+  );
+}
 
 export function PersonalReviewPage() {
-  const [params] = useSearchParams();
-  const season = Number(params.get("season") || 22);
+  const [params, setParams] = useSearchParams();
+  const requestedSeason = parseSeasonParam(params.get("season"));
+  const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [review, setReview] = useState<PersonalSeasonReview | null>(null);
   const [analysis, setAnalysis] = useState<SeasonAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedAchievement, setSelectedAchievement] = useState<ReviewAchievement | null>(null);
+  const reviewRequestGuard = useRef(createLatestRequestGuard());
+  const analysisRequestGuard = useRef(createLatestRequestGuard());
 
   useEffect(() => {
+    reviewRequestGuard.current.invalidate();
+    analysisRequestGuard.current.invalidate();
+    setSelectedSeason(requestedSeason);
+    setReview(null);
+    setAnalysis(null);
     setError(null);
-    void getPersonalSeasonReview(season)
-      .then(setReview)
-      .catch((err) => setError(productErrorMessage(err)));
-  }, [season]);
+    setAnalysisError(null);
+    setAnalysisLoading(false);
+  }, [requestedSeason]);
 
   useEffect(() => {
+    const request = reviewRequestGuard.current.begin();
+    setReview(null);
+    setError(null);
+    void getPersonalSeasonReview(selectedSeason)
+      .then((nextReview) => {
+        if (!reviewRequestGuard.current.isCurrent(request)) return;
+        setReview(nextReview);
+        const backendSeason = nextReview.summary.season;
+        if (selectedSeason === undefined && typeof backendSeason === "number" && backendSeason > 0) {
+          setSelectedSeason(backendSeason);
+        }
+      })
+      .catch((err) => {
+        if (reviewRequestGuard.current.isCurrent(request)) setError(productErrorMessage(err));
+      });
+
+    return () => reviewRequestGuard.current.invalidate(request);
+  }, [selectedSeason]);
+
+  useEffect(() => {
+    if (selectedSeason === undefined) {
+      setAnalysis(null);
+      setAnalysisError(null);
+      setAnalysisLoading(false);
+      return;
+    }
+    const request = analysisRequestGuard.current.begin();
+    setAnalysis(null);
     setAnalysisLoading(true);
     setAnalysisError(null);
-    void getSeasonAnalysis()
-      .then(setAnalysis)
-      .catch((err) => setAnalysisError(productErrorMessage(err)))
-      .finally(() => setAnalysisLoading(false));
-  }, []);
+    void getSeasonAnalysis(selectedSeason)
+      .then((nextAnalysis) => {
+        if (analysisRequestGuard.current.isCurrent(request)) setAnalysis(nextAnalysis);
+      })
+      .catch((err) => {
+        if (analysisRequestGuard.current.isCurrent(request)) setAnalysisError(productErrorMessage(err));
+      })
+      .finally(() => {
+        if (analysisRequestGuard.current.isCurrent(request)) setAnalysisLoading(false);
+      });
+
+    return () => analysisRequestGuard.current.invalidate(request);
+  }, [selectedSeason]);
+
+  function changeSeason(nextSeason: number) {
+    setSelectedSeason(nextSeason);
+    setReview(null);
+    setAnalysis(null);
+    const nextParams = new URLSearchParams(params);
+    nextParams.set("season", String(nextSeason));
+    setParams(nextParams);
+  }
 
   if (error) {
     return (
@@ -70,8 +155,11 @@ export function PersonalReviewPage() {
 
   if (!review) return <section className="workspace">正在加载个人赛季战报...</section>;
 
+  if (!hasReviewSeasonData(review)) return <ReviewEmptyState />;
+
   const achievements = buildSharedReviewAchievements(review);
   const analytics = analysis?.friend ?? null;
+  const titleSeason = selectedSeason ?? review.summary.season;
 
   return (
     <section className="workspace reviewWorkspace phase6ReviewWorkspace">
@@ -79,10 +167,20 @@ export function PersonalReviewPage() {
         <div className="phase6RoleReportHeader">
           <div>
             <span className="phase6Eyebrow">战报</span>
-            <h2>S{review.summary.season ?? season} 赛季表现报告</h2>
+            <h2>{titleSeason ? `S${titleSeason} 赛季表现报告` : "赛季表现报告"}</h2>
             <p>按职责汇总当前段位、胜率、样本和 KDA，下面保留可追溯的复盘证据。</p>
           </div>
           <div className="phase6CommandStatus">
+            <label className="seasonSelect phase8SeasonSelect">
+              <span>赛季</span>
+              <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(Number(event.target.value))}>
+                {selectableSeasons.map((season) => (
+                  <option key={season} value={season}>
+                    S{season}
+                  </option>
+                ))}
+              </select>
+            </label>
             <StatusBadge tone="good">
               <BarChart3 size={15} /> {review.summary.totalMatches} 场
             </StatusBadge>
@@ -119,6 +217,12 @@ export function PersonalReviewPage() {
       <SeasonAnalysisModules analysis={analysis} analytics={analytics} loading={analysisLoading} error={analysisError} />
     </section>
   );
+}
+
+function parseSeasonParam(value: string | null) {
+  if (!value) return undefined;
+  const season = Number(value);
+  return Number.isFinite(season) ? season : undefined;
 }
 
 function RoleRankCard({ role }: { role: RoleRankSummary }) {

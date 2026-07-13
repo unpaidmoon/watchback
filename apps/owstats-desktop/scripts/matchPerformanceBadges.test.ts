@@ -54,7 +54,7 @@ assert.ok(
   "primary match tag should render before the grade pill so circular badges stay grouped on the right",
 );
 
-const styleSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 const matchGradeStyle = styleSource.match(/\.phase6MatchGrade \.gradePill \{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
 assert.match(matchGradeStyle, /width:\s*27px;/, "match grade circles should match award medal width");
 assert.match(matchGradeStyle, /height:\s*27px;/, "match grade circles should match award medal height");

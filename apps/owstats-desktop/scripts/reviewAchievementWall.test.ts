@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
-const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 
 for (const label of ["成就墙", "常胜将军", "胜率机器", "高光制造者", "战局核心", "招牌打法", "巅峰一战", "本命专精", "战术变阵"]) {
   assert.equal(source.includes(label), true, `review page should render achievement label: ${label}`);

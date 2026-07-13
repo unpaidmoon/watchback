@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)] // Review fixtures deliberately expose each match dimension.
+
 use owstats_desktop_lib::{
     get_onboarding_status, get_personal_season_review, OnboardingStatusRequest, OwDatabase,
     PersonalReviewRequest,
@@ -99,6 +101,47 @@ fn seed_ranked_match_entry(
             deaths,
             raw_entry.to_string()
         ],
+    )
+    .unwrap();
+}
+
+fn seed_ranked_match_entry_with_instance_type(
+    db: &OwDatabase,
+    id: &str,
+    game_mode: &str,
+    instance_type: &str,
+    role_type: Option<&str>,
+    result: &str,
+    begin_ts: i64,
+    rank_score: i64,
+    rank_sub_tier: i64,
+) {
+    let conn = db.connect().unwrap();
+    let mut raw_entry = serde_json::json!({
+        "gameMode": game_mode,
+        "instanceType": instance_type,
+        "rankInfo": {
+            "rankName": "Diamond",
+            "rankScore": rank_score,
+            "rankSubTier": rank_sub_tier
+        }
+    });
+    if let Some(role_type) = role_type {
+        raw_entry["roleType"] = serde_json::json!(role_type);
+    }
+    conn.execute(
+        r#"
+        INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+            hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+            deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+        )
+        VALUES (?1, 22, 'preset', ?2, 'normal', ?3, 'Ilios', 'Ilios', 'hero', 'Hero', ?4,
+            CASE WHEN ?3 = 'win' THEN 2 ELSE 1 END,
+            CASE WHEN ?3 = 'win' THEN 1 ELSE 2 END,
+            10, 5, 5, 1000, 100, 100, 0, 620, ?5, '2026-06-27T00:00:00Z')
+        "#,
+        rusqlite::params![id, game_mode, result, begin_ts, raw_entry.to_string()],
     )
     .unwrap();
 }
@@ -471,4 +514,109 @@ fn role_rank_summary_counts_only_matching_competitive_mode() {
     assert_eq!(open.matches, 1);
     assert_eq!(open.wins, 0);
     assert_eq!(open.rank_key, "master");
+}
+
+#[test]
+fn personal_review_counts_only_lowercase_competitive_roles_by_entry_role_type() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("phase3.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_ranked_match_entry(
+        &db,
+        "s23-leisure-dps",
+        "leisure",
+        Some("dps"),
+        "win",
+        100,
+        0,
+        0,
+        18,
+        4,
+        2,
+    );
+    seed_ranked_match_entry_with_instance_type(
+        &db,
+        "s23-sport-tank",
+        "sport",
+        "IT_RANKED",
+        Some("tank"),
+        "loss",
+        200,
+        598,
+        2,
+    );
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    let tank = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "tank")
+        .unwrap();
+    assert_eq!(tank.matches, 1);
+    assert_eq!(tank.rank_key, "master");
+    assert_eq!(tank.rank_sub_tier, 2);
+
+    let dps = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "dps")
+        .unwrap();
+    assert_eq!(dps.matches, 0);
+    assert_eq!(dps.wins, 0);
+    assert_eq!(dps.rank_key, "unranked");
+    assert_eq!(dps.kda, 0.0);
+}
+
+#[test]
+fn personal_review_keeps_lowercase_sport_open_out_of_role_queue() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("phase3.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_ranked_match_entry_with_instance_type(
+        &db,
+        "s21-sport-open",
+        "sport",
+        "IT_RULESET",
+        Some("tank"),
+        "win",
+        100,
+        595,
+        3,
+    );
+    seed_ranked_match_entry_with_instance_type(
+        &db,
+        "s21-sport-tank",
+        "sport",
+        "IT_RANKED",
+        Some("tank"),
+        "loss",
+        200,
+        496,
+        4,
+    );
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    let open = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "open")
+        .unwrap();
+    assert_eq!(open.matches, 1);
+    assert_eq!(open.wins, 1);
+    assert_eq!(open.rank_key, "master");
+
+    let tank = review
+        .role_summaries
+        .iter()
+        .find(|item| item.role_type == "tank")
+        .unwrap();
+    assert_eq!(tank.matches, 1);
+    assert_eq!(tank.wins, 0);
+    assert_eq!(tank.rank_key, "diamond");
 }

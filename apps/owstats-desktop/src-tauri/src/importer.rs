@@ -1,13 +1,13 @@
 use crate::db::OwDatabase;
 use crate::match_evaluation::refresh_match_evaluations_conn;
 use crate::models::ImportSummary;
-use crate::redaction::redact_sensitive_json;
+use crate::redaction::{redact_sensitive_json, redact_sensitive_text, sanitize_persisted_json};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const PRESET_MODES: &[&str] = &[
     "LeisurePreset",
@@ -28,12 +28,11 @@ pub fn import_full_season_payload(
         .with_context(|| format!("failed to read season payload {}", path.display()))?;
     let payload: Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse season payload {}", path.display()))?;
-    let root = path
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .unwrap_or_else(|| Path::new("."));
-    import_payload_value(db, &payload, root)
+    import_payload_value_embedded(db, &payload)
+}
+
+pub fn import_payload_value_embedded(db: &OwDatabase, payload: &Value) -> Result<ImportSummary> {
+    import_payload_value_with_lookups(db, payload, load_embedded_lookup()?)
 }
 
 pub fn import_payload_value(
@@ -41,6 +40,16 @@ pub fn import_payload_value(
     payload: &Value,
     project_root: &Path,
 ) -> Result<ImportSummary> {
+    import_payload_value_with_lookups(db, payload, load_lookup(project_root))
+}
+
+fn import_payload_value_with_lookups(
+    db: &OwDatabase,
+    payload: &Value,
+    lookups: Lookups,
+) -> Result<ImportSummary> {
+    let sanitized_payload = sanitize_persisted_json(payload);
+    let payload = &sanitized_payload;
     db.initialize()?;
     let conn = db.connect()?;
     let season = payload.get("season").and_then(Value::as_i64).unwrap_or(0);
@@ -61,7 +70,6 @@ pub fn import_payload_value(
         .cloned()
         .unwrap_or_default();
     let now = Utc::now().to_rfc3339();
-    let lookups = load_lookup(project_root);
     let details_by_id = details_by_match_id(&details);
 
     let tx = conn.unchecked_transaction()?;
@@ -170,22 +178,32 @@ pub fn import_payload_value(
 
     rebuild_match_players_for_season(&tx, season, &details, &lookups, Some(payload), &now)?;
 
+    tx.execute("DELETE FROM sync_errors WHERE season = ?", [season])?;
+
     for error in &errors {
         tx.execute(
             r#"
-            INSERT INTO sync_errors (season, match_id, error_type, message, raw_json, created_at)
+            INSERT OR IGNORE INTO sync_errors (season, match_id, error_type, message, raw_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
             params![
                 season,
                 string_field(error, "match_id"),
                 string_field(error, "error_type"),
-                string_field(error, "error").or_else(|| string_field(error, "message")),
+                string_field(error, "error")
+                    .or_else(|| string_field(error, "message"))
+                    .map(|message| redact_sensitive_text(&message)),
                 serde_json::to_string(error)?,
                 now,
             ],
         )?;
     }
+
+    let latest_error_count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM sync_errors WHERE season = ?",
+        [season],
+        |row| row.get(0),
+    )?;
 
     tx.execute(
         r#"
@@ -203,7 +221,7 @@ pub fn import_payload_value(
             now,
             entries.len() as i64,
             details.len() as i64,
-            errors.len() as i64
+            latest_error_count
         ],
     )?;
 
@@ -220,14 +238,20 @@ pub fn import_payload_value(
     let _ = refresh_match_evaluations_conn(&tx);
     tx.commit()?;
 
-    Ok(ImportSummary {
+    let mut summary = ImportSummary {
         season,
         matches_seen: entries.len(),
         details_seen: details.len(),
         preset_matches,
         stadium_matches,
         imported_at: now,
-    })
+        mmr_warning: None,
+    };
+    if crate::career_mmr::replay::rebuild_career_mmr(db).is_err() {
+        summary.mmr_warning =
+            Some("比赛已成功导入，但生涯分重建失败；已保留上一套完整结果。".to_string());
+    }
+    Ok(summary)
 }
 
 pub fn rebuild_match_players_from_existing_details(db: &OwDatabase) -> Result<()> {
@@ -281,6 +305,10 @@ fn rebuild_match_players_for_season(
         "DELETE FROM match_players WHERE season = ?",
         params![season],
     )?;
+    tx.execute(
+        "DELETE FROM arena_match_players WHERE season = ?",
+        params![season],
+    )?;
     let current_bnet = payload
         .and_then(|item| item.pointer("/profile_card/data/bnetId"))
         .and_then(value_to_string)
@@ -288,9 +316,6 @@ fn rebuild_match_players_for_season(
         .unwrap_or_default();
 
     for detail in details {
-        if string_field(detail, "match_kind").as_deref() != Some("normal") {
-            continue;
-        }
         let match_id = string_field(detail, "match_id").unwrap_or_default();
         if match_id.is_empty() {
             continue;
@@ -303,6 +328,13 @@ fn rebuild_match_players_for_season(
             )
             .ok();
         if bucket.as_deref() != Some("preset") {
+            if string_field(detail, "match_kind").as_deref() == Some("fight") {
+                let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
+                insert_arena_player_index_rows(tx, &match_id, season, data, now)?;
+            }
+            continue;
+        }
+        if string_field(detail, "match_kind").as_deref() != Some("normal") {
             continue;
         }
         let data = detail.pointer("/payload/data").unwrap_or(&Value::Null);
@@ -332,7 +364,149 @@ fn rebuild_match_players_for_season(
             now,
         )?;
     }
+    let key = format!("arena_player_index_v1:{season}");
+    tx.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, 'complete', ?2) \
+         ON CONFLICT(key) DO UPDATE SET value='complete', updated_at=excluded.updated_at",
+        params![key, now],
+    )?;
     Ok(())
+}
+
+fn insert_arena_player_index_rows(
+    tx: &rusqlite::Transaction<'_>,
+    match_id: &str,
+    season: i64,
+    data: &Value,
+    now: &str,
+) -> Result<()> {
+    let name_map = arena_name_map(data);
+    insert_arena_player_index_side(
+        tx,
+        match_id,
+        season,
+        "teammate",
+        data.pointer("/totalCount/teammateList"),
+        &name_map,
+        now,
+    )?;
+    insert_arena_player_index_side(
+        tx,
+        match_id,
+        season,
+        "enemy",
+        data.pointer("/totalCount/enemyList"),
+        &name_map,
+        now,
+    )?;
+
+    if let Some(rounds) = data.get("roundCountList").and_then(Value::as_array) {
+        for round in rounds {
+            insert_arena_player_index_side(
+                tx,
+                match_id,
+                season,
+                "teammate",
+                round.get("teammateList"),
+                &name_map,
+                now,
+            )?;
+            insert_arena_player_index_side(
+                tx,
+                match_id,
+                season,
+                "enemy",
+                round.get("enemyList"),
+                &name_map,
+                now,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn insert_arena_player_index_side(
+    tx: &rusqlite::Transaction<'_>,
+    match_id: &str,
+    season: i64,
+    side: &str,
+    value: Option<&Value>,
+    name_map: &HashMap<String, String>,
+    now: &str,
+) -> Result<()> {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for item in items {
+        if !item.is_object() {
+            continue;
+        }
+        let bnet_id = string_field(item, "bnetId").unwrap_or_default();
+        if bnet_id.is_empty() {
+            continue;
+        }
+        tx.execute(
+            r#"
+            INSERT INTO arena_match_players (match_id, season, side, bnet_id, player_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(match_id, side, bnet_id) DO UPDATE SET
+                season=excluded.season,
+                player_name=excluded.player_name,
+                updated_at=excluded.updated_at
+            "#,
+            params![
+                match_id,
+                season,
+                side,
+                bnet_id,
+                arena_player_name(item, name_map),
+                now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn arena_name_map(data: &Value) -> HashMap<String, String> {
+    data.get("nameMap")
+        .and_then(Value::as_object)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|(key, value)| {
+                    let name = value.as_str()?.trim();
+                    if key.trim().is_empty() || name.is_empty() {
+                        None
+                    } else {
+                        Some((key.to_string(), name.to_string()))
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn arena_player_name(item: &Value, name_map: &HashMap<String, String>) -> String {
+    let bnet_id = string_field(item, "bnetId").unwrap_or_default();
+    string_field(item, "name")
+        .filter(|name| !looks_like_private_id(name))
+        .or_else(|| {
+            name_map
+                .get(&bnet_id)
+                .filter(|name| !looks_like_private_id(name))
+                .cloned()
+        })
+        .unwrap_or_else(|| "未知玩家".to_string())
+}
+
+fn looks_like_private_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return !trimmed.is_empty();
+    }
+    let compact = trimmed.chars().filter(|ch| *ch != '-').collect::<String>();
+    compact.len() == 32 && compact.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn player_rows_for_side<'a>(data: &'a Value, list_name: &str) -> Option<&'a Value> {
@@ -424,6 +598,7 @@ fn infer_current_bnet(details: &[Value]) -> Option<String> {
         .map(|(bnet_id, _)| bnet_id)
 }
 
+#[allow(clippy::too_many_arguments)] // SQL row mapping preserves the importer call boundary.
 fn insert_player_rows(
     tx: &rusqlite::Transaction<'_>,
     match_id: &str,
@@ -586,6 +761,8 @@ fn normalize_timestamp(value: i64) -> i64 {
 struct Lookups {
     heroes: HashMap<String, String>,
     maps: HashMap<String, String>,
+    #[allow(dead_code)]
+    attrs: HashMap<String, String>,
 }
 
 fn load_lookup(project_root: &Path) -> Lookups {
@@ -593,16 +770,46 @@ fn load_lookup(project_root: &Path) -> Lookups {
     let parsed = std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-    let heroes = dict_names(parsed.as_ref().and_then(|item| item.get("heroes")));
-    let maps = dict_names(parsed.as_ref().and_then(|item| item.get("maps")));
-    Lookups { heroes, maps }
+    parsed
+        .as_ref()
+        .map(parse_lookups)
+        .unwrap_or_else(|| load_embedded_lookup().expect("embedded runtime lookup must be valid"))
+}
+
+fn load_embedded_lookup() -> Result<Lookups> {
+    let parsed: Value = serde_json::from_str(include_str!("../../runtime-config/ow-lookups.json"))
+        .context("failed to parse embedded runtime lookup")?;
+    Ok(parse_lookups(&parsed))
+}
+
+fn parse_lookups(parsed: &Value) -> Lookups {
+    Lookups {
+        heroes: dict_names(parsed.get("heroes")),
+        maps: dict_names(parsed.get("maps")),
+        attrs: attr_names(parsed.get("attrs")),
+    }
 }
 
 fn load_lookup_from_db(tx: &rusqlite::Transaction<'_>) -> Result<Lookups> {
     Ok(Lookups {
         heroes: load_dictionary_from_db(tx, "hero_dict")?,
         maps: load_dictionary_from_db(tx, "map_dict")?,
+        attrs: HashMap::new(),
     })
+}
+
+fn attr_names(value: Option<&Value>) -> HashMap<String, String> {
+    value
+        .and_then(Value::as_object)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|(guid, item)| {
+                    string_field(item, "text").map(|text| (guid.clone(), text))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn load_dictionary_from_db(
@@ -663,6 +870,29 @@ fn is_sensitive_key(key: &str) -> bool {
     lowered.contains("token") || lowered.contains("cookie")
 }
 
+#[allow(clippy::items_after_test_module)] // Public importer helpers intentionally follow lookup unit tests.
+#[cfg(test)]
+mod portable_lookup_tests {
+    use super::load_embedded_lookup;
+
+    #[test]
+    fn embedded_lookup_resolves_known_hero_map_and_attribute_without_project_root() {
+        let lookup = load_embedded_lookup().unwrap();
+        assert_eq!(
+            lookup.heroes.get("207165582859043131").map(String::as_str),
+            Some("安娜")
+        );
+        assert_eq!(
+            lookup.maps.get("576460752303425122").map(String::as_str),
+            Some("漓江塔")
+        );
+        assert_eq!(
+            lookup.attrs.get("603482350067646509").map(String::as_str),
+            Some("单独消灭")
+        );
+    }
+}
+
 fn upsert_dictionary(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
@@ -678,10 +908,6 @@ fn upsert_dictionary(
         tx.execute(&sql, params![guid, name, raw.to_string(), now])?;
     }
     Ok(())
-}
-
-pub fn default_database_path(app_data_dir: PathBuf) -> PathBuf {
-    app_data_dir.join("owstats.sqlite3")
 }
 
 pub fn existing_import_summary(db: &OwDatabase) -> Result<Option<ImportSummary>> {
@@ -710,6 +936,7 @@ pub fn existing_import_summary(db: &OwDatabase) -> Result<Option<ImportSummary>>
                     imported_at: row.get(3)?,
                     preset_matches: row.get(4)?,
                     stadium_matches: row.get(5)?,
+                    mmr_warning: None,
                 })
             },
         )

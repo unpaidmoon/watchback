@@ -53,8 +53,13 @@ apps/*/src-tauri/gen/
 dist/
 build/
 *.spec
+apps/owstats-desktop/public/assets/
+apps/owstats-desktop/public/assets.tmp/
+apps/owstats-desktop/public/assets.stage-*/
+apps/owstats-desktop/public/assets.backup-*/
 
 # Test artifacts
+/test-results/
 court_image_*.png
 court_result.json
 apps/owstats-desktop/.playwright-cli/

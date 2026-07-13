@@ -18,11 +18,12 @@ export const phase6NavItems: Phase6NavItem[] = [
   { label: "指挥台", path: "/onboarding", title: "登录、同步与数据状态" },
   { label: "对局", path: "/matches", title: "浏览和筛选对局" },
   { label: "战报", path: "/review", title: "个人赛季战报" },
+  { label: "生涯 MMR", path: "/career-mmr", title: "本地估算的三职责生涯 MMR" },
   { label: "排行", path: "/ranking", title: "英雄与地图排行" },
 ];
 
 export function credentialTone(state: string | null | undefined): StatusTone {
-  if (state === "saved") {
+  if (state === "ready") {
     return "good";
   }
 
@@ -30,7 +31,7 @@ export function credentialTone(state: string | null | undefined): StatusTone {
     return "bad";
   }
 
-  if (state === "missing" || state === "not_found" || state === "incomplete") {
+  if (state === "missing" || state === "not_found" || state === "incomplete" || state === "currentPlayerMissing") {
     return "warn";
   }
 
@@ -38,12 +39,16 @@ export function credentialTone(state: string | null | undefined): StatusTone {
 }
 
 export function credentialLabel(state: string | null | undefined): string {
-  if (state === "saved") {
+  if (state === "ready") {
     return "已登录";
   }
 
   if (state === "failed" || state === "invalid") {
     return "需重新登录";
+  }
+
+  if (state === "currentPlayerMissing") {
+    return "待识别账号";
   }
 
   return "未登录";

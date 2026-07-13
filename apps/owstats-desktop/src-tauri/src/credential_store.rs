@@ -45,12 +45,26 @@ pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
         .and_then(|item| item.as_str())
         .map(str::to_string);
     let complete = role_id.is_some() && !token.trim().is_empty();
+    let current_player_ready = json
+        .get("customer_token")
+        .or_else(|| json.get("customerToken"))
+        .and_then(|item| item.as_str())
+        .is_some_and(|value| !value.trim().is_empty());
     Ok(CredentialStatus {
-        state: if complete { "saved" } else { "incomplete" }.to_string(),
-        message: if complete {
-            "已保存网易大神登录凭证，可用于同步。".to_string()
+        state: if !complete {
+            "incomplete"
+        } else if current_player_ready {
+            "ready"
         } else {
+            "currentPlayerMissing"
+        }
+        .to_string(),
+        message: if !complete {
             "本地凭证不完整，请重新登录。".to_string()
+        } else if current_player_ready {
+            "已识别当前登录账号，可以同步本人数据。".to_string()
+        } else {
+            "已登录，但尚未识别当前账号的同步身份，请重新登录。".to_string()
         },
         exposes_secret: false,
         role_id,
@@ -84,17 +98,7 @@ pub fn clear_credentials_for_path(path: &Path) -> Result<bool> {
 }
 
 pub fn redact_sensitive_text(message: &str) -> String {
-    let mut parts = Vec::new();
-    for part in message.split_whitespace() {
-        let lowered = part.to_ascii_lowercase();
-        if lowered.contains("token") || lowered.contains("cookie") {
-            let key = part.split_once('=').map(|(key, _)| key).unwrap_or(part);
-            parts.push(format!("{key}=***REDACTED***"));
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    parts.join(" ")
+    crate::redaction::redact_sensitive_text(message)
 }
 
 #[cfg(test)]

@@ -1,11 +1,145 @@
 import { AlertCircle, Map } from "lucide-react";
-import { Link, Navigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { getSeasonAnalysis } from "../shared/api";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
+import { productErrorMessage } from "../shared/phase6Shell";
 import { formatWinRate } from "../shared/rankingUtils";
 import type { FriendAnalytics, FriendBoard, FriendBoardEntry, MapAnalysisCard, SeasonAnalysis } from "../shared/types";
 
+const selectableSeasons = [23, 22, 21] as const;
+
+export function createLatestFriendAnalysisRequestGuard() {
+  let latestRequest = 0;
+
+  return {
+    begin() {
+      latestRequest += 1;
+      return latestRequest;
+    },
+    isCurrent(request: number) {
+      return latestRequest === request;
+    },
+    invalidate(request?: number) {
+      if (request === undefined || latestRequest === request) latestRequest += 1;
+    },
+  };
+}
+
+export function parseFriendAnalysisSeasonParam(value: string | null) {
+  if (!value) return undefined;
+  const season = Number(value);
+  return selectableSeasons.includes(season as (typeof selectableSeasons)[number]) ? season : undefined;
+}
+
+export function normalizeFriendAnalysisRequestedSeason(value: string | null) {
+  const selectedSeason = parseFriendAnalysisSeasonParam(value);
+  return {
+    selectedSeason,
+    shouldReplaceUrl: value !== null && selectedSeason === undefined,
+  };
+}
+
+export function hasFriendAnalysisSeasonData(analysis: Pick<SeasonAnalysis, "season">): analysis is { season: number } {
+  return typeof analysis.season === "number" && analysis.season > 0;
+}
+
+export function FriendAnalysisEmptyState() {
+  return (
+    <section className="workspace analyticsWorkspace">
+      <GlassPanel className="phase6RoleReport" tone="solid">
+        <h2>暂无可用好友分析</h2>
+        <p>当前本地数据库没有可用于好友分析的赛季数据。</p>
+      </GlassPanel>
+    </section>
+  );
+}
+
 export function FriendAnalyticsPage() {
-  return <Navigate to="/review" replace />;
+  const [params, setParams] = useSearchParams();
+  const seasonParam = params.get("season");
+  const { selectedSeason: requestedSeason, shouldReplaceUrl } = normalizeFriendAnalysisRequestedSeason(seasonParam);
+  const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
+  const [analysis, setAnalysis] = useState<SeasonAnalysis | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const analysisRequestGuard = useRef(createLatestFriendAnalysisRequestGuard());
+
+  useEffect(() => {
+    if (!shouldReplaceUrl) return;
+    const nextParams = new URLSearchParams(params);
+    nextParams.delete("season");
+    setParams(nextParams, { replace: true });
+  }, [shouldReplaceUrl, params, setParams]);
+
+  useEffect(() => {
+    analysisRequestGuard.current.invalidate();
+    setSelectedSeason(requestedSeason);
+    setAnalysis(null);
+    setError(null);
+    setLoading(false);
+  }, [requestedSeason]);
+
+  useEffect(() => {
+    const request = analysisRequestGuard.current.begin();
+    setAnalysis(null);
+    setLoading(true);
+    setError(null);
+    void getSeasonAnalysis(selectedSeason)
+      .then((nextAnalysis) => {
+        if (!analysisRequestGuard.current.isCurrent(request)) return;
+        setAnalysis(nextAnalysis);
+        if (selectedSeason === undefined && hasFriendAnalysisSeasonData(nextAnalysis)) {
+          setSelectedSeason(nextAnalysis.season);
+        }
+      })
+      .catch((err) => {
+        if (analysisRequestGuard.current.isCurrent(request)) setError(productErrorMessage(err));
+      })
+      .finally(() => {
+        if (analysisRequestGuard.current.isCurrent(request)) setLoading(false);
+      });
+
+    return () => analysisRequestGuard.current.invalidate(request);
+  }, [selectedSeason]);
+
+  function changeSeason(nextSeason: number | undefined) {
+    setSelectedSeason(nextSeason);
+    const nextParams = new URLSearchParams(params);
+    if (nextSeason === undefined) {
+      nextParams.delete("season");
+    } else {
+      nextParams.set("season", String(nextSeason));
+    }
+    setParams(nextParams);
+  }
+
+  const analytics = analysis?.friend ?? null;
+
+  if (!loading && analysis && !hasFriendAnalysisSeasonData(analysis)) return <FriendAnalysisEmptyState />;
+
+  return (
+    <section className="workspace analyticsWorkspace">
+      <header className="sectionHeader phase6InlineHeader">
+        <div>
+          <span className="phase6Eyebrow">好友分析</span>
+          <h2>{selectedSeason ? `S${selectedSeason} 好友分析` : "最新赛季好友分析"}</h2>
+        </div>
+        <label className="seasonSelect phase8SeasonSelect">
+          <span>赛季</span>
+          <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(event.target.value ? Number(event.target.value) : undefined)}>
+            <option value="">最新赛季</option>
+            {selectableSeasons.map((season) => (
+              <option key={season} value={season}>
+                S{season}
+              </option>
+            ))}
+          </select>
+        </label>
+      </header>
+      <SeasonAnalysisModules analysis={analysis} analytics={analytics} loading={loading} error={error} />
+    </section>
+  );
 }
 
 export function SeasonAnalysisModules({
@@ -28,7 +162,7 @@ export function SeasonAnalysisModules({
         </div>
       )}
 
-      {loading && <div className="emptyState">正在计算赛季分析...</div>}
+      {loading && <div className="emptyState">正在加载好友分析...</div>}
       {!loading && analytics && (
         <>
           <FriendPhase5Summary analytics={analytics} />

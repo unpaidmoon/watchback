@@ -1,8 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
@@ -26,12 +25,34 @@ impl OwDatabase {
         }
         let conn = Connection::open(&self.path)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        if self.path.is_file() {
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
+        }
         Ok(conn)
     }
 
     pub fn initialize(&self) -> Result<()> {
+        let database_preexisted = self.path.is_file()
+            && std::fs::metadata(&self.path)
+                .map(|metadata| metadata.len() > 0)
+                .unwrap_or(false);
         let conn = self.connect()?;
+        if database_preexisted {
+            if let Some(app_data_dir) = self.path.parent() {
+                crate::database::backup::backup_before_schema_migration(
+                    &conn,
+                    &self.path,
+                    &app_data_dir.join("backups"),
+                    crate::database::migrations::CURRENT_SCHEMA_VERSION,
+                )?;
+            }
+        }
         initialize_connection(&conn)?;
+        if let Some(app_data_dir) = self.path.parent() {
+            crate::privacy_migration::migrate_legacy_persistence(&conn, app_data_dir, &self.path)?;
+        }
         Ok(())
     }
 }
@@ -190,41 +211,6 @@ pub fn initialize_connection(conn: &Connection) -> Result<()> {
         "#,
         [],
     )?;
-    run_migrations(conn)?;
-    Ok(())
-}
-
-fn run_migrations(conn: &Connection) -> Result<()> {
-    let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if current < 1 {
-        conn.pragma_update(None, "user_version", 1)?;
-    }
-    if current < 2 {
-        add_column_if_missing(conn, "match_players", "role_type", "TEXT")?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_match_players_role ON match_players(season, is_current_player, role_type)",
-            [],
-        )?;
-        conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
-    }
-    Ok(())
-}
-
-fn add_column_if_missing(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let columns = stmt
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    if !columns.iter().any(|item| item == column) {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-            [],
-        )?;
-    }
+    crate::database::migrations::run_migrations(conn)?;
     Ok(())
 }

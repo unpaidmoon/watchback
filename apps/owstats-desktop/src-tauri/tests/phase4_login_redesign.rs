@@ -164,7 +164,7 @@ fn credential_status_and_progress_redact_secrets() {
     .unwrap();
 
     let status = credential_status_for_path(&path).unwrap();
-    assert_eq!(status.state, "saved");
+    assert_eq!(status.state, "ready");
     assert_eq!(status.role_id, Some(123456));
     assert!(!status.message.contains("secret-token"));
     assert!(!status.message.contains("customer-secret"));

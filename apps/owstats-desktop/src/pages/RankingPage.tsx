@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
 import { HeroAvatar, MapPreview } from "../shared/phase6Components";
@@ -18,6 +18,24 @@ type RankingTab = "heroes" | "maps";
 
 const heroSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
 const mapSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"];
+const selectableSeasons = [23, 22, 21] as const;
+
+export function createLatestRankingRequestGuard() {
+  let latestRequest = 0;
+
+  return {
+    begin() {
+      latestRequest += 1;
+      return latestRequest;
+    },
+    isCurrent(request: number) {
+      return latestRequest === request;
+    },
+    invalidate(request?: number) {
+      if (request === undefined || latestRequest === request) latestRequest += 1;
+    },
+  };
+}
 
 const sortLabels: Record<RankingSortKey, string> = {
   bestHero: "最佳英雄",
@@ -31,26 +49,43 @@ const sortLabels: Record<RankingSortKey, string> = {
 export function RankingPage() {
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<RankingTab>(params.get("tab") === "maps" ? "maps" : "heroes");
+  const requestedSeason = parseSeasonParam(params.get("season"));
+  const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [sort, setSort] = useState<RankingSort>(() => defaultRankingSort(tab));
   const [search, setSearch] = useState("");
   const [ranking, setRanking] = useState<RankingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const rankingRequestGuard = useRef(createLatestRankingRequestGuard());
 
   useEffect(() => {
     const nextTab = params.get("tab") === "maps" ? "maps" : "heroes";
     setTab(nextTab);
     setSort(defaultRankingSort(nextTab));
-  }, [params]);
+    setSelectedSeason(requestedSeason);
+  }, [params, requestedSeason]);
 
   useEffect(() => {
+    const request = rankingRequestGuard.current.begin();
     setLoading(true);
     setError(null);
-    void getRankings()
-      .then(setRanking)
-      .catch((err) => setError(productErrorMessage(err)))
-      .finally(() => setLoading(false));
-  }, []);
+    void getRankings(selectedSeason)
+      .then((nextRanking) => {
+        if (!rankingRequestGuard.current.isCurrent(request)) return;
+        setRanking(nextRanking);
+        if (selectedSeason === undefined && nextRanking.season) {
+          setSelectedSeason(nextRanking.season);
+        }
+      })
+      .catch((err) => {
+        if (rankingRequestGuard.current.isCurrent(request)) setError(productErrorMessage(err));
+      })
+      .finally(() => {
+        if (rankingRequestGuard.current.isCurrent(request)) setLoading(false);
+      });
+
+    return () => rankingRequestGuard.current.invalidate(request);
+  }, [selectedSeason]);
 
   const rows = useMemo(() => {
     const source = tab === "maps" ? ranking?.maps ?? [] : ranking?.heroes ?? [];
@@ -69,7 +104,20 @@ export function RankingPage() {
   function switchTab(next: RankingTab) {
     setTab(next);
     setSort(defaultRankingSort(next));
-    setParams(next === "maps" ? { tab: "maps" } : {});
+    const nextParams = new URLSearchParams(params);
+    if (next === "maps") {
+      nextParams.set("tab", "maps");
+    } else {
+      nextParams.delete("tab");
+    }
+    setParams(nextParams);
+  }
+
+  function changeSeason(nextSeason: number) {
+    setSelectedSeason(nextSeason);
+    const nextParams = new URLSearchParams(params);
+    nextParams.set("season", String(nextSeason));
+    setParams(nextParams);
   }
 
   function changeSort(key: RankingSortKey) {
@@ -98,8 +146,18 @@ export function RankingPage() {
           <Search size={16} />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "maps" ? "搜索地图或英雄" : "搜索英雄"} />
         </label>
+        <label className="seasonSelect phase8SeasonSelect">
+          <span>赛季</span>
+          <select value={selectedSeason ?? ""} onChange={(event) => changeSeason(Number(event.target.value))}>
+            {selectableSeasons.map((season) => (
+              <option key={season} value={season}>
+                S{season}
+              </option>
+            ))}
+          </select>
+        </label>
         <span className="phase6RankingCount">
-          {ranking?.season ? `S${ranking.season}` : "本地赛季"} · {sourceCount} 项 · 当前 {rows.length} 项
+          {selectedSeason ? `S${selectedSeason}` : "本地赛季"} · {sourceCount} 项 · 当前 {rows.length} 项
         </span>
       </div>
 
@@ -108,6 +166,12 @@ export function RankingPage() {
       {!loading && rows.length > 0 && <RankingTable rows={rows} tab={tab} sort={sort} onSort={changeSort} />}
     </section>
   );
+}
+
+export function parseSeasonParam(value: string | null) {
+  if (!value) return undefined;
+  const season = Number(value);
+  return selectableSeasons.includes(season as (typeof selectableSeasons)[number]) ? season : undefined;
 }
 
 function RankingTable({

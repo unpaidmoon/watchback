@@ -1,6 +1,140 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrOverview {
+    pub model_version: Option<i64>,
+    pub composite_mmr: Option<i64>,
+    pub roles: Vec<CareerMmrRoleSummary>,
+    pub discovered_seasons: Vec<i64>,
+    pub disclaimer: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrRoleSummary {
+    pub role: String,
+    pub current_mmr: Option<i64>,
+    pub confidence: f64,
+    pub confidence_label: String,
+    pub peak_mmr: Option<i64>,
+    pub peak_at: Option<i64>,
+    pub effective_matches: f64,
+    pub effective_hours: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrHistoryRequest {
+    pub role: String,
+    pub season: Option<i64>,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    pub granularity: Option<String>,
+    pub limit: Option<usize>,
+    pub before: Option<i64>,
+    pub before_hash: Option<String>,
+    pub before_bucket: Option<i64>,
+    pub before_season: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrHistory {
+    pub role: String,
+    pub granularity: String,
+    pub points: Vec<CareerMmrHistoryPoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrHistoryPoint {
+    pub timestamp: i64,
+    pub season: i64,
+    pub mmr: i64,
+    pub confidence: f64,
+    pub delta: f64,
+    pub cursor_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrModeBreakdown {
+    pub role: String,
+    pub items: Vec<CareerMmrModeItem>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrModeItem {
+    pub mode_family: String,
+    pub matches_count: i64,
+    pub duration_sec: i64,
+    pub wins: i64,
+    pub losses: i64,
+    pub draws: i64,
+    pub cumulative_delta: f64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrSeasonBreakdown {
+    pub role: String,
+    pub items: Vec<CareerMmrSeasonItem>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrSeasonItem {
+    pub season: i64,
+    pub matches_count: i64,
+    pub start_mmr: i64,
+    pub end_mmr: i64,
+    pub peak_mmr: i64,
+    pub net_delta: f64,
+    pub first_match_at: Option<i64>,
+    pub last_match_at: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrMatchExplanation {
+    pub role: String,
+    pub summary: String,
+    pub factors: Vec<CareerMmrExplanationFactor>,
+    pub data_quality: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrRecentExplanations {
+    pub role: String,
+    pub items: Vec<CareerMmrRecentExplanation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrRecentExplanation {
+    pub timestamp: i64,
+    pub season: i64,
+    pub delta: f64,
+    pub summary: String,
+    pub factors: Vec<CareerMmrExplanationFactor>,
+    pub data_quality: f64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrExplanationFactor {
+    pub kind: String,
+    pub label: String,
+    pub value: f64,
+    pub unit: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerMmrBuildStatus {
+    pub model_version: Option<i64>,
+    pub summary_count: i64,
+    pub is_built: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {
@@ -10,6 +144,8 @@ pub struct ImportSummary {
     pub preset_matches: i64,
     pub stadium_matches: i64,
     pub imported_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mmr_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

@@ -1,16 +1,20 @@
 mod analytics;
+pub mod app_paths;
 pub mod browser_session;
+pub mod career_mmr;
 mod commands;
 pub mod credential_store;
 pub mod credentials;
 pub mod dashen_auth;
 pub mod dashen_client;
+mod database;
 mod db;
 mod importer;
 pub mod login_flow;
 mod match_evaluation;
 mod models;
 pub mod player_target;
+mod privacy_migration;
 mod queries;
 pub mod ranking;
 mod redaction;
@@ -18,10 +22,13 @@ mod review;
 pub mod season_fetch;
 mod settings;
 mod sync;
+mod sync_coordinator;
 
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
-pub use importer::{import_full_season_payload, import_payload_value};
+pub use importer::{
+    import_full_season_payload, import_payload_value, import_payload_value_embedded,
+};
 pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSION};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
@@ -30,13 +37,16 @@ pub use review::{get_onboarding_status, get_personal_season_review};
 pub use sync::{
     dump_season_json, dump_season_json_with_base_url, sync_import_parts, sync_season,
     sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
+    sync_season_with_current_account_credentials_path_output_dir_base_url,
     sync_season_with_progress,
 };
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(sync_coordinator::SyncCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
             commands::list_match_filters,
@@ -49,9 +59,6 @@ pub fn run() {
             commands::get_onboarding_status,
             commands::get_personal_season_review,
             commands::get_credential_status,
-            commands::get_player_target_status,
-            commands::clear_player_target,
-            commands::bind_player_target,
             commands::get_player_profile,
             commands::get_user_settings,
             commands::save_user_settings,
@@ -61,6 +68,14 @@ pub fn run() {
             commands::cancel_dashen_login,
             commands::get_rankings,
             commands::get_season_analysis,
+            commands::get_career_mmr_overview,
+            commands::get_role_mmr_history,
+            commands::get_role_mmr_mode_breakdown,
+            commands::get_role_mmr_season_breakdown,
+            commands::get_mmr_match_explanation,
+            commands::get_recent_mmr_explanations,
+            commands::rebuild_career_mmr,
+            commands::get_career_mmr_build_status,
             commands::sync_season,
         ])
         .run(tauri::generate_context!())

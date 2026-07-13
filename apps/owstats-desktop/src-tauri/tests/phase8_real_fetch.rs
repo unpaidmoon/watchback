@@ -260,7 +260,7 @@ async fn dashen_client_retries_http_429_with_backoff() {
 }
 
 #[tokio::test]
-async fn full_season_fetch_builds_python_shaped_payload_with_local_raw_tokens() {
+async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
     use owstats_desktop_lib::dashen_client::DashenCredentials;
     use owstats_desktop_lib::season_fetch::{fetch_full_season_with_base_url, FullSeasonRequest};
 
@@ -320,14 +320,9 @@ async fn full_season_fetch_builds_python_shaped_payload_with_local_raw_tokens() 
         .as_array()
         .unwrap()
         .is_empty());
-    assert_eq!(
-        fetch.payload["customer_token"], "player-customer-token",
-        "local raw JSON should preserve the target customer token"
-    );
-    assert!(
-        text.contains(r#""customerToken":"detail-secret""#),
-        "local raw JSON should preserve upstream detail token-like fields"
-    );
+    assert!(fetch.payload.get("customer_token").is_none());
+    assert!(!text.contains("player-customer-token"));
+    assert!(!text.contains("detail-secret"));
     assert!(!text.contains("account-auth-token"));
 }
 
@@ -406,48 +401,34 @@ async fn full_season_fetch_tries_current_season_without_season_param_first() {
 }
 
 #[tokio::test]
-async fn sync_writes_json_before_importing_sqlite() {
+async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_season_directory() {
     let temp = tempfile::tempdir().unwrap();
-    let project_root = temp.path().join("project");
     let app_data = temp.path().join("app-data");
-    std::fs::create_dir_all(project_root.join("data")).unwrap();
+    let season_dir = app_data.join("seasons");
     std::fs::create_dir_all(&app_data).unwrap();
 
     std::fs::write(
         app_data.join(".dashen_credentials.json"),
-        r#"{"role_id":123,"token":"account-auth-token","dts":2026,"server":1}"#,
-    )
-    .unwrap();
-    save_player_target_for_path(
-        &app_data.join(".dashen_player_target.json"),
-        &PlayerTarget {
-            input_bnet: "Tester#12345".to_string(),
-            resolved_bnet: Some("Tester#12345".to_string()),
-            customer_token: "player-customer-token".to_string(),
-            bound_at: "2026-07-03T00:00:00Z".to_string(),
-        },
+        r#"{"role_id":123,"token":"account-auth-token","customer_token":"current-account-customer-token","dts":2026,"server":1}"#,
     )
     .unwrap();
 
     let server = spawn_full_season_server();
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
 
-    let summary = owstats_desktop_lib::sync_season_with_credentials_and_target_paths_base_url(
-        &db,
-        &project_root,
-        &app_data.join(".dashen_credentials.json"),
-        &app_data.join(".dashen_player_target.json"),
-        23,
-        &format!("{}/customer", server.base_url),
-        |_| {},
-    )
-    .await
-    .unwrap();
+    let summary =
+        owstats_desktop_lib::sync_season_with_current_account_credentials_path_output_dir_base_url(
+            &db,
+            &season_dir,
+            &app_data.join(".dashen_credentials.json"),
+            23,
+            &format!("{}/customer", server.base_url),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
-    let raw_path = project_root
-        .join("data")
-        .join("players")
-        .join("local_s23_full_season.json");
+    let raw_path = season_dir.join("local_s23_full_season.json");
     assert!(raw_path.exists());
     assert_eq!(summary.imported_matches, 3);
 }

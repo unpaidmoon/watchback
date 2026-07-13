@@ -4,7 +4,11 @@ import assetManifest from "../../../assets/manifest.json" with { type: "json" };
 import { perkAssetUrls, resolveHeroStatInfo, resolvePerkInfo } from "../src/shared/assets.ts";
 
 const rustModels = readFileSync(new URL("../src-tauri/src/models.rs", import.meta.url), "utf8");
-const rustQueries = readFileSync(new URL("../src-tauri/src/queries.rs", import.meta.url), "utf8");
+const rustQueries = [
+  "../src-tauri/src/queries/mod.rs",
+  "../src-tauri/src/queries/normal_detail.rs",
+  "../src-tauri/src/queries/arena_detail.rs",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 const sharedTypes = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
 const sharedAssets = readFileSync(new URL("../src/shared/assets.ts", import.meta.url), "utf8");
 
@@ -22,14 +26,16 @@ assert.equal(sharedTypes.includes("export type PlayerPerk"), true, "frontend typ
 assert.equal(sharedTypes.includes("export type HeroStat"), true, "frontend types should expose HeroStat");
 assert.equal(sharedTypes.includes("perks: PlayerPerk[]"), true, "frontend PlayerRow should include perks");
 assert.equal(sharedTypes.includes("heroStats: HeroStat[]"), true, "frontend PlayerRow should include hero stats");
-assert.equal(sharedAssets.includes("ow_config_cache.json"), true, "hero stat labels should be backed by ow_config_cache attrs");
+assert.equal(sharedAssets.includes("runtime-config/ow-lookups.json"), true, "hero stat labels should use the tracked runtime lookup config");
+assert.equal(sharedAssets.includes("docs/reference"), false, "frontend assets must not import ignored reference data");
+assert.equal(sharedAssets.includes("/@fs/"), false, "frontend assets must not emit Vite filesystem URLs");
 assert.equal(sharedAssets.includes("attrs?: Record<string"), true, "asset helpers should understand ow_config_cache attrs");
 
 const reaperPerk = resolvePerkInfo("920986123797276720");
 assert.equal(reaperPerk?.id, "0x0CC8000000002830", "decimal raw perk guid should resolve to hex query_tool id");
 assert.equal(reaperPerk?.name, "萦绕幽灵", "perk name should strip the description split marker");
 assert.match(reaperPerk?.description ?? "", /幽灵形态/, "perk description should be available");
-assert.match(reaperPerk?.iconUrl ?? "", /^\/@fs\/D:\/Codex\/OW_data\/owstats-local\/assets\/perks\//, "perk icon should resolve to a local asset URL");
+assert.match(reaperPerk?.iconUrl ?? "", /^\/assets\/perks\//, "perk icon should resolve to a stable asset URL");
 assert.deepEqual(perkAssetUrls(["920986123797276720"]), [reaperPerk?.iconUrl], "perkAssetUrls should expose icon candidates");
 
 const soloKills = resolveHeroStatInfo("603482350067646509");

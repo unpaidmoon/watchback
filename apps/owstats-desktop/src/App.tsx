@@ -2,6 +2,7 @@ import { Bell, CircleDot, Sparkles } from "lucide-react";
 import { useEffect } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { FriendAnalyticsPage } from "./pages/FriendAnalyticsPage";
+import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
 import { MatchDetailPage } from "./pages/MatchDetailPage";
 import { MatchesPage } from "./pages/MatchesPage";
@@ -61,6 +62,7 @@ export function App() {
             <Route path="/matches" element={<MatchesPage />} />
             <Route path="/matches/:matchId" element={<MatchDetailPage />} />
             <Route path="/review" element={<PersonalReviewPage />} />
+            <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />
             <Route path="/analytics/friends" element={<FriendAnalyticsPage />} />
             <Route path="/analytics/friends/:bnetId" element={<FriendDetailPage />} />

@@ -2,7 +2,7 @@ use crate::models::PlayerTargetStatus;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -14,10 +14,7 @@ pub struct PlayerTarget {
 }
 
 pub fn player_target_path(app: &AppHandle) -> Result<PathBuf> {
-    Ok(app
-        .path()
-        .app_data_dir()?
-        .join(".dashen_player_target.json"))
+    Ok(crate::app_paths::AppPaths::from_app(app)?.legacy_player_target())
 }
 
 pub fn player_target_status_for_path(path: &Path) -> Result<PlayerTargetStatus> {

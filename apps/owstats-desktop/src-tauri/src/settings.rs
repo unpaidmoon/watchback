@@ -1,7 +1,9 @@
 use crate::db::OwDatabase;
 use crate::models::{PlayerProfile, UpdateCheckResult, UserSettings};
+#[cfg(test)]
 use crate::redaction::redact_sensitive_json;
 use anyhow::Result;
+#[cfg(test)]
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -28,6 +30,7 @@ pub fn get_player_profile_for_path(path: &Path, role_id: Option<i64>) -> Result<
     Ok(profile)
 }
 
+#[cfg(test)]
 pub fn get_player_profile_with_project_root(
     db: &OwDatabase,
     path: &Path,
@@ -42,6 +45,17 @@ pub fn get_player_profile_with_project_root(
         return Ok(profile);
     }
 
+    get_player_profile_for_path(path, role_id)
+}
+
+pub fn get_player_profile(
+    db: &OwDatabase,
+    path: &Path,
+    role_id: Option<i64>,
+) -> Result<PlayerProfile> {
+    if let Some(profile) = get_player_profile_from_db(db, role_id)? {
+        return Ok(profile);
+    }
     get_player_profile_for_path(path, role_id)
 }
 
@@ -94,6 +108,7 @@ fn get_player_profile_from_db(
     )))
 }
 
+#[cfg(test)]
 fn get_player_profile_from_project_payloads(
     project_root: &Path,
     role_id: Option<i64>,
@@ -132,6 +147,7 @@ fn get_player_profile_from_project_payloads(
     Ok(None)
 }
 
+#[cfg(test)]
 fn upsert_player_profile(db: &OwDatabase, profile: &PlayerProfile, raw: &Value) -> Result<()> {
     let Some(role_id) = profile.role_id else {
         return Ok(());
@@ -173,22 +189,22 @@ fn profile_from_raw(
         bnet_id
             .as_deref()
             .and_then(|value| value.parse::<i64>().ok())
-            .or_else(|| json_i64(&raw, "bnetId"))
+            .or_else(|| json_i64(raw, "bnetId"))
     });
-    let player_id = json_string(&raw, "name")
+    let player_id = json_string(raw, "name")
         .or(display_name)
         .or(bnet_id.clone());
 
     PlayerProfile {
         role_id,
         player_id,
-        avatar_url: json_string(&raw, "icon")
-            .or_else(|| json_string(&raw, "headIcon"))
-            .or_else(|| json_string(&raw, "avatar"))
-            .or_else(|| json_string(&raw, "avatarUrl")),
-        endorsement_level: json_i64(&raw, "level").or_else(|| json_i64(&raw, "endorsementLevel")),
-        play_time_hours: json_f64(&raw, "gameTime").or_else(|| json_f64(&raw, "playTimeHours")),
-        title: json_string(&raw, "title"),
+        avatar_url: json_string(raw, "icon")
+            .or_else(|| json_string(raw, "headIcon"))
+            .or_else(|| json_string(raw, "avatar"))
+            .or_else(|| json_string(raw, "avatarUrl")),
+        endorsement_level: json_i64(raw, "level").or_else(|| json_i64(raw, "endorsementLevel")),
+        play_time_hours: json_f64(raw, "gameTime").or_else(|| json_f64(raw, "playTimeHours")),
+        title: json_string(raw, "title"),
         refreshed_at,
     }
 }

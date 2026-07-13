@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const analyticsSource = readFileSync(new URL("../src-tauri/src/analytics.rs", import.meta.url), "utf8");
+const analyticsSource = [
+  "../src-tauri/src/analytics/mod.rs",
+  "../src-tauri/src/analytics/boards.rs",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 
 assert.equal(
   analyticsSource.includes('"受疗不低，千疗击杀更高。"'),

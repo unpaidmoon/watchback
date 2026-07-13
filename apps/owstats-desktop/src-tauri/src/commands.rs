@@ -1,20 +1,18 @@
-use crate::importer::{default_database_path, existing_import_summary};
+use crate::importer::existing_import_summary;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_credentials_and_target_paths_base_url, BindPlayerTargetRequest,
-    BindPlayerTargetResult, ClearPlayerTargetResult, CredentialLoginCancelResult,
-    CredentialLoginResult, CredentialStatus, FilterOptions, FriendAnalytics,
-    FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult, MatchDetailView,
-    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, OwDatabase,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
-    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
-    UpdateCheckResult, UserSettings,
+    sync_season_with_current_account_credentials_path_output_dir_base_url,
+    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
+    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LogoutResult,
+    MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
+    OwDatabase, PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
+    RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,66 +104,12 @@ pub fn get_credential_status(app: AppHandle) -> Result<CredentialStatus, String>
 }
 
 #[tauri::command]
-pub fn get_player_target_status(app: AppHandle) -> Result<PlayerTargetStatus, String> {
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    crate::player_target::player_target_status_for_path(&path).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn clear_player_target(app: AppHandle) -> Result<ClearPlayerTargetResult, String> {
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    let cleared = crate::player_target::clear_player_target_for_path(&path).map_err(to_message)?;
-    let status = crate::player_target::player_target_status_for_path(&path).map_err(to_message)?;
-    Ok(ClearPlayerTargetResult { cleared, status })
-}
-
-#[tauri::command]
-pub async fn bind_player_target(
-    app: AppHandle,
-    request: BindPlayerTargetRequest,
-) -> Result<BindPlayerTargetResult, String> {
-    let bnet = request.bnet.trim();
-    if bnet.is_empty() {
-        return Err("请输入 BattleTag".to_string());
-    }
-    let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
-    let credentials =
-        crate::sync::read_credentials_for_command(&credential_path).map_err(to_message)?;
-    let client = crate::dashen_client::DashenClient::new(
-        crate::dashen_client::DashenCredentials {
-            role_id: credentials.role_id,
-            token: credentials.token,
-            dts: credentials.dts,
-            server: credentials.server.unwrap_or(1),
-        },
-        "https://datamsapi.ds.163.com/v1/a19ld5tool/customer".to_string(),
-    )
-    .map_err(to_message)?;
-    let payload = client.search_bnet_account(bnet).await.map_err(to_message)?;
-    let target = crate::player_target::target_from_search_payload(
-        bnet,
-        &payload,
-        &chrono::Utc::now().to_rfc3339(),
-    )
-    .map_err(to_message)?;
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    crate::player_target::save_player_target_for_path(&path, &target).map_err(to_message)?;
-    let status = crate::player_target::player_target_status_for_path(&path).map_err(to_message)?;
-    Ok(BindPlayerTargetResult { status })
-}
-
-#[tauri::command]
 pub fn get_player_profile(app: AppHandle) -> Result<PlayerProfile, String> {
     let role_id = crate::credentials::get_credential_status(&app)
         .map_err(to_message)?
         .role_id;
-    crate::settings::get_player_profile_with_project_root(
-        &app_database(&app)?,
-        &player_profile_path(&app)?,
-        role_id,
-        &project_root()?,
-    )
-    .map_err(to_message)
+    crate::settings::get_player_profile(&app_database(&app)?, &player_profile_path(&app)?, role_id)
+        .map_err(to_message)
 }
 
 #[tauri::command]
@@ -222,17 +166,108 @@ pub fn get_season_analysis(app: AppHandle, season: Option<i64>) -> Result<Season
 }
 
 #[tauri::command]
-pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSummary, String> {
+pub fn get_career_mmr_overview(app: AppHandle) -> Result<crate::CareerMmrOverview, String> {
+    crate::career_mmr::query::get_career_mmr_overview(&app_database(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_role_mmr_history(
+    app: AppHandle,
+    role: String,
+    season: Option<i64>,
+    from: Option<i64>,
+    to: Option<i64>,
+    granularity: Option<String>,
+    limit: Option<usize>,
+    before: Option<i64>,
+    before_hash: Option<String>,
+    before_bucket: Option<i64>,
+    before_season: Option<i64>,
+) -> Result<crate::CareerMmrHistory, String> {
+    crate::career_mmr::query::get_role_mmr_history(
+        &app_database(&app)?,
+        crate::CareerMmrHistoryRequest {
+            role,
+            season,
+            from,
+            to,
+            granularity,
+            limit,
+            before,
+            before_hash,
+            before_bucket,
+            before_season,
+        },
+    )
+    .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_role_mmr_mode_breakdown(
+    app: AppHandle,
+    role: String,
+) -> Result<crate::CareerMmrModeBreakdown, String> {
+    crate::career_mmr::query::get_role_mmr_mode_breakdown(&app_database(&app)?, &role)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_role_mmr_season_breakdown(
+    app: AppHandle,
+    role: String,
+) -> Result<crate::CareerMmrSeasonBreakdown, String> {
+    crate::career_mmr::query::get_role_mmr_season_breakdown(&app_database(&app)?, &role)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_mmr_match_explanation(
+    app: AppHandle,
+    match_id: String,
+    role: String,
+) -> Result<crate::CareerMmrMatchExplanation, String> {
+    crate::career_mmr::query::get_mmr_match_explanation(&app_database(&app)?, &match_id, &role)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_recent_mmr_explanations(
+    app: AppHandle,
+    role: String,
+    limit: usize,
+) -> Result<crate::CareerMmrRecentExplanations, String> {
+    crate::career_mmr::query::get_recent_mmr_explanations(&app_database(&app)?, &role, limit)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn rebuild_career_mmr(
+    app: AppHandle,
+) -> Result<crate::career_mmr::replay::CareerMmrBuildSummary, String> {
+    crate::career_mmr::replay::rebuild_career_mmr(&app_database(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_career_mmr_build_status(app: AppHandle) -> Result<crate::CareerMmrBuildStatus, String> {
+    crate::career_mmr::query::get_career_mmr_build_status(&app_database(&app)?).map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn sync_season(
+    app: AppHandle,
+    request: SyncRequest,
+    coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+) -> Result<SyncSummary, String> {
+    let _permit = coordinator.try_acquire().map_err(str::to_string)?;
     let db = app_database(&app)?;
-    let root = project_root()?;
+    let paths = app_paths(&app)?;
+    let root = paths.seasons();
     let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let emit_app = app.clone();
-    sync_season_with_credentials_and_target_paths_base_url(
+    sync_season_with_current_account_credentials_path_output_dir_base_url(
         &db,
         &root,
         &credential_path,
-        &target_path,
         request.season,
         "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
         move |progress| {
@@ -244,36 +279,21 @@ pub async fn sync_season(app: AppHandle, request: SyncRequest) -> Result<SyncSum
 }
 
 fn app_database(app: &AppHandle) -> Result<OwDatabase, String> {
-    let data_dir = app.path().app_data_dir().map_err(to_message)?;
-    Ok(OwDatabase::new(default_database_path(data_dir)))
+    Ok(OwDatabase::new(app_paths(app)?.database()))
 }
 
 fn player_profile_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(to_message)?
-        .join("player_profile.json"))
+    Ok(app_paths(app)?.player_profile())
 }
 
 fn user_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(to_message)?
-        .join("user_settings.json"))
+    Ok(app_paths(app)?.user_settings())
 }
 
-fn project_root() -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .and_then(|apps_dir| apps_dir.parent())
-        .and_then(|repo| repo.parent())
-        .map(PathBuf::from)
-        .ok_or_else(|| "failed to resolve repository root".to_string())
+fn app_paths(app: &AppHandle) -> Result<crate::app_paths::AppPaths, String> {
+    crate::app_paths::AppPaths::from_app(app).map_err(to_message)
 }
 
 fn to_message(error: impl std::fmt::Display) -> String {
-    error.to_string()
+    crate::redaction::safe_error_message(error)
 }
