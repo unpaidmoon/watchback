@@ -81,11 +81,17 @@ assert.match(base, new RegExp(`font-family:\\s*${escapeRegExp(systemFontStack)}\
 
 const imports = [...entry.matchAll(/@import\s+"([^"]+)"\s*;/g)].map((match) => match[1]);
 assert.deepEqual(
-  imports.slice(0, 4),
-  ["./styles/tokens.css", "./styles/shared.css", "./styles/base.css", "./styles/shell.css"],
-  "visual layers load tokens, legacy declarations, base overrides, then shell overrides",
+  imports.slice(0, 5),
+  [
+    "./styles/tokens.css",
+    "./styles/shared.css",
+    "./styles/base.css",
+    "./styles/shell.css",
+    "./styles/page-shell.css",
+  ],
+  "visual layers load tokens, legacy declarations, base, shell, then page-shell overrides",
 );
-assert.ok(imports.slice(4).every((path) => path.startsWith("./styles/features/")), "feature styles load after the shell layer");
+assert.ok(imports.slice(5).every((path) => path.startsWith("./styles/features/")), "feature styles load after the page-shell layer");
 
 assert.doesNotMatch(shell, /#ff8a24|#d45f14|blue.*orange|orange.*blue/i, "new shell contains no orange brand or blue-orange gradient");
 
