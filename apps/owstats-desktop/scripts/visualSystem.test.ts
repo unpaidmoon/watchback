@@ -35,6 +35,15 @@ function declarationsForSelector(css: string, selector: string) {
   assert.fail(`${selector} is present`);
 }
 
+function declarationsForSelectorWithProperty(css: string, selector: string, property: string) {
+  const propertyPattern = new RegExp(`(?:^|;)\\s*${escapeRegExp(property)}\\s*:`, "i");
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = splitSelectors(match[1]);
+    if (selectors.includes(selector) && propertyPattern.test(match[2])) return match[2];
+  }
+  assert.fail(`${selector} defines ${property}`);
+}
+
 function assertDeclaration(declarations: string, property: string, value: string, message: string) {
   assert.match(
     declarations,
@@ -129,20 +138,53 @@ const baseControls = declarationsForSelector(base, "button");
 assert.equal(baseControls, declarationsForSelector(base, "input"), "buttons and inputs share the base control rule");
 assert.equal(baseControls, declarationsForSelector(base, "select"), "buttons and selects share the base control rule");
 assertDeclaration(baseControls, "min-height", "44px", "base controls keep a 44px hit target");
+assertDeclaration(baseControls, "min-block-size", "44px !important", "base controls override legacy physical heights with a 44px block target");
+assertDeclaration(
+  declarationsForSelectorWithProperty(base, "button", "min-inline-size"),
+  "min-inline-size",
+  "44px !important",
+  "buttons override legacy icon widths with a 44px inline target",
+);
+
+for (const [legacySelector, property, value] of [
+  [".filterBar input", "min-height", "34px"],
+  [".filterBar select", "min-height", "34px"],
+  [".phase6PlayerSearchBox input", "min-height", "30px"],
+  [".phase6PlayerSearchClear", "width", "24px"],
+  [".phase6PlayerSearchClear", "height", "24px"],
+  [".phase6ShellIconButton", "width", "38px"],
+  [".phase6ShellIconButton", "height", "38px"],
+  [".iconOnlyButton", "width", "36px"],
+  [".iconOnlyButton", "height", "36px"],
+  [".phase6IconButton", "width", "34px"],
+  [".phase6IconButton", "height", "34px"],
+] as const) {
+  assertDeclaration(declarationsForSelector(shared, legacySelector), property, value, `${legacySelector} keeps the tracked legacy target conflict`);
+}
+
+const playerSearchCompatibility = declarationsForSelector(base, ".phase6PlayerSearchBox");
+assertDeclaration(playerSearchCompatibility, "min-block-size", "44px", "player search stays 44px before and after its clear button appears");
+assertDeclaration(
+  playerSearchCompatibility,
+  "grid-template-columns",
+  "18px minmax(0, 1fr) 44px",
+  "player search reserves the full clear-button target width",
+);
 
 const baseFocusRing = declarationsForSelector(base, ":where(a, button, input, select, [tabindex]):focus-visible");
-assertDeclaration(baseFocusRing, "outline", "2px solid var(--data-primary)", "keyboard focus uses the purple 2px ring");
-assertDeclaration(baseFocusRing, "outline-offset", "2px", "keyboard focus ring is offset by 2px");
+assertDeclaration(baseFocusRing, "outline", "2px solid var(--data-primary) !important", "the unified accessibility layer enforces the purple 2px ring");
+assertDeclaration(baseFocusRing, "outline-offset", "2px !important", "the unified accessibility layer enforces the 2px focus offset");
+assert.doesNotMatch(baseFocusRing, /forced-color-adjust\s*:\s*none/i, "focus colors remain available for forced-colors mapping");
 
-for (const [legacySelector, outlineValue, compatibleSelector] of [
-  [".phase6PlayerSearchBox input", "none", ".phase6PlayerSearchBox input:focus-visible"],
-  [".searchBox input", "0", ".searchBox input:focus-visible"],
-  [".seasonSelect select", "0", ".seasonSelect select:focus-visible"],
+for (const [legacySelector, property, value] of [
+  [".phase6PlayerSearchBox input", "outline", "none"],
+  [".searchBox input", "outline", "0"],
+  [".seasonSelect select", "outline", "0"],
+  [".phase6CompactPlayerRow.phase7CompactPlayerExpandable:focus-visible", "outline", "2px solid rgb(255 255 255 / 0.9)"],
+  [".phase7ArenaSlot", "outline", "1px solid rgb(255 255 255 / 0.1)"],
+  [".phase7ArenaSlot.filled", "outline-color", "rgb(255 255 255 / 0.18)"],
 ] as const) {
-  assertDeclaration(declarationsForSelector(shared, legacySelector), "outline", outlineValue, `${legacySelector} keeps its legacy reset`);
-  const compatibleFocusRing = declarationsForSelector(base, compatibleSelector);
-  assertDeclaration(compatibleFocusRing, "outline", "2px solid var(--data-primary)", `${compatibleSelector} restores the purple focus ring`);
-  assertDeclaration(compatibleFocusRing, "outline-offset", "2px", `${compatibleSelector} restores the focus offset`);
+  assertDeclaration(declarationsForSelector(shared, legacySelector), property, value, `${legacySelector} keeps the tracked legacy focus conflict`);
 }
 
 const reducedMotion = blockForAtRule(base, "@media (prefers-reduced-motion: reduce)");
