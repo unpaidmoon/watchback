@@ -12,6 +12,13 @@
   --action-on-primary: #FFFFFF;
   --data-primary: #4B22D1;
   --data-secondary: #2F8C95;
+  --canvas-glow-cool: rgba(198, 224, 222, 0.52);
+  --canvas-glow-light: rgba(250, 249, 241, 0.72);
+  --glass-primary: rgba(244, 246, 240, 0.68);
+  --glass-secondary: rgba(250, 251, 247, 0.52);
+  --glass-border: rgba(255, 255, 255, 0.58);
+  --glass-shadow: 0 18px 48px rgba(45, 54, 48, 0.08);
+  --glass-blur: 16px;
   --data-secondary-strong: #1F6F78;
   --data-neutral: #A5AAA4;
   --data-neutral-strong: #70756F;

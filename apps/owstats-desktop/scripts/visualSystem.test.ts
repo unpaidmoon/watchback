@@ -102,6 +102,12 @@ const approvedTokens = {
   "--action-on-primary": "#FFFFFF",
   "--data-primary": "#4B22D1",
   "--data-secondary": "#2F8C95",
+  "--canvas-glow-cool": "rgba(198, 224, 222, 0.52)",
+  "--canvas-glow-light": "rgba(250, 249, 241, 0.72)",
+  "--glass-primary": "rgba(244, 246, 240, 0.68)",
+  "--glass-secondary": "rgba(250, 251, 247, 0.52)",
+  "--glass-border": "rgba(255, 255, 255, 0.58)",
+  "--glass-blur": "16px",
   "--data-neutral": "#A5AAA4",
   "--status-success": "#21A366",
   "--status-success-bg": "#E2F3E7",
@@ -226,6 +232,9 @@ assert.deepEqual(
 assert.ok(imports.slice(5).every((path) => path.startsWith("./styles/features/")), "feature styles load after the page-shell layer");
 
 assert.doesNotMatch(shell, /#ff8a24|#d45f14|blue.*orange|orange.*blue/i, "new shell contains no orange brand or blue-orange gradient");
+assert.match(shell, /radial-gradient\(/i, "应用画布应有大范围柔和光晕");
+assert.match(shell, /@supports\s*\(backdrop-filter:\s*blur\(1px\)\)/i, "毛玻璃必须有特性检测与回退");
+assert.doesNotMatch(shell, /animation:\s*(?!none)/i, "指挥台画布不得运行持续动画");
 
 declarationsForSelector(shared, ".phase6ProductNav a");
 declarationsForSelector(shared, ".phase6ProductNav a.active");

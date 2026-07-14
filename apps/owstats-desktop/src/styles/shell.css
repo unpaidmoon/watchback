@@ -5,7 +5,19 @@
   overflow: clip;
   border-radius: var(--radius-shell);
   color: var(--text-primary);
-  background: var(--app-canvas);
+  background:
+    radial-gradient(circle at 86% 9%, var(--canvas-glow-light) 0, transparent 33%),
+    radial-gradient(circle at 14% 28%, var(--canvas-glow-cool) 0, transparent 42%),
+    var(--app-canvas);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .appFrame {
+    background:
+      radial-gradient(circle at 86% 9%, var(--canvas-glow-light) 0, transparent 33%),
+      radial-gradient(circle at 14% 28%, var(--canvas-glow-cool) 0, transparent 42%),
+      var(--app-canvas);
+  }
 }
 
 .appTopBar {
