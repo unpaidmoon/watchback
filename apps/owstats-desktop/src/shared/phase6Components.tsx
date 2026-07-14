@@ -33,6 +33,7 @@ type MapPreviewProps = {
   mapKey?: string | null;
   name: string;
   className?: string;
+  decorative?: boolean;
 };
 
 export function GlassPanel({ children, className = "", tone = "soft" }: GlassPanelProps) {
@@ -62,7 +63,13 @@ function AssetImage({ sources, fallbackLabel, className = "", ...imageProps }: A
   }, [sources.join("|")]);
 
   if (!src) {
-    return <span className={`phase6AssetFallback ${className}`} aria-label={`${fallbackLabel}暂无图片`} />;
+    return (
+      <span
+        className={`phase6AssetFallback ${className}`}
+        aria-label={imageProps["aria-hidden"] ? undefined : `${fallbackLabel}暂无图片`}
+        aria-hidden={imageProps["aria-hidden"]}
+      />
+    );
   }
 
   return (
@@ -87,6 +94,14 @@ export function HeroAvatar({ heroKey, name, size = "md" }: HeroAvatarProps) {
   return <AssetImage className={`phase6HeroAvatarShared ${size}`} sources={heroAssetUrls([heroKey, name])} fallbackLabel={name} alt={name} />;
 }
 
-export function MapPreview({ mapKey, name, className = "" }: MapPreviewProps) {
-  return <AssetImage className={`phase6MapPreviewShared ${className}`} sources={mapAssetUrls([mapKey, name])} fallbackLabel={name} alt={name} />;
+export function MapPreview({ mapKey, name, className = "", decorative = false }: MapPreviewProps) {
+  return (
+    <AssetImage
+      className={`phase6MapPreviewShared ${className}`}
+      sources={mapAssetUrls([mapKey, name])}
+      fallbackLabel={name}
+      alt={decorative ? "" : name}
+      aria-hidden={decorative ? "true" : undefined}
+    />
+  );
 }

@@ -16,6 +16,7 @@ const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCa
 const listPaneSource = readFileSync(new URL("../src/features/matches/MatchListPane.tsx", import.meta.url), "utf8");
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
 const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
+const phase6ComponentsSource = readFileSync(new URL("../src/shared/phase6Components.tsx", import.meta.url), "utf8");
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 const matchStyleSource = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 
@@ -242,10 +243,17 @@ assert.equal(detailHeaderSource.includes("mapKey={mapGuid ?? mapName}"), true, "
 assert.equal(detailHeaderSource.includes("resultEnglishLabel"), true, "detail header should derive the English result label");
 assert.equal(compactDetailSource.includes("mapGuid={detail.mapGuid}"), true, "normal detail should pass its map guid to the shared header");
 assert.equal(compactDetailSource.includes("mapGuid={selected.mapGuid}"), true, "arena detail should pass the selected slice map guid to the shared header");
+assert.equal(detailPageSource.includes("<MatchDetailHeader"), true, "standalone normal detail should reuse the shared result map banner");
+assert.equal(detailHeaderSource.includes("decorative"), true, "detail banner map preview should be hidden from assistive technology");
+assert.equal(phase6ComponentsSource.includes("decorative?: boolean"), true, "MapPreview should expose an explicit decorative mode");
+assert.equal(phase6ComponentsSource.includes('aria-hidden={decorative ? "true" : undefined}'), true, "decorative image fallback should be hidden from assistive technology");
+assert.equal(detailHeaderSource.includes("--space-5"), false, "detail banner should only use defined spacing tokens");
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-win[\s\S]*?background:\s*var\(--status-success-bg\)/);
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-loss[\s\S]*?background:\s*var\(--surface-control\)/);
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-draw[\s\S]*?background:\s*var\(--surface-control\)/);
 assert.doesNotMatch(matchStyleSource, /#ff8[0-9a-f]{3}|orange/i, "match result header must not introduce orange");
+assert.match(matchStyleSource, /\.matchDetailHeaderContent\s*\{[^}]*color:\s*var\(--action-on-primary\)/s, "map-side content should use the inverse text token");
+assert.match(matchStyleSource, /\.matchDetailHeaderContent \.matchDetailHeaderMeta\s*\{[^}]*color:\s*var\(--action-on-primary\)/s, "map-side metadata should retain readable contrast");
 
 const anonymousPlayer: PlayerRow = {
   side: "teammate",
@@ -353,6 +361,7 @@ const standaloneNormalMarkup = renderToStaticMarkup(
   }),
 );
 assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
+assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should render the shared English result label");
 
 for (const [result, resultLabel, englishLabel] of [
   ["loss", "失败", "DEFEAT"],
@@ -366,8 +375,18 @@ for (const [result, resultLabel, englishLabel] of [
       matchId: `anonymous-${result}`,
     }),
   );
-  assert.match(standaloneMarkup, /phase6DetailHero/, `standalone ${result} detail should retain its existing header`);
+  assert.match(standaloneMarkup, new RegExp(`>${englishLabel}<`), `standalone ${result} detail should render ${englishLabel}`);
 }
+
+const standaloneUnknownMarkup = renderToStaticMarkup(
+  createElement(MatchDetailReport, {
+    detail: { ...normalDetail, matchId: "anonymous-unknown", result: null, resultLabel: "未知结果" },
+    loading: false,
+    error: null,
+    matchId: "anonymous-unknown",
+  }),
+);
+assert.match(standaloneUnknownMarkup, />UNKNOWN</, "unknown result should not be announced as a draw");
 
 const arenaDetail: MatchDetailView = {
   ...normalDetail,

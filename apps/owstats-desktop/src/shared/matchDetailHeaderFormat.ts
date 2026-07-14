@@ -22,5 +22,6 @@ export function formatDetailStartTime(beginTs: number | null): string {
 export function resultEnglishLabel(result: string | null): string {
   if (result === "win") return "VICTORY";
   if (result === "loss") return "DEFEAT";
-  return "DRAW";
+  if (result === "draw") return "DRAW";
+  return "UNKNOWN";
 }

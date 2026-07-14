@@ -267,13 +267,22 @@
   display: grid;
   align-content: center;
   gap: 2px;
-  padding: var(--space-5);
+  padding: var(--space-6);
   clip-path: polygon(0 0, 86% 0, 100% 100%, 0 100%);
 }
 
 .matchDetailHeaderResultBlock.result-win {
   background: var(--status-success-bg);
   color: var(--text-primary);
+}
+
+.matchDetailHeaderContent .matchDetailHeaderCopy h2,
+.matchDetailHeaderContent .matchDetailHeaderScore {
+  color: var(--action-on-primary);
+}
+
+.matchDetailHeaderContent .matchDetailHeaderMeta {
+  color: var(--action-on-primary);
 }
 
 .matchDetailHeaderResultBlock.result-loss,
@@ -302,7 +311,7 @@
   gap: var(--space-4);
   align-items: center;
   padding: var(--space-4);
-  color: var(--text-primary);
+  color: var(--action-on-primary);
 }
 
 .matchDetailHeaderMeta,
@@ -351,14 +360,14 @@
   padding-inline: var(--space-3);
   border-color: var(--border-subtle);
   border-radius: var(--radius-control);
-  background: var(--surface-control);
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--action-primary) 52%, transparent);
+  color: var(--action-on-primary);
   box-shadow: none;
 }
 
 .matchDetailHeaderNavigation .ghostButton:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--data-primary) 30%, var(--border-subtle));
-  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-control));
+  border-color: var(--action-on-primary);
+  background: color-mix(in srgb, var(--action-primary) 68%, transparent);
 }
 
 .matchDetailTeamComparison {

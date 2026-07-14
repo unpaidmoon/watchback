@@ -10,6 +10,7 @@ import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
 import { productErrorMessage } from "../shared/phase6Shell";
 import type { ArenaDetailSlice, MatchDetailView, PlayerRow } from "../shared/types";
+import { MatchDetailHeader } from "../features/matches/MatchDetailHeader";
 
 export function MatchDetailPage() {
   const { matchId } = useParams();
@@ -139,7 +140,7 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
 
   return (
     <section className={`detailPage phase6DetailPage ${embedded ? "phase6EmbeddedDetailPage" : ""}`}>
-      <header className={`detailHero phase6DetailHero ${detail?.result ?? "pending"}`}>
+      <div className={`detailHero phase6DetailHero ${detail?.result ?? "pending"}`}>
         {detail ? (
           <>
             {onBack && (
@@ -148,34 +149,20 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
                 返回列表
               </button>
             )}
-            <div className="phase6DetailBanner">
-              <MapPreview className="phase6DetailBannerMap" mapKey={detail.mapGuid ?? detail.mapName} name={detailMapName} />
-              <div className="phase6DetailResultPanel">
-                <strong>{detail.resultLabel ?? "未知"}</strong>
-              </div>
-              <div className="phase6DetailCornerAccent" />
-            </div>
-            <div className="phase6DetailSummary">
-              <h2>地图：{detailMapName}</h2>
-              <div className="phase6DetailFacts">
-                <span>
-                  <b>最终比分：</b>
-                  {formatFinalScore(detail)}
-                </span>
-                <span>
-                  <b>游戏时长：</b>
-                  {formatDetailDuration(detail.durationSec)}
-                </span>
-                <span>
-                  <b>游戏模式：</b>
-                  {detail.modeLabel ?? "-"}
-                </span>
-                <span>
-                  <b>对局开始时间：</b>
-                  {formatDetailStartTime(detail.beginTs)}
-                </span>
-              </div>
-            </div>
+            <MatchDetailHeader
+              resultLabel={detail.resultLabel ?? "未知结果"}
+              result={detail.result}
+              mapGuid={detail.mapGuid}
+              mapName={detailMapName}
+              modeLabel={detail.modeLabel ?? "未知模式"}
+              score={formatFinalScore(detail)}
+              duration={formatDetailDuration(detail.durationSec)}
+              startTime={formatDetailStartTime(detail.beginTs)}
+              hasPrevious={false}
+              hasNext={false}
+              onPrevious={() => undefined}
+              onNext={() => undefined}
+            />
           </>
         ) : (
           <div className="phase6DetailLoadingHeader">
@@ -191,7 +178,7 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
             </div>
           </div>
         )}
-      </header>
+      </div>
 
       {error && (
         <div className="errorBanner phase6RecoverableError">

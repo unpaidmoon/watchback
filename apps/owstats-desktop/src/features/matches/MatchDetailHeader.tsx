@@ -39,7 +39,7 @@ export function MatchDetailHeader({
 
   return (
     <header className={`matchDetailHeader result-${tone}`}>
-      <MapPreview mapKey={mapGuid ?? mapName} name={mapName} className="matchDetailHeaderMap" />
+      <MapPreview mapKey={mapGuid ?? mapName} name={mapName} className="matchDetailHeaderMap" decorative />
       <div className="matchDetailHeaderScrim" aria-hidden="true" />
       <div className={`matchDetailHeaderResultBlock result-${tone}`}>
         <strong>{resultLabel}</strong>
