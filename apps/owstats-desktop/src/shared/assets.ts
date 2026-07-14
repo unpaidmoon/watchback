@@ -208,6 +208,10 @@ for (const [guid, hero] of Object.entries(queryTool.heroes ?? {})) {
 const mapLookup = new Map([...manifestLookup(manifest.maps), ...Object.entries(localizedMapAliases).map(([name, key]) => [name.toLowerCase(), key] as const)]);
 const heroDisplayNames = displayNameLookup(manifest.heroes);
 const mapDisplayNames = displayNameLookup(manifest.maps);
+for (const [name, key] of Object.entries(localizedMapAliases)) {
+  mapDisplayNames.set(key, name);
+  mapDisplayNames.set(name.toLowerCase(), name);
+}
 for (const [guid, hero] of Object.entries(queryTool.heroes ?? {})) {
   const name = hero.name?.trim();
   if (name) heroDisplayNames.set(guid, resolveDisplayName(name, name, heroDisplayNames, name));
