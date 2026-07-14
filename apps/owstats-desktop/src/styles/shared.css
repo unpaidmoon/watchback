@@ -5297,11 +5297,8 @@ select {
 .phase6Board {
   min-height: calc(100vh - 76px);
   padding: 28px;
-  color: #18202d;
-  background:
-    radial-gradient(circle at 12% 8%, rgb(255 177 94 / 0.34), transparent 28%),
-    radial-gradient(circle at 86% 14%, rgb(102 126 234 / 0.18), transparent 30%),
-    linear-gradient(135deg, #fff7ed 0%, #f4f8ff 42%, #eef7f3 100%);
+  color: var(--text-primary);
+  background: var(--app-canvas);
 }
 
 .phase6BoardHeader {
@@ -5336,9 +5333,9 @@ select {
 }
 
 .phase6Eyebrow {
-  color: #d56b1f;
+  color: var(--data-primary);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .phase6BoardStatus,
@@ -5435,9 +5432,9 @@ select {
 
 .phase6CapsuleBar nav button.active,
 .phase6Rail button.active {
-  background: #ff8a24;
-  color: #1f242b;
-  box-shadow: 0 8px 20px rgb(242 139 36 / 0.32);
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+  box-shadow: none;
 }
 
 .phase6IconGhost,
@@ -5470,9 +5467,9 @@ select {
   gap: 8px;
   padding: 0 16px;
   border-radius: 999px;
-  background: #ff8a24;
-  color: #1f242b;
-  font-weight: 900;
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -5702,8 +5699,8 @@ select {
   min-height: 26px;
   padding: 0 9px;
   border-radius: 999px;
-  background: #fff3e7;
-  color: #b55212;
+  background: var(--status-warning-bg);
+  color: var(--text-primary);
   font-size: 12px;
 }
 

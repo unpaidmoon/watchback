@@ -51,6 +51,16 @@ assert.doesNotMatch(
   "共享图片兜底不能回退到蓝橙渐变",
 );
 assert.match(assetFallbackRule, /background:\s*var\(--surface-secondary\)/, "共享图片兜底应使用中性表面令牌");
+const styleBoardStart = legacyShared.indexOf(".phase6Board {");
+assert.notEqual(styleBoardStart, -1, "内部样式板样式必须存在");
+const styleBoardStyles = legacyShared.slice(styleBoardStart);
+assert.doesNotMatch(
+  styleBoardStyles,
+  /#ff8a24|#d56b1f|rgb\(255\s+177\s+94|rgb\(242\s+139\s+36|#fff7ed|#fff3e7|#b55212/i,
+  "可达样式板不能保留旧橙色品牌视觉",
+);
+assert.match(styleBoardStyles, /\.phase6Board\s*\{[^}]*background:\s*var\(--app-canvas\)/s);
+assert.match(styleBoardStyles, /\.phase6PrimaryAction\s*\{[^}]*background:\s*var\(--action-primary\)/s);
 
 const pageState = read("../src/shared/page-shell/PageState.tsx");
 assert.match(pageState, /role="status"[^>]*aria-live="polite"[^>]*aria-busy="true"/);
