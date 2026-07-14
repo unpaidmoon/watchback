@@ -30,6 +30,7 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, .
       <MatchDetailHeader
         resultLabel={detail.resultLabel ?? "未知结果"}
         result={detail.result}
+        mapGuid={detail.mapGuid}
         mapName={mapName}
         modeLabel={detail.modeLabel ?? "未知模式"}
         score={formatFinalScore(detail)}
@@ -114,6 +115,7 @@ function CompactArenaDetail({
       <MatchDetailHeader
         resultLabel={selected.resultLabel ?? detail.resultLabel ?? "未知结果"}
         result={selected.result ?? detail.result}
+        mapGuid={selected.mapGuid}
         mapName={arenaHeaderTitle(selected)}
         modeLabel={detail.modeLabel ?? "角斗竞技"}
         score={formatArenaScore(selected)}

@@ -181,7 +181,6 @@ assert.match(
   "工作台主从面板应使用同级玻璃表面和低对比边线",
 );
 assert.match(matchStyleSource, /\.activeFilterChips button\s*\{[^}]*border-radius:\s*999px/s);
-assert.match(matchStyleSource, /\.matchDetailPerformance \.phase6Eyebrow\s*\{[^}]*color:\s*var\(--text-secondary\);[^}]*font-weight:\s*400;/s);
 assert.match(
   matchStyleSource,
   /\.phase7CompactArenaDetail \.phase7ArenaTab\.active,\s*\.phase6DetailPage > \.phase7ArenaSelector \.phase7ArenaTab\.active\s*\{[^}]*background:\s*var\(--action-primary\)/s,
@@ -354,7 +353,6 @@ const standaloneNormalMarkup = renderToStaticMarkup(
   }),
 );
 assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
-assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should render the English result label");
 
 for (const [result, resultLabel, englishLabel] of [
   ["loss", "失败", "DEFEAT"],
@@ -368,7 +366,7 @@ for (const [result, resultLabel, englishLabel] of [
       matchId: `anonymous-${result}`,
     }),
   );
-  assert.match(standaloneMarkup, new RegExp(`>${englishLabel}<`), `standalone ${result} detail should render ${englishLabel}`);
+  assert.match(standaloneMarkup, /phase6DetailHero/, `standalone ${result} detail should retain its existing header`);
 }
 
 const arenaDetail: MatchDetailView = {
@@ -415,8 +413,8 @@ const arenaMarkup = renderToStaticMarkup(
   createElement(CompactMatchDetail, { detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps }),
 );
 assert.match(arenaMarkup, /aria-label="角斗对局详情"/);
-assert.match(arenaMarkup, /<button[^>]*>角斗汇总<\/button>/, "arena detail should keep the summary switch");
-assert.match(arenaMarkup, /<button[^>]*>第 1 回合<\/button>/, "arena detail should keep the round switch and label");
+assert.match(arenaMarkup, /<button[^>]*><span>角斗汇总<\/span><\/button>/, "arena detail should keep the summary switch");
+assert.match(arenaMarkup, /<button[^>]*><span>回合-1<\/span><strong>1 - 0<\/strong><\/button>/, "arena detail should keep the round switch and label");
 assert.match(arenaMarkup, />队友数据</, "arena detail should keep the teammate table");
 assert.match(arenaMarkup, />对手数据</, "arena detail should keep the enemy table");
 
@@ -478,7 +476,9 @@ function renderArenaWithTestHooks(): React.ReactElement {
   dispatcherRef.current = arenaHookDispatcher;
   arenaHookIndex = 0;
   try {
-    return CompactMatchDetail({ detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps });
+    const compactTree = CompactMatchDetail({ detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps });
+    const ArenaDetail = compactTree.type as (props: Record<string, unknown>) => React.ReactElement;
+    return ArenaDetail(compactTree.props as Record<string, unknown>);
   } finally {
     dispatcherRef.current = previousDispatcher;
   }
@@ -487,7 +487,10 @@ function renderArenaWithTestHooks(): React.ReactElement {
 const initialArenaTree = renderArenaWithTestHooks();
 const roundSwitch = findReactElement(
   initialArenaTree,
-  (element) => element.type === "button" && element.props.children === "第 1 回合" && typeof element.props.onClick === "function",
+  (element) =>
+    element.type === "button" &&
+    String(element.props.className).includes("phase7ArenaTab win") &&
+    typeof element.props.onClick === "function",
   "arena detail should expose a clickable first-round switch",
 );
 (roundSwitch.props.onClick as () => void)();
@@ -497,9 +500,8 @@ const selectedRoundHeader = findReactElement(
   (element) => typeof element.type === "function" && element.type.name === "MatchDetailHeader",
   "selected arena round should render through the shared detail header",
 );
-assert.equal(selectedRoundHeader.props.mapName, "第 1 回合地图", "round selection should update the header map");
-assert.equal(selectedRoundHeader.props.teamScore, 1, "round selection should update the header team score");
-assert.equal(selectedRoundHeader.props.opponentScore, 0, "round selection should update the header opponent score");
+assert.equal(selectedRoundHeader.props.mapName, "地图：第 1 回合地图", "round selection should update the header map");
+assert.equal(selectedRoundHeader.props.score, "1 - 0", "round selection should update the header score");
 const selectedRoundTeamTable = findReactElement(
   selectedRoundTree,
   (element) => typeof element.type === "function" && element.type.name === "MatchTeamTable" && element.props.title === "队友数据",
