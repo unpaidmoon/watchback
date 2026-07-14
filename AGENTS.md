@@ -12,10 +12,12 @@
 按以下顺序读取与任务相关的材料：
 
 1. 本文件与 `README.md`。
-2. `docs/maintenance.md`、`docs/windows-release.md`。
-3. `docs/superpowers/specs/` 中最新且与任务直接相关的设计，以及 `main-thread-log.md`。
+2. 涉及新页面、组件视觉调整或页面重构时，必须先完整阅读根目录 `design.md`；它是当前视觉规范，若与较早视觉说明冲突，以它为准。
+3. `docs/maintenance.md`、`docs/windows-release.md`。
+4. `docs/superpowers/specs/` 中最新且与任务直接相关的设计，以及 `main-thread-log.md`。
 
 - 用户可见文本必须使用中文；内部 API、字段名和上游协议字段保持原名。
+- 新页面和视觉重构必须遵循 `design.md` 的颜色、字体、间距、表面层级、可访问性和视觉验收规则；不得自行引入新的品牌色、字体、圆角、阴影或卡片语言。
 - 当前赛季产品边界是固定 S21/S22/S23，页面各自维护赛季筛选；不要新增全局赛季状态或“一键同步全部”。
 - 同步产品方向以 `docs/superpowers/specs/2026-07-03-phase-8-login-account-season-sync-design.md` 为准：仅同步当前浏览器登录账号的数据，BattleTag 绑定与 `searchBnetAccount` 属于旧流程，除非用户明确要求，不要恢复或扩展它。
 - `data/players/5479_s22_full_season.json` 是原始匿名完整赛季 fixture；不得把真实用户数据、凭据或浏览器 profile 加入提示词、提交或文档。
