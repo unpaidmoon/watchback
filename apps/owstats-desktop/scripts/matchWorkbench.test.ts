@@ -120,10 +120,11 @@ assert.equal(matchesPageSource.includes("ref={timelineRef}"), true, "MatchesPage
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
 assert.equal(timelineSource.includes("<MatchListCard"), true, "MatchTimeline should map streak segments to list cards");
 assert.equal(listCardSource.includes("phase6MatchRowSelected"), true, "MatchListCard should render selected state on the active row");
-assert.equal(listCardSource.includes("MatchPerformanceBadges"), false, "Match list cards should not render grade or award badges");
-assert.equal(listCardSource.includes("primaryTagBadgeTone"), true, "MatchListCard should keep the primary performance tag only");
+assert.equal(listCardSource.includes("<MatchPerformanceBadges"), true, "MatchListCard should render compact grade and award badges");
+assert.equal(listCardSource.includes("compact"), true, "list badges should use the compact layout");
+assert.equal(listCardSource.includes("primaryTagBadgeTone"), false, "MatchListCard should delegate primary tags to shared badges");
 assert.equal(listCardSource.includes("phase6MatchListHeroLine"), true, "MatchListCard should render a compact full-data hero row");
-assert.equal(listCardSource.includes("phase6VerticalPerformanceTag"), true, "MatchListCard should show the performance tag as a vertical hero-side badge");
+assert.equal(listCardSource.includes("phase6VerticalPerformanceTag"), false, "MatchListCard should replace the legacy performance tag with shared badges");
 assert.equal(listCardSource.includes("<span>对局表现</span>"), false, "MatchListCard should omit the horizontal match performance label");
 assert.equal(listCardSource.includes("<span>{match.heroName}</span>"), false, "MatchListCard should not render the hero name in compact list cards");
 assert.ok(
@@ -225,14 +226,22 @@ assert.equal(compactDetailSource.includes("compactHeroStats"), false, "compact d
 assert.equal(compactDetailSource.includes("heroUsagePercent"), false, "compact detail should remove hero usage percent helper");
 assert.equal(compactDetailSource.includes("fallbackHeroStats"), false, "compact detail should not synthesize base-field fallback stats");
 assert.equal(compactDetailSource.includes("slice(0, 6)"), true, "compact detail should support 6v6 rows");
+assert.equal(compactDetailSource.includes('<section className="matchDetailPerformance"'), false, "normal detail should remove the personal summary panel");
+assert.equal(compactDetailSource.includes("本人表现"), false, "normal detail should not retain the removed summary title");
 
 assert.ok(
-  compactDetailSource.indexOf("MatchDetailHeader") < compactDetailSource.indexOf("本人表现") &&
-    compactDetailSource.indexOf("本人表现") < compactDetailSource.indexOf("队伍对比") &&
+  compactDetailSource.indexOf("MatchDetailHeader") < compactDetailSource.indexOf("队伍对比") &&
     compactDetailSource.indexOf("队伍对比") < compactDetailSource.indexOf('title="队友数据"') &&
     compactDetailSource.indexOf('title="队友数据"') < compactDetailSource.indexOf('title="对手数据"'),
   "normal detail should keep the agreed information order",
 );
+
+assert.equal(detailHeaderSource.includes("MapPreview"), true, "detail header should render the existing map preview asset");
+assert.match(detailHeaderSource, /mapGuid:\s*string\s*\|\s*null/, "detail header should accept the map guid for the preview");
+assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-win[\s\S]*?background:\s*var\(--status-success-bg\)/);
+assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-loss[\s\S]*?background:\s*var\(--surface-control\)/);
+assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-draw[\s\S]*?background:\s*var\(--surface-control\)/);
+assert.doesNotMatch(matchStyleSource, /#ff8[0-9a-f]{3}|orange/i, "match result header must not introduce orange");
 
 const anonymousPlayer: PlayerRow = {
   side: "teammate",
@@ -327,7 +336,7 @@ const normalMarkup = renderToStaticMarkup(
   createElement(CompactMatchDetail, { detail: normalDetail, loading: false, error: null, matchId: normalDetail.matchId, ...navigationProps }),
 );
 assert.match(normalMarkup, /aria-label="普通对局详情"/);
-assert.match(normalMarkup, />本人表现</);
+assert.doesNotMatch(normalMarkup, />本人表现</);
 assert.match(normalMarkup, />队友数据</);
 assert.match(normalMarkup, />对手数据</);
 
