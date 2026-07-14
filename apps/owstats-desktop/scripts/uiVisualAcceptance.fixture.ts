@@ -535,12 +535,161 @@ export const fixtureCommandCenter = {
   tools: ["检查更新", "退出登录"],
 } as const;
 
+export const fixtureEmptyReview = {
+  summary: {
+    season: null,
+    totalMatches: 0,
+    baselineMatches: 0,
+    wins: 0,
+    losses: 0,
+    winRate: 0,
+    avgKills: 0,
+    avgDeaths: 0,
+    avgDamage: 0,
+    avgHealing: 0,
+  },
+  baseline: {
+    matchCount: 0,
+    excludedTotal: 0,
+    shortMatchThresholdSec: 180,
+    exclusionReasons: [],
+    avgKills: 0,
+    avgDeaths: 0,
+    avgDamage: 0,
+    avgHealing: 0,
+  },
+  roleSummaries: [],
+  phase5Highlights: {
+    carryCount: 0,
+    tryHardCount: 0,
+    sGradeCount: 0,
+    longestWinStreak: 0,
+    mostCommonHighlight: null,
+  },
+  topConclusions: [],
+  personalBests: [],
+  streaks: { longestWinStreak: 0, longestLossStreak: 0 },
+  heroPool: {
+    label: "暂无数据",
+    totalHeroes: 0,
+    top1Share: 0,
+    top3Share: 0,
+    avgHeroesPerMatch: 0,
+    switchMatchRate: 0,
+    mainHeroes: [],
+    clues: [],
+  },
+  maps: { minSample: 3, bestMap: null, maps: [], conclusions: [] },
+} satisfies PersonalSeasonReview;
+
+export const fixtureEmptyCareerOverview = {
+  modelVersion: 2,
+  compositeMmr: null,
+  roles: [],
+  discoveredSeasons: [],
+  disclaimer: "暂无可用于计算生涯 MMR 的本地对局数据",
+} satisfies CareerMmrOverview;
+
+export const fixtureEmptyRanking = {
+  season: 23,
+  availableSeasons: [23, 22, 21],
+  heroes: [],
+  maps: [],
+} satisfies RankingResponse;
+
+export const fixtureEmptyOnboarding = {
+  selectedSeason: 23,
+  availableSeasons: [23, 22, 21],
+  canEnterReview: false,
+  credentialStatus: {
+    state: "missing",
+    message: "尚未建立合成登录状态",
+    exposesSecret: false,
+    roleId: null,
+    savedAt: null,
+  },
+  localData: {
+    dataSource: "匿名合成数据",
+    season: 23,
+    presetMatches: 0,
+    detailMatches: 0,
+    lastSyncedOrImportedAt: null,
+    freshnessRisk: "unknown",
+  },
+  seasonStatuses: [],
+  health: { readable: true, warnings: ["当前没有可展示的合成赛季数据"] },
+} satisfies OnboardingStatus;
+
+export const visualPrimaryRequests = {
+  matches: "list_match_timeline",
+  review: "get_personal_season_review",
+  mmr: "get_career_mmr_overview",
+  ranking: "get_rankings",
+  commandCenter: "get_onboarding_status",
+} as const;
+
+type VisualPrimaryRequest = (typeof visualPrimaryRequests)[keyof typeof visualPrimaryRequests];
+type VisualScenarioName = "success" | "loading" | "empty" | "error";
+type VisualCommandOverride = {
+  delayMs?: number;
+  response?: unknown;
+  errorMessage?: string;
+};
+
+type VisualScenario = {
+  label: string;
+  commands: Record<VisualPrimaryRequest, VisualCommandOverride>;
+};
+
+export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenario> = {
+  success: {
+    label: "成功",
+    commands: {
+      list_match_timeline: {},
+      get_personal_season_review: {},
+      get_career_mmr_overview: {},
+      get_rankings: {},
+      get_onboarding_status: {},
+    },
+  },
+  loading: {
+    label: "加载",
+    commands: {
+      list_match_timeline: { delayMs: 450 },
+      get_personal_season_review: { delayMs: 450 },
+      get_career_mmr_overview: { delayMs: 450 },
+      get_rankings: { delayMs: 450 },
+      get_onboarding_status: { delayMs: 450 },
+    },
+  },
+  empty: {
+    label: "空",
+    commands: {
+      list_match_timeline: { response: [] },
+      get_personal_season_review: { response: fixtureEmptyReview },
+      get_career_mmr_overview: { response: fixtureEmptyCareerOverview },
+      get_rankings: { response: fixtureEmptyRanking },
+      get_onboarding_status: { response: fixtureEmptyOnboarding },
+    },
+  },
+  error: {
+    label: "错误",
+    commands: {
+      list_match_timeline: { errorMessage: "合成视觉验收错误：对局请求失败，请重新加载。" },
+      get_personal_season_review: { errorMessage: "合成视觉验收错误：战报请求失败，请重新加载。" },
+      get_career_mmr_overview: { errorMessage: "合成视觉验收错误：生涯 MMR 请求失败，请重新加载。" },
+      get_rankings: { errorMessage: "合成视觉验收错误：排行请求失败，请重新加载。" },
+      get_onboarding_status: { errorMessage: "合成视觉验收错误：指挥台请求失败，请重新加载。" },
+    },
+  },
+};
+
 export const visualInvokeResponses: Record<string, unknown> = {
   get_overview: fixtureOverview,
   list_match_filters: fixtureFilters,
   list_match_timeline: fixtureMatches,
   search_match_player_options: [],
-  get_match_details: fixtureNormalDetail,
+  get_match_details: fixtureMatchDetailsById,
   refresh_match_evaluations: null,
   get_personal_season_review: fixtureReview,
   get_season_analysis: fixtureAnalysis,
@@ -557,6 +706,64 @@ export const visualInvokeResponses: Record<string, unknown> = {
   get_user_settings: { theme: "system" },
   check_app_update: { status: "current", currentVersion: "0.1.0", latestVersion: "0.1.0", message: "当前已是合成验收版本" },
 };
+
+export type VisualInvokePlan = {
+  delayMs: number;
+  response: unknown;
+  errorMessage?: string;
+};
+
+export function resolveVisualInvokePlan(
+  command: string,
+  args: unknown = {},
+  scenarioName: VisualScenarioName = "success",
+): VisualInvokePlan {
+  const response = resolveSuccessfulVisualResponse(command, args);
+  const override = visualAcceptanceScenarios[scenarioName].commands[command as VisualPrimaryRequest];
+  return {
+    delayMs: override?.delayMs ?? 0,
+    response: override && Object.prototype.hasOwnProperty.call(override, "response")
+      ? override.response
+      : response,
+    ...(override?.errorMessage ? { errorMessage: override.errorMessage } : {}),
+  };
+}
+
+export async function invokeVisualFixture(
+  command: string,
+  args: unknown = {},
+  scenarioName: VisualScenarioName = "success",
+  wait: (delayMs: number) => Promise<void> = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+): Promise<unknown> {
+  const plan = resolveVisualInvokePlan(command, args, scenarioName);
+  if (plan.delayMs > 0) await wait(plan.delayMs);
+  if (plan.errorMessage) throw new Error(plan.errorMessage);
+  return plan.response;
+}
+
+function resolveSuccessfulVisualResponse(command: string, args: unknown): unknown {
+  if (command === "get_match_details") {
+    const matchId = readMatchId(args);
+    if (!matchId || !fixtureMatchDetailsById[matchId]) {
+      throw new Error("合成视觉验收错误：没有可用于该请求的对局详情。");
+    }
+    return fixtureMatchDetailsById[matchId];
+  }
+  if (!Object.prototype.hasOwnProperty.call(visualInvokeResponses, command)) {
+    throw new Error("合成视觉验收错误：没有配置该请求的匿名响应。");
+  }
+  return visualInvokeResponses[command];
+}
+
+function readMatchId(args: unknown): string | null {
+  if (!args || typeof args !== "object") return null;
+  const direct = (args as { matchId?: unknown }).matchId;
+  if (typeof direct === "string") return direct;
+  const request = (args as { request?: unknown }).request;
+  if (!request || typeof request !== "object") return null;
+  const nested = (request as { matchId?: unknown }).matchId;
+  return typeof nested === "string" ? nested : null;
+}
 
 export const allVisualFixtures = {
   shell: fixtureShell,
