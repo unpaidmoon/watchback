@@ -11,7 +11,30 @@ assert.equal(analyticsSource.includes("phase6PageHeader"), false, "analysis page
 assert.equal(analyticsSource.includes("MetricCard"), false, "analysis page should remove analysis model overview metric cards");
 assert.equal(analyticsSource.includes("export function SeasonAnalysisModules"), true, "analysis modules should be reusable outside the analysis page");
 assert.equal(reviewSource.includes("getSeasonAnalysis"), true, "review page should load season analysis data");
-assert.equal(reviewSource.includes("SeasonAnalysisModules"), true, "review page should render moved analysis modules");
+assert.equal(reviewSource.includes("FriendAnalysisModules") && reviewSource.includes("MapAnalysisModules"), true, "review page should render moved analysis modules");
+
+for (const view of ["overview", "roles", "friends", "maps", "achievements"]) {
+  assert.match(reviewSource, new RegExp(`value="${view}"`), `review renders ${view} tab`);
+}
+assert.match(reviewSource, /parseReviewView\(params\.get\("view"\)\)/);
+assert.match(reviewSource, /nextParams\.set\("view", nextView\)/);
+assert.match(reviewSource, /<FriendAnalysisModules/);
+assert.match(reviewSource, /<MapAnalysisModules/);
+assert.doesNotMatch(reviewSource, /<SeasonAnalysisModules analysis=\{analysis\}/);
+assert.match(reviewSource, /<PageHeader/);
+assert.match(reviewSource, /<PageSeasonSelect/);
+assert.match(reviewSource, /<PageLoadingState/);
+assert.match(reviewSource, /<PageErrorState/);
+assert.match(reviewSource, /<PageEmptyState/);
+assert.match(reviewSource, /\}, \[selectedSeason\]\);/s, "review data requests depend on season, not view");
+assert.doesNotMatch(reviewSource, /\[selectedSeason,\s*view\]/, "tab switches must reuse loaded season data");
+assert.match(reviewSource, /<nav className="reviewTabs" aria-label="战报内容">/, "战报页内导航应有可访问名称");
+assert.match(reviewSource, /aria-current=\{active \? "page" : undefined\}/, "战报当前标签应暴露当前页面语义");
+assert.doesNotMatch(
+  reviewSource,
+  /role="tablist"|role="tab"|aria-selected=/,
+  "战报应保持完整的页内导航模式，不混用不完整的 tab 语义",
+);
 
 const reviewRegions = qaRegionsForPath("/review").map((region) => region.id);
 assert.deepEqual(reviewRegions, ["NAV-CAPSULE", "REV-RANKS", "FRD-BOARDS", "FRD-LINEUP", "FRD-MAPS"], "review QA regions should include moved analysis modules");

@@ -1,1 +1,759 @@
-/* Match feature rules remain in shared.css until their declaration-only extraction. */
+.matchesPage,
+.matchesWorkbench,
+.matchListPane,
+.matchListCard,
+.matchDetailPane,
+.matchTeamTable {
+  min-width: 0;
+}
+
+.matchListCard,
+.matchDetailPane,
+.matchTeamTable {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-secondary);
+}
+
+.phase6WorkbenchList button.matchListCard {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 0;
+  padding: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  box-shadow: none;
+  transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
+
+.phase6WorkbenchList button.matchListCard:not(.phase6MatchRowSelected):hover {
+  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--border-subtle));
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.matchListCard.phase6MatchRowSelected {
+  border-color: var(--data-primary);
+  background: color-mix(in srgb, var(--data-primary) 7%, var(--surface-secondary));
+  box-shadow: none;
+}
+
+.matchListCardSummary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.matchListCard .matchListCardMap {
+  position: static;
+  inset: auto;
+  width: 88px;
+  height: 68px;
+  border-radius: var(--radius-control);
+  filter: saturate(0.82) contrast(0.98);
+}
+
+.matchListCardCopy,
+.matchListCardData,
+.matchListCardStats {
+  min-width: 0;
+}
+
+.matchListCardCopy {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.matchListCardResultScore,
+.matchListCardMeta,
+.matchListCardHeroLine {
+  display: flex;
+  align-items: center;
+}
+
+.matchListCardResultScore {
+  gap: var(--space-2);
+}
+
+.matchListCardResult {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.matchListCardResultMarker {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.matchListCardResult.result-win .matchListCardResultMarker {
+  background: var(--status-success);
+}
+
+.matchListCardResult.result-loss .matchListCardResultMarker {
+  background: var(--status-danger);
+}
+
+.matchListCardResult.result-draw .matchListCardResultMarker,
+.matchListCardResult.result-neutral .matchListCardResultMarker {
+  background: var(--data-neutral);
+}
+
+.matchListCardScore {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.matchListCardTitle {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchListCardMeta {
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.matchListCardHeroLine {
+  min-width: 0;
+  gap: 6px;
+}
+
+.matchListCardHeroLine .phase6HeroAvatarShared {
+  width: 24px;
+  height: 24px;
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag {
+  min-width: 0;
+  min-height: 20px;
+  padding: 2px 6px;
+  border-color: var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-control);
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag.badgeTone-gold {
+  border-color: color-mix(in srgb, var(--data-secondary) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-secondary) 10%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag.badgeTone-blue {
+  border-color: color-mix(in srgb, var(--data-primary) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 8%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.matchListCardHeroLine .phase6VerticalPerformanceTag.badgeTone-danger {
+  border-color: color-mix(in srgb, var(--status-danger) 32%, var(--border-subtle));
+  background: color-mix(in srgb, var(--status-danger) 7%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.matchListCardHeroName {
+  max-width: 96px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase6WorkbenchList .matchListCardData {
+  position: static;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+}
+
+.matchListCardStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  gap: var(--space-2);
+}
+
+.matchListCardStats .phase6MatchMetricBlock {
+  min-width: 64px;
+  display: grid;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.matchListCardStats .phase6MatchMetricBlock strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase6WorkbenchList .matchListCardData .phase6MatchOpen {
+  grid-column: auto;
+  grid-row: auto;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 22px;
+}
+
+.phase6CompactDetail {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.phase7CompactArenaDetail {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.matchDetailHeader {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.matchDetailHeaderIdentity,
+.matchDetailHeaderResult,
+.matchDetailHeaderMeta,
+.matchDetailHeaderNavigation {
+  display: flex;
+  align-items: center;
+}
+
+.matchDetailHeaderIdentity {
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.matchDetailHeaderResult {
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.matchDetailHeaderResultMarker {
+  width: 8px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--data-neutral);
+}
+
+.matchDetailHeader.result-win .matchDetailHeaderResultMarker {
+  background: var(--status-success);
+}
+
+.matchDetailHeader.result-loss .matchDetailHeaderResultMarker {
+  background: var(--status-danger);
+}
+
+.matchDetailHeaderCopy {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.matchDetailHeaderCopy h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 18px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchDetailHeaderMeta {
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.matchDetailHeaderScore {
+  color: var(--text-primary);
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.matchDetailHeaderNavigation {
+  gap: var(--space-2);
+}
+
+.matchDetailHeaderNavigation .ghostButton {
+  padding-inline: var(--space-3);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.matchDetailHeaderNavigation .ghostButton:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--data-primary) 30%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-control));
+}
+
+.matchDetailPerformance,
+.matchDetailTeamComparison {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.matchDetailPerformance {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.matchDetailPerformance > div {
+  display: grid;
+  gap: 2px;
+}
+
+.matchDetailPerformance h2,
+.matchDetailTeamComparison > h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 17px;
+}
+
+.matchDetailPerformance p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.matchDetailTeamComparison {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.matchDetailTeamTables {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.matchTeamTable {
+  position: relative;
+  min-width: 0;
+  overflow: visible;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.matchTeamTableMarker {
+  position: absolute;
+  left: -1px;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: var(--data-secondary);
+}
+
+.matchTeamTableMarker.enemy {
+  background: var(--status-danger);
+}
+
+.matchTeamTable h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.matchTeamTable .phase6CompactPlayerRow,
+.matchTeamTable.enemy .phase6CompactPlayerRow {
+  min-height: 68px;
+  padding-right: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--data-secondary);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.matchTeamTable.enemy .phase6CompactPlayerRow {
+  border-left-color: var(--status-danger);
+}
+
+.matchTeamTable .phase6CompactAvatarPlate {
+  min-height: 66px;
+  background: var(--surface-control);
+}
+
+.matchTeamTable .phase6CompactAvatarPlate::after {
+  display: none;
+}
+
+.matchTeamTable .phase6CompactPlayerRow .phase6HeroAvatarShared {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.matchTeamTable .phase6CompactPlayerRow strong,
+.matchTeamTable .phase7CompactRankBadge {
+  color: var(--text-primary);
+}
+
+.matchTeamTable .phase6CompactPlayerName {
+  padding-block: var(--space-2);
+  border-bottom-color: var(--border-subtle);
+}
+
+.matchTeamTable .phase6CompactPlayerMetric small,
+.matchTeamTable .phase6CompactPerkEmpty,
+.matchTeamTable .phase7CompactRankBadge {
+  color: var(--text-secondary);
+}
+
+.matchTeamTable .phase6CompactPerkIcon {
+  border-color: var(--border-subtle);
+}
+
+.matchTeamTable .phase6StatHighlight {
+  color: var(--data-primary);
+}
+
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable:hover,
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--data-primary) 5%, var(--surface-secondary));
+  filter: none;
+}
+
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable:focus-visible {
+  outline: 2px solid var(--data-primary) !important;
+  outline-offset: 2px !important;
+}
+
+.matchTeamTableEmpty {
+  padding: var(--space-4);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.appFrame:has(.matchesPage) {
+  height: calc(100dvh - 16px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.appCanvas:has(> .matchesPage) {
+  flex: 1;
+  min-height: 0;
+}
+
+.matchesPage {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: var(--space-4);
+  overflow: hidden;
+}
+
+.matchesPageControls {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.matchesPageControls .phase6FilterBar {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.matchesWorkbench.phase6MatchWorkbench {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 32fr) minmax(0, 68fr);
+  gap: var(--space-4);
+  overflow: hidden;
+}
+
+.matchListPane,
+.matchDetailPane {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.matchListPane > .phase6QaRegion {
+  height: auto;
+  min-height: 100%;
+}
+
+.matchListPane .phase6Timeline,
+.matchDetailPane .phase6CompactDetailScroll {
+  height: auto;
+  overflow: visible;
+  padding-right: 0;
+  overscroll-behavior: auto;
+}
+
+.matchDetailPane .phase6CompactDetail {
+  height: auto;
+  min-height: 100%;
+  grid-template-rows: auto auto;
+}
+
+.matchDetailPane .phase7CompactArenaDetail {
+  grid-template-rows: auto auto auto;
+}
+
+.matchDetailBackButton {
+  display: none;
+}
+
+@media (max-width: 1099px) {
+  .matchesWorkbench.phase6MatchWorkbench {
+    grid-template-columns: 1fr;
+  }
+
+  .matchesWorkbench.detailOpen .matchListPane {
+    display: none;
+  }
+
+  .matchesWorkbench:not(.detailOpen) .matchDetailPane {
+    display: none;
+  }
+
+  .matchDetailBackButton {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: inline-flex;
+    margin-bottom: var(--space-3);
+    border-color: var(--border-subtle);
+    border-radius: var(--radius-control);
+    background: var(--surface-control);
+    color: var(--text-primary);
+    box-shadow: none;
+  }
+
+  .matchDetailHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .matchDetailHeaderNavigation {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
+.filterBar.phase6FilterBar {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.filterBar.phase6FilterBar label {
+  color: var(--text-secondary);
+}
+
+.filterBar.phase6FilterBar select,
+.filterBar.phase6FilterBar input,
+.filterBar.phase6FilterBar .phase6PlayerSearchBox {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+}
+
+.matchFilterToolbar.phase6FilterRowPrimary {
+  grid-template-columns: minmax(128px, 0.75fr) minmax(112px, 0.65fr) minmax(220px, 1.5fr) auto auto;
+  align-items: end;
+}
+
+.matchAdvancedToggle,
+.matchClearFilters {
+  width: auto;
+  padding-inline: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.matchAdvancedToggle {
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.matchClearFilters {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.matchAdvancedToggle:hover,
+.matchClearFilters:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--data-primary) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-secondary));
+  color: var(--text-primary);
+}
+
+.advancedMatchFilters.phase6FilterRowSecondary {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.activeFilterChips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.activeFilterChips button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--data-primary) 24%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--data-primary) 6%, var(--surface-secondary));
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.activeFilterChips button:hover {
+  background: color-mix(in srgb, var(--data-primary) 10%, var(--surface-secondary));
+}
+
+.matchDetailPerformance .phase6Eyebrow {
+  color: var(--data-primary);
+  font-weight: 700;
+}
+
+.phase7CompactArenaDetail .phase7ArenaSelector,
+.phase6DetailPage > .phase7ArenaSelector {
+  gap: var(--space-2);
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab,
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab {
+  min-height: 44px;
+  margin-left: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  clip-path: none;
+  box-shadow: none;
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab strong,
+.phase7CompactArenaDetail .phase7ArenaTab.win:not(.active) strong,
+.phase7CompactArenaDetail .phase7ArenaTab.loss:not(.active) strong,
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab strong,
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.win:not(.active) strong,
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.loss:not(.active) strong {
+  color: var(--text-primary);
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab.active,
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.active {
+  border-color: var(--data-primary);
+  background: var(--data-primary);
+  color: var(--action-on-primary);
+}
+
+.phase7CompactArenaDetail .phase7ArenaTab.active strong,
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.active strong {
+  color: var(--action-on-primary);
+}
+
+.matchTeamTable .phase6CompactPlayerRow,
+.matchTeamTable.enemy .phase6CompactPlayerRow {
+  grid-template-columns:
+    64px minmax(120px, 1fr) minmax(88px, 0.35fr) minmax(160px, 0.7fr)
+    minmax(126px, 0.5fr) minmax(76px, 0.3fr);
+  gap: var(--space-2);
+}
+
+.matchTeamTable .phase6CompactPlayerName strong {
+  font-size: 16px;
+}
+
+.matchTeamTable .phase6CompactPlayerMetric strong {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1099px) {
+  .matchFilterToolbar.phase6FilterRowPrimary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .matchFilterToolbar .phase6PlayerSearchLabel {
+    grid-column: 1 / -1;
+  }
+
+  .advancedMatchFilters.phase6FilterRowSecondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

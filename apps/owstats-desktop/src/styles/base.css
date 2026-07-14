@@ -1,1 +1,66 @@
-/* Global reset and element rules remain in shared.css until their declaration-only extraction. */
+html {
+  background: var(--app-outside);
+}
+
+:root {
+  /* Keep unmigrated phase-6 components inside the current visual language. */
+  --phase6-accent: var(--data-primary);
+  --phase6-accent-strong: var(--data-primary);
+  --phase6-blue: var(--data-secondary);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1024px;
+  min-height: 100vh;
+  padding: 8px;
+  color: var(--text-primary);
+  background: var(--app-outside);
+  font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button,
+input,
+select {
+  min-height: 44px;
+  min-block-size: 44px !important;
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  min-inline-size: 44px !important;
+}
+
+.phase6PlayerSearchBox {
+  min-block-size: 44px;
+  grid-template-columns: 18px minmax(0, 1fr) 44px;
+}
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--data-primary) !important;
+  outline-offset: 2px !important;
+}
+
+[data-numeric] {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,25 +1,40 @@
-import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CompactMatchDetail } from "../features/matches/CompactMatchDetail";
 import { FilterBar } from "../features/matches/FilterBar";
-import { MatchTimeline } from "../features/matches/MatchTimeline";
-import { filtersFromParams, hasLoadedOptions, paramsFromFilters, validateFilters } from "../features/matches/matchFilters";
+import { MatchDetailPane } from "../features/matches/MatchDetailPane";
+import { MatchListPane } from "../features/matches/MatchListPane";
+import {
+  activeMatchFilterChips,
+  clearVisibleMatchFilters,
+  filtersFromParams,
+  hasLoadedOptions,
+  paramsFromFilters,
+  validateFilters,
+} from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
 import {
+  canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
+  chooseInitialMatchId,
   chooseInitialMatchFilters,
+  chooseMatchIdForLoadedMatches,
+  chooseMatchesPageNavigationState,
   computeMatchAnchorScrollTop,
+  consumeMatchesSearchParamsNavigation,
   getMatchesPageCache,
   hasExplicitMatchFilterParams,
+  isLatestMatchRequest,
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
+  shouldLoadMatchesForFilter,
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
+import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
@@ -32,6 +47,7 @@ const emptyOptions: FilterOptions = {
 
 export function MatchesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const searchParamsKey = searchParams.toString();
   const cachedPage = useMemo(() => getMatchesPageCache(), []);
   const hasExplicitFilters = useMemo(() => hasExplicitMatchFilterParams(searchParams), []);
   const initialFilters = useMemo(
@@ -41,19 +57,41 @@ export function MatchesPage() {
   const canHydrateCache = useMemo(() => canHydrateMatchesPageCache(cachedPage, initialFilters, hasExplicitFilters), []);
   const initialCacheRef = useRef(cachedPage);
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const skipInitialFilterLoadRef = useRef(true);
+  const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);
+  const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));
   const loadedFilterKeyRef = useRef(canHydrateCache ? cachedPage?.loadedFilterKey ?? "" : "");
+  const currentFiltersRef = useRef(initialFilters);
+  const pageDataReadyRef = useRef(canHydrateCache);
+  const pageDataRef = useRef<Pick<MatchesPageCache, "overview" | "summary" | "options">>({
+    overview: canHydrateCache ? cachedPage?.overview ?? null : null,
+    summary: canHydrateCache ? cachedPage?.summary ?? null : null,
+    options: canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions,
+  });
   const [overview, setOverview] = useState<Overview | null>(canHydrateCache ? cachedPage?.overview ?? null : null);
   const [summary, setSummary] = useState<ImportSummary | null>(canHydrateCache ? cachedPage?.summary ?? null : null);
   const [options, setOptions] = useState<FilterOptions>(canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions);
-  const [filters, setFilters] = useState<MatchFilters>(initialFilters);
+  const [filters, setFiltersState] = useState<MatchFilters>(initialFilters);
   const [matches, setMatches] = useState<MatchSummary[]>(canHydrateCache ? cachedPage?.matches ?? [] : []);
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() => searchParams.get("matchId"));
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() =>
+    chooseInitialMatchId(searchParams.get("matchId"), cachedPage?.selectedMatchId, canHydrateCache),
+  );
+  const selectedMatchIdRef = useRef(selectedMatchId);
+  const pageDataRequestIdRef = useRef(0);
+  const timelineRequestIdRef = useRef(0);
   const [selectedDetail, setSelectedDetail] = useState<MatchDetailView | null>(null);
+  const [detailStateMatchId, setDetailStateMatchId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [detailRetryKey, setDetailRetryKey] = useState(0);
+  const [busy, setBusy] = useState(!canHydrateCache);
   const [error, setError] = useState<string | null>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const hasVisibleFilters = activeMatchFilterChips(filters, options).length > 0;
+
+  useEffect(() => () => {
+    pageDataRequestIdRef.current += 1;
+    timelineRequestIdRef.current += 1;
+  }, []);
 
   useEffect(() => {
     if (canHydrateCache) return;
@@ -66,36 +104,71 @@ export function MatchesPage() {
   }, [matches.length]);
 
   useEffect(() => {
+    const navigationDecision = consumeMatchesSearchParamsNavigation(
+      searchParamsKey,
+      lastWrittenSearchParamsKeyRef.current,
+    );
+    lastWrittenSearchParamsKeyRef.current = navigationDecision.nextLastWrittenSearchParamsKey;
+    if (!navigationDecision.shouldApplyNavigation) return;
+    const navigation = chooseMatchesPageNavigationState(
+      filtersFromParams(searchParams),
+      searchParams.get("matchId"),
+      getMatchesPageCache(),
+      hasExplicitMatchFilterParams(searchParams),
+    );
+    if (matchFiltersKey(navigation.filters) !== matchFiltersKey(filters)) setFilters(navigation.filters);
+    if (navigation.selectedMatchId !== selectedMatchId) setSelectedMatchIdSafely(navigation.selectedMatchId);
+  }, [searchParamsKey]);
+
+  useEffect(() => {
     rememberScroll();
-    updateMatchesPageCache({ filters });
-    setSearchParams(preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId)), { replace: true });
-    if (skipInitialFilterLoadRef.current) {
-      skipInitialFilterLoadRef.current = false;
-      return;
-    }
-    if (matchFiltersKey(filters) === loadedFilterKeyRef.current) return;
-    void loadMatches(filters);
+    const nextSearchParams = preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId));
+    const nextSearchParamsKey = nextSearchParams.toString();
+    if (nextSearchParamsKey === searchParamsKey) return;
+    lastWrittenSearchParamsKeyRef.current = nextSearchParamsKey;
+    setSearchParams(nextSearchParams, { replace: true });
   }, [filters, selectedMatchId]);
 
   useEffect(() => {
-    if (matches.length === 0) {
-      if (selectedMatchId !== null) setSelectedMatchId(null);
+    const currentFilterKey = matchFiltersKey(filters);
+    if (currentFilterKey === loadedFilterKeyRef.current) {
+      timelineRequestIdRef.current += 1;
+      initialHydrationFilterKeyRef.current = null;
+      setBusy(false);
       return;
     }
-    if (!selectedMatchId || !matches.some((match) => match.matchId === selectedMatchId)) {
-      setSelectedMatchId(matches[0].matchId);
-    }
-  }, [matches, selectedMatchId]);
+    if (!shouldLoadMatchesForFilter(
+      currentFilterKey,
+      loadedFilterKeyRef.current,
+      initialHydrationFilterKeyRef.current,
+    )) return;
+    initialHydrationFilterKeyRef.current = null;
+    void loadMatches(filters);
+  }, [filters]);
+
+  useEffect(() => {
+    const isCurrentFilterLoaded = loadedFilterKeyRef.current === matchFiltersKey(filters);
+    const nextSelectedMatchId = chooseMatchIdForLoadedMatches(
+      selectedMatchId,
+      matches,
+      isCurrentFilterLoaded,
+    );
+    if (nextSelectedMatchId !== selectedMatchId) setSelectedMatchIdSafely(nextSelectedMatchId);
+  }, [filters, matches, selectedMatchId]);
 
   useEffect(() => {
     if (!selectedMatchId) {
+      setDetailStateMatchId(null);
       setSelectedDetail(null);
       setDetailError(null);
       setDetailLoading(false);
+      setMobileDetailOpen(false);
       return;
     }
     let cancelled = false;
+    setDetailStateMatchId(selectedMatchId);
     setDetailLoading(true);
+    setSelectedDetail(null);
     setDetailError(null);
     void getMatchDetails(selectedMatchId)
       .then((detail) => {
@@ -113,11 +186,21 @@ export function MatchesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedMatchId]);
+  }, [selectedMatchId, detailRetryKey]);
 
   useEffect(() => {
-    updateMatchesPageCache({ overview, summary, options, filters, matches, loadedFilterKey: loadedFilterKeyRef.current });
-  }, [overview, summary, options, filters, matches]);
+    if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;
+    updateMatchesPageCache({
+      overview,
+      summary,
+      options,
+      filters,
+      matches,
+      selectedMatchId,
+      loadedFilterKey: loadedFilterKeyRef.current,
+      hasLoaded: pageDataReadyRef.current,
+    });
+  }, [overview, summary, options, filters, matches, selectedMatchId]);
 
   useEffect(() => {
     window.addEventListener("scroll", rememberScroll, { passive: true });
@@ -137,45 +220,126 @@ export function MatchesPage() {
     if (JSON.stringify(cleaned) !== JSON.stringify(filters)) {
       setFilters(cleaned);
     }
-  }, [options]);
+  }, [filters, options]);
 
   async function hydrateInitialMatches(nextFilters: MatchFilters) {
+    const pageDataRequestId = ++pageDataRequestIdRef.current;
+    const timelineRequestId = ++timelineRequestIdRef.current;
+    const hydrationFilterKey = matchFiltersKey(nextFilters);
     setBusy(true);
     setError(null);
     try {
-      const cache = await preloadMatchesPageCache({ getOverview, listMatchFilters, listMatchTimeline }, nextFilters);
-      loadedFilterKeyRef.current = cache.loadedFilterKey;
-      setOverview(cache.overview);
-      setSummary(cache.summary);
-      setOptions(cache.options);
-      setMatches(cache.matches);
+      const cache = await preloadMatchesPageCache(
+        { getOverview, listMatchFilters, listMatchTimeline },
+        nextFilters,
+        { cacheResult: false },
+      );
+      if (!isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) return;
+      const pageData = {
+        overview: cache.overview,
+        summary: cache.summary,
+        options: cache.options,
+      };
+      pageDataRef.current = pageData;
+      pageDataReadyRef.current = true;
+      setOverview(pageData.overview);
+      setSummary(pageData.summary);
+      setOptions(pageData.options);
+      if (canCommitMatchTimelineRequest(
+        timelineRequestId,
+        timelineRequestIdRef.current,
+        hydrationFilterKey,
+        matchFiltersKey(currentFiltersRef.current),
+      )) {
+        commitLoadedMatches(nextFilters, cache.matches, pageData);
+      }
       void refreshMatchEvaluations()
-        .then(() => loadMatches(nextFilters))
+        .then(() => {
+          if (!isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) return;
+          void loadMatches(currentFiltersRef.current);
+        })
         .catch(() => undefined);
     } catch (err) {
-      setError(productErrorMessage(err));
+      if (isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) setError(productErrorMessage(err));
     } finally {
-      setBusy(false);
+      if (isLatestMatchRequest(pageDataRequestId, pageDataRequestIdRef.current)) {
+        if (initialHydrationFilterKeyRef.current === matchFiltersKey(nextFilters)) {
+          initialHydrationFilterKeyRef.current = null;
+        }
+        setBusy(false);
+      }
     }
   }
 
   async function loadMatches(nextFilters: MatchFilters) {
+    const timelineRequestId = ++timelineRequestIdRef.current;
+    const timelineFilterKey = matchFiltersKey(nextFilters);
+    setBusy(true);
+    setError(null);
     try {
       const nextMatches = await listMatchTimeline(nextFilters);
-      const loadedFilterKey = matchFiltersKey(nextFilters);
-      loadedFilterKeyRef.current = loadedFilterKey;
-      setMatches(nextMatches);
-      updateMatchesPageCache({
-        filters: nextFilters,
-        matches: nextMatches,
-        loadedFilterKey,
-        hasLoaded: true,
-        scrollTop: readMatchListScrollTop(),
-        scrollAnchor: readMatchScrollAnchor(),
-      });
+      if (!canCommitMatchTimelineRequest(
+        timelineRequestId,
+        timelineRequestIdRef.current,
+        timelineFilterKey,
+        matchFiltersKey(currentFiltersRef.current),
+      )) return;
+      commitLoadedMatches(nextFilters, nextMatches);
     } catch (err) {
-      setError(productErrorMessage(err));
+      if (canCommitMatchTimelineRequest(
+        timelineRequestId,
+        timelineRequestIdRef.current,
+        timelineFilterKey,
+        matchFiltersKey(currentFiltersRef.current),
+      )) setError(productErrorMessage(err));
+    } finally {
+      if (isLatestMatchRequest(timelineRequestId, timelineRequestIdRef.current)) setBusy(false);
     }
+  }
+
+  function setFilters(nextFilters: MatchFilters) {
+    currentFiltersRef.current = nextFilters;
+    if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
+      setBusy(true);
+      setError(null);
+    }
+    setFiltersState(nextFilters);
+  }
+
+  function retryMatches() {
+    if (pageDataReadyRef.current) {
+      void loadMatches(currentFiltersRef.current);
+      return;
+    }
+    void hydrateInitialMatches(currentFiltersRef.current);
+  }
+
+  function setSelectedMatchIdSafely(nextSelectedMatchId: string | null) {
+    selectedMatchIdRef.current = nextSelectedMatchId;
+    setSelectedMatchId(nextSelectedMatchId);
+  }
+
+  function commitLoadedMatches(
+    nextFilters: MatchFilters,
+    nextMatches: MatchSummary[],
+    pageData?: Pick<MatchesPageCache, "overview" | "summary" | "options">,
+  ) {
+    const loadedFilterKey = matchFiltersKey(nextFilters);
+    const cachePageData = pageData ?? (pageDataReadyRef.current ? pageDataRef.current : {});
+    const nextSelectedMatchId = chooseMatchIdForLoadedMatches(selectedMatchIdRef.current, nextMatches, true);
+    loadedFilterKeyRef.current = loadedFilterKey;
+    setMatches(nextMatches);
+    setSelectedMatchIdSafely(nextSelectedMatchId);
+    updateMatchesPageCache({
+      ...cachePageData,
+      filters: nextFilters,
+      matches: nextMatches,
+      selectedMatchId: nextSelectedMatchId,
+      loadedFilterKey,
+      hasLoaded: pageDataReadyRef.current,
+      scrollTop: readMatchListScrollTop(),
+      scrollAnchor: readMatchScrollAnchor(),
+    });
   }
 
   function rememberScroll() {
@@ -236,41 +400,89 @@ export function MatchesPage() {
     else if (document.scrollingElement) document.scrollingElement.scrollTop = scrollTop;
   }
 
+  const selectedMatchIndex = selectedMatchId
+    ? matches.findIndex((match) => match.matchId === selectedMatchId)
+    : -1;
+  const previousMatchId = selectedMatchIndex > 0
+    ? matches[selectedMatchIndex - 1]?.matchId ?? null
+    : null;
+  const nextMatchId = selectedMatchIndex >= 0 && selectedMatchIndex < matches.length - 1
+    ? matches[selectedMatchIndex + 1]?.matchId ?? null
+    : null;
+
+  function selectAdjacentMatch(matchId: string | null) {
+    if (!matchId) return;
+    rememberScroll();
+    setSelectedMatchIdSafely(matchId);
+  }
+
+  function selectMatch(matchId: string) {
+    rememberScroll();
+    setSelectedMatchIdSafely(matchId);
+    setMobileDetailOpen(true);
+  }
+
   return (
-    <>
-      {error && (
-        <div className="errorBanner phase6RecoverableError">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
+    <div className="matchesPage">
+      <PageHeader
+        title="对局记录"
+        description={`${matches.length} 场本地对局`}
+        actions={(
+          <PageSeasonSelect
+            value={filters.season}
+            seasons={options.seasons}
+            includeAll
+            allLabel="全部赛季"
+            onChange={(season) => {
+              const nextFilters = { ...filters };
+              if (season === undefined) delete nextFilters.season;
+              else nextFilters.season = season;
+              setFilters(nextFilters);
+            }}
+          />
+        )}
+      />
+      <div className="matchesPageControls">
+        <FilterBar filters={filters} options={options} onChange={setFilters} />
+      </div>
 
-      <FilterBar filters={filters} options={options} onChange={setFilters} />
-
-      <section className="workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench">
-        <div className="phase6WorkbenchList">
+      <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${mobileDetailOpen ? "detailOpen" : ""}`}>
+        <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={rememberScroll}>
           <QaRegion id="MAT-LIST">
-            <MatchTimeline
-              ref={timelineRef}
-              matches={matches}
-              selectedMatchId={selectedMatchId}
-              onScroll={rememberScroll}
-              onSelect={(matchId) => {
-                rememberScroll();
-                setSelectedMatchId(matchId);
-              }}
-            />
+            {error ? (
+              <PageErrorState message={error} actionLabel="重新加载" onRetry={retryMatches} />
+            ) : busy ? (
+              <PageLoadingState message="正在加载对局列表..." />
+            ) : matches.length === 0 ? (
+              <PageEmptyState
+                title="暂无符合条件的对局"
+                description={hasVisibleFilters ? "调整或清除筛选条件后再试。" : "当前赛季没有可展示的本地对局。"}
+                actionLabel={hasVisibleFilters ? "清除筛选" : "重新加载"}
+                onAction={() => hasVisibleFilters ? setFilters(clearVisibleMatchFilters(filters)) : retryMatches()}
+              />
+            ) : (
+              <MatchListPane
+                matches={matches}
+                selectedMatchId={selectedMatchId}
+                onSelect={selectMatch}
+              />
+            )}
           </QaRegion>
         </div>
-        <aside className="phase6WorkbenchDetail" aria-label="对局详情">
-          {selectedMatchId ? (
-            <CompactMatchDetail detail={selectedDetail} loading={detailLoading} error={detailError} matchId={selectedMatchId} />
-          ) : (
-            <div className="emptyState phase6WorkbenchEmpty">选择左侧对局查看详情。</div>
-          )}
-        </aside>
+        <MatchDetailPane
+          detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}
+          loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
+          error={detailStateMatchId === selectedMatchId ? detailError : null}
+          matchId={selectedMatchId}
+          hasPrevious={previousMatchId !== null}
+          hasNext={nextMatchId !== null}
+          onPrevious={() => selectAdjacentMatch(previousMatchId)}
+          onNext={() => selectAdjacentMatch(nextMatchId)}
+          onRetry={() => setDetailRetryKey((value) => value + 1)}
+          onBack={() => setMobileDetailOpen(false)}
+        />
       </section>
-    </>
+    </div>
   );
 }
 

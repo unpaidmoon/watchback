@@ -5,7 +5,7 @@ import { getMatchDetails } from "../shared/api";
 import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
 import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
 import { arenaRankAssetUrl } from "../shared/assets";
-import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../shared/matchDetailHeaderFormat";
+import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../shared/matchDetailHeaderFormat";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
 import { productErrorMessage } from "../shared/phase6Shell";
@@ -152,7 +152,6 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
               <MapPreview className="phase6DetailBannerMap" mapKey={detail.mapGuid ?? detail.mapName} name={detailMapName} />
               <div className="phase6DetailResultPanel">
                 <strong>{detail.resultLabel ?? "未知"}</strong>
-                <span>{resultEnglishLabel(detail.result)}</span>
               </div>
               <div className="phase6DetailCornerAccent" />
             </div>

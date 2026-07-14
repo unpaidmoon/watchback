@@ -15,11 +15,11 @@ export type CommandMetric = {
 };
 
 export const phase6NavItems: Phase6NavItem[] = [
-  { label: "指挥台", path: "/onboarding", title: "登录、同步与数据状态" },
   { label: "对局", path: "/matches", title: "浏览和筛选对局" },
   { label: "战报", path: "/review", title: "个人赛季战报" },
   { label: "生涯 MMR", path: "/career-mmr", title: "本地估算的三职责生涯 MMR" },
   { label: "排行", path: "/ranking", title: "英雄与地图排行" },
+  { label: "指挥台", path: "/onboarding", title: "登录、同步与数据状态" },
 ];
 
 export function credentialTone(state: string | null | undefined): StatusTone {
@@ -95,7 +95,12 @@ export function productErrorMessage(error: unknown): string {
     return "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
   }
 
-  return text;
+  const productText = text
+    .replace(/^(?:(?:Error|TypeError|RangeError|ReferenceError|SyntaxError):\s*)+/i, "")
+    .trim();
+  return /[\u3400-\u9fff]/.test(productText)
+    ? productText
+    : "请求失败，请稍后重新加载。";
 }
 
 export function hasDesktopBackend(host: unknown = globalThis): boolean {

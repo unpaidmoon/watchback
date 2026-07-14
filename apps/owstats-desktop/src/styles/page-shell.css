@@ -1,0 +1,145 @@
+.pageHeader {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.pageHeaderContent {
+  min-width: 0;
+}
+
+.pageHeader h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.pageHeader p {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pageHeaderActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pageSeasonSelect {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.pageSeasonSelect label {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pageSeasonSelect select {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  background: var(--surface-control);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pageSeasonSelect select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.pageSeasonSelect select:focus-visible,
+.pageStateAction:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
+}
+
+.pageState {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-primary);
+  color: var(--text-primary);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.pageState h2,
+.pageState p {
+  margin: 0;
+}
+
+.pageState h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.pageState p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pageStateAction {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--action-primary);
+  border-radius: var(--radius-control);
+  color: var(--action-on-primary);
+  background: var(--action-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.pageStateAction:hover {
+  opacity: 0.88;
+}
+
+.statusPill {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  background: var(--surface-control);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.statusPill--success {
+  color: var(--text-primary);
+  background: var(--status-success-bg);
+}
+
+.statusPill--danger {
+  color: var(--text-primary);
+  background: var(--status-danger-bg);
+}
+
+.statusPill--warning {
+  color: var(--text-primary);
+  background: var(--status-warning-bg);
+}

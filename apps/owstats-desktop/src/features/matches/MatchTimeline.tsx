@@ -1,8 +1,6 @@
 import { forwardRef, Fragment } from "react";
-import { formatCompactStat, formatMatchBannerTitle, formatMatchPreviewKey, formatScoreLine } from "../../shared/matchListFormat";
-import { primaryTagBadgeTone } from "../../shared/matchPerformanceBadges";
-import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
 import type { MatchSummary } from "../../shared/types";
+import { MatchListCard } from "./MatchListCard";
 
 type Props = {
   matches: MatchSummary[];
@@ -23,59 +21,16 @@ export const MatchTimeline = forwardRef<HTMLDivElement, Props>(function MatchTim
       {matches.map((match) => (
         <Fragment key={match.matchId}>
           {streakLabels.get(match.matchId) && <div className="streakSeparator">{streakLabels.get(match.matchId)}</div>}
-          <button
-            type="button"
-            className={`matchRow phase6MatchRowReal ${match.result} ${selectedMatchId === match.matchId ? "phase6MatchRowSelected" : ""}`}
-            data-match-id={match.matchId}
-            aria-current={selectedMatchId === match.matchId ? "true" : undefined}
-            onClick={() => onSelect(match.matchId)}
-          >
-            <span className="phase6MatchBanner">
-              <MapPreview mapKey={formatMatchPreviewKey(match)} name={match.mapName} className="phase6MatchMapThumb" />
-              <span className="phase6MatchScoreSlab">{formatScoreLine(match)}</span>
-              <span className="phase6MatchMapTitle">{formatMatchBannerTitle(match)}</span>
-            </span>
-            <span className="phase6MatchDataPanel">
-              <span className="phase6MatchListHeroLine">
-                <span className="phase6HeroStackCell">
-                  <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
-                  {match.evaluation ? (
-                    <strong className={`phase6VerticalPerformanceTag badgeTone-${listPerformanceTone(match.evaluation.primaryTag)}`}>{match.evaluation.primaryTag}</strong>
-                  ) : (
-                    <strong className="phase6VerticalPerformanceTag badgeTone-blue">常规</strong>
-                  )}
-                </span>
-                <span className="phase6MatchListStats">
-                  <MetricBlock label="K/A/D" value={`${match.kills}/${match.assists}/${match.deaths}`} />
-                  <MetricBlock
-                    label="伤害 / 治疗 / 抵挡"
-                    value={`${formatCompactStat(match.damage)}/${formatCompactStat(match.healing)}/${formatCompactStat(match.mitigation)}`}
-                  />
-                </span>
-              </span>
-              <span className="phase6MatchOpen">›</span>
-            </span>
-          </button>
+          <MatchListCard
+            match={match}
+            selected={selectedMatchId === match.matchId}
+            onSelect={onSelect}
+          />
         </Fragment>
       ))}
     </div>
   );
 });
-
-function listPerformanceTone(primaryTag: string) {
-  if (primaryTagBadgeTone(primaryTag) === "gold") return "gold";
-  if (primaryTag === "躺赢局" || primaryTag === "背锅局") return "danger";
-  return "blue";
-}
-
-function MetricBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="phase6MatchMetricBlock">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </span>
-  );
-}
 
 function streakSegmentLabels(matches: MatchSummary[]) {
   const labels = new Map<string, string>();

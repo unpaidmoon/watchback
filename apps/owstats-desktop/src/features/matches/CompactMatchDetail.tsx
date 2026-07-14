@@ -1,78 +1,71 @@
-import { AlertCircle, CircleDollarSign } from "lucide-react";
+import { CircleDollarSign } from "lucide-react";
 import { useEffect, useState } from "react";
-import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../../shared/arenaDetailFormat";
-import { arenaRankAssetUrl, resolveArenaModTraitInfo, resolvePerkInfo } from "../../shared/assets";
+import { arenaHeaderTitle, formatArenaScore, formatArenaTabLabel } from "../../shared/arenaDetailFormat";
+import { resolveArenaModTraitInfo } from "../../shared/assets";
 import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
-import { formatDetailDuration, formatDetailStartTime, formatFinalScore, resultEnglishLabel } from "../../shared/matchDetailHeaderFormat";
-import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../../shared/playerHighlights";
-import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
+import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../../shared/matchDetailHeaderFormat";
+import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
-export function CompactMatchDetail({ detail, loading, error, matchId }: { detail: MatchDetailView | null; loading: boolean; error: string | null; matchId: string }) {
+import { MatchDetailHeader, type MatchDetailNavigationProps } from "./MatchDetailHeader";
+import { MatchTeamTable } from "./MatchTeamTable";
+
+export type CompactMatchDetailProps = {
+  detail: MatchDetailView | null;
+  loading: boolean;
+  error: string | null;
+  matchId: string;
+  onRetry: () => void;
+} & MatchDetailNavigationProps;
+
+export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, ...navigation }: CompactMatchDetailProps) {
   if (error) {
-    return (
-      <div className="errorBanner phase6RecoverableError">
-        <AlertCircle size={18} />
-        <span>{error}</span>
-      </div>
-    );
+    return <PageErrorState message={error} actionLabel="重新加载" onRetry={onRetry} />;
   }
-  if (loading && !detail) return <div className="emptyState phase6WorkbenchEmpty">正在读取对局详情...</div>;
-  if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情：{matchId}</div>;
-  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} />;
+  if (loading && !detail) return <PageLoadingState message="正在读取对局详情..." />;
+  if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情。</div>;
+  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} {...navigation} />;
 
   const mapName = detail.mapName ?? "未知地图";
-  const compactPlayers = [...detail.teammates.slice(0, 6), ...detail.enemies.slice(0, 6)];
   return (
-    <section className={`phase6CompactDetail ${detail.result ?? "pending"}`}>
-      <header className="phase6CompactHero">
-        <MapPreview className="phase6CompactHeroMap" mapKey={detail.mapGuid ?? detail.mapName} name={mapName} />
-        <div className="phase6CompactResult">
-          <strong>{detail.resultLabel ?? "未知"}</strong>
-          <span>{resultEnglishLabel(detail.result)}</span>
-        </div>
-        <div className="phase6CompactHeroText">
-          <span>{mapName}</span>
-          <strong>{formatFinalScore(detail)}</strong>
-          <small>{detail.modeLabel ?? "-"} · {formatDetailDuration(detail.durationSec)} · {formatDetailStartTime(detail.beginTs)}</small>
-        </div>
-      </header>
+    <section className={`phase6CompactDetail ${detail.result ?? "pending"}`} aria-label="普通对局详情">
+      <MatchDetailHeader
+        resultLabel={detail.resultLabel ?? "未知结果"}
+        result={detail.result}
+        mapName={mapName}
+        modeLabel={detail.modeLabel ?? "未知模式"}
+        score={formatFinalScore(detail)}
+        duration={formatDetailDuration(detail.durationSec)}
+        startTime={formatDetailStartTime(detail.beginTs)}
+        {...navigation}
+      />
 
       <div className="phase6CompactDetailScroll">
-        <div className="phase6CompactFacts">
-          <CompactFact label="最终比分" value={formatFinalScore(detail)} />
-          <CompactFact label="游戏模式" value={detail.modeLabel ?? "-"} />
-          <CompactFact label="游戏时长" value={formatDetailDuration(detail.durationSec)} />
-          <CompactFact label="开始时间" value={formatDetailStartTime(detail.beginTs)} />
-        </div>
-
-        <div className="phase6CompactPerformance">
+        <section className="matchDetailPerformance" aria-labelledby="self-performance-title">
           <div>
-            <span className="phase6Eyebrow">对局表现</span>
-            <strong>评分与同队奖牌</strong>
+            <span className="phase6Eyebrow">个人摘要</span>
+            <h2 id="self-performance-title">本人表现</h2>
+            <p>评分与同队奖牌</p>
           </div>
           <MatchPerformanceBadges evaluation={detail.evaluation} teamAwards={detail.teamAwards} />
-        </div>
+        </section>
 
-        <div className="phase6CompactPlayers" aria-label="双方玩家数据">
-          <CompactTeam
-            title="队友"
-            tone="team"
-            players={detail.teammates.slice(0, 6)}
-          />
-          <div className="phase6CompactVs">VS</div>
-          <CompactTeam
-            title="对手"
-            tone="enemy"
-            players={detail.enemies.slice(0, 6)}
-          />
-        </div>
-        {compactPlayers.length === 0 && <div className="emptyState">该对局暂无玩家明细。</div>}
+        <section className="matchDetailTeamComparison" aria-labelledby="team-comparison-title">
+          <h2 id="team-comparison-title">队伍对比</h2>
+          <div className="matchDetailTeamTables">
+            <MatchTeamTable title="队友数据" tone="team" players={detail.teammates.slice(0, 6)} showPerks />
+            <MatchTeamTable title="对手数据" tone="enemy" players={detail.enemies.slice(0, 6)} showPerks />
+          </div>
+        </section>
       </div>
     </section>
   );
 }
 
-function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; loading: boolean }) {
+function CompactArenaDetail({
+  detail,
+  loading,
+  ...navigation
+}: { detail: MatchDetailView; loading: boolean } & MatchDetailNavigationProps) {
   const arena = detail.arenaDetail;
   const [selectedKey, setSelectedKey] = useState("summary");
   const [expandedCompactArenaPlayerKeys, setExpandedCompactArenaPlayerKeys] = useState<Set<string>>(() => new Set());
@@ -103,7 +96,10 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
       ? arena.summary
       : arena.rounds.find((round) => round.key === selectedKey) ?? arena.summary;
   return (
-    <section className={`phase6CompactDetail phase7CompactArenaDetail ${selected.result ?? detail.result ?? "pending"}`}>
+    <section
+      className={`phase6CompactDetail phase7CompactArenaDetail ${selected.result ?? detail.result ?? "pending"}`}
+      aria-label="角斗对局详情"
+    >
       <nav className="phase7ArenaSelector" aria-label="角斗回合切换">
         <button
           type="button"
@@ -125,201 +121,55 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
         ))}
       </nav>
 
-      <header className="phase6CompactHero">
-        <MapPreview className="phase6CompactHeroMap" mapKey={arenaHeaderMapKey(selected)} name={selected.mapName ?? "未知地图"} />
-        <div className="phase6CompactResult">
-          <strong>{selected.resultLabel ?? "未知"}</strong>
-          <span>{arenaResultSubLabel(selected.result ?? detail.result)}</span>
-        </div>
-        <div className="phase6CompactHeroText">
-          <span>{arenaHeaderTitle(selected)}</span>
-          <strong>{formatArenaScore(selected)}</strong>
-          <small>{formatDetailDuration(selected.durationSec)} / {formatDetailStartTime(selected.beginTs)}</small>
-        </div>
-      </header>
+      <MatchDetailHeader
+        resultLabel={selected.resultLabel ?? detail.resultLabel ?? "未知结果"}
+        result={selected.result ?? detail.result}
+        mapName={arenaHeaderTitle(selected)}
+        modeLabel={detail.modeLabel ?? "角斗竞技"}
+        score={formatArenaScore(selected)}
+        duration={formatDetailDuration(selected.durationSec)}
+        startTime={formatDetailStartTime(selected.beginTs)}
+        {...navigation}
+      />
 
       <div className="phase6CompactDetailScroll">
         {loading && <div className="emptyState">正在刷新角斗详情...</div>}
-        <div className="phase6CompactFacts">
-          <CompactFact label="比分" value={formatArenaScore(selected)} />
-          <CompactFact label="游戏时长" value={formatDetailDuration(selected.durationSec)} />
-          {selected.key !== "summary" && <CompactFact label="游戏模式" value={detail.modeLabel ?? "-"} />}
-          <CompactFact label="开始时间" value={formatDetailStartTime(selected.beginTs)} />
-        </div>
-
-        <div className="phase6CompactPlayers" aria-label="角斗双方玩家数据" key={selected.key}>
-          <CompactTeam
-            title="队友"
-            tone="team"
-            players={selected.teammates}
-            showPerks={false}
-            economyMode={selected.key === "summary" ? "final" : "round"}
-            expandedPlayerKeys={expandedCompactArenaPlayerKeys}
-            onTogglePlayer={toggleCompactArenaPlayer}
-          />
-          <div className="phase6CompactVs">VS</div>
-          <CompactTeam
-            title="对手"
-            tone="enemy"
-            players={selected.enemies}
-            showPerks={false}
-            economyMode={selected.key === "summary" ? "final" : "round"}
-            expandedPlayerKeys={expandedCompactArenaPlayerKeys}
-            onTogglePlayer={toggleCompactArenaPlayer}
-          />
-        </div>
-        {selected.teammates.length + selected.enemies.length === 0 && <div className="emptyState">该回合暂无玩家明细。</div>}
+        <section className="matchDetailTeamComparison" aria-labelledby="arena-team-comparison-title" key={selected.key}>
+          <h2 id="arena-team-comparison-title">队伍对比</h2>
+          <div className="matchDetailTeamTables">
+            <MatchTeamTable
+              title="队友数据"
+              tone="team"
+              players={selected.teammates}
+              showPerks={false}
+              expandedPlayerKeys={expandedCompactArenaPlayerKeys}
+              onTogglePlayer={toggleCompactArenaPlayer}
+              renderExpansion={(player) => (
+                <CompactArenaPlayerExpansion
+                  player={player}
+                  economyMode={selected.key === "summary" ? "final" : "round"}
+                />
+              )}
+            />
+            <MatchTeamTable
+              title="对手数据"
+              tone="enemy"
+              players={selected.enemies}
+              showPerks={false}
+              expandedPlayerKeys={expandedCompactArenaPlayerKeys}
+              onTogglePlayer={toggleCompactArenaPlayer}
+              renderExpansion={(player) => (
+                <CompactArenaPlayerExpansion
+                  player={player}
+                  economyMode={selected.key === "summary" ? "final" : "round"}
+                />
+              )}
+            />
+          </div>
+        </section>
       </div>
     </section>
   );
-}
-
-function CompactFact({ label, value }: { label: string; value: string }) {
-  return (
-    <span>
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </span>
-  );
-}
-
-function CompactTeam({
-  title,
-  players,
-  tone,
-  showPerks = true,
-  economyMode,
-  expandedPlayerKeys,
-  onTogglePlayer,
-}: {
-  title: string;
-  players: PlayerRow[];
-  tone: "team" | "enemy";
-  showPerks?: boolean;
-  economyMode?: "final" | "round";
-  expandedPlayerKeys?: ReadonlySet<string>;
-  onTogglePlayer?: (playerKey: string) => void;
-}) {
-  const highlights = playerHighlightMap(players);
-  return (
-    <section className={`phase6CompactTeam ${tone}`}>
-      <h3>{title}</h3>
-      <div className="phase6CompactPlayerRows">
-        {players.map((player, index) => {
-          const key = compactPlayerKey(player, index);
-          const expanded = expandedPlayerKeys?.has(key) ?? false;
-          return (
-            <div className="phase6CompactPlayerBlock" key={key}>
-              <CompactPlayerRow
-                player={player}
-                showPerks={showPerks}
-                highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()}
-                expanded={expanded}
-                onToggle={onTogglePlayer ? () => onTogglePlayer(key) : undefined}
-              />
-              {expanded && economyMode && <CompactArenaPlayerExpansion player={player} economyMode={economyMode} />}
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function CompactPlayerRow({
-  player,
-  showPerks = true,
-  highlights,
-  expanded = false,
-  onToggle,
-}: {
-  player: PlayerRow;
-  showPerks?: boolean;
-  highlights: Set<HighlightMetric>;
-  expanded?: boolean;
-  onToggle?: () => void;
-}) {
-  const rankIcon = arenaRankAssetUrl(player.rankKey);
-  const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
-  const perks = showPerks
-    ? player.perks.flatMap((perk) => {
-        const info = resolvePerkInfo(perk.guid);
-        return info ? [info] : [];
-      })
-    : [];
-  const rowContent = (
-    <>
-      <span className="phase6CompactAvatarPlate">
-        <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
-      </span>
-      <span className="phase6CompactPlayerName">
-        <span className="phase7CompactPlayerNameLine">
-          <strong>{player.name}</strong>
-          {(rankIcon || rankTierLabel) && (
-            <small className="phase7CompactRankBadge">
-              {rankIcon && <img src={rankIcon} alt="" />}
-              {rankTierLabel}
-            </small>
-          )}
-        </span>
-        {showPerks && (
-          <span className="phase6CompactPerkStrip" aria-label="威能">
-            {perks.length > 0 ? (
-              perks.slice(0, 2).map((perk) => (
-                <span className="phase6PerkTooltip" key={perk.id}>
-                  <img className="phase6CompactPerkIcon" src={perk.iconUrl ?? undefined} alt={perk.name} />
-                  <span className="phase6PerkTooltipPanel" role="tooltip">
-                    <strong>{perk.name}</strong>
-                    <small>{perk.description ?? "暂无释义"}</small>
-                  </span>
-                </span>
-              ))
-            ) : (
-              <span className="phase6CompactPerkEmpty">未记录威能</span>
-            )}
-          </span>
-        )}
-      </span>
-      <span className="phase6CompactPlayerMetric">
-        <small>K/A/D</small>
-        <strong>
-          <CompactHighlight value={player.kills} active={highlights.has("kills")} />/{player.assists}/{player.deaths}
-        </strong>
-      </span>
-      <span className="phase6CompactPlayerMetric phase6CompactPlayerMetricWide">
-        <small>伤/疗/挡</small>
-        <strong>
-          <CompactHighlight value={player.damage} active={highlights.has("damage")} />/
-          <CompactHighlight value={player.healing} active={highlights.has("healing")} />/
-          <CompactHighlight value={player.mitigation} active={highlights.has("mitigation")} />
-        </strong>
-      </span>
-      <span className="phase6CompactPlayerMetric">
-        <small>承伤/受疗</small>
-        <strong>{player.damageTaken}/{player.healingTaken}</strong>
-      </span>
-      <span className="phase6CompactPlayerMetric phase6CompactPlayerMetricFinal">
-        <small>最后一击</small>
-        <strong>{player.finalHits}</strong>
-      </span>
-    </>
-  );
-
-  if (onToggle) {
-    return (
-      <button
-        type="button"
-        className="phase6CompactPlayerRow phase7CompactPlayerExpandable"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-label={`${player.name}${expanded ? "收起角斗详情" : "展开角斗详情"}`}
-      >
-        {rowContent}
-      </button>
-    );
-  }
-
-  return <article className="phase6CompactPlayerRow">{rowContent}</article>;
 }
 
 function CompactArenaPlayerExpansion({ player, economyMode }: { player: PlayerRow; economyMode: "final" | "round" }) {
@@ -383,12 +233,4 @@ function formatCompactArenaEconomy(player: PlayerRow, mode: "final" | "round"): 
   if (player.endWorth !== null) return String(player.endWorth);
   if (player.worth !== null) return String(player.worth);
   return "-";
-}
-
-function CompactHighlight({ value, active }: { value: number; active: boolean }) {
-  return <em className={active ? "phase6StatHighlight" : ""}>{value}</em>;
-}
-
-function compactPlayerKey(player: PlayerRow, index: number) {
-  return `${player.side}-${player.bnetId || player.name}-${player.heroGuid || player.heroName}-${index}`;
 }

@@ -1,8 +1,9 @@
-import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
 import { resolveHeroDisplayName, resolveMapDisplayName } from "../shared/assets";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import { HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import {
@@ -56,6 +57,7 @@ export function RankingPage() {
   const [ranking, setRanking] = useState<RankingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryRequest, setRetryRequest] = useState(0);
   const rankingRequestGuard = useRef(createLatestRankingRequestGuard());
 
   useEffect(() => {
@@ -90,7 +92,7 @@ export function RankingPage() {
       });
 
     return () => rankingRequestGuard.current.invalidate(request);
-  }, [selectedSeason]);
+  }, [selectedSeason, retryRequest]);
 
   const rows = useMemo(() => {
     const source = (tab === "maps" ? ranking?.maps ?? [] : ranking?.heroes ?? []).map((row) => ({
@@ -139,19 +141,35 @@ export function RankingPage() {
 
   return (
     <section className="workspace rankingWorkspace phase6RankingWorkspace">
-      {error && (
-        <div className="errorBanner phase6RecoverableError">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
+      <PageHeader
+        title="英雄与地图排行"
+        description={tab === "heroes" ? "按本地赛季汇总英雄表现" : "按本地赛季汇总地图表现"}
+        actions={(
+          <PageSeasonSelect
+            value={selectedSeason}
+            seasons={availableSeasons}
+            disabled={availableSeasons.length === 0}
+            onChange={(season) => season !== undefined && changeSeason(season)}
+          />
+        )}
+      />
 
       <div className="rankingToolbar phase6RankingToolbar">
-        <div className="segmentedControl phase6SegmentedControl">
-          <button type="button" className={tab === "heroes" ? "active" : ""} onClick={() => switchTab("heroes")}>
+        <div className="segmentedControl phase6SegmentedControl" role="group" aria-label="排行类型">
+          <button
+            type="button"
+            className={tab === "heroes" ? "active" : ""}
+            aria-pressed={tab === "heroes"}
+            onClick={() => switchTab("heroes")}
+          >
             英雄排行
           </button>
-          <button type="button" className={tab === "maps" ? "active" : ""} onClick={() => switchTab("maps")}>
+          <button
+            type="button"
+            className={tab === "maps" ? "active" : ""}
+            aria-pressed={tab === "maps"}
+            onClick={() => switchTab("maps")}
+          >
             地图排行
           </button>
         </div>
@@ -159,28 +177,25 @@ export function RankingPage() {
           <Search size={16} />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "maps" ? "搜索地图或英雄" : "搜索英雄"} />
         </label>
-        <label className="seasonSelect phase8SeasonSelect">
-          <span>赛季</span>
-          <select
-            value={selectedSeason ?? ""}
-            disabled={availableSeasons.length === 0}
-            onChange={(event) => changeSeason(Number(event.target.value))}
-          >
-            {availableSeasons.map((season) => (
-              <option key={season} value={season}>
-                S{season}
-              </option>
-            ))}
-          </select>
-        </label>
         <span className="phase6RankingCount">
-          {selectedSeason ? `S${selectedSeason}` : "本地赛季"} · {sourceCount} 项 · 当前 {rows.length} 项
+          {sourceCount} 项 · 当前 {rows.length} 项
         </span>
       </div>
 
-      {loading && <div className="emptyState">正在计算排行...</div>}
-      {!loading && rows.length === 0 && <div className="emptyState">本地赛季数据不足，暂无排行。</div>}
-      {!loading && rows.length > 0 && <RankingTable rows={rows} tab={tab} sort={sort} onSort={changeSort} />}
+      {error ? (
+        <PageErrorState message={error} onRetry={() => setRetryRequest((value) => value + 1)} />
+      ) : loading ? (
+        <PageLoadingState message="正在计算排行..." />
+      ) : rows.length === 0 ? (
+        <PageEmptyState
+          title="暂无排行"
+          description={search ? "没有与当前搜索匹配的条目。" : "本地赛季数据不足，暂无排行。"}
+          actionLabel={search ? "清除搜索" : "重新加载"}
+          onAction={() => search ? setSearch("") : setRetryRequest((value) => value + 1)}
+        />
+      ) : (
+        <RankingTable rows={rows} tab={tab} sort={sort} onSort={changeSort} />
+      )}
     </section>
   );
 }
@@ -204,18 +219,29 @@ function RankingTable({
 }) {
   const sortKeys = tab === "maps" ? mapSortKeys : heroSortKeys;
   return (
-    <div className={`rankingTable phase6RankingTable ${tab}`}>
-      <div className="rankingHead phase6RankingHead">
-        <span>{tab === "maps" ? "地图" : "英雄"}</span>
-        {tab === "maps" && <span>最佳英雄</span>}
+    <div
+      className={`rankingTable phase6RankingTable ${tab}`}
+      role="table"
+      aria-label={tab === "maps" ? "地图排行" : "英雄排行"}
+      aria-rowcount={rows.length + 1}
+      aria-colcount={tab === "maps" ? 7 : 6}
+    >
+      <div className="rankingHead phase6RankingHead" role="row" aria-rowindex={1}>
+        <span role="columnheader">{tab === "maps" ? "地图" : "英雄"}</span>
+        {tab === "maps" && <span role="columnheader">最佳英雄</span>}
         {sortKeys.map((key) => (
           <SortButton key={key} sortKey={key} activeSort={sort} tab={tab} onSort={onSort} />
         ))}
-        <span>{tab === "maps" ? "地图评分" : "英雄评分"}</span>
+        <span role="columnheader">{tab === "maps" ? "地图评分" : "英雄评分"}</span>
       </div>
       {rows.map((row, index) => (
-        <div className="rankingLine phase6RankingLine" key={`${tab}-${row.key}`}>
-          <span className="phase6RankName">
+        <div
+          className="rankingLine phase6RankingLine"
+          key={`${tab}-${row.key}`}
+          role="row"
+          aria-rowindex={index + 2}
+        >
+          <span className="phase6RankName" role="cell">
             <b>{index + 1}</b>
             {tab === "maps" ? (
               <MapPreview mapKey={row.key || row.name} name={row.name} className="phase6RankMapPreview" />
@@ -225,11 +251,11 @@ function RankingTable({
             <strong>{row.name}</strong>
           </span>
           {tab === "maps" && <BestHeroCell row={row} />}
-          <span>{row.matches}</span>
-          <span>{formatWinRate(row.winRate)}</span>
-          <span>{formatPlayTimeHours(row.playTimeHours)}</span>
-          <span>{formatKda(row.kda)}</span>
-          <span>{formatRating(row.rating)}</span>
+          <span role="cell">{row.matches}</span>
+          <span role="cell">{formatWinRate(row.winRate)}</span>
+          <span role="cell">{formatPlayTimeHours(row.playTimeHours)}</span>
+          <span role="cell">{formatKda(row.kda)}</span>
+          <span role="cell">{formatRating(row.rating)}</span>
         </div>
       ))}
     </div>
@@ -248,25 +274,36 @@ function SortButton({
   onSort: (key: RankingSortKey) => void;
 }) {
   const label = sortKey === "rating" && tab === "maps" ? "地图评分" : sortLabels[sortKey];
+  const active = activeSort.key === sortKey;
+  const currentDirection = activeSort.direction === "desc" ? "降序" : "升序";
+  const nextDirection = activeSort.direction === "desc" ? "升序" : "降序";
   return (
-    <button
-      type="button"
-      className={activeSort.key === sortKey ? "active" : ""}
-      onClick={() => onSort(sortKey)}
-      title={`按${label}排序`}
+    <span
+      className="rankingSortHeader"
+      data-sort-key={sortKey}
+      role="columnheader"
+      aria-sort={active ? activeSort.direction === "desc" ? "descending" : "ascending" : undefined}
     >
-      {label}
-      {activeSort.key === sortKey ? activeSort.direction === "desc" ? <ArrowDown size={14} /> : <ArrowUp size={14} /> : <ArrowUpDown size={14} />}
-    </button>
+      <button
+        type="button"
+        className={active ? "active" : ""}
+        onClick={() => onSort(sortKey)}
+        aria-label={active ? `${label}，当前${currentDirection}，点击切换为${nextDirection}` : `${label}，点击排序`}
+        title={`按${label}排序`}
+      >
+        {label}
+        {active ? activeSort.direction === "desc" ? <ArrowDown size={14} aria-hidden="true" /> : <ArrowUp size={14} aria-hidden="true" /> : <ArrowUpDown size={14} aria-hidden="true" />}
+      </button>
+    </span>
   );
 }
 
 function BestHeroCell({ row }: { row: RankingRow }) {
   if (!row.bestHeroName) {
-    return <span className="phase6RankBestHero">-</span>;
+    return <span className="phase6RankBestHero" role="cell">-</span>;
   }
   return (
-    <span className="phase6RankBestHero">
+    <span className="phase6RankBestHero" role="cell">
       <HeroAvatar heroKey={row.bestHeroGuid || row.bestHeroName} name={row.bestHeroName} />
       <strong>{row.bestHeroName}</strong>
     </span>

@@ -13,14 +13,12 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   cancelDashenLogin,
   checkAppUpdate,
   confirmLoginTargetSwitch,
   getOnboardingStatus,
-  getPersonalSeasonReview,
   getPlayerProfile,
   getLoginTargetStatus,
   clearPlayerTarget,
@@ -30,26 +28,22 @@ import {
   startDashenLogin,
   syncSeason,
 } from "../shared/api";
-import { achievementBadgeUrl } from "../shared/assets";
-import { GlassPanel, HeroAvatar } from "../shared/phase6Components";
 import { DataFact, formatTimestamp, SeasonStatusCard } from "../features/command-center/SeasonHealthPanel";
 import { QaRegion } from "../shared/QaFeedbackLayer";
-import { activeBadgeLevel, activeTopAchievements, romanLevels } from "../shared/reviewAchievements";
-import type { ReviewAchievement } from "../shared/reviewAchievements";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
-import type { CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PersonalSeasonReview, PlayerProfile, SyncProgress } from "../shared/types";
+import { PageHeader } from "../shared/page-shell";
+import type { CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
 
 type DashboardSnapshot = {
   status: OnboardingStatus;
   profile: PlayerProfile;
-  review: PersonalSeasonReview | null;
   targetStatus: LoginTargetStatus;
 };
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
-const PROFILE_REVIEW_SEASON = 22;
+const DASHBOARD_SEASON = 22;
 const dashboardCache = new Map<number, DashboardSnapshot>();
 
 export function normalizeLoginTargetName(value: string) {
@@ -63,7 +57,6 @@ export function isCurrentDashboardRequest(requestGeneration: number, currentGene
 export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
-  const [review, setReview] = useState<PersonalSeasonReview | null>(null);
   const [targetStatus, setTargetStatus] = useState<LoginTargetStatus | null>(null);
   const [seasonInput, setSeasonInput] = useState("23");
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
@@ -129,7 +122,7 @@ export function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    const cached = dashboardCache.get(PROFILE_REVIEW_SEASON);
+    const cached = dashboardCache.get(DASHBOARD_SEASON);
     if (cached) {
       applyDashboardSnapshot(cached);
     }
@@ -142,17 +135,16 @@ export function OnboardingPage() {
       setError(null);
     }
     try {
-      const [nextStatus, nextProfile, nextReview, nextTargetStatus] = await Promise.all([
+      const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all([
         getOnboardingStatus(),
         getPlayerProfile(),
-        getPersonalSeasonReview(PROFILE_REVIEW_SEASON).catch(() => null),
         getLoginTargetStatus(),
       ]);
       if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
         return;
       }
-      const snapshot = { status: nextStatus, profile: nextProfile, review: nextReview, targetStatus: nextTargetStatus };
-      dashboardCache.set(PROFILE_REVIEW_SEASON, snapshot);
+      const snapshot = { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
+      dashboardCache.set(DASHBOARD_SEASON, snapshot);
       applyDashboardSnapshot(snapshot);
     } catch (err) {
       if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
@@ -164,7 +156,6 @@ export function OnboardingPage() {
   function applyDashboardSnapshot(snapshot: DashboardSnapshot) {
     setStatus(snapshot.status);
     setProfile(snapshot.profile);
-    setReview(snapshot.review);
     setTargetStatus(snapshot.targetStatus);
   }
 
@@ -181,7 +172,7 @@ export function OnboardingPage() {
   }
 
   function invalidateDashboardCache() {
-    dashboardCache.delete(PROFILE_REVIEW_SEASON);
+    dashboardCache.delete(DASHBOARD_SEASON);
     dashboardRequestGenerationRef.current += 1;
   }
 
@@ -441,8 +432,6 @@ export function OnboardingPage() {
         coveragePercent: 0,
       }]
     : [];
-  const commonHeroes = review?.heroPool.mainHeroes.slice(0, 3) ?? [];
-  const topAchievements = review ? activeTopAchievements(review, 3) : [];
 
   useEffect(() => {
     if (!primaryTargetState) {
@@ -464,6 +453,21 @@ export function OnboardingPage() {
 
   return (
     <section className="workspace onboardingWorkspace phase6CommandCenter">
+      <PageHeader
+        title="指挥台"
+        description="管理当前登录账号、赛季同步与本地数据状态"
+        actions={(
+          <>
+            <button className="ghostButton" type="button" onClick={runUpdateCheck} disabled={checkingUpdate}>
+              <Download size={18} />
+              {checkingUpdate ? "检查中" : "检查更新"}
+            </button>
+            <button className="primaryButton" type="button" onClick={() => runSeasonSync(selectedSeason)} disabled={!Number.isSafeInteger(selectedSeason) || selectedSeason <= 0 || !credentialReady || !targetStatus?.syncAllowed || accountOperationBusy || syncingSeason !== null}>
+              {syncingSeason === selectedSeason ? "同步中…" : `同步 S${seasonInput}`}
+            </button>
+          </>
+        )}
+      />
       {(error || notice) && (
         <div
           className={`errorBanner inline phase6RecoverableError ${notice && !error ? "good" : ""}`}
@@ -475,83 +479,23 @@ export function OnboardingPage() {
         </div>
       )}
 
+      <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
+        <DataFact label="登录状态" value={credentialReady ? "已登录" : "待登录"} tone={credentialReady ? "good" : "warn"} />
+        <DataFact label="本地对局" value={`${presetMatches} 场`} tone={presetMatches > 0 ? "good" : "warn"} />
+        <DataFact label="覆盖率" value={`${coveragePercent}%`} tone={coveragePercent >= 80 ? "good" : "warn"} />
+        <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
+      </div>
+
       <QaRegion id="CMD-PROFILE" className="phase6QaBlockRegion">
-        <GlassPanel className="phase6PlayerPass" tone="solid">
-          <div className="phase6PlayerPassRail">
-            <div className="phase6ProfileAvatar">
-              {profile?.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <UserRound size={42} />}
+        <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
+          <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
+            <div className="commandCenterSectionHeading">
+              <div>
+                <span className="phase6Eyebrow">主要操作</span>
+                <h2 id="command-center-sync-title">赛季数据与同步</h2>
+              </div>
+              <strong>{readableSyncProgress(syncProgress)}</strong>
             </div>
-          </div>
-          <div className="phase6PassIdentity">
-            <h2>{displayName}</h2>
-            <p>{profile?.title ?? "暂无头衔"}</p>
-            <div className="phase6ProfileInlineStats" aria-label="账号摘要">
-              <ProfileInlineStat label="赞赏等级" value={profile?.endorsementLevel ?? "-"} />
-              <ProfileInlineStat label="游戏时间" value={profile?.playTimeHours != null ? `${profile.playTimeHours.toFixed(1)} 小时` : "-"} />
-            </div>
-          </div>
-          <div className="phase6ProfileShowcase" aria-label="常用英雄与已激活成就">
-            <section className="phase6ProfileShowcaseGroup" aria-label="常用英雄">
-              <h3>常用英雄</h3>
-              <div className="phase6ProfileHeroStrip">
-                {Array.from({ length: 3 }).map((_, index) => {
-                  const hero = commonHeroes[index];
-                  return (
-                    <div className="phase6ProfileShowcaseItem" key={hero ? `${hero.hero}-${index}` : `empty-hero-${index}`}>
-                      {hero ? <HeroAvatar heroKey={hero.hero} name={hero.hero} size="sm" /> : <span className="phase6ProfileHeroEmpty" aria-hidden="true" />}
-                      <span className="phase6ProfileHeroName">{hero?.hero ?? "--"}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-            <section className="phase6ProfileShowcaseGroup phase6ProfileAchievementGroup phase6ProfileAchievementInset" aria-label="成就展示">
-              <h3>成就展示</h3>
-              <div className="phase6ProfileAchievementBadges">
-                {Array.from({ length: 3 }).map((_, index) => {
-                  const achievement = topAchievements[index];
-                  return (
-                    <div className="phase6ProfileShowcaseItem" key={achievement?.key ?? `empty-achievement-${index}`}>
-                      {achievement ? <ProfileAchievementBadge achievement={achievement} /> : <span className="phase6ProfileAchievementEmpty" aria-hidden="true" />}
-                      <span className="phase6ProfileAchievementName">{achievement?.title ?? "--"}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          </div>
-
-          <div className="phase6UnifiedCommandPanel">
-            <section className="phase6CoverageMeter phase6DataCoverageCard" aria-label="数据覆盖度">
-              <div className="phase6CoveragePrimary">
-                <div>
-                  <span className="phase6Eyebrow">数据覆盖度</span>
-                  <strong>{coveragePercent}%</strong>
-                  <p>{presetMatches > 0 ? `${detailMatches}/${presetMatches} 场详情已就绪` : "暂无对局数据"}</p>
-                </div>
-                <div className="phase6DataFacts" aria-label="数据摘要">
-                  <DataFact label="登录凭证" value={credentialReady ? "可用" : "待登录"} tone={credentialReady ? "good" : "warn"} />
-                  <DataFact label="本地对局" value={`${presetMatches} 场`} tone={presetMatches > 0 ? "good" : "warn"} />
-                  <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
-                </div>
-              </div>
-              <div className="phase6CoverageTrack" aria-hidden="true">
-                <span style={{ width: `${coveragePercent}%` }} />
-              </div>
-              <div className="phase6CoverageFooter">
-                <span>{canUseData ? "数据已就绪" : "等待数据"}</span>
-                <strong>{readableSyncProgress(syncProgress)}</strong>
-              </div>
-              <div className="phase6DataHealthGrid" aria-label="数据检查">
-                <HealthItem label={credentialReady ? "登录凭证可用" : "登录凭证待登录"} ok={credentialReady} />
-                <HealthItem label={status?.health.readable ? "本地数据库可用" : "本地数据库待检查"} ok={Boolean(status?.health.readable)} />
-                <HealthItem label={presetMatches > 0 ? "本地赛季有数据" : "本地赛季等待数据"} ok={presetMatches > 0} />
-                <HealthItem label={presetMatches > 0 && detailMatches >= presetMatches ? "对局详情完整" : "对局详情待补全"} ok={presetMatches > 0 && detailMatches >= presetMatches} />
-                <HealthItem label="没有待处理失败" ok={!warnings.length} />
-              </div>
-            </section>
-
-            <section className="phase6UnifiedActions" aria-label="设置选项">
               <section className="syncTargetStrip" aria-label="当前目标玩家">
                 <div className="phase8TargetPlayerSummary">
                   <span className="phase6Eyebrow">当前目标玩家</span>
@@ -615,8 +559,37 @@ export function OnboardingPage() {
                   ))}
                 </div>
               </section>
+          </section>
 
-              <div className="phase6SettingsLauncherGrid syncSecondaryActions">
+          <aside className="commandCenterAccountPanel" aria-labelledby="command-center-account-title">
+            <div className="commandCenterIdentity">
+              <div className="phase6ProfileAvatar">
+                {profile?.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <UserRound size={32} />}
+              </div>
+              <div>
+                <span className="phase6Eyebrow">当前账号与健康</span>
+                <h2 id="command-center-account-title">{displayName}</h2>
+                <p>{profile?.title ?? "暂无头衔"}</p>
+              </div>
+            </div>
+            <div className="commandCenterAccountFacts">
+              <ProfileInlineStat label="赞赏等级" value={profile?.endorsementLevel ?? "-"} />
+              <ProfileInlineStat label="游戏时间" value={profile?.playTimeHours != null ? `${profile.playTimeHours.toFixed(1)} 小时` : "-"} />
+            </div>
+            <section className="phase6CoverageMeter phase6DataCoverageCard" aria-label="数据覆盖度">
+              <div className="phase6CoveragePrimary">
+                <div><span className="phase6Eyebrow">数据覆盖度</span><strong>{coveragePercent}%</strong></div>
+              </div>
+              <div className="phase6CoverageTrack" aria-hidden="true"><span style={{ width: `${coveragePercent}%` }} /></div>
+              <div className="phase6CoverageFooter"><span>{canUseData ? "数据已就绪" : "等待数据"}</span><strong>{detailMatches}/{presetMatches} 场详情</strong></div>
+            </section>
+            <div className="phase6DataHealthGrid" aria-label="数据检查">
+              <HealthItem label={credentialReady ? "登录凭证可用" : "登录凭证待登录"} ok={credentialReady} />
+              <HealthItem label={status?.health.readable ? "本地数据库可用" : "本地数据库待检查"} ok={Boolean(status?.health.readable)} />
+              <HealthItem label={presetMatches > 0 ? "本地赛季有数据" : "本地赛季等待数据"} ok={presetMatches > 0} />
+              <HealthItem label="没有待处理失败" ok={!warnings.length} />
+            </div>
+            <div className="commandCenterAccountActions">
                 {!hasTargetPrimaryAction && (
                   <button className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
                     <LogIn size={18} />
@@ -629,22 +602,27 @@ export function OnboardingPage() {
                     {cancellingLogin ? "取消中…" : "取消"}
                   </button>
                 )}
-                <button className="ghostButton" type="button" onClick={runUpdateCheck} disabled={checkingUpdate}>
-                  <Download size={18} />
-                  {checkingUpdate ? "检查中" : "检查更新"}
-                </button>
-                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}>
-                  <LogOut size={18} />
-                  {loggingOut ? "退出中…" : "退出登录"}
-                </button>
+            </div>
+          </aside>
+        </div>
+
+        <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
+          <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>
+          <div className="phase6SettingsLauncherGrid syncSecondaryActions">
                 <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setNotice("版本号入口后续提供")} />
                 <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => setNotice("日志文件入口后续提供")} />
                 <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => setNotice("数据存放路径入口后续提供")} />
                 <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => setNotice("Github地址入口后续提供")} />
-              </div>
-            </section>
           </div>
-        </GlassPanel>
+        </section>
+
+        <section className="commandCenterDangerZone" aria-label="账号危险操作">
+          <div><strong>退出当前账号</strong><p>退出后会清除本地登录凭证，但不会删除已经导入的赛季数据。</p></div>
+          <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}>
+            <LogOut size={18} />
+            {loggingOut ? "退出中…" : "退出登录"}
+          </button>
+        </section>
       </QaRegion>
     </section>
   );
@@ -660,20 +638,7 @@ function ProfileInlineStat({ label, value }: { label: string; value: string | nu
   );
 }
 
-function ProfileAchievementBadge({ achievement }: { achievement: ReviewAchievement }) {
-  const activeLevel = activeBadgeLevel(achievement);
-
-  return (
-    <img
-      className="phase6ProfileAchievementToken"
-      src={achievementBadgeUrl(achievement.key, activeLevel)}
-      alt={`${achievement.title} ${romanLevels[activeLevel - 1]}`}
-      title={`${achievement.title} ${romanLevels[activeLevel - 1]}`}
-    />
-  );
-}
-
-function SettingsPlaceholder({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+function SettingsPlaceholder({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
     <button className="ghostButton phase6SettingsPlaceholderAction" type="button" onClick={onClick}>
       {icon}

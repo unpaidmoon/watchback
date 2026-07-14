@@ -6,6 +6,7 @@ export type MatchesPageCache = {
   options: FilterOptions;
   filters: MatchFilters;
   matches: MatchSummary[];
+  selectedMatchId: string | null;
   loadedFilterKey: string;
   scrollTop: number;
   scrollAnchor: MatchScrollAnchor | null;
@@ -26,20 +27,27 @@ export type MatchScrollAnchorCandidate = {
 const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"];
 
 let matchesPageCache: MatchesPageCache | null = null;
-let preloadPromise: Promise<MatchesPageCache> | null = null;
-let preloadFilterKey = "";
+let cacheGeneration = 0;
+let latestCacheWriteId = 0;
+const preloadPromises = new Map<string, Promise<MatchesPageCache>>();
 
 export function getMatchesPageCache() {
   return matchesPageCache;
 }
 
 export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
-  matchesPageCache = {
+  matchesPageCache = createMatchesPageCache(patch);
+  return matchesPageCache;
+}
+
+function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
+  return {
     overview: null,
     summary: null,
     options: { seasons: [], heroes: [], maps: [], results: [], modes: [] },
     filters: {},
     matches: [],
+    selectedMatchId: null,
     loadedFilterKey: "",
     scrollTop: 0,
     scrollAnchor: null,
@@ -47,13 +55,12 @@ export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
     ...matchesPageCache,
     ...patch,
   };
-  return matchesPageCache;
 }
 
 export function clearMatchesPageCache() {
+  cacheGeneration += 1;
   matchesPageCache = null;
-  preloadPromise = null;
-  preloadFilterKey = "";
+  preloadPromises.clear();
 }
 
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {
@@ -65,10 +72,80 @@ export function chooseInitialMatchFilters(urlFilters: MatchFilters, cachedFilter
   return cachedFilters ?? urlFilters;
 }
 
+export function chooseInitialMatchId(
+  urlMatchId: string | null,
+  cachedMatchId: string | null | undefined,
+  canHydrateCache: boolean,
+) {
+  return urlMatchId ?? (canHydrateCache ? cachedMatchId ?? null : null);
+}
+
+export function chooseMatchesPageNavigationState(
+  urlFilters: MatchFilters,
+  urlMatchId: string | null,
+  cache: MatchesPageCache | null,
+  hasExplicitFilters: boolean,
+) {
+  const filters = chooseInitialMatchFilters(urlFilters, cache?.filters, hasExplicitFilters);
+  const canHydrateCache = canHydrateMatchesPageCache(cache, filters, hasExplicitFilters);
+  return {
+    filters,
+    selectedMatchId: chooseInitialMatchId(urlMatchId, cache?.selectedMatchId, canHydrateCache),
+    canHydrateCache,
+  };
+}
+
+export function consumeMatchesSearchParamsNavigation(
+  currentSearchParamsKey: string,
+  lastWrittenSearchParamsKey: string | null,
+) {
+  return {
+    shouldApplyNavigation: currentSearchParamsKey !== lastWrittenSearchParamsKey,
+    nextLastWrittenSearchParamsKey: null,
+  };
+}
+
+export function chooseMatchIdForLoadedMatches(
+  selectedMatchId: string | null,
+  matches: Array<{ matchId: string }>,
+  isCurrentFilterLoaded: boolean,
+) {
+  if (!isCurrentFilterLoaded) return selectedMatchId;
+  if (matches.length === 0) return null;
+  if (selectedMatchId && matches.some((match) => match.matchId === selectedMatchId)) return selectedMatchId;
+  return matches[0].matchId;
+}
+
+export function isLatestMatchRequest(requestId: number, latestRequestId: number) {
+  return requestId === latestRequestId;
+}
+
+export function canCommitMatchTimelineRequest(
+  requestId: number,
+  latestRequestId: number,
+  requestedFilterKey: string,
+  currentFilterKey: string,
+) {
+  return isLatestMatchRequest(requestId, latestRequestId) && requestedFilterKey === currentFilterKey;
+}
+
+export function shouldLoadMatchesForFilter(
+  currentFilterKey: string,
+  loadedFilterKey: string,
+  initialHydrationFilterKey: string | null,
+) {
+  if (currentFilterKey === loadedFilterKey) return false;
+  return initialHydrationFilterKey !== currentFilterKey;
+}
+
+export function isValidMatchesPageCacheSnapshot(cache: MatchesPageCache | null): cache is MatchesPageCache {
+  return cache !== null && cache.hasLoaded && cache.loadedFilterKey !== "" && cache.loadedFilterKey === matchFiltersKey(cache.filters);
+}
+
 export function canHydrateMatchesPageCache(cache: MatchesPageCache | null, filters: MatchFilters, hasExplicitFilters: boolean) {
-  if (!cache?.hasLoaded) return false;
+  if (!isValidMatchesPageCacheSnapshot(cache)) return false;
   if (!hasExplicitFilters) return true;
-  return cache.loadedFilterKey !== "" && cache.loadedFilterKey === matchFiltersKey(filters);
+  return cache.loadedFilterKey === matchFiltersKey(filters);
 }
 
 export function selectMatchScrollAnchor(candidates: MatchScrollAnchorCandidate[], containerTop: number): MatchScrollAnchor | null {
@@ -112,30 +189,42 @@ export type MatchesPagePreloadLoaders = {
   listMatchTimeline: (filters: MatchFilters) => Promise<MatchSummary[]>;
 };
 
-export function preloadMatchesPageCache(loaders: MatchesPagePreloadLoaders, filters: MatchFilters = {}) {
+export function preloadMatchesPageCache(
+  loaders: MatchesPagePreloadLoaders,
+  filters: MatchFilters = {},
+  options: { cacheResult?: boolean } = {},
+) {
   const filterKey = matchFiltersKey(filters);
-  if (matchesPageCache?.hasLoaded && matchesPageCache.loadedFilterKey === filterKey) {
-    return Promise.resolve(matchesPageCache);
+  const preloadKey = `${filterKey}:${options.cacheResult === false ? "detached" : "cache"}`;
+  const cache = matchesPageCache;
+  if (isValidMatchesPageCacheSnapshot(cache) && cache.loadedFilterKey === filterKey) {
+    return Promise.resolve(cache);
   }
-  if (preloadPromise && preloadFilterKey === filterKey) return preloadPromise;
+  const pendingPreload = preloadPromises.get(preloadKey);
+  if (pendingPreload) return pendingPreload;
 
-  preloadFilterKey = filterKey;
+  const preloadGeneration = cacheGeneration;
+  const cacheWriteId = options.cacheResult === false ? null : ++latestCacheWriteId;
+  let preloadPromise!: Promise<MatchesPageCache>;
   preloadPromise = Promise.all([loaders.getOverview(), loaders.listMatchFilters(), loaders.listMatchTimeline(filters)])
-    .then(([overview, options, matches]) =>
-      updateMatchesPageCache({
+    .then(([overview, filterOptions, matches]) => {
+      const snapshot = createMatchesPageCache({
         overview,
         summary: overview.importSummary,
-        options,
+        options: filterOptions,
         filters,
         matches,
         loadedFilterKey: filterKey,
         hasLoaded: true,
-      }),
-    )
+      });
+      const canCacheResult =
+        cacheWriteId !== null && preloadGeneration === cacheGeneration && cacheWriteId === latestCacheWriteId;
+      return canCacheResult ? updateMatchesPageCache(snapshot) : snapshot;
+    })
     .finally(() => {
-      preloadPromise = null;
-      preloadFilterKey = "";
+      if (preloadPromises.get(preloadKey) === preloadPromise) preloadPromises.delete(preloadKey);
     });
 
+  preloadPromises.set(preloadKey, preloadPromise);
   return preloadPromise;
 }

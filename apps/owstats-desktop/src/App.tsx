@@ -1,5 +1,4 @@
-import { Bell, CircleDot, Sparkles } from "lucide-react";
-import { useEffect } from "react";
+import { CircleDot, Sparkles } from "lucide-react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { FriendAnalyticsPage } from "./pages/FriendAnalyticsPage";
 import { CareerMmrPage } from "./pages/CareerMmrPage";
@@ -11,52 +10,46 @@ import { Phase6StyleBoardPage } from "./pages/Phase6StyleBoardPage";
 import { PersonalReviewPage } from "./pages/PersonalReviewPage";
 import { RankingPage } from "./pages/RankingPage";
 import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
-import { StatusBadge } from "./shared/phase6Components";
+import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
-import { preloadDefaultMatchesPage } from "./shared/matchesPagePreload";
 
 export function App() {
-  useEffect(() => {
-    void preloadDefaultMatchesPage().catch(() => undefined);
-  }, []);
-
   return (
     <QaFeedbackProvider>
-      <main className="appShell phase6ProductShell">
-        <header className="phase6ProductTopBar">
-          <div className="phase6ProductBrand">
+      <RouteFocusManager />
+      <main className="appFrame appShell phase6ProductShell">
+        <header className="appTopBar phase6ProductTopBar">
+          <div className="appBrand phase6ProductBrand">
             <span className="phase6ProductLogo">
               <Sparkles size={18} />
             </span>
             <div>
-              <h1>OWStatsLocal</h1>
+              <strong className="appBrandName">OWStatsLocal</strong>
               <p>本地优先的守望先锋战绩工作台</p>
             </div>
           </div>
 
           <QaRegion id="NAV-CAPSULE" className="phase6QaInlineRegion">
-            <nav className="phase6ProductNav" aria-label="主导航">
+            <nav className="appNav phase6ProductNav" aria-label="主导航">
               {phase6NavItems.map((item) => (
-                <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "active" : "")} title={item.title}>
+                <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "appNavLink active" : "appNavLink")} title={item.title}>
                   {item.label}
                 </NavLink>
               ))}
             </nav>
           </QaRegion>
 
-          <div className="phase6ShellStatus" aria-label="全局状态">
-            <StatusBadge>
-              <CircleDot size={14} /> 本地数据
-            </StatusBadge>
-            <button className="phase6ShellIconButton" type="button" aria-label="通知">
-              <Bell size={17} />
-            </button>
+          <div className="appShellStatus phase6ShellStatus" aria-label="全局状态">
+            <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据" aria-current={false}>
+              <CircleDot size={14} aria-hidden="true" />
+              本地数据
+            </NavLink>
           </div>
         </header>
 
-        <div className="phase6ProductSurface">
+        <div className="appCanvas phase6ProductSurface">
           <Routes>
-            <Route path="/" element={<Navigate to="/onboarding" replace />} />
+            <Route path="/" element={<Navigate to="/matches" replace />} />
             <Route path="/onboarding" element={<OnboardingPage />} />
             <Route path="/phase6-style-board" element={<Phase6StyleBoardPage />} />
             <Route path="/matches" element={<MatchesPage />} />
@@ -65,7 +58,7 @@ export function App() {
             <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />
             <Route path="/analytics/friends" element={<FriendAnalyticsPage />} />
-            <Route path="/analytics/friends/:bnetId" element={<FriendDetailPage />} />
+            <Route path="/analytics/friends/detail" element={<FriendDetailPage />} />
           </Routes>
         </div>
       </main>

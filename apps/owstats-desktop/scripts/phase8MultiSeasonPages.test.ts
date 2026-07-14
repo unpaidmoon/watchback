@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createLatestRequestGuard, hasReviewSeasonData, ReviewEmptyState } from "../src/pages/PersonalReviewPage";
+import {
+  createLatestRequestGuard,
+  hasReviewSeasonData,
+  requestPersonalSeasonReviewOnce,
+  ReviewEmptyState,
+  shouldRequestReviewSeason,
+} from "../src/pages/PersonalReviewPage";
+import type { PersonalSeasonReview } from "../src/shared/types";
 import { createLatestRankingRequestGuard, parseSeasonParam } from "../src/pages/RankingPage";
 import {
   createLatestFriendAnalysisRequestGuard,
@@ -15,17 +22,41 @@ import {
 const reviewSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
+const friendDetailSource = readFileSync(new URL("../src/pages/FriendDetailPage.tsx", import.meta.url), "utf8");
 const matchesSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
 const matchFiltersSource = readFileSync(new URL("../src/features/matches/matchFilters.ts", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
-assert.match(reviewSource, /getPersonalSeasonReview\(selectedSeason/, "review page should request personal review with selectedSeason");
+assert.match(reviewSource, /requestPersonalSeasonReviewOnce\(selectedSeason/, "review page should request personal review with selectedSeason");
 assert.match(reviewSource, /getSeasonAnalysis\(selectedSeason/, "review page should request season analysis with the same selectedSeason");
 assert.match(reviewSource, /const titleSeason = selectedSeason \?\? review\.summary\.season/, "review title should use selectedSeason before backend summary season");
+assert.equal(shouldRequestReviewSeason(undefined, null), true, "review should discover the latest season when the URL omits season");
+assert.equal(shouldRequestReviewSeason(23, null), true, "review should request an explicit season that is not loaded");
+assert.equal(shouldRequestReviewSeason(23, 23), false, "review should reuse the just-discovered season response");
+assert.equal(shouldRequestReviewSeason(22, 23), true, "review should request after changing to a different season");
+assert.match(reviewSource, /nextParams\.set\("season", String\(backendSeason\)\)/, "a discovered review season should be written to the URL");
+assert.match(reviewSource, /setParams\(nextParams, \{ replace: true \}\)/, "discovered review season should replace the incomplete URL");
+
+const coalescedReview = {} as PersonalSeasonReview;
+let coalescedReviewLoads = 0;
+const loadCoalescedReview = async () => {
+  coalescedReviewLoads += 1;
+  await Promise.resolve();
+  return coalescedReview;
+};
+const firstCoalescedReview = requestPersonalSeasonReviewOnce(undefined, loadCoalescedReview);
+const secondCoalescedReview = requestPersonalSeasonReviewOnce(undefined, loadCoalescedReview);
+assert.equal(firstCoalescedReview, secondCoalescedReview, "simultaneous latest-season review requests should share one promise");
+assert.equal(coalescedReviewLoads, 1, "StrictMode remount must not duplicate an in-flight review request");
+await Promise.all([firstCoalescedReview, secondCoalescedReview]);
+await requestPersonalSeasonReviewOnce(undefined, loadCoalescedReview);
+assert.equal(coalescedReviewLoads, 2, "a settled review request must not become a stale permanent cache");
 
 assert.match(rankingSource, /getRankings\(selectedSeason/, "ranking page should request rankings with selectedSeason");
-assert.match(rankingSource, /<select[^>]+value=\{selectedSeason/, "ranking page should render a page-level season selector");
+assert.match(rankingSource, /<PageSeasonSelect/, "ranking page should render the shared page-level season selector");
+assert.match(rankingSource, /value=\{selectedSeason\}/, "ranking page should bind the shared selector to selectedSeason");
+assert.match(rankingSource, /seasons=\{availableSeasons\}/, "ranking page should use backend-discovered seasons");
 assert.match(rankingSource, /\.set\("season", String\(nextSeason\)\)/, "ranking page selector should persist season in the URL");
 assert.equal(rankingSource.includes("selectableSeasons"), false, "ranking page must not keep a fixed season list");
 assert.match(rankingSource, /ranking\?\.availableSeasons/, "ranking page should render seasons returned by the backend");
@@ -52,14 +83,29 @@ assert.deepEqual(
 assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S]*setLoading\(false\);/, "a URL season change must clear stale friend analysis state");
 assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
+assert.match(analyticsSource, /buildReviewRankingHref\(season\)/);
+assert.match(analyticsSource, /buildFriendDetailState\(friend\.bnetId, season, sourceView, window\.scrollY\)/);
+assert.match(analyticsSource, /event\.preventDefault\(\)/, "好友详情点击应阻止使用渲染期旧 state 的默认导航");
+assert.match(
+  analyticsSource,
+  /navigate\("\/analytics\/friends\/detail",\s*\{\s*state\s*\}\)/s,
+  "好友详情应使用点击时的滚动位置显式导航",
+);
+assert.doesNotMatch(analyticsSource, /state=\{detailState\(\)\}/, "链接不应固化渲染期滚动位置");
+assert.match(friendDetailSource, /getFriendDetails\(state\.bnetId, \{ season: state\.season \}\)/);
+assert.match(friendDetailSource, /sessionStorage\.setItem\(state\.returnTo\.scrollKey/);
+assert.match(friendDetailSource, /navigate\(state\.returnTo\.href\)/);
+assert.doesNotMatch(friendDetailSource, /detail\?\.name \?\? bnetId/);
 
 assert.match(matchesSource, /chooseInitialMatchFilters\(filtersFromParams\(searchParams\), cachedPage\?\.filters, hasExplicitFilters\)/, "matches page should restore URL season filters before considering cached filters");
+assert.match(matchesSource, /<PageSeasonSelect/, "matches page should render its season selector in the page header");
+assert.match(matchesSource, /seasons=\{options\.seasons\}/, "matches page should use locally available season options");
 assert.match(matchesSource, /<FilterBar filters=\{filters\} options=\{options\} onChange=\{setFilters\} \/>/, "matches page should bind the filter bar to the page-local filter state");
 assert.match(matchesSource, /paramsFromFilters\(filters, selectedMatchId\)/, "matches page should persist its current filter state, including season, to the URL");
 assert.match(matchFiltersSource, /if \(next\.season !== undefined && !options\.seasons\.includes\(next\.season\)\) delete next\.season;/, "matches page should clear an unavailable URL season instead of querying a stale season");
 
-assert.match(filterBarSource, /<select value=\{filters\.season \?\? ""\} onChange=\{\(event\) => patch\(\{ season: numberOrUndefined\(event\.target\.value\) \}\)\}>/, "match filter bar should keep its season selector bound to the page-local season filter");
-assert.match(filterBarSource, /\{options\.seasons\.map\(\(season\) => \(/, "match filter bar should render the locally available season options");
+assert.doesNotMatch(filterBarSource, />\s*赛季\s*</, "match filter bar should not duplicate the page-level season selector");
+assert.equal(filterBarSource.includes("PageSeasonSelect"), false, "match filter bar should not own the page season selector");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

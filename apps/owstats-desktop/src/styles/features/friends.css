@@ -1,1 +1,73 @@
-/* Friend feature rules remain in shared.css until their declaration-only extraction. */
+.friendCardLink {
+  display: block;
+  border-radius: var(--radius-control);
+  color: inherit;
+  text-decoration: none;
+}
+
+.friendCardLink .friendCard {
+  height: 100%;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-secondary);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.friendCardLink:hover .friendCard {
+  border-color: color-mix(in srgb, var(--data-primary) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 5%, var(--surface-secondary));
+  transform: translateY(-1px);
+}
+
+.friendCardLink:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 3px;
+}
+
+.friendCardLink:focus-visible .friendCard {
+  border-color: var(--data-primary);
+}
+
+.friendDetailPage {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-8);
+}
+
+.friendDetailPage .detailContent {
+  max-width: none;
+  margin-top: 0;
+}
+
+.friendDetailPage .phase6Eyebrow {
+  color: var(--data-primary);
+}
+
+.friendDetailPage .phase6ReviewPanel {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.friendDetailPage .boardHits article,
+.friendDetailPage .breakdownList div,
+.friendDetailPage .recentMatchRow {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+}
+
+.friendDetailPage .boardHits p,
+.friendDetailPage .boardHits span {
+  color: var(--text-secondary);
+}
+
+.friendDetailPage .ghostButton {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  box-shadow: none;
+}
