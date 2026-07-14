@@ -2,6 +2,13 @@ html {
   background: var(--app-outside);
 }
 
+:root {
+  /* Keep unmigrated phase-6 components inside the current visual language. */
+  --phase6-accent: var(--data-primary);
+  --phase6-accent-strong: var(--data-primary);
+  --phase6-blue: var(--data-secondary);
+}
+
 *,
 *::before,
 *::after {

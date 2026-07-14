@@ -26,6 +26,16 @@ assert.match(
   base,
   /font-family:\s*"Microsoft YaHei UI",\s*"PingFang SC",\s*"Noto Sans CJK SC",\s*"Segoe UI",\s*sans-serif;/,
 );
+assert.match(
+  base,
+  /--phase6-accent:\s*var\(--data-primary\)/,
+  "遗留组件的主强调色必须回落到紫色数据令牌",
+);
+assert.match(
+  base,
+  /--phase6-blue:\s*var\(--data-secondary\)/,
+  "遗留组件的次强调色必须回落到冷蓝绿色数据令牌",
+);
 assert.match(base, /:where\([^}]+\):focus-visible\s*\{[^}]*outline:\s*2px solid var\(--data-primary\)/s);
 assert.match(base, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
 assert.match(base, /transition-duration:\s*0\.01ms !important/);
