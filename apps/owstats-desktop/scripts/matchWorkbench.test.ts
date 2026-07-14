@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
@@ -353,8 +354,22 @@ const standaloneNormalMarkup = renderToStaticMarkup(
   }),
 );
 assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
-assert.doesNotMatch(standaloneNormalMarkup, /VICTORY|DEFEAT|DRAW/);
-assert.doesNotMatch(detailPageSource, /resultEnglishLabel/, "standalone match detail should not render English result copy");
+assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should render the English result label");
+
+for (const [result, resultLabel, englishLabel] of [
+  ["loss", "失败", "DEFEAT"],
+  ["draw", "平局", "DRAW"],
+] as const) {
+  const standaloneMarkup = renderToStaticMarkup(
+    createElement(MatchDetailReport, {
+      detail: { ...normalDetail, matchId: `anonymous-${result}`, result, resultLabel },
+      loading: false,
+      error: null,
+      matchId: `anonymous-${result}`,
+    }),
+  );
+  assert.match(standaloneMarkup, new RegExp(`>${englishLabel}<`), `standalone ${result} detail should render ${englishLabel}`);
+}
 
 const arenaDetail: MatchDetailView = {
   ...normalDetail,
@@ -389,8 +404,8 @@ const arenaDetail: MatchDetailView = {
         beginTs: 0,
         beginLabel: "70/01/01 08:00",
         mapGuid: "",
-        mapName: "匿名角斗地图",
-        teammates: [anonymousPlayer],
+        mapName: "第 1 回合地图",
+        teammates: [{ ...anonymousPlayer, name: "第 1 回合队友" }],
         enemies: [{ ...anonymousPlayer, side: "enemy", name: "匿名角斗对手" }],
       },
     ],
@@ -404,3 +419,85 @@ assert.match(arenaMarkup, /<button[^>]*>角斗汇总<\/button>/, "arena detail s
 assert.match(arenaMarkup, /<button[^>]*>第 1 回合<\/button>/, "arena detail should keep the round switch and label");
 assert.match(arenaMarkup, />队友数据</, "arena detail should keep the teammate table");
 assert.match(arenaMarkup, />对手数据</, "arena detail should keep the enemy table");
+
+type TestElement = React.ReactElement<Record<string, unknown>>;
+
+function findReactElement(tree: React.ReactNode, predicate: (element: TestElement) => boolean, message: string): TestElement {
+  let found: TestElement | null = null;
+  const visit = (node: React.ReactNode): void => {
+    if (found || !React.isValidElement(node)) return;
+    const element = node as TestElement;
+    if (predicate(element)) {
+      found = element;
+      return;
+    }
+    React.Children.forEach(element.props.children as React.ReactNode, visit);
+  };
+  visit(tree);
+  assert.ok(found, message);
+  return found;
+}
+
+type StateSetter<T> = (next: T | ((current: T) => T)) => void;
+type TestDispatcher = { useState<T>(initialState: T | (() => T)): [T, StateSetter<T>] };
+type ReactInternals = { ReactCurrentDispatcher: { current: unknown } };
+
+const dispatcherRef = (React as typeof React & { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: ReactInternals })
+  .__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
+const arenaStateSlots: unknown[] = [];
+let arenaHookIndex = 0;
+const arenaHookDispatcher = new Proxy({} as TestDispatcher, {
+  get(_target, hookName) {
+    if (hookName !== "useState") {
+      throw new Error(`arena interaction test does not support React hook ${String(hookName)}`);
+    }
+    return <T,>(initialState: T | (() => T)): [T, StateSetter<T>] => {
+      const slot = arenaHookIndex++;
+      if (slot === arenaStateSlots.length) {
+        arenaStateSlots.push(typeof initialState === "function" ? (initialState as () => T)() : initialState);
+      }
+      const setState: StateSetter<T> = (next) => {
+        arenaStateSlots[slot] = typeof next === "function" ? (next as (current: T) => T)(arenaStateSlots[slot] as T) : next;
+      };
+      return [arenaStateSlots[slot] as T, setState];
+    };
+  },
+});
+
+function renderArenaWithTestHooks(): React.ReactElement {
+  const previousDispatcher = dispatcherRef.current;
+  dispatcherRef.current = arenaHookDispatcher;
+  arenaHookIndex = 0;
+  try {
+    return CompactMatchDetail({ detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps });
+  } finally {
+    dispatcherRef.current = previousDispatcher;
+  }
+}
+
+const initialArenaTree = renderArenaWithTestHooks();
+const roundSwitch = findReactElement(
+  initialArenaTree,
+  (element) => element.type === "button" && element.props.children === "第 1 回合" && typeof element.props.onClick === "function",
+  "arena detail should expose a clickable first-round switch",
+);
+(roundSwitch.props.onClick as () => void)();
+const selectedRoundTree = renderArenaWithTestHooks();
+const selectedRoundHeader = findReactElement(
+  selectedRoundTree,
+  (element) => typeof element.type === "function" && element.type.name === "MatchDetailHeader",
+  "selected arena round should render through the shared detail header",
+);
+assert.equal(selectedRoundHeader.props.mapName, "第 1 回合地图", "round selection should update the header map");
+assert.equal(selectedRoundHeader.props.teamScore, 1, "round selection should update the header team score");
+assert.equal(selectedRoundHeader.props.opponentScore, 0, "round selection should update the header opponent score");
+const selectedRoundTeamTable = findReactElement(
+  selectedRoundTree,
+  (element) => typeof element.type === "function" && element.type.name === "MatchTeamTable" && element.props.title === "队友数据",
+  "selected arena round should keep the teammate table",
+);
+assert.equal(
+  (selectedRoundTeamTable.props.players as PlayerRow[])[0]?.name,
+  "第 1 回合队友",
+  "round selection should switch the displayed player data",
+);
