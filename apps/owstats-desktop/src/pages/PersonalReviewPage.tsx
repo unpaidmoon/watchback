@@ -66,6 +66,30 @@ export function hasReviewSeasonData(
   return typeof review.summary.season === "number" && review.summary.season > 0;
 }
 
+export function shouldRequestReviewSeason(selectedSeason: number | undefined, loadedSeason: number | null) {
+  return selectedSeason === undefined || selectedSeason !== loadedSeason;
+}
+
+const inFlightReviewRequests = new Map<string, Promise<PersonalSeasonReview>>();
+
+export function requestPersonalSeasonReviewOnce(
+  season: number | undefined,
+  load: (requestedSeason?: number) => Promise<PersonalSeasonReview> = getPersonalSeasonReview,
+) {
+  const requestKey = season === undefined ? "latest" : `season:${season}`;
+  const existingRequest = inFlightReviewRequests.get(requestKey);
+  if (existingRequest) return existingRequest;
+
+  const pendingRequest = load(season);
+  const request = pendingRequest.finally(() => {
+    if (inFlightReviewRequests.get(requestKey) === request) {
+      inFlightReviewRequests.delete(requestKey);
+    }
+  });
+  inFlightReviewRequests.set(requestKey, request);
+  return request;
+}
+
 export function ReviewEmptyState({ onAction = () => undefined }: { onAction?: () => void }) {
   return (
     <PageEmptyState
@@ -91,6 +115,7 @@ export function PersonalReviewPage() {
   const [selectedAchievement, setSelectedAchievement] = useState<ReviewAchievement | null>(null);
   const reviewRequestGuard = useRef(createLatestRequestGuard());
   const analysisRequestGuard = useRef(createLatestRequestGuard());
+  const loadedReviewSeasonRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (params.get("view") === view) return;
@@ -100,8 +125,10 @@ export function PersonalReviewPage() {
   }, [params, setParams, view]);
 
   useEffect(() => {
+    if (requestedSeason === selectedSeason) return;
     reviewRequestGuard.current.invalidate();
     analysisRequestGuard.current.invalidate();
+    loadedReviewSeasonRef.current = null;
     setSelectedSeason(requestedSeason);
     setReview(null);
     setAnalysis(null);
@@ -111,16 +138,22 @@ export function PersonalReviewPage() {
   }, [requestedSeason]);
 
   function requestReview() {
+    if (!shouldRequestReviewSeason(selectedSeason, loadedReviewSeasonRef.current)) return;
     const request = reviewRequestGuard.current.begin();
     setReview(null);
     setError(null);
-    void getPersonalSeasonReview(selectedSeason)
+    void requestPersonalSeasonReviewOnce(selectedSeason)
       .then((nextReview) => {
         if (!reviewRequestGuard.current.isCurrent(request)) return;
         setReview(nextReview);
         const backendSeason = nextReview.summary.season;
+        loadedReviewSeasonRef.current = typeof backendSeason === "number" && backendSeason > 0 ? backendSeason : null;
         if (selectedSeason === undefined && typeof backendSeason === "number" && backendSeason > 0) {
           setSelectedSeason(backendSeason);
+          const nextParams = new URLSearchParams(params);
+          nextParams.set("season", String(backendSeason));
+          nextParams.set("view", view);
+          setParams(nextParams, { replace: true });
         }
       })
       .catch((err) => {

@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createLatestRequestGuard, hasReviewSeasonData, ReviewEmptyState } from "../src/pages/PersonalReviewPage";
+import {
+  createLatestRequestGuard,
+  hasReviewSeasonData,
+  requestPersonalSeasonReviewOnce,
+  ReviewEmptyState,
+  shouldRequestReviewSeason,
+} from "../src/pages/PersonalReviewPage";
+import type { PersonalSeasonReview } from "../src/shared/types";
 import { createLatestRankingRequestGuard, parseSeasonParam } from "../src/pages/RankingPage";
 import {
   createLatestFriendAnalysisRequestGuard,
@@ -21,9 +28,30 @@ const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.
 const matchFiltersSource = readFileSync(new URL("../src/features/matches/matchFilters.ts", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
-assert.match(reviewSource, /getPersonalSeasonReview\(selectedSeason/, "review page should request personal review with selectedSeason");
+assert.match(reviewSource, /requestPersonalSeasonReviewOnce\(selectedSeason/, "review page should request personal review with selectedSeason");
 assert.match(reviewSource, /getSeasonAnalysis\(selectedSeason/, "review page should request season analysis with the same selectedSeason");
 assert.match(reviewSource, /const titleSeason = selectedSeason \?\? review\.summary\.season/, "review title should use selectedSeason before backend summary season");
+assert.equal(shouldRequestReviewSeason(undefined, null), true, "review should discover the latest season when the URL omits season");
+assert.equal(shouldRequestReviewSeason(23, null), true, "review should request an explicit season that is not loaded");
+assert.equal(shouldRequestReviewSeason(23, 23), false, "review should reuse the just-discovered season response");
+assert.equal(shouldRequestReviewSeason(22, 23), true, "review should request after changing to a different season");
+assert.match(reviewSource, /nextParams\.set\("season", String\(backendSeason\)\)/, "a discovered review season should be written to the URL");
+assert.match(reviewSource, /setParams\(nextParams, \{ replace: true \}\)/, "discovered review season should replace the incomplete URL");
+
+const coalescedReview = {} as PersonalSeasonReview;
+let coalescedReviewLoads = 0;
+const loadCoalescedReview = async () => {
+  coalescedReviewLoads += 1;
+  await Promise.resolve();
+  return coalescedReview;
+};
+const firstCoalescedReview = requestPersonalSeasonReviewOnce(undefined, loadCoalescedReview);
+const secondCoalescedReview = requestPersonalSeasonReviewOnce(undefined, loadCoalescedReview);
+assert.equal(firstCoalescedReview, secondCoalescedReview, "simultaneous latest-season review requests should share one promise");
+assert.equal(coalescedReviewLoads, 1, "StrictMode remount must not duplicate an in-flight review request");
+await Promise.all([firstCoalescedReview, secondCoalescedReview]);
+await requestPersonalSeasonReviewOnce(undefined, loadCoalescedReview);
+assert.equal(coalescedReviewLoads, 2, "a settled review request must not become a stale permanent cache");
 
 assert.match(rankingSource, /getRankings\(selectedSeason/, "ranking page should request rankings with selectedSeason");
 assert.match(rankingSource, /<PageSeasonSelect/, "ranking page should render the shared page-level season selector");
