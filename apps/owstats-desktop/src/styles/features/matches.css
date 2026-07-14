@@ -600,10 +600,10 @@
 .filterBar.phase6FilterBar {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-secondary);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .filterBar.phase6FilterBar label {
@@ -613,9 +613,9 @@
 .filterBar.phase6FilterBar select,
 .filterBar.phase6FilterBar input,
 .filterBar.phase6FilterBar .phase6PlayerSearchBox {
-  border-color: var(--border-subtle);
+  border-color: var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-secondary);
+  background: var(--glass-secondary);
   color: var(--text-primary);
 }
 
@@ -682,8 +682,8 @@
 }
 
 .matchDetailPerformance .phase6Eyebrow {
-  color: var(--data-primary);
-  font-weight: 700;
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .phase7CompactArenaDetail .phase7ArenaSelector,
@@ -717,8 +717,8 @@
 
 .phase7CompactArenaDetail .phase7ArenaTab.active,
 .phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.active {
-  border-color: var(--data-primary);
-  background: var(--data-primary);
+  border-color: var(--action-primary);
+  background: var(--action-primary);
   color: var(--action-on-primary);
 }
 
@@ -756,4 +756,44 @@
   .advancedMatchFilters.phase6FilterRowSecondary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* Design-system rollout: the two workbench panes are peers; contents use quiet dividers. */
+.matchListPane,
+.matchDetailPane {
+  padding: var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-secondary);
+  background: var(--glass-primary);
+  box-shadow: none;
+}
+
+.matchListCard,
+.matchDetailHeader,
+.matchDetailPerformance,
+.matchDetailTeamComparison,
+.matchTeamTable {
+  border-color: var(--glass-border);
+  background: var(--glass-secondary);
+  box-shadow: none;
+}
+
+.matchListCard.phase6MatchRowSelected {
+  border-color: var(--action-primary);
+  background: color-mix(in srgb, var(--action-primary) 6%, var(--glass-secondary));
+}
+
+.matchListCardResult,
+.matchListCardScore,
+.matchListCardTitle,
+.matchListCardHeroName,
+.matchDetailHeaderResult {
+  font-weight: 400;
+}
+
+.matchTeamTable .phase6CompactPlayerRow,
+.matchTeamTable.enemy .phase6CompactPlayerRow,
+.matchTeamTable .phase6CompactAvatarPlate {
+  border-color: var(--glass-border);
+  background: transparent;
 }

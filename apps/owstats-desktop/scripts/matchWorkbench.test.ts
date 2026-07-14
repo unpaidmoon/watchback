@@ -142,7 +142,7 @@ assert.equal(
   "MatchListCard should render K/D/A in that order",
 );
 assert.equal(listCardSource.includes('label="K/A/D"'), false, "MatchListCard should not keep the ambiguous K/A/D order");
-assert.match(matchStyleSource, /\.matchListCard\.phase6MatchRowSelected[\s\S]*border-color:\s*var\(--data-primary\)/);
+assert.match(matchStyleSource, /\.matchListCard\.phase6MatchRowSelected[\s\S]*border-color:\s*var\(--action-primary\)/);
 assert.match(matchStyleSource, /\.matchListCardResult\.result-win \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-success\)/);
 assert.match(matchStyleSource, /\.matchListCardResult\.result-loss \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-danger\)/);
 assert.match(matchStyleSource, /\.matchListCard \.matchListCardMap[\s\S]*position:\s*static/);
@@ -168,13 +168,22 @@ assert.match(matchStyleSource, /\.matchesWorkbench\.detailOpen\s+\.matchListPane
 assert.match(matchStyleSource, /\.matchesWorkbench:not\(\.detailOpen\)\s+\.matchDetailPane\s*\{[^}]*display:\s*none/s);
 assert.match(matchStyleSource, /\.matchListPane,\s*\.matchDetailPane\s*\{[^}]*overflow-y:\s*auto/s);
 assert.match(matchStyleSource, /\.matchListPane \.phase6Timeline,\s*\.matchDetailPane \.phase6CompactDetailScroll\s*\{[^}]*overflow:\s*visible/s);
-assert.match(matchStyleSource, /\.filterBar\.phase6FilterBar\s*\{[^}]*background:\s*var\(--surface-secondary\)/s);
-assert.match(matchStyleSource, /\.activeFilterChips button\s*\{[^}]*border-radius:\s*999px/s);
-assert.match(matchStyleSource, /\.matchDetailPerformance \.phase6Eyebrow\s*\{[^}]*color:\s*var\(--data-primary\)/s);
 assert.match(
   matchStyleSource,
-  /\.phase7CompactArenaDetail \.phase7ArenaTab\.active,\s*\.phase6DetailPage > \.phase7ArenaSelector \.phase7ArenaTab\.active\s*\{[^}]*background:\s*var\(--data-primary\)/s,
-  "standalone arena detail should share the semantic purple active selector",
+  /\.filterBar\.phase6FilterBar\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "筛选栏应使用低边界玻璃表面且不叠加阴影",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchListPane,\s*\.matchDetailPane\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);/s,
+  "工作台主从面板应使用同级玻璃表面和低对比边线",
+);
+assert.match(matchStyleSource, /\.activeFilterChips button\s*\{[^}]*border-radius:\s*999px/s);
+assert.match(matchStyleSource, /\.matchDetailPerformance \.phase6Eyebrow\s*\{[^}]*color:\s*var\(--text-secondary\);[^}]*font-weight:\s*400;/s);
+assert.match(
+  matchStyleSource,
+  /\.phase7CompactArenaDetail \.phase7ArenaTab\.active,\s*\.phase6DetailPage > \.phase7ArenaSelector \.phase7ArenaTab\.active\s*\{[^}]*background:\s*var\(--action-primary\)/s,
+  "standalone arena detail should share the dark action selector",
 );
 assert.match(matchStyleSource, /\.matchTeamTable \.phase6CompactPlayerMetric strong\s*\{[^}]*white-space:\s*nowrap/s);
 
