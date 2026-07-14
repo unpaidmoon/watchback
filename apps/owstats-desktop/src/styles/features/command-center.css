@@ -248,6 +248,31 @@
   color: var(--text-secondary);
 }
 
+.phase6CommandCenter .phase6DataCoverageCard {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.phase6CommandCenter .phase8SeasonStatusCard {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.phase6CommandCenter .phase8SeasonStatusStats > span {
+  border: 0;
+  border-left: 1px solid var(--glass-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.phase6CommandCenter .phase8SeasonStatusStats > span:first-child {
+  border-left: 0;
+}
+
 .phase6CommandCenter .primaryButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--action-primary) 88%, white);
 }

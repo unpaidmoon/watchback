@@ -51,6 +51,9 @@ assertEqual(/\.phase6CommandCenter \.phase6Eyebrow\s*\{[\s\S]*?color:\s*var\(--t
 assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusStats > span\.(?:good|warn) strong\s*\{[\s\S]*?color:\s*var\(--text-primary\);/.test(commandCenterStyles), true, "season facts do not use green or yellow text");
 assertEqual(/\.phase6CommandCenter \.phase6DataHealthGrid span\s*\{[\s\S]*?background:\s*transparent;/.test(commandCenterStyles), true, "health rows remove colored pills");
 assertEqual(/\.phase6CommandCenter \.syncTargetStrip,[\s\S]*?background:\s*rgba\(250, 251, 247, 0\.38\);/.test(commandCenterStyles), true, "target strip removes the opaque white inner card");
+assertEqual(/\.phase6CommandCenter \.phase6DataCoverageCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "coverage card is flattened into the account surface");
+assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;/.test(commandCenterStyles), true, "season status is flattened into the sync surface");
+assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusStats > span\s*\{[\s\S]*?border-radius:\s*0;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "season facts use dividers instead of floating cards");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
