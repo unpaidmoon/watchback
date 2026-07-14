@@ -13,8 +13,8 @@ assert.match(
 );
 assert.match(
   reviewCss,
-  /\.reviewWorkspace\s+\.phase6Eyebrow\s*\{[^}]*color:\s*var\(--data-primary\);/s,
-  "战报区块眉题应使用紫色数据强调，不应沿用旧橙色",
+  /\.reviewWorkspace\s+\.phase6Eyebrow\s*\{[^}]*color:\s*var\(--text-secondary\);[^}]*font-weight:\s*400;/s,
+  "战报区块眉题应使用中性次级文字和常规字重",
 );
 assert.match(
   reviewCss,
@@ -28,13 +28,13 @@ assert.match(
 );
 assert.match(
   reviewCss,
-  /\.reviewWorkspace\s+\.phase6GlassPanelShared\.solid\.phase6AchievementPanel\s*\{[^}]*background:\s*var\(--surface-secondary\);/s,
-  "成就墙应回到浅色页面表面",
+  /\.reviewWorkspace\s+\.phase6GlassPanelShared\.solid\.phase6AchievementPanel\s*\{[^}]*background:\s*var\(--glass-primary\);/s,
+  "成就墙应使用一级玻璃表面",
 );
 assert.match(
   reviewCss,
-  /\.reviewWorkspace\s+\.phase6AchievementCard\s*\{[^}]*background:\s*var\(--surface-control\);/s,
-  "成就卡片应使用浅色中性表面",
+  /\.reviewWorkspace\s+\.phase6AchievementCard\s*\{[^}]*background:\s*var\(--glass-secondary\);/s,
+  "成就卡片应使用次级玻璃表面",
 );
 assert.match(
   reviewCss,
@@ -50,13 +50,23 @@ assert.match(friendDetailSource, /className="detailPage phase6DetailPage friendD
 assert.match(friendDetailSource, /<PageHeader[\s\S]*title=\{detail\?\.name \?\? "好友详情"\}/, "好友详情应复用统一页面标题");
 assert.match(
   friendCss,
-  /\.friendDetailPage\s+\.phase6Eyebrow\s*\{[^}]*color:\s*var\(--data-primary\);/s,
-  "好友详情眉题不应沿用旧橙色",
+  /\.friendDetailPage\s+\.phase6Eyebrow\s*\{[^}]*color:\s*var\(--text-secondary\);[^}]*font-weight:\s*400;/s,
+  "好友详情眉题应使用中性次级文字和常规字重",
 );
 assert.match(
   friendCss,
-  /\.friendDetailPage\s+\.phase6ReviewPanel\s*\{[^}]*background:\s*var\(--surface-secondary\);/s,
-  "好友详情面板应使用统一浅色表面",
+  /\.friendDetailPage\s+\.phase6ReviewPanel\s*\{[^}]*border-color:\s*var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "好友详情面板应使用低边界玻璃表面而非叠层卡片",
+);
+assert.match(
+  reviewCss,
+  /\.reviewOverviewPanel,[\s\S]*?\.reviewRoleHeroPanel\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "战报一级面板应使用低边界玻璃表面且不叠加阴影",
+);
+assert.match(
+  reviewCss,
+  /\.reviewOverviewMetrics\s+\.metric,[\s\S]*?\.reviewHeroSummary\s+\.metric\s*\{[^}]*background:\s*var\(--glass-secondary\);[^}]*box-shadow:\s*none;/s,
+  "战报内部指标块应使用次级玻璃表面，不应成为第二层浮卡",
 );
 assert.match(reviewSource, /closeButtonRef\.current\?\.focus\(\)/, "成就弹窗打开时应把焦点移入弹窗");
 assert.match(reviewSource, /event\.key === "Escape"/, "成就弹窗应支持 Escape 关闭");

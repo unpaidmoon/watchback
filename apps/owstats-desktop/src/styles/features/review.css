@@ -56,10 +56,10 @@
 
 .reviewOverviewPanel,
 .reviewRoleHeroPanel {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-secondary);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .reviewOverviewPanel header,
@@ -79,7 +79,8 @@
 }
 
 .reviewWorkspace .phase6Eyebrow {
-  color: var(--data-primary);
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .reviewOverviewMetrics,
@@ -98,9 +99,10 @@
   display: grid;
   gap: var(--space-1);
   padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-control);
+  background: var(--glass-secondary);
+  box-shadow: none;
 }
 
 .reviewOverviewMetrics .metric span,
@@ -111,7 +113,8 @@
 
 .reviewOverviewMetrics .metric strong,
 .reviewHeroSummary .metric strong {
-  color: var(--data-primary);
+  color: var(--text-primary);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 
@@ -124,9 +127,9 @@
 }
 
 .reviewWorkspace .phase6FriendIntimacyCard {
-  border-color: var(--border-subtle);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  border-color: var(--glass-border);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .reviewWorkspace .phase6FriendIntimacyRankBadge {
@@ -148,9 +151,9 @@
 }
 
 .reviewWorkspace .phase6GlassPanelShared.solid.phase6AchievementPanel {
-  border-color: var(--border-subtle);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  border-color: var(--glass-border);
+  background: var(--glass-primary);
+  box-shadow: none;
   color: var(--text-primary);
 }
 
@@ -160,15 +163,15 @@
 }
 
 .reviewWorkspace .phase6AchievementCard {
-  border-color: var(--border-subtle);
-  background: var(--surface-control);
+  border-color: var(--glass-border);
+  background: var(--glass-secondary);
   box-shadow: none;
 }
 
 .reviewWorkspace .phase6AchievementCard:hover,
 .reviewWorkspace .phase6AchievementCard:focus-within {
-  border-color: color-mix(in srgb, var(--data-primary) 36%, var(--border-subtle));
-  box-shadow: var(--shadow-card);
+  border-color: var(--text-tertiary);
+  box-shadow: none;
 }
 
 .reviewWorkspace .phase6AchievementMedalImage {
@@ -185,12 +188,12 @@
 }
 
 .reviewWorkspace .phase6AchievementCopy strong span {
-  border-color: color-mix(in srgb, var(--data-primary) 24%, var(--border-subtle));
-  color: var(--data-primary);
+  border-color: var(--glass-border);
+  color: var(--text-secondary);
 }
 
 .reviewWorkspace .phase6AchievementCopy > span {
-  color: var(--data-primary);
+  color: var(--text-secondary);
 }
 
 .reviewWorkspace .phase6AchievementCopy small,

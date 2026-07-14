@@ -42,22 +42,24 @@
 }
 
 .friendDetailPage .phase6Eyebrow {
-  color: var(--data-primary);
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .friendDetailPage .phase6ReviewPanel {
-  border-color: var(--border-subtle);
+  border-color: var(--glass-border);
   border-radius: var(--radius-secondary);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .friendDetailPage .boardHits article,
 .friendDetailPage .breakdownList div,
 .friendDetailPage .recentMatchRow {
-  border-color: var(--border-subtle);
+  border-color: var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-control);
+  background: var(--glass-secondary);
+  box-shadow: none;
 }
 
 .friendDetailPage .boardHits p,
