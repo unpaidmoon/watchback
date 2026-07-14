@@ -167,9 +167,12 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
     customer_base_url: &str,
     mut progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
-    db.initialize()?;
     let credentials = read_credentials(credential_path)?;
     let target = crate::player_target::read_player_target_for_path(target_path)?;
+    if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
+        return Err(anyhow!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR));
+    }
+    db.initialize()?;
     progress(SyncProgress {
         season,
         phase: "拉取赛季 JSON".to_string(),

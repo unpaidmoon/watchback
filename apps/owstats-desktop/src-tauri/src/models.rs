@@ -527,21 +527,21 @@ pub struct PlayerTargetStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BindPlayerTargetRequest {
-    pub bnet: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BindPlayerTargetResult {
-    pub status: PlayerTargetStatus,
+pub struct LoginTargetStatus {
+    pub state: String,
+    pub detected_bnet: Option<String>,
+    pub current_bnet: Option<String>,
+    pub message: String,
+    pub sync_allowed: bool,
+    pub can_confirm_switch: bool,
+    pub can_retry: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearPlayerTargetResult {
     pub cleared: bool,
-    pub status: PlayerTargetStatus,
+    pub target: LoginTargetStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -738,6 +738,7 @@ pub struct CredentialStatus {
     pub state: String,
     pub message: String,
     pub exposes_secret: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub role_id: Option<i64>,
     pub saved_at: Option<String>,
 }
@@ -746,6 +747,7 @@ pub struct CredentialStatus {
 #[serde(rename_all = "camelCase")]
 pub struct CredentialLoginResult {
     pub status: CredentialStatus,
+    pub target: LoginTargetStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

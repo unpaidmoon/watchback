@@ -7,7 +7,7 @@ import {
   readableSyncProgress,
 } from "../src/shared/phase6Shell.ts";
 import { checkAppUpdate, getPlayerProfile, getUserSettings, logout, saveUserSettings } from "../src/shared/api.ts";
-import { formatCompactTimestamp } from "../src/features/command-center/SeasonHealthPanel.tsx";
+import { formatCompactTimestamp, seasonSyncGateCopy } from "../src/features/command-center/SeasonHealthPanel.tsx";
 import type { OnboardingStatus, SyncProgress } from "../src/shared/types.ts";
 import { readFileSync } from "node:fs";
 
@@ -61,6 +61,19 @@ assertEqual(
   "07-12 10:56",
   "compact timestamp removes only the year while preserving local month day and minute",
 );
+assertEqual(seasonSyncGateCopy(false, false, false, false, false).statusLabel, "需要登录", "missing credentials keep the login status copy");
+assertEqual(seasonSyncGateCopy(false, false, false, false, false).syncHint, "登录后可同步", "missing credentials keep the login recovery copy");
+assertEqual(seasonSyncGateCopy(true, false, false, false, false).statusLabel, "目标待确认", "ready credentials distinguish a blocked target");
+assertEqual(seasonSyncGateCopy(true, false, false, false, false).syncHint, "确认当前目标后可同步", "blocked target explains the required confirmation");
+assertEqual(seasonSyncGateCopy(false, false, true, false, false).statusLabel, "账号处理中", "first login identification takes precedence over static login copy");
+assertEqual(seasonSyncGateCopy(false, false, true, false, false).syncHint, "账号操作完成后可同步", "first login identification explains the active operation");
+assertEqual(seasonSyncGateCopy(true, false, true, false, false).statusLabel, "账号处理中", "target confirmation takes precedence over static target copy");
+assertEqual(seasonSyncGateCopy(true, false, true, false, false).syncHint, "账号操作完成后可同步", "target confirmation explains the active operation");
+assertEqual(seasonSyncGateCopy(true, true, true, false, true).statusLabel, "账号处理中", "account work has its own status copy");
+assertEqual(seasonSyncGateCopy(true, true, true, false, true).syncHint, "账号操作完成后可同步", "account work has its own recovery copy");
+assertEqual(seasonSyncGateCopy(true, true, true, true, true).statusLabel, "同步中", "active sync does not fall back to account-processing copy");
+assertEqual(seasonSyncGateCopy(true, true, false, false, true).statusLabel, "本地数据可用", "normal ready target preserves local-data status");
+assertEqual(seasonSyncGateCopy(true, true, false, false, true).syncHint, "当前目标可同步", "normal ready target remains syncable");
 assertEqual(onboardingSource.includes("phase6PlayerPass"), true, "command center uses a player pass identity strip");
 assertEqual(onboardingSource.includes("phase6PlayerPassRail"), true, "player pass uses a compact visual rail instead of a large diagonal block");
 assertEqual(onboardingSource.includes("phase6ProfileInlineStats"), true, "player pass places endorsement and play time under the title");
@@ -90,7 +103,60 @@ assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data are
 assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads the selected season status from onboarding status");
 assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), false, "command center does not fix the season list");
 assertEqual(onboardingSource.includes("seasonInput"), true, "command center accepts an explicit season number");
-assertEqual(onboardingSource.includes("BattleTag"), true, "command center exposes BattleTag binding");
+assertEqual(onboardingSource.includes("BattleTag"), false, "command center never exposes BattleTag input or manual binding copy");
+assertEqual(onboardingSource.includes('aria-label="BattleTag"'), false, "command center removes the BattleTag input");
+assertEqual(onboardingSource.includes("battleTag"), false, "command center removes BattleTag input state");
+assertEqual(onboardingSource.includes("runBindTarget"), false, "command center removes manual target binding");
+assertEqual(onboardingSource.includes("切换到此账号"), true, "account mismatch offers an explicit switch action");
+assertEqual(onboardingSource.includes("保留原目标"), true, "account mismatch offers an explicit keep action");
+assertEqual(onboardingSource.includes("重新绑定"), true, "retryable binding failure offers a retry action");
+assertEqual(onboardingSource.includes("重新识别"), true, "unidentified account offers a fresh login identification action");
+assertEqual(onboardingSource.includes("credentialReady={credentialReady}"), true, "season card receives the real credential state");
+assertEqual(onboardingSource.includes("targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}"), true, "season card receives the backend target gate separately");
+assertEqual(onboardingSource.includes("accountOperationBusy={accountOperationBusy}"), true, "season card receives the account operation state separately");
+assertEqual(onboardingSource.includes("credentialReady={syncTargetReady}"), false, "season card never receives a mixed gate disguised as credential state");
+assertEqual(
+  /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| isSyncBlocked \|\| isSyncing\}/.test(seasonHealthSource),
+  true,
+  "season sync button combines credential, target, account-operation and sync gates",
+);
+assertEqual(onboardingSource.includes("const accountOperationBusy = loggingIn || loggingOut || targetAction !== null"), true, "account actions share one busy gate");
+assertEqual(seasonHealthSource.includes("credentialReady && targetSyncAllowed && !accountOperationBusy"), true, "account actions suspend season sync without changing credential semantics");
+assertEqual(onboardingSource.includes("accountOperationLockRef"), true, "account handlers have a synchronous re-entry guard");
+assertEqual(onboardingSource.includes("dashboardRequestGenerationRef"), true, "dashboard refreshes invalidate stale responses");
+assertEqual(onboardingSource.includes("mountedRef"), true, "dashboard responses cannot update an unmounted command center");
+assertEqual(onboardingSource.includes("primaryTargetActionRef"), true, "target recovery exposes a focus destination");
+assertEqual(onboardingSource.includes("previousPrimaryTargetStateRef"), true, "target recovery focus is not stolen on same-state rerenders");
+assertEqual(
+  /catch \(err\) \{[\s\S]*?const loginError = `登录或识别失败[\s\S]*?await loadDashboard\(\);[\s\S]*?setError\(loginError\)/.test(onboardingSource),
+  true,
+  "login refresh completes before the final recoverable error is shown",
+);
+assertEqual(/async function runClearTarget\(\)[\s\S]*?setNotice\(result\.target\.message\)/.test(onboardingSource), true, "clear action uses the backend recovery message");
+assertEqual(onboardingSource.includes("{!hasTargetPrimaryAction && ("), true, "target recovery does not duplicate the bottom login CTA");
+assertEqual(onboardingSource.includes("let disposed = false"), true, "late event subscriptions are disposed safely");
+assertEqual(onboardingSource.includes("if (disposed)"), true, "late event listeners immediately unlisten after cleanup");
+assertEqual(onboardingSource.includes("function acquireOperationLock()"), true, "account and season actions share one synchronous lock");
+assertEqual(
+  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)[\s\S]*?finally[\s\S]*?releaseOperationLock\(\)/.test(onboardingSource),
+  true,
+  "season sync owns and releases the shared operation lock",
+);
+assertEqual(onboardingSource.includes("disabled={accountOperationBusy || syncingSeason !== null || !targetStatus.canConfirmSwitch}"), true, "switch confirmation is disabled during season sync");
+assertEqual(onboardingSource.includes("disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}"), true, "clear is disabled during season sync");
+assertEqual(onboardingSource.includes("disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}"), true, "logout is disabled during season sync");
+assertEqual((onboardingSource.match(/accountOperationBusy \|\| syncingSeason !== null/g) ?? []).length >= 6, true, "all account action buttons are disabled during season sync");
+assertEqual(onboardingSource.includes("function invalidateDashboardCache()"), true, "account changes invalidate the cached dashboard snapshot");
+assertEqual(
+  /function beginAccountOperation\(\)[\s\S]*?invalidateDashboardCache\(\)/.test(onboardingSource),
+  true,
+  "every account operation invalidates stale cached identity before changing state",
+);
+assertEqual(
+  /useEffect\(\(\) => \{[\s\S]*?accountOperationBusy \|\| syncingSeason !== null[\s\S]*?button\.disabled[\s\S]*?button\.focus\(\)[\s\S]*?document\.activeElement === button[\s\S]*?previousPrimaryTargetStateRef\.current = primaryTargetState[\s\S]*?\}, \[primaryTargetState, accountOperationBusy, syncingSeason\]\)/.test(onboardingSource),
+  true,
+  "target recovery focus is recorded only after the enabled button receives focus",
+);
 assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
 assertEqual(onboardingSource.includes("S21"), false, "command center does not hard-code S21");

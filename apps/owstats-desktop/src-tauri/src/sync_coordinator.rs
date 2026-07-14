@@ -1,18 +1,26 @@
 use std::sync::{Arc, Mutex};
 
-const SYNC_IN_PROGRESS_MESSAGE: &str = "已有赛季同步正在进行，请等待完成后再试";
+const SYNC_IN_PROGRESS_MESSAGE: &str = "账号操作或赛季同步正在进行，请等待完成后再试";
 
 #[derive(Clone, Default)]
 pub struct SyncCoordinator {
     running: Arc<Mutex<bool>>,
 }
 
-pub struct SyncPermit {
+pub struct OperationPermit {
     running: Arc<Mutex<bool>>,
 }
 
 impl SyncCoordinator {
-    pub fn try_acquire(&self) -> Result<SyncPermit, &'static str> {
+    pub fn try_acquire_account_operation(&self) -> Result<OperationPermit, &'static str> {
+        self.try_acquire()
+    }
+
+    pub fn try_acquire_sync(&self) -> Result<OperationPermit, &'static str> {
+        self.try_acquire()
+    }
+
+    fn try_acquire(&self) -> Result<OperationPermit, &'static str> {
         let mut running = self
             .running
             .try_lock()
@@ -21,13 +29,13 @@ impl SyncCoordinator {
             return Err(SYNC_IN_PROGRESS_MESSAGE);
         }
         *running = true;
-        Ok(SyncPermit {
+        Ok(OperationPermit {
             running: Arc::clone(&self.running),
         })
     }
 }
 
-impl Drop for SyncPermit {
+impl Drop for OperationPermit {
     fn drop(&mut self) {
         if let Ok(mut running) = self.running.lock() {
             *running = false;
@@ -40,14 +48,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_one_sync_can_run_and_drop_releases_the_guard() {
+    fn account_operation_blocks_sync_until_permit_is_dropped() {
         let coordinator = SyncCoordinator::default();
-        let guard = coordinator.try_acquire().unwrap();
+        let guard = coordinator.try_acquire_account_operation().unwrap();
         assert!(matches!(
-            coordinator.try_acquire(),
+            coordinator.try_acquire_sync(),
             Err(SYNC_IN_PROGRESS_MESSAGE)
         ));
         drop(guard);
-        assert!(coordinator.try_acquire().is_ok());
+        assert!(coordinator.try_acquire_sync().is_ok());
+    }
+
+    #[test]
+    fn sync_blocks_account_operation_until_permit_is_dropped() {
+        let coordinator = SyncCoordinator::default();
+        let guard = coordinator.try_acquire_sync().unwrap();
+        assert!(matches!(
+            coordinator.try_acquire_account_operation(),
+            Err(SYNC_IN_PROGRESS_MESSAGE)
+        ));
+        drop(guard);
+        assert!(coordinator.try_acquire_account_operation().is_ok());
     }
 }

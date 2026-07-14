@@ -1,9 +1,12 @@
 use futures_util::future::join_all;
+use owstats_desktop_lib::login_target::SYNC_TARGET_CONFIRMATION_ERROR;
 use owstats_desktop_lib::player_target::{
     clear_player_target_for_path, player_target_status_for_path, save_player_target_for_path,
     PlayerTarget,
 };
-use owstats_desktop_lib::OwDatabase;
+use owstats_desktop_lib::{
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, OwDatabase,
+};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -21,6 +24,7 @@ fn player_target_status_does_not_expose_customer_token() {
             resolved_bnet: Some("Tester#12345".to_string()),
             customer_token: "secret-customer-token".to_string(),
             bound_at: "2026-07-03T00:00:00Z".to_string(),
+            source_role_id: None,
         },
     )
     .unwrap();
@@ -45,6 +49,7 @@ fn clearing_player_target_removes_saved_target() {
             resolved_bnet: None,
             customer_token: "secret-customer-token".to_string(),
             bound_at: "2026-07-03T00:00:00Z".to_string(),
+            source_role_id: None,
         },
     )
     .unwrap();
@@ -69,6 +74,7 @@ fn extracts_customer_token_from_search_payload() {
     let parsed = owstats_desktop_lib::player_target::target_from_search_payload(
         "Tester#12345",
         &payload,
+        123,
         "2026-07-03T00:00:00Z",
     )
     .unwrap();
@@ -76,6 +82,65 @@ fn extracts_customer_token_from_search_payload() {
     assert_eq!(parsed.input_bnet, "Tester#12345");
     assert_eq!(parsed.resolved_bnet.as_deref(), Some("Tester#12345"));
     assert_eq!(parsed.customer_token, "player-customer-token");
+    assert_eq!(parsed.source_role_id, Some(123));
+}
+
+#[tokio::test]
+async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    let database_path = temp.path().join("sync.sqlite3");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":101,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Other#2000".to_string(),
+            resolved_bnet: Some("Other#2000".to_string()),
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-14T00:00:00Z".to_string(),
+            source_role_id: Some(202),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(&database_path);
+    let server = spawn_request_counting_server();
+
+    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+    assert!(
+        server.requests.lock().unwrap().is_empty(),
+        "rejected sync must not send an upstream request"
+    );
+    assert!(
+        !database_path.exists(),
+        "gate must run before db initialization"
+    );
+    assert!(
+        !season_dir.exists(),
+        "gate must run before season output writes"
+    );
+    for secret in ["101", "202", "Other#2000", "synthetic-player-key", "token"] {
+        assert!(!error.contains(secret));
+    }
+    server.join();
 }
 
 #[tokio::test]
@@ -443,6 +508,70 @@ struct RecordedRequest {
 struct RecordingServer {
     base_url: String,
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
+}
+
+struct RequestCountingServer {
+    base_url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl RequestCountingServer {
+    fn join(mut self) {
+        self.stop.take().unwrap().send(()).unwrap();
+        self.handle.take().unwrap().join().unwrap();
+    }
+}
+
+impl Drop for RequestCountingServer {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn spawn_request_counting_server() -> RequestCountingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || loop {
+        if stop_rx.try_recv().is_ok() {
+            break;
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut buffer = [0_u8; 4096];
+                let read = stream.read(&mut buffer).unwrap_or(0);
+                let first_line = String::from_utf8_lossy(&buffer[..read])
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                captured.lock().unwrap().push(first_line);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 500 Synthetic Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::yield_now();
+            }
+            Err(error) => panic!("request counting server failed: {error}"),
+        }
+    });
+    RequestCountingServer {
+        base_url: format!("http://{address}"),
+        requests,
+        stop: Some(stop_tx),
+        handle: Some(handle),
+    }
 }
 
 struct DelayedDetailServer {

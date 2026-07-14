@@ -1,1 +1,31 @@
 /* Command-center feature rules remain in shared.css until their declaration-only extraction. */
+
+.syncTargetDecision {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.syncTargetDecision button {
+  min-height: 44px;
+}
+
+.syncTargetComparison {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.syncTargetComparison span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 620px) {
+  .syncTargetDecision {
+    justify-content: flex-start;
+  }
+}
