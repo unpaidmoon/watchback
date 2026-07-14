@@ -11,6 +11,7 @@ export type PageEmptyStateProps = {
 
 export type PageErrorStateProps = {
   message: string;
+  actionLabel?: string;
   onRetry: () => void;
 };
 
@@ -34,12 +35,12 @@ export function PageEmptyState({ title, description, actionLabel, onAction }: Pa
   );
 }
 
-export function PageErrorState({ message, onRetry }: PageErrorStateProps) {
+export function PageErrorState({ message, actionLabel = "重试", onRetry }: PageErrorStateProps) {
   return (
     <section className="pageState pageState--error" role="alert">
       <p>{message}</p>
       <button className="pageStateAction" type="button" onClick={onRetry}>
-        重试
+        {actionLabel}
       </button>
     </section>
   );

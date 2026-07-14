@@ -30,6 +30,36 @@ assert.equal(matchesPageSource.includes("selectedMatchId"), true, "MatchesPage s
 assert.equal(matchesPageSource.includes("navigate(`/matches/${matchId}`)"), false, "MatchesPage should not navigate away when selecting a match row");
 assert.match(
   matchesPageSource,
+  /const \[busy, setBusy\] = useState\(!canHydrateCache\)/,
+  "uncached match pages should expose loading state on the first render",
+);
+assert.match(
+  matchesPageSource,
+  /error \? \(\s*<PageErrorState[\s\S]*?actionLabel="重新加载"[\s\S]*?onRetry=\{retryMatches\}[\s\S]*?\) : busy \? \(\s*<PageLoadingState message="正在加载对局列表\.\.\." \/>/,
+  "the match list should render shared error and loading states before the empty timeline",
+);
+assert.match(
+  matchesPageSource,
+  /async function loadMatches\(nextFilters: MatchFilters\) \{[\s\S]*?setBusy\(true\);\s*setError\(null\);/,
+  "filter and retry requests should enter a visible loading state",
+);
+assert.match(
+  matchesPageSource,
+  /function retryMatches\(\) \{\s*if \(pageDataReadyRef\.current\) \{\s*void loadMatches\(currentFiltersRef\.current\);\s*return;\s*\}\s*void hydrateInitialMatches\(currentFiltersRef\.current\);\s*\}/,
+  "list retry should repeat the failed request without changing filter state",
+);
+assert.match(
+  matchesPageSource,
+  /const \[detailRetryKey, setDetailRetryKey\] = useState\(0\);[\s\S]*?\}, \[selectedMatchId, detailRetryKey\]\);/,
+  "detail retry should re-run the selected detail request",
+);
+assert.equal(
+  matchesPageSource.includes("onRetry={() => setDetailRetryKey((value) => value + 1)}"),
+  true,
+  "the detail pane should expose an explicit retry action",
+);
+assert.match(
+  matchesPageSource,
   /setDetailStateMatchId\(selectedMatchId\);\s*setDetailLoading\(true\);\s*setSelectedDetail\(null\);\s*setDetailError\(null\);\s*void getMatchDetails\(selectedMatchId\)/,
   "MatchesPage should bind loading and error state to the requested match before loading detail",
 );
@@ -58,6 +88,7 @@ assert.equal(matchesPageSource.includes("setMobileDetailOpen(true)"), true, "sel
 assert.equal(detailPaneSource.includes("onBack"), true, "detail pane should expose narrow back navigation");
 assert.equal(detailPaneSource.includes("matchDetailBackButton"), true, "detail pane should render a real narrow back button");
 assert.equal(detailPaneSource.includes("CompactMatchDetail"), true, "MatchDetailPane should own compact detail rendering");
+assert.equal(detailPaneSource.includes('"onRetry"'), true, "MatchDetailPane should forward the retry contract");
 assert.equal(detailPaneSource.includes("选择左侧对局查看详情。"), true, "MatchDetailPane should own the unchanged empty state");
 assert.equal(detailHeaderSource.includes("上一场"), true, "the shared detail header should keep previous navigation visible");
 assert.equal(detailHeaderSource.includes("下一场"), true, "the shared detail header should keep next navigation visible");
@@ -225,7 +256,34 @@ const navigationProps = {
   hasNext: true,
   onPrevious: () => undefined,
   onNext: () => undefined,
+  onRetry: () => undefined,
 };
+
+const detailLoadingMarkup = renderToStaticMarkup(
+  createElement(CompactMatchDetail, {
+    detail: null,
+    loading: true,
+    error: null,
+    matchId: "fixture-loading",
+    ...navigationProps,
+  }),
+);
+assert.match(detailLoadingMarkup, /role="status"/);
+assert.match(detailLoadingMarkup, /aria-busy="true"/);
+assert.match(detailLoadingMarkup, /正在读取对局详情\.\.\./);
+
+const detailErrorMarkup = renderToStaticMarkup(
+  createElement(CompactMatchDetail, {
+    detail: null,
+    loading: false,
+    error: "对局详情读取失败",
+    matchId: "fixture-error",
+    ...navigationProps,
+  }),
+);
+assert.match(detailErrorMarkup, /role="alert"/);
+assert.match(detailErrorMarkup, /对局详情读取失败/);
+assert.match(detailErrorMarkup, /<button[^>]*>重新加载<\/button>/);
 const normalMarkup = renderToStaticMarkup(
   createElement(CompactMatchDetail, { detail: normalDetail, loading: false, error: null, matchId: normalDetail.matchId, ...navigationProps }),
 );

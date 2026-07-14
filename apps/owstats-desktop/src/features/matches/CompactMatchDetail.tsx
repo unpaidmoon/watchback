@@ -1,9 +1,10 @@
-import { AlertCircle, CircleDollarSign } from "lucide-react";
+import { CircleDollarSign } from "lucide-react";
 import { useEffect, useState } from "react";
 import { arenaHeaderTitle, formatArenaScore, formatArenaTabLabel } from "../../shared/arenaDetailFormat";
 import { resolveArenaModTraitInfo } from "../../shared/assets";
 import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../../shared/matchDetailHeaderFormat";
+import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
 import { MatchDetailHeader, type MatchDetailNavigationProps } from "./MatchDetailHeader";
 import { MatchTeamTable } from "./MatchTeamTable";
@@ -13,18 +14,14 @@ export type CompactMatchDetailProps = {
   loading: boolean;
   error: string | null;
   matchId: string;
+  onRetry: () => void;
 } & MatchDetailNavigationProps;
 
-export function CompactMatchDetail({ detail, loading, error, matchId, ...navigation }: CompactMatchDetailProps) {
+export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, ...navigation }: CompactMatchDetailProps) {
   if (error) {
-    return (
-      <div className="errorBanner phase6RecoverableError">
-        <AlertCircle size={18} />
-        <span>{error}</span>
-      </div>
-    );
+    return <PageErrorState message={error} actionLabel="重新加载" onRetry={onRetry} />;
   }
-  if (loading && !detail) return <div className="emptyState phase6WorkbenchEmpty">正在读取对局详情...</div>;
+  if (loading && !detail) return <PageLoadingState message="正在读取对局详情..." />;
   if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情。</div>;
   if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} {...navigation} />;
 

@@ -1,4 +1,3 @@
-import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
@@ -28,7 +27,7 @@ import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
-import { PageHeader, PageSeasonSelect } from "../shared/page-shell";
+import { PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
@@ -76,7 +75,8 @@ export function MatchesPage() {
   const [detailStateMatchId, setDetailStateMatchId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [detailRetryKey, setDetailRetryKey] = useState(0);
+  const [busy, setBusy] = useState(!canHydrateCache);
   const [error, setError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
@@ -178,7 +178,7 @@ export function MatchesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedMatchId]);
+  }, [selectedMatchId, detailRetryKey]);
 
   useEffect(() => {
     if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;
@@ -266,6 +266,8 @@ export function MatchesPage() {
   async function loadMatches(nextFilters: MatchFilters) {
     const timelineRequestId = ++timelineRequestIdRef.current;
     const timelineFilterKey = matchFiltersKey(nextFilters);
+    setBusy(true);
+    setError(null);
     try {
       const nextMatches = await listMatchTimeline(nextFilters);
       if (!canCommitMatchTimelineRequest(
@@ -289,7 +291,19 @@ export function MatchesPage() {
 
   function setFilters(nextFilters: MatchFilters) {
     currentFiltersRef.current = nextFilters;
+    if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
+      setBusy(true);
+      setError(null);
+    }
     setFiltersState(nextFilters);
+  }
+
+  function retryMatches() {
+    if (pageDataReadyRef.current) {
+      void loadMatches(currentFiltersRef.current);
+      return;
+    }
+    void hydrateInitialMatches(currentFiltersRef.current);
   }
 
   function setSelectedMatchIdSafely(nextSelectedMatchId: string | null) {
@@ -421,23 +435,23 @@ export function MatchesPage() {
         )}
       />
       <div className="matchesPageControls">
-        {error && (
-          <div className="errorBanner phase6RecoverableError">
-            <AlertCircle size={18} />
-            <span>{error}</span>
-          </div>
-        )}
         <FilterBar filters={filters} options={options} onChange={setFilters} />
       </div>
 
       <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${mobileDetailOpen ? "detailOpen" : ""}`}>
         <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={rememberScroll}>
           <QaRegion id="MAT-LIST">
-            <MatchListPane
-              matches={matches}
-              selectedMatchId={selectedMatchId}
-              onSelect={selectMatch}
-            />
+            {error ? (
+              <PageErrorState message={error} actionLabel="重新加载" onRetry={retryMatches} />
+            ) : busy ? (
+              <PageLoadingState message="正在加载对局列表..." />
+            ) : (
+              <MatchListPane
+                matches={matches}
+                selectedMatchId={selectedMatchId}
+                onSelect={selectMatch}
+              />
+            )}
           </QaRegion>
         </div>
         <MatchDetailPane
@@ -449,6 +463,7 @@ export function MatchesPage() {
           hasNext={nextMatchId !== null}
           onPrevious={() => selectAdjacentMatch(previousMatchId)}
           onNext={() => selectAdjacentMatch(nextMatchId)}
+          onRetry={() => setDetailRetryKey((value) => value + 1)}
           onBack={() => setMobileDetailOpen(false)}
         />
       </section>

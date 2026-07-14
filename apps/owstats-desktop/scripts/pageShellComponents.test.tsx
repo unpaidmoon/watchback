@@ -104,6 +104,16 @@ assert.match(error, /role="alert"/);
 assert.match(error, /读取失败/);
 assert.match(error, /<button[^>]*type="button"[^>]*>重试<\/button>/);
 
+const reloadError = renderToStaticMarkup(
+  createElement(PageErrorState, {
+    message: "对局读取失败",
+    actionLabel: "重新加载",
+    onRetry: () => undefined,
+  }),
+);
+assert.match(reloadError, /对局读取失败/);
+assert.match(reloadError, /<button[^>]*type="button"[^>]*>重新加载<\/button>/);
+
 const status = renderToStaticMarkup(
   createElement(StatusPill, { tone: "success", children: "已完成" }),
 );
