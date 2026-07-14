@@ -209,9 +209,8 @@ select {
 
 .phase6AssetFallback {
   display: inline-block;
-  background:
-    linear-gradient(135deg, rgb(255 138 36 / 0.14), rgb(47 110 234 / 0.1)),
-    var(--phase6-subtle);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-secondary);
 }
 
 .appShell {

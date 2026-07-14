@@ -6,6 +6,7 @@ function read(relativePath: string) {
 }
 
 const tokens = read("../src/styles/tokens.css");
+const legacyShared = read("../src/styles/shared.css");
 const base = read("../src/styles/base.css");
 const shell = read("../src/styles/shell.css");
 const pageShell = read("../src/styles/page-shell.css");
@@ -42,6 +43,14 @@ assert.match(base, /transition-duration:\s*0\.01ms !important/);
 assert.doesNotMatch(semanticStyles, /fonts\.googleapis\.com|https?:\/\/[^)'"\s]+\.(?:woff2?|ttf|otf)/i);
 assert.doesNotMatch(semanticStyles, /\/@fs\/|[A-Z]:\\(?:Codex|Users)\\/i);
 assert.doesNotMatch(semanticStyles, /linear-gradient\([^)]*(?:orange|#f59|#fb9)[^)]*(?:blue|#2f6|#3b8)/i);
+const assetFallbackRule = legacyShared.match(/\.phase6AssetFallback\s*\{([^}]*)\}/s)?.[1] ?? "";
+assert.notEqual(assetFallbackRule, "", "共享图片兜底样式必须存在");
+assert.doesNotMatch(
+  assetFallbackRule,
+  /linear-gradient|255\s+138\s+36|47\s+110\s+234/i,
+  "共享图片兜底不能回退到蓝橙渐变",
+);
+assert.match(assetFallbackRule, /background:\s*var\(--surface-secondary\)/, "共享图片兜底应使用中性表面令牌");
 
 const pageState = read("../src/shared/page-shell/PageState.tsx");
 assert.match(pageState, /role="status"[^>]*aria-live="polite"[^>]*aria-busy="true"/);
