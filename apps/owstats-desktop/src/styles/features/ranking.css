@@ -18,9 +18,9 @@
 
 .phase6SegmentedControl {
   padding: var(--space-1);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-control);
+  background: var(--glass-secondary);
 }
 
 .phase6SegmentedControl button {
@@ -37,9 +37,9 @@
 .phase6RankingSearch {
   flex: 1 1 280px;
   min-width: 180px;
-  border-color: var(--border-subtle);
+  border-color: var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-secondary);
+  background: var(--glass-secondary);
 }
 
 .phase6RankingSearch input {
@@ -57,23 +57,23 @@
   gap: 0;
   margin-top: 0;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .phase6RankingHead,
 .phase6RankingLine {
   border-width: 0 0 1px;
   border-style: solid;
-  border-color: var(--border-subtle);
+  border-color: var(--glass-border);
   border-radius: 0;
 }
 
 .phase6RankingHead {
   min-height: 44px;
-  background: var(--surface-primary);
+  background: var(--glass-secondary);
   color: var(--text-primary);
 }
 
@@ -90,13 +90,14 @@
 }
 
 .phase6RankingHead button.active {
-  color: var(--data-primary);
+  color: var(--text-primary);
 }
 
 .phase6RankingLine {
   min-height: 52px;
-  background: var(--surface-secondary);
+  background: transparent;
   box-shadow: none;
+  font-weight: 400;
 }
 
 .phase6RankingLine:last-child {

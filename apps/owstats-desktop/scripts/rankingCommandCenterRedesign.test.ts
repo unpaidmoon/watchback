@@ -27,11 +27,17 @@ assert.match(rankingSource, /title="英雄与地图排行"/);
 assert.match(rankingSource, /<PageHeader[\s\S]*actions=\{\([\s\S]*<PageSeasonSelect/);
 assert.match(rankingSource, /className="rankingToolbar phase6RankingToolbar"[\s\S]*phase6SegmentedControl[\s\S]*phase6RankingSearch[\s\S]*phase6RankingCount/);
 assert.doesNotMatch(rankingSource, /className="rankingToolbar phase6RankingToolbar"[\s\S]*phase8SeasonSelect[\s\S]*<\/div>/);
-assert.match(rankingCss, /\.phase6RankingHead\s*\{[^}]*background:\s*var\(--surface-primary\)/s);
+assert.match(
+  rankingCss,
+  /\.phase6RankingTable\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "排行表格应作为唯一一级玻璃表面，不叠加阴影",
+);
+assert.match(rankingCss, /\.phase6RankingHead\s*\{[^}]*background:\s*var\(--glass-secondary\)/s);
 assert.match(rankingCss, /\.phase6RankingLine\s*\{[^}]*min-height:\s*52px/s);
 assert.match(rankingCss, /\.phase6RankingLine\s*\{[^}]*box-shadow:\s*none/s);
 assert.match(rankingCss, /\.phase6SegmentedControl button\.active\s*\{[^}]*background:\s*var\(--action-primary\)/s);
-assert.match(rankingCss, /\.phase6RankingHead button\.active\s*\{[^}]*color:\s*var\(--data-primary\)/s);
+assert.match(rankingCss, /\.phase6RankingHead button\.active\s*\{[^}]*color:\s*var\(--text-primary\)/s);
+assert.match(rankingCss, /\.phase6RankingLine\s*\{[^}]*background:\s*transparent;[^}]*font-weight:\s*400;/s);
 
 assert.match(
   rankingSource,
