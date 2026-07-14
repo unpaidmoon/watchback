@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { strict as assert } from "node:assert";
+import { isCurrentDashboardRequest, normalizeLoginTargetName } from "../src/pages/OnboardingPage.tsx";
 
 const root = process.cwd();
 const onboarding = readFileSync(join(root, "src/pages/OnboardingPage.tsx"), "utf8");
@@ -42,6 +43,7 @@ assert.match(onboarding, /role=\{error \? "alert" : "status"\}/, "recoverable me
 assert.match(onboarding, /aria-live=\{error \? "assertive" : "polite"\}/, "recoverable messages are announced accessibly");
 assert.match(commandCenterStyles, /\.syncTargetDecision\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?gap:/, "target decisions wrap without horizontal overflow");
 assert.match(commandCenterStyles, /\.syncTargetDecision[^}]*button[\s\S]*?min-height:\s*(?:3[8-9]|[4-9]\d)px;/, "target actions preserve the existing primary-button touch height");
+assert.match(commandCenterStyles, /\.syncTargetDecision button\s*\{[\s\S]*?min-height:\s*44px;/, "target actions provide a 44px touch target");
 
 assert.match(types, /type LoginTargetStatus\s*=\s*\{[\s\S]*?state:\s*"ready"\s*\|\s*"switchRequired"\s*\|\s*"mismatchKept"\s*\|\s*"bindFailed"\s*\|\s*"unidentified"\s*\|\s*"verificationRequired"\s*\|\s*string;/, "frontend models every login-target state");
 for (const field of ["detectedBnet", "currentBnet", "message", "syncAllowed", "canConfirmSwitch", "canRetry"]) {
@@ -49,6 +51,16 @@ for (const field of ["detectedBnet", "currentBnet", "message", "syncAllowed", "c
 }
 assert.match(types, /type CredentialLoginResult\s*=\s*\{[\s\S]*?status:\s*CredentialStatus;[\s\S]*?target:\s*LoginTargetStatus;/, "login result returns credential and target status together");
 assert.match(types, /type ClearPlayerTargetResult\s*=\s*\{[\s\S]*?cleared:\s*boolean;[\s\S]*?target:\s*LoginTargetStatus;/, "clear result returns the replacement login target status");
+
+assert.equal(normalizeLoginTargetName(" Alice＃1234 "), "alice#1234", "frontend target normalization matches backend hash and case handling");
+assert.notEqual(
+  normalizeLoginTargetName("Ａｌｉｃｅ#1234"),
+  normalizeLoginTargetName("Alice#1234"),
+  "frontend target normalization must not fold full-width letters",
+);
+assert.equal(isCurrentDashboardRequest(2, 2, true), true, "latest mounted dashboard request may update state");
+assert.equal(isCurrentDashboardRequest(1, 2, true), false, "stale dashboard request cannot update state");
+assert.equal(isCurrentDashboardRequest(2, 2, false), false, "unmounted dashboard request cannot update state");
 
 assert.doesNotMatch(commands, /bind_player_target/, "backend must not expose arbitrary BattleTag binding");
 assert.doesNotMatch(lib, /commands::bind_player_target/, "handler must not register arbitrary BattleTag binding");

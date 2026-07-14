@@ -103,6 +103,25 @@ assertEqual(
   true,
   "season sync requires both ready credentials and an allowed login target",
 );
+assertEqual(onboardingSource.includes("const accountOperationBusy = loggingIn || loggingOut || targetAction !== null"), true, "account actions share one busy gate");
+assertEqual(onboardingSource.includes("Boolean(targetStatus?.syncAllowed) && !accountOperationBusy"), true, "account actions suspend season sync");
+assertEqual(onboardingSource.includes("accountOperationLockRef"), true, "account handlers have a synchronous re-entry guard");
+assertEqual(onboardingSource.includes("dashboardRequestGenerationRef"), true, "dashboard refreshes invalidate stale responses");
+assertEqual(onboardingSource.includes("mountedRef"), true, "dashboard responses cannot update an unmounted command center");
+assertEqual(onboardingSource.includes("primaryTargetActionRef"), true, "target recovery exposes a focus destination");
+assertEqual(onboardingSource.includes("previousPrimaryTargetStateRef"), true, "target recovery focus is not stolen on same-state rerenders");
+assertEqual(
+  /catch \(err\) \{[\s\S]*?const loginError = `登录或识别失败[\s\S]*?await loadDashboard\(\);[\s\S]*?setError\(loginError\)/.test(onboardingSource),
+  true,
+  "login refresh completes before the final recoverable error is shown",
+);
+assertEqual(/async function runClearTarget\(\)[\s\S]*?setNotice\(result\.target\.message\)/.test(onboardingSource), true, "clear action uses the backend recovery message");
+assertEqual(onboardingSource.includes("{!hasTargetPrimaryAction && ("), true, "target recovery does not duplicate the bottom login CTA");
+assertEqual(onboardingSource.includes("let disposed = false"), true, "late event subscriptions are disposed safely");
+assertEqual(onboardingSource.includes("if (disposed)"), true, "late event listeners immediately unlisten after cleanup");
+assertEqual(onboardingSource.includes("disabled={accountOperationBusy || !targetStatus.canConfirmSwitch}"), true, "switch confirmation shares the account busy gate");
+assertEqual(onboardingSource.includes("disabled={!hasCurrentTarget || accountOperationBusy}"), true, "clear shares the account busy gate");
+assertEqual(onboardingSource.includes("disabled={!credentialReady || accountOperationBusy}"), true, "logout shares the account busy gate");
 assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
 assertEqual(onboardingSource.includes("S21"), false, "command center does not hard-code S21");

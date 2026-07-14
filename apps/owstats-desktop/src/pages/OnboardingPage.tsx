@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   cancelDashenLogin,
   checkAppUpdate,
@@ -52,8 +52,12 @@ type TargetAction = "confirm" | "keep" | "retry" | "clear";
 const PROFILE_REVIEW_SEASON = 22;
 const dashboardCache = new Map<number, DashboardSnapshot>();
 
-function normalizeLoginTargetName(value: string) {
-  return value.trim().normalize("NFKC").toLowerCase();
+export function normalizeLoginTargetName(value: string) {
+  return value.trim().replace(/＃/g, "#").toLowerCase();
+}
+
+export function isCurrentDashboardRequest(requestGeneration: number, currentGeneration: number, mounted: boolean) {
+  return mounted && requestGeneration === currentGeneration;
 }
 
 export function OnboardingPage() {
@@ -72,21 +76,53 @@ export function OnboardingPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const dashboardRequestGenerationRef = useRef(0);
+  const accountOperationLockRef = useRef(false);
+  const cancelLoginLockRef = useRef(false);
+  const primaryTargetActionRef = useRef<HTMLButtonElement | null>(null);
+  const previousPrimaryTargetStateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      dashboardRequestGenerationRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasDesktopBackend()) {
       return;
     }
 
+    let disposed = false;
     let unlistenSync: (() => void) | undefined;
     let unlistenLogin: (() => void) | undefined;
-    void listen<SyncProgress>("sync-progress", (event) => setSyncProgress(event.payload)).then((handler) => {
+    void listen<SyncProgress>("sync-progress", (event) => {
+      if (!disposed) {
+        setSyncProgress(event.payload);
+      }
+    }).then((handler) => {
+      if (disposed) {
+        handler();
+        return;
+      }
       unlistenSync = handler;
     });
-    void listen<CredentialLoginProgress>("credential-login-progress", (event) => setLoginProgress(event.payload)).then((handler) => {
+    void listen<CredentialLoginProgress>("credential-login-progress", (event) => {
+      if (!disposed) {
+        setLoginProgress(event.payload);
+      }
+    }).then((handler) => {
+      if (disposed) {
+        handler();
+        return;
+      }
       unlistenLogin = handler;
     });
     return () => {
+      disposed = true;
       unlistenSync?.();
       unlistenLogin?.();
     };
@@ -101,7 +137,10 @@ export function OnboardingPage() {
   }, []);
 
   async function loadDashboard() {
-    setError(null);
+    const requestGeneration = ++dashboardRequestGenerationRef.current;
+    if (mountedRef.current) {
+      setError(null);
+    }
     try {
       const [nextStatus, nextProfile, nextReview, nextTargetStatus] = await Promise.all([
         getOnboardingStatus(),
@@ -109,11 +148,16 @@ export function OnboardingPage() {
         getPersonalSeasonReview(PROFILE_REVIEW_SEASON).catch(() => null),
         getLoginTargetStatus(),
       ]);
+      if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
+        return;
+      }
       const snapshot = { status: nextStatus, profile: nextProfile, review: nextReview, targetStatus: nextTargetStatus };
       dashboardCache.set(PROFILE_REVIEW_SEASON, snapshot);
       applyDashboardSnapshot(snapshot);
     } catch (err) {
-      setError(productErrorMessage(err));
+      if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
+        setError(productErrorMessage(err));
+      }
     }
   }
 
@@ -124,39 +168,78 @@ export function OnboardingPage() {
     setTargetStatus(snapshot.targetStatus);
   }
 
+  function beginAccountOperation() {
+    if (accountOperationLockRef.current) {
+      return false;
+    }
+    accountOperationLockRef.current = true;
+    dashboardRequestGenerationRef.current += 1;
+    return true;
+  }
+
+  function finishAccountOperation() {
+    accountOperationLockRef.current = false;
+  }
+
   async function runLogin() {
+    if (!beginAccountOperation()) {
+      return;
+    }
     setLoggingIn(true);
     setNotice(null);
     setError(null);
     try {
       const result = await startDashenLogin();
-      setStatus((current) => (current ? { ...current, credentialStatus: result.status } : current));
-      setTargetStatus(result.target);
-      setNotice(result.target.message);
+      if (mountedRef.current) {
+        setStatus((current) => (current ? { ...current, credentialStatus: result.status } : current));
+        setTargetStatus(result.target);
+        setNotice(result.target.message);
+      }
       await loadDashboard();
     } catch (err) {
-      setError(`登录或识别失败：${productErrorMessage(err)}。请重新识别。`);
+      const loginError = `登录或识别失败：${productErrorMessage(err)}。请重新识别。`;
       await loadDashboard();
+      if (mountedRef.current) {
+        setError(loginError);
+      }
     } finally {
-      setLoggingIn(false);
+      if (mountedRef.current) {
+        setLoggingIn(false);
+      }
+      finishAccountOperation();
     }
   }
 
   async function cancelLogin() {
+    if (cancelLoginLockRef.current) {
+      return;
+    }
+    cancelLoginLockRef.current = true;
     setCancellingLogin(true);
     setError(null);
     try {
       await cancelDashenLogin();
-      setLoginProgress({ phase: "cancelled", message: "已取消登录等待。" });
+      if (mountedRef.current) {
+        setLoginProgress({ phase: "cancelled", message: "已取消登录等待。" });
+      }
     } catch (err) {
-      setError(`取消登录失败：${productErrorMessage(err)}。请重试。`);
+      if (mountedRef.current) {
+        setError(`取消登录失败：${productErrorMessage(err)}。请重试。`);
+      }
     } finally {
-      setLoggingIn(false);
-      setCancellingLogin(false);
+      if (mountedRef.current) {
+        setCancellingLogin(false);
+      }
+      cancelLoginLockRef.current = false;
     }
   }
 
   async function runSeasonSync(season: number) {
+    if (accountOperationLockRef.current) {
+      setError("当前正在处理账号操作，请完成后再同步。");
+      return;
+    }
+    dashboardRequestGenerationRef.current += 1;
     setSyncingSeason(season);
     setNotice(null);
     setError(null);
@@ -174,79 +257,129 @@ export function OnboardingPage() {
   }
 
   async function runConfirmTargetSwitch() {
+    if (!beginAccountOperation()) {
+      return;
+    }
     setTargetAction("confirm");
     setError(null);
     setNotice(null);
     try {
       const nextTarget = await confirmLoginTargetSwitch();
-      setTargetStatus(nextTarget);
-      setNotice(nextTarget.message);
+      if (mountedRef.current) {
+        setTargetStatus(nextTarget);
+        setNotice(nextTarget.message);
+      }
     } catch (err) {
-      setError(`切换目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+      if (mountedRef.current) {
+        setError(`切换目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+      }
     } finally {
-      setTargetAction(null);
+      if (mountedRef.current) {
+        setTargetAction(null);
+      }
+      finishAccountOperation();
     }
   }
 
   async function runKeepCurrentTarget() {
+    if (!beginAccountOperation()) {
+      return;
+    }
     setTargetAction("keep");
     setError(null);
     setNotice(null);
     try {
       const nextTarget = await keepCurrentPlayerTarget();
-      setTargetStatus(nextTarget);
-      setNotice(nextTarget.message);
+      if (mountedRef.current) {
+        setTargetStatus(nextTarget);
+        setNotice(nextTarget.message);
+      }
     } catch (err) {
-      setError(`保留原目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+      if (mountedRef.current) {
+        setError(`保留原目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+      }
     } finally {
-      setTargetAction(null);
+      if (mountedRef.current) {
+        setTargetAction(null);
+      }
+      finishAccountOperation();
     }
   }
 
   async function runRetryTargetBinding() {
+    if (!beginAccountOperation()) {
+      return;
+    }
     setTargetAction("retry");
     setError(null);
     setNotice(null);
     try {
       const nextTarget = await retryLoginTargetBinding();
-      setTargetStatus(nextTarget);
-      setNotice(nextTarget.message);
+      if (mountedRef.current) {
+        setTargetStatus(nextTarget);
+        setNotice(nextTarget.message);
+      }
     } catch (err) {
-      setError(`重新绑定失败：${productErrorMessage(err)}。请重试或重新识别。`);
+      if (mountedRef.current) {
+        setError(`重新绑定失败：${productErrorMessage(err)}。请重试或重新识别。`);
+      }
     } finally {
-      setTargetAction(null);
+      if (mountedRef.current) {
+        setTargetAction(null);
+      }
+      finishAccountOperation();
     }
   }
 
   async function runClearTarget() {
+    if (!beginAccountOperation()) {
+      return;
+    }
     setTargetAction("clear");
     setNotice(null);
     setError(null);
     try {
       const result = await clearPlayerTarget();
-      setTargetStatus(result.target);
-      setNotice("已清除当前目标，请重新识别登录账号。");
+      if (mountedRef.current) {
+        setTargetStatus(result.target);
+        setNotice(result.target.message);
+      }
     } catch (err) {
-      setError(`清除目标失败：${productErrorMessage(err)}。请重试。`);
+      if (mountedRef.current) {
+        setError(`清除目标失败：${productErrorMessage(err)}。请重试。`);
+      }
     } finally {
-      setTargetAction(null);
+      if (mountedRef.current) {
+        setTargetAction(null);
+      }
+      finishAccountOperation();
     }
   }
 
   async function runLogout() {
+    if (!beginAccountOperation()) {
+      return;
+    }
     setLoggingOut(true);
     setNotice(null);
     setError(null);
     try {
       const result = await logout();
-      setNotice(result.message);
-      setLoginProgress(null);
-      dashboardCache.delete(PROFILE_REVIEW_SEASON);
-      await loadDashboard();
+      if (mountedRef.current) {
+        setNotice(result.message);
+        setLoginProgress(null);
+        dashboardCache.delete(PROFILE_REVIEW_SEASON);
+        await loadDashboard();
+      }
     } catch (err) {
-      setError(`退出登录失败：${productErrorMessage(err)}。请重试。`);
+      if (mountedRef.current) {
+        setError(`退出登录失败：${productErrorMessage(err)}。请重试。`);
+      }
     } finally {
-      setLoggingOut(false);
+      if (mountedRef.current) {
+        setLoggingOut(false);
+      }
+      finishAccountOperation();
     }
   }
 
@@ -265,8 +398,13 @@ export function OnboardingPage() {
   }
 
   const credentialReady = status?.credentialStatus.state === "ready";
-  const syncTargetReady = credentialReady && Boolean(targetStatus?.syncAllowed);
+  const accountOperationBusy = loggingIn || loggingOut || targetAction !== null;
+  const syncTargetReady = credentialReady && Boolean(targetStatus?.syncAllowed) && !accountOperationBusy;
   const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
+  const primaryTargetState = targetStatus && ["switchRequired", "bindFailed", "unidentified", "verificationRequired", "mismatchKept"].includes(targetStatus.state)
+    ? targetStatus.state
+    : null;
+  const hasTargetPrimaryAction = primaryTargetState !== null;
   const showDetectedLogin = Boolean(
     targetStatus?.currentBnet &&
     targetStatus.detectedBnet &&
@@ -294,6 +432,13 @@ export function OnboardingPage() {
     : [];
   const commonHeroes = review?.heroPool.mainHeroes.slice(0, 3) ?? [];
   const topAchievements = review ? activeTopAchievements(review, 3) : [];
+
+  useEffect(() => {
+    if (primaryTargetState && previousPrimaryTargetStateRef.current !== primaryTargetState) {
+      primaryTargetActionRef.current?.focus();
+    }
+    previousPrimaryTargetStateRef.current = primaryTargetState;
+  }, [primaryTargetState]);
 
   return (
     <section className="workspace onboardingWorkspace phase6CommandCenter">
@@ -401,24 +546,24 @@ export function OnboardingPage() {
                   {targetStatus?.state === "ready" && <span className="good">当前目标已确认，可同步</span>}
                   {targetStatus?.state === "switchRequired" && (
                     <>
-                      <button className="primaryButton" type="button" onClick={runConfirmTargetSwitch} disabled={targetAction !== null || loggingIn || !targetStatus.canConfirmSwitch}>
+                      <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runConfirmTargetSwitch} disabled={accountOperationBusy || !targetStatus.canConfirmSwitch}>
                         {targetAction === "confirm" ? "切换中…" : "切换到此账号"}
                       </button>
-                      <button className="ghostButton" type="button" onClick={runKeepCurrentTarget} disabled={targetAction !== null || loggingIn}>
+                      <button className="ghostButton" type="button" onClick={runKeepCurrentTarget} disabled={accountOperationBusy}>
                         {targetAction === "keep" ? "保留中…" : "保留原目标"}
                       </button>
                     </>
                   )}
                   {targetStatus?.state === "bindFailed" && targetStatus.canRetry ? (
-                    <button className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={targetAction !== null || loggingIn}>
+                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={accountOperationBusy}>
                       {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
                     </button>
                   ) : targetStatus && ["unidentified", "verificationRequired", "mismatchKept", "bindFailed"].includes(targetStatus.state) ? (
-                    <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn || targetAction !== null}>
+                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy}>
                       {loggingIn ? "识别中…" : "重新识别"}
                     </button>
                   ) : null}
-                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || targetAction !== null || loggingIn}>
+                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy}>
                     {targetAction === "clear" ? "清除中…" : "清除"}
                   </button>
                 </div>
@@ -448,10 +593,12 @@ export function OnboardingPage() {
               </section>
 
               <div className="phase6SettingsLauncherGrid syncSecondaryActions">
-                <button className="primaryButton" type="button" onClick={runLogin} disabled={loggingIn || cancellingLogin || targetAction !== null}>
-                  <LogIn size={18} />
-                  {loggingIn ? "登录识别中…" : credentialReady ? "重新登录" : "登录网易大神"}
-                </button>
+                {!hasTargetPrimaryAction && (
+                  <button className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy}>
+                    <LogIn size={18} />
+                    {loggingIn ? "登录识别中…" : credentialReady ? "重新登录" : "登录网易大神"}
+                  </button>
+                )}
                 {loggingIn && (
                   <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
                     <X size={18} />
@@ -462,7 +609,7 @@ export function OnboardingPage() {
                   <Download size={18} />
                   {checkingUpdate ? "检查中" : "检查更新"}
                 </button>
-                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || loggingOut}>
+                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy}>
                   <LogOut size={18} />
                   {loggingOut ? "退出中…" : "退出登录"}
                 </button>
