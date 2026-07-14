@@ -354,7 +354,11 @@ assert.match(normalMarkup, />对手数据</);
 
 const standaloneNormalMarkup = renderToStaticMarkup(
   createElement(MatchDetailReport, {
-    detail: normalDetail,
+    detail: {
+      ...normalDetail,
+      evaluation: { grade: "A", primaryTag: "带飞局", evidenceTags: [], confidence: 0.9 },
+      teamAwards: [{ code: "damage", label: "本队伤害最高", tone: "gold" }],
+    },
     loading: false,
     error: null,
     matchId: normalDetail.matchId,
@@ -362,6 +366,9 @@ const standaloneNormalMarkup = renderToStaticMarkup(
 );
 assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
 assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should render the shared English result label");
+assert.doesNotMatch(standaloneNormalMarkup, />对局表现</, "standalone normal detail should remove the personal summary eyebrow");
+assert.doesNotMatch(standaloneNormalMarkup, />评分与同队奖牌</, "standalone normal detail should remove the personal summary title");
+assert.doesNotMatch(standaloneNormalMarkup, /phase6PerformanceBadges/, "standalone normal detail should not render performance badges");
 
 for (const [result, resultLabel, englishLabel] of [
   ["loss", "失败", "DEFEAT"],

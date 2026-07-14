@@ -2,7 +2,6 @@ import { AlertCircle, ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMatchDetails } from "../shared/api";
-import { MatchPerformanceBadges } from "../shared/PerformanceBadgesView";
 import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
 import { arenaRankAssetUrl } from "../shared/assets";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../shared/matchDetailHeaderFormat";
@@ -190,7 +189,6 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
       {!loading && !detail && !error && <div className="emptyState">未找到对局详情。</div>}
       {detail && (
         <div className="detailContent">
-          <DetailEvaluation detail={detail} />
           <SameRoleComparison detail={detail} />
           <div className="playerColumns phase6PlayerColumns">
             <PlayerTable title="队友" players={detail.teammates} tone="team" />
@@ -237,21 +235,6 @@ function ArenaSelector({
         </button>
       ))}
     </nav>
-  );
-}
-
-function DetailEvaluation({ detail }: { detail: MatchDetailView }) {
-  if (!detail.evaluation && detail.teamAwards.length === 0) return null;
-  return (
-    <GlassPanel className="roleComparison phase6ReportPanel" tone="solid">
-      <header>
-        <div>
-          <span className="phase6Eyebrow">对局表现</span>
-          <h3>评分与同队奖牌</h3>
-        </div>
-      </header>
-      <MatchPerformanceBadges evaluation={detail.evaluation} teamAwards={detail.teamAwards} />
-    </GlassPanel>
   );
 }
 
