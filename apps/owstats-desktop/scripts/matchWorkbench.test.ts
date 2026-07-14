@@ -138,6 +138,21 @@ assert.match(matchStyleSource, /\.matchListCardResult\.result-loss \.matchListCa
 assert.match(matchStyleSource, /\.matchListCard \.matchListCardMap[\s\S]*position:\s*static/);
 assert.match(matchStyleSource, /\.matchListCardHeroLine \.phase6VerticalPerformanceTag[\s\S]*writing-mode:\s*horizontal-tb/);
 assert.match(matchStyleSource, /grid-template-columns:\s*minmax\([^)]*,\s*32fr\)\s+minmax\(0,\s*68fr\)/);
+assert.match(
+  matchStyleSource,
+  /\.appFrame:has\(\.matchesPage\)\s*\{[^}]*height:\s*calc\(100dvh - 16px\)[^}]*display:\s*flex[^}]*flex-direction:\s*column/s,
+  "the match route should constrain the shell to the available viewport without changing long-form pages",
+);
+assert.match(
+  matchStyleSource,
+  /\.appCanvas:has\(> \.matchesPage\)\s*\{[^}]*flex:\s*1[^}]*min-height:\s*0/s,
+  "the match route canvas should give its remaining height to the workbench",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchesPage\s*\{[^}]*height:\s*100%[^}]*min-height:\s*0/s,
+  "the match page should fill the shell remainder instead of recalculating the viewport",
+);
 assert.match(matchStyleSource, /@media\s*\(max-width:\s*1099px\)/);
 assert.match(matchStyleSource, /\.matchesWorkbench\.detailOpen\s+\.matchListPane\s*\{[^}]*display:\s*none/s);
 assert.match(matchStyleSource, /\.matchesWorkbench:not\(\.detailOpen\)\s+\.matchDetailPane\s*\{[^}]*display:\s*none/s);
