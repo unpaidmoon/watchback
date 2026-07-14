@@ -50,6 +50,8 @@ assert.ok(
 );
 assert.equal(listCardSource.includes("<MatchPerformanceBadges"), true, "match list should render grade and award badges");
 assert.match(listCardSource, /<MatchPerformanceBadges[\s\S]*?compact/, "match list badges should use the compact layout");
+assert.match(listCardSource, /<MatchPerformanceBadges[\s\S]*?evaluation=\{match\.evaluation\}/, "match list badges should receive the match evaluation");
+assert.match(listCardSource, /<MatchPerformanceBadges[\s\S]*?teamAwards=\{match\.teamAwards\}/, "match list badges should receive team awards");
 assert.equal(listCardSource.includes("phase6MatchGrade"), false, "match list should not render the old match performance block");
 
 const badgesSource = readFileSync(new URL("../src/shared/PerformanceBadgesView.tsx", import.meta.url), "utf8");

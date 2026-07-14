@@ -238,6 +238,10 @@ assert.ok(
 
 assert.equal(detailHeaderSource.includes("MapPreview"), true, "detail header should render the existing map preview asset");
 assert.match(detailHeaderSource, /mapGuid:\s*string\s*\|\s*null/, "detail header should accept the map guid for the preview");
+assert.equal(detailHeaderSource.includes("mapKey={mapGuid ?? mapName}"), true, "detail header should prefer the map guid when resolving its preview");
+assert.equal(detailHeaderSource.includes("resultEnglishLabel"), true, "detail header should derive the English result label");
+assert.equal(compactDetailSource.includes("mapGuid={detail.mapGuid}"), true, "normal detail should pass its map guid to the shared header");
+assert.equal(compactDetailSource.includes("mapGuid={selected.mapGuid}"), true, "arena detail should pass the selected slice map guid to the shared header");
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-win[\s\S]*?background:\s*var\(--status-success-bg\)/);
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-loss[\s\S]*?background:\s*var\(--surface-control\)/);
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-draw[\s\S]*?background:\s*var\(--surface-control\)/);
@@ -373,10 +377,30 @@ const arenaDetail: MatchDetailView = {
       teammates: [anonymousPlayer],
       enemies: [{ ...anonymousPlayer, side: "enemy", name: "匿名角斗对手" }],
     },
-    rounds: [],
+    rounds: [
+      {
+        key: "round-1",
+        label: "第 1 回合",
+        result: "win",
+        resultLabel: "胜利",
+        teamScore: 1,
+        opponentScore: 0,
+        durationSec: 180,
+        beginTs: 0,
+        beginLabel: "70/01/01 08:00",
+        mapGuid: "",
+        mapName: "匿名角斗地图",
+        teammates: [anonymousPlayer],
+        enemies: [{ ...anonymousPlayer, side: "enemy", name: "匿名角斗对手" }],
+      },
+    ],
   },
 };
 const arenaMarkup = renderToStaticMarkup(
   createElement(CompactMatchDetail, { detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps }),
 );
 assert.match(arenaMarkup, /aria-label="角斗对局详情"/);
+assert.match(arenaMarkup, /<button[^>]*>角斗汇总<\/button>/, "arena detail should keep the summary switch");
+assert.match(arenaMarkup, /<button[^>]*>第 1 回合<\/button>/, "arena detail should keep the round switch and label");
+assert.match(arenaMarkup, />队友数据</, "arena detail should keep the teammate table");
+assert.match(arenaMarkup, />对手数据</, "arena detail should keep the enemy table");
