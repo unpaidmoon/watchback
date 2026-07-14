@@ -31,7 +31,10 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const seasonHealthSource = readFileSync(new URL("../src/features/command-center/SeasonHealthPanel.tsx", import.meta.url), "utf8");
 const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
-const styles = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
+const styles = [
+  readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8"),
+  readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8"),
+].join("\n");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
@@ -43,6 +46,16 @@ assertEqual(
   /\.phase6CommandCenter\s*\{\s*max-width:\s*var\(--phase6-content-max\);\s*margin-inline:\s*auto;/.test(styles),
   true,
   "command center is horizontally centered inside the wide workspace",
+);
+assertEqual(
+  /\.commandCenterMainGrid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 2fr\) minmax\(280px, 1fr\);/.test(styles),
+  true,
+  "command center gives season sync two thirds and account health one third",
+);
+assertEqual(
+  /\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/.test(styles),
+  true,
+  "command center metrics form one horizontal four-column row",
 );
 assertEqual(
   /\.phase6RankingWorkspace\s*\{\s*max-width:\s*var\(--phase6-content-max\);\s*margin-inline:\s*auto;/.test(styles),
@@ -82,30 +95,19 @@ assertEqual(seasonSyncGateCopy(true, true, true, false, true).syncHint, "账号�
 assertEqual(seasonSyncGateCopy(true, true, true, true, true).statusLabel, "同步中", "active sync does not fall back to account-processing copy");
 assertEqual(seasonSyncGateCopy(true, true, false, false, true).statusLabel, "本地数据可用", "normal ready target preserves local-data status");
 assertEqual(seasonSyncGateCopy(true, true, false, false, true).syncHint, "当前目标可同步", "normal ready target remains syncable");
-assertEqual(onboardingSource.includes("phase6PlayerPass"), true, "command center uses a player pass identity strip");
-assertEqual(onboardingSource.includes("phase6PlayerPassRail"), true, "player pass uses a compact visual rail instead of a large diagonal block");
-assertEqual(onboardingSource.includes("phase6ProfileInlineStats"), true, "player pass places endorsement and play time under the title");
-assertEqual(onboardingSource.includes("phase6ProfileShowcase"), true, "profile card adds a right-side hero and achievement showcase");
-assertEqual(onboardingSource.includes("phase6ProfileShowcaseGroup"), true, "profile showcase is split into titled hero and achievement groups");
-assertEqual(onboardingSource.includes("常用英雄"), true, "profile showcase labels the common heroes group");
-assertEqual(onboardingSource.includes("成就展示"), true, "profile showcase labels the achievements group");
-assertEqual(onboardingSource.includes("phase6ProfileHeroStrip"), true, "profile showcase uses a horizontal three-hero strip");
-assertEqual(onboardingSource.includes("mainHeroes.slice(0, 3)"), true, "profile showcase limits common heroes to three");
-assertEqual(onboardingSource.includes("Array.from({ length: 3 })"), true, "profile showcase renders three stable hero and achievement slots");
-assertEqual(onboardingSource.includes("phase6ProfileHeroName"), true, "profile showcase renders hero names under avatars");
-assertEqual(onboardingSource.includes("phase6ProfileAchievementBadges"), true, "profile showcase shows top active achievements");
-assertEqual(onboardingSource.includes("phase6ProfileAchievementBadgeFrame"), false, "achievement badges no longer use light circular backing frames");
-assertEqual(onboardingSource.includes("phase6ProfileAchievementToken"), true, "achievement badges keep only a dark token treatment");
-assertEqual(onboardingSource.includes("phase6ProfileAchievementName"), true, "profile showcase renders achievement names under badges");
-assertEqual(onboardingSource.includes("phase6ProfileAchievementInset"), true, "achievement group keeps a dedicated achievement treatment");
-assertEqual(styles.includes("grid-template-rows: 56px 30px"), true, "profile hero and achievement showcase items share fixed media and label rows");
-assertEqual(/\.phase6ProfileAchievementToken\s*\{\s*width: 56px;\s*height: 56px;/.test(styles), true, "profile achievement tokens match hero avatar size");
-assertEqual(styles.includes("rgb(255 252 242 / 0.82)"), true, "achievement showcase uses a light token-tinted background");
-assertEqual(styles.includes("linear-gradient(145deg, rgb(23 32 51 / 0.98), rgb(36 47 68 / 0.95))"), false, "achievement showcase no longer uses the overly dark embedded panel");
-assertEqual(onboardingSource.includes("activeTopAchievements"), true, "profile showcase uses shared active achievement ranking");
-assertEqual(onboardingSource.includes("getPersonalSeasonReview"), true, "profile showcase loads review data for heroes and achievements");
-assertEqual(onboardingSource.includes("phase6PassStatusTrack"), false, "player pass removes duplicated account status chips");
-assertEqual(onboardingSource.includes("phase6UnifiedCommandPanel"), true, "command center is consolidated into one player pass control panel");
+assertEqual(onboardingSource.includes("<PageHeader"), true, "command center uses the shared lightweight page header");
+assertEqual(onboardingSource.includes('title="指挥台"'), true, "command center keeps its page title");
+assertEqual(onboardingSource.includes("commandCenterMetricsRow"), true, "command center exposes four horizontal status metrics");
+assertEqual(onboardingSource.includes("commandCenterMainGrid"), true, "command center uses a two-column work area");
+assertEqual(onboardingSource.includes("commandCenterSyncPanel"), true, "season sync is the primary two-thirds panel");
+assertEqual(onboardingSource.includes("commandCenterAccountPanel"), true, "account and health use the narrow side panel");
+assertEqual(onboardingSource.includes("commandCenterTools"), true, "secondary tools are grouped at the bottom");
+assertEqual(onboardingSource.includes("commandCenterDangerZone"), true, "logout is separated as a dangerous operation");
+assertEqual(onboardingSource.includes('id="local-data"'), true, "local data shell link has a focusable destination");
+assertEqual(onboardingSource.includes("常用英雄"), false, "common heroes move out of the command center first screen");
+assertEqual(onboardingSource.includes("成就展示"), false, "achievements move out of the command center first screen");
+assertEqual(onboardingSource.includes("getPersonalSeasonReview"), false, "command center no longer requests review-only showcase data");
+assertEqual(onboardingSource.includes("phase6PlayerPass"), false, "command center removes the legacy oversized player pass");
 assertEqual(onboardingSource.includes("phase6CoverageMeter"), true, "command center shows data coverage");
 assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data area keeps one unified coverage card");
 assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads the selected season status from onboarding status");
@@ -173,7 +175,7 @@ assertEqual(onboardingSource.includes("同步全部"), false, "command center ha
 assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
 assertEqual(onboardingSource.includes("dumpSeason"), false, "command center does not expose diagnostic dump API wrapper");
-assertEqual(onboardingSource.includes("phase6DataFacts"), true, "data coverage card owns credential, match count, and last sync facts");
+assertEqual(onboardingSource.includes("commandCenterMetricsRow"), true, "top metrics own credential, match count, coverage and last sync facts");
 assertEqual(onboardingSource.includes("phase6DataHealthGrid"), true, "data coverage card owns health checks");
 assertEqual(onboardingSource.includes("phase6SyncTimeline"), false, "command center removes separate sync status card");
 assertEqual(onboardingSource.includes("phase6HealthChecklist"), false, "command center removes separate health checklist card");
@@ -196,8 +198,8 @@ assertEqual(onboardingSource.includes("applyDashboardSnapshot"), true, "command 
 assertEqual(onboardingSource.includes("phase6ThemeSelector"), false, "command center settings removes theme selector controls");
 assertEqual(onboardingSource.includes("phase6CompactSettingsActions"), false, "settings account actions move into the launcher grid");
 assertEqual(onboardingSource.includes("StatusBadge tone={credentialTone(status?.credentialStatus.state)}"), false, "profile card removes the right-side login status capsule");
-assertEqual(onboardingSource.indexOf("onClick={runLogin}") < onboardingSource.indexOf("onClick={runUpdateCheck}"), true, "login action appears before update action");
-assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.indexOf("onClick={runLogout}"), true, "update action appears before logout action");
+assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.indexOf("onClick={runLogin}"), true, "header update action appears before account actions");
+assertEqual(onboardingSource.indexOf("onClick={runLogin}") < onboardingSource.indexOf("onClick={runLogout}"), true, "dangerous logout remains after account actions");
 assertEqual(onboardingSource.includes("phase6NextActions"), false, "command center does not duplicate capsule navigation with next-step entries");
 assertEqual(onboardingSource.includes("CommandEntry"), false, "command center removes duplicated next-step entry component");
 assertEqual(rankingSource.includes("<PageHeader"), true, "ranking page uses the shared lightweight page header");

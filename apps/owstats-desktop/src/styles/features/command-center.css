@@ -1,5 +1,245 @@
 /* Command-center feature rules remain in shared.css until their declaration-only extraction. */
 
+.commandCenterMetricsRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--phase6-border);
+  border-radius: var(--phase6-radius-lg);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.commandCenterMetricsRow > span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 18px 22px;
+  border-right: 1px solid var(--phase6-border);
+}
+
+.commandCenterMetricsRow > span > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.commandCenterMetricsRow > span > strong {
+  font-size: 20px;
+}
+
+.commandCenterMetricsRow > span.good > strong {
+  color: var(--status-success);
+}
+
+.commandCenterMetricsRow > span.warn > strong {
+  color: var(--status-warning);
+}
+
+.commandCenterMetricsRow > span:last-child {
+  border-right: 0;
+}
+
+.commandCenterMainGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-6);
+  scroll-margin-top: 96px;
+}
+
+.commandCenterMainGrid:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 4px;
+}
+
+.commandCenterSyncPanel,
+.commandCenterAccountPanel,
+.commandCenterTools,
+.commandCenterDangerZone {
+  min-width: 0;
+  border: 1px solid var(--phase6-border);
+  border-radius: var(--phase6-radius-lg);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.commandCenterSyncPanel,
+.commandCenterAccountPanel,
+.commandCenterTools {
+  padding: clamp(20px, 2vw, 28px);
+}
+
+.commandCenterSectionHeading,
+.commandCenterIdentity,
+.commandCenterDangerZone,
+.commandCenterTools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.commandCenterSectionHeading h2,
+.commandCenterIdentity h2,
+.commandCenterTools h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.commandCenterSyncPanel .syncSeasonWorkbench {
+  margin-top: 20px;
+  border: 0;
+  background: var(--surface-primary);
+  box-shadow: none;
+}
+
+.commandCenterSyncPanel .syncTargetStrip {
+  margin-top: 20px;
+}
+
+.commandCenterAccountPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.commandCenterAccountPanel .phase6DataCoverageCard {
+  width: 100%;
+  overflow: hidden;
+}
+
+.commandCenterAccountPanel .phase6CoveragePrimary {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.commandCenterIdentity {
+  justify-content: flex-start;
+}
+
+.commandCenterIdentity h2,
+.phase8TargetPlayerSummary strong {
+  overflow-wrap: anywhere;
+}
+
+.commandCenterAccountFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.commandCenterAccountFacts > span {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--phase6-radius-md);
+  background: var(--surface-primary);
+}
+
+.commandCenterAccountFacts span span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.commandCenterAccountActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.commandCenterTools {
+  margin-top: var(--space-6);
+}
+
+.commandCenterTools > div:first-child {
+  flex: 0 0 auto;
+}
+
+.commandCenterTools .phase6SettingsLauncherGrid {
+  flex: 1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.commandCenterDangerZone {
+  margin-top: 12px;
+  padding: 16px 20px;
+  background: color-mix(in srgb, var(--status-danger) 5%, var(--surface-secondary));
+  border-color: color-mix(in srgb, var(--phase6-bad) 24%, var(--phase6-border));
+}
+
+.commandCenterDangerZone p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.phase6CommandCenter .primaryButton {
+  border-color: var(--action-primary);
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+  box-shadow: none;
+}
+
+.phase6CommandCenter .primaryButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--action-primary) 88%, white);
+}
+
+.phase6CommandCenter .ghostButton,
+.phase6CommandCenter .phase6SettingsPlaceholderAction {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.phase6CommandCenter .dangerButton {
+  border-color: color-mix(in srgb, var(--status-danger) 34%, var(--border-subtle));
+  background: var(--status-danger-bg);
+  color: var(--status-danger-strong);
+  box-shadow: none;
+}
+
+.phase6CommandCenter .phase6CoverageTrack > span,
+.phase6CommandCenter .phase8SeasonCoverage .phase6CoverageTrack > span {
+  background: var(--data-primary);
+}
+
+@media (max-width: 1080px) {
+  .commandCenterMainGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .commandCenterTools {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .commandCenterTools .phase6SettingsLauncherGrid {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .commandCenterMetricsRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .commandCenterMetricsRow > span:nth-child(2) {
+    border-right: 0;
+  }
+
+  .commandCenterMetricsRow > span:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--phase6-border);
+  }
+
+  .commandCenterTools .phase6SettingsLauncherGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .commandCenterDangerZone {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .syncTargetDecision {
   min-width: 0;
   display: flex;
