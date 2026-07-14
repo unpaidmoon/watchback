@@ -24,15 +24,9 @@
 }
 
 .commandCenterMetricsRow > span > strong {
+  color: var(--text-primary);
   font-size: 20px;
-}
-
-.commandCenterMetricsRow > span.good > strong {
-  color: var(--status-success);
-}
-
-.commandCenterMetricsRow > span.warn > strong {
-  color: var(--status-warning);
+  font-weight: 400;
 }
 
 .commandCenterMetricsRow > span:last-child {
@@ -92,13 +86,13 @@
 .commandCenterTools h2 {
   margin: 4px 0 0;
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .commandCenterSyncPanel .syncSeasonWorkbench {
   margin-top: 20px;
   border: 0;
-  background: var(--surface-primary);
+  background: rgba(250, 251, 247, 0.38);
   box-shadow: none;
 }
 
@@ -155,7 +149,7 @@
   gap: 4px;
   padding: 12px;
   border-radius: var(--phase6-radius-md);
-  background: var(--surface-primary);
+  background: rgba(250, 251, 247, 0.38);
 }
 
 .commandCenterAccountFacts span span {
