@@ -75,6 +75,17 @@ assert.match(pageSource, /className="careerMmrBaseline"/, "趋势图必须显示
 assert.match(pageSource, /aria-label="图表图例"[\s\S]*MMR 估算[\s\S]*置信区间上下界[\s\S]*起点基准/, "图表必须用中文文本解释三类线条的真实语义");
 assert.match(styleSource, /\.careerMmrConfidenceBound\s*{[\s\S]*?stroke:\s*var\(--data-secondary\)/, "置信边界辅线必须使用冷蓝绿色数据令牌");
 assert.match(styleSource, /\.careerMmrBaseline\s*{[\s\S]*?stroke:\s*var\(--data-neutral-strong\)/, "起点基准必须使用可辨认的灰色数据令牌");
+assert.match(
+  styleSource,
+  /\.careerMmrPanel\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "MMR 面板应使用单层玻璃表面且不叠加阴影",
+);
+assert.match(
+  styleSource,
+  /\.careerMmrRoleCard\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "职责卡应使用低边界玻璃表面",
+);
+assert.match(styleSource, /\.careerMmrRoleCard > span\s*\{[^}]*font-weight:\s*400;/s, "职责说明应使用常规字重");
 assert.match(pageSource, /生涯累计贡献/);
 assert.match(pageSource, /label="展示赛季"/);
 assert.match(pageSource, /<PageHeader/);

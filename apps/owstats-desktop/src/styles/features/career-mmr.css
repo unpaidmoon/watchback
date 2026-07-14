@@ -10,10 +10,10 @@
   justify-content: space-between;
   gap: var(--space-6);
   padding: var(--space-4) var(--space-6);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-secondary);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .careerMmrSummary p {
@@ -35,7 +35,7 @@
 }
 
 .careerMmrComposite strong {
-  color: var(--data-primary);
+  color: var(--text-primary);
   font-size: 36px;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
@@ -50,12 +50,12 @@
 .careerMmrRoleCard {
   position: relative;
   padding: var(--space-4);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-secondary);
-  background: var(--surface-secondary);
+  background: var(--glass-primary);
   color: inherit;
   text-align: left;
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
   transition:
     border-color var(--motion-fast) ease,
     transform var(--motion-fast) ease;
@@ -85,7 +85,7 @@
 
 .careerMmrRoleCard > span {
   color: var(--text-secondary);
-  font-weight: 700;
+  font-weight: 400;
 }
 
 .careerMmrRoleCard > strong {
@@ -114,7 +114,7 @@
   margin-top: var(--space-2);
   overflow: hidden;
   border-radius: 999px;
-  background: var(--surface-control);
+  background: var(--glass-secondary);
 }
 
 .careerMmrConfidence i {
@@ -149,10 +149,10 @@
 .careerMmrPanel {
   min-width: 0;
   padding: var(--space-4);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-secondary);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  background: var(--glass-primary);
+  box-shadow: none;
 }
 
 .careerMmrSeasonPanel {
@@ -168,7 +168,7 @@
 }
 
 .careerMmrPanelTitle svg {
-  color: var(--data-primary);
+  color: var(--text-secondary);
 }
 
 .careerMmrPanelTitle > span {
@@ -310,9 +310,10 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-1) var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
-  background: var(--surface-control);
+  background: var(--glass-secondary);
+  box-shadow: none;
 }
 
 .careerMmrModeItem > div:first-child,
@@ -355,7 +356,7 @@
   grid-template-columns: 64px 90px minmax(160px, 1fr) auto;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-1);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--glass-border);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
