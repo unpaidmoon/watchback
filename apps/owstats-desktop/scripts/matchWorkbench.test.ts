@@ -439,7 +439,10 @@ function findReactElement(tree: React.ReactNode, predicate: (element: TestElemen
 }
 
 type StateSetter<T> = (next: T | ((current: T) => T)) => void;
-type TestDispatcher = { useState<T>(initialState: T | (() => T)): [T, StateSetter<T>] };
+type TestDispatcher = {
+  useState<T>(initialState: T | (() => T)): [T, StateSetter<T>];
+  useEffect(effect: React.EffectCallback, dependencies?: React.DependencyList): void;
+};
 type ReactInternals = { ReactCurrentDispatcher: { current: unknown } };
 
 const dispatcherRef = (React as typeof React & { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: ReactInternals })
@@ -448,19 +451,25 @@ const arenaStateSlots: unknown[] = [];
 let arenaHookIndex = 0;
 const arenaHookDispatcher = new Proxy({} as TestDispatcher, {
   get(_target, hookName) {
-    if (hookName !== "useState") {
-      throw new Error(`arena interaction test does not support React hook ${String(hookName)}`);
-    }
-    return <T,>(initialState: T | (() => T)): [T, StateSetter<T>] => {
-      const slot = arenaHookIndex++;
-      if (slot === arenaStateSlots.length) {
-        arenaStateSlots.push(typeof initialState === "function" ? (initialState as () => T)() : initialState);
-      }
-      const setState: StateSetter<T> = (next) => {
-        arenaStateSlots[slot] = typeof next === "function" ? (next as (current: T) => T)(arenaStateSlots[slot] as T) : next;
+    if (hookName === "useState") {
+      return <T,>(initialState: T | (() => T)): [T, StateSetter<T>] => {
+        const slot = arenaHookIndex++;
+        if (slot === arenaStateSlots.length) {
+          arenaStateSlots.push(typeof initialState === "function" ? (initialState as () => T)() : initialState);
+        }
+        const setState: StateSetter<T> = (next) => {
+          arenaStateSlots[slot] = typeof next === "function" ? (next as (current: T) => T)(arenaStateSlots[slot] as T) : next;
+        };
+        return [arenaStateSlots[slot] as T, setState];
       };
-      return [arenaStateSlots[slot] as T, setState];
-    };
+    }
+    if (hookName === "useEffect") {
+      return (_effect: React.EffectCallback, _dependencies?: React.DependencyList): void => {
+        // A server-style tree render must retain hook order but never commit effects.
+        arenaHookIndex++;
+      };
+    }
+    throw new Error(`arena interaction test does not support React hook ${String(hookName)}`);
   },
 });
 
