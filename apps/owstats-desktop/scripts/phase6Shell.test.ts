@@ -35,6 +35,10 @@ const styles = [
   readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8"),
   readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8"),
 ].join("\n");
+const commandCenterStyles = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
+assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
+assertEqual(/\.commandCenterSyncPanel,[\s\S]*?\.commandCenterAccountPanel[\s\S]*?background:\s*var\(--glass-primary\);/.test(commandCenterStyles), true, "main panels use the primary glass surface");
+assertEqual(/@media \(max-width: 1440px\)[\s\S]*?\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "1440px folds metrics into two columns");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");

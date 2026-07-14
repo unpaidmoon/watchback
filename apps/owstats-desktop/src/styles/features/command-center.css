@@ -3,10 +3,10 @@
 .commandCenterMetricsRow {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--phase6-border);
-  border-radius: var(--phase6-radius-lg);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -56,10 +56,19 @@
 .commandCenterTools,
 .commandCenterDangerZone {
   min-width: 0;
-  border: 1px solid var(--phase6-border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--phase6-radius-lg);
-  background: var(--surface-secondary);
-  box-shadow: var(--shadow-card);
+}
+
+.commandCenterSyncPanel,
+.commandCenterAccountPanel {
+  background: var(--glass-primary);
+  box-shadow: var(--glass-shadow);
+}
+
+.commandCenterTools {
+  background: var(--glass-secondary);
+  box-shadow: none;
 }
 
 .commandCenterSyncPanel,
@@ -162,8 +171,24 @@
 .commandCenterDangerZone {
   margin-top: 12px;
   padding: 16px 20px;
-  background: color-mix(in srgb, var(--status-danger) 5%, var(--surface-secondary));
-  border-color: color-mix(in srgb, var(--phase6-bad) 24%, var(--phase6-border));
+  background: rgba(248, 231, 229, 0.34);
+  border-color: rgba(229, 72, 72, 0.22);
+  box-shadow: none;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .commandCenterSyncPanel,
+  .commandCenterAccountPanel,
+  .commandCenterTools {
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+  }
+}
+
+@media (max-width: 1440px) {
+  .commandCenterMetricsRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .commandCenterDangerZone p {
