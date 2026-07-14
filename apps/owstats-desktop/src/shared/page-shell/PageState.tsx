@@ -35,7 +35,7 @@ export function PageEmptyState({ title, description, actionLabel, onAction }: Pa
   );
 }
 
-export function PageErrorState({ message, actionLabel = "重试", onRetry }: PageErrorStateProps) {
+export function PageErrorState({ message, actionLabel = "重新加载", onRetry }: PageErrorStateProps) {
   return (
     <section className="pageState pageState--error" role="alert">
       <p>{message}</p>

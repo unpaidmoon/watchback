@@ -102,7 +102,7 @@ const error = renderToStaticMarkup(
 );
 assert.match(error, /role="alert"/);
 assert.match(error, /读取失败/);
-assert.match(error, /<button[^>]*type="button"[^>]*>重试<\/button>/);
+assert.match(error, /<button[^>]*type="button"[^>]*>重新加载<\/button>/);
 
 const reloadError = renderToStaticMarkup(
   createElement(PageErrorState, {
