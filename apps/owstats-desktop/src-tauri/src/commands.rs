@@ -129,9 +129,13 @@ pub fn save_user_settings(app: AppHandle, settings: UserSettings) -> Result<User
 #[tauri::command]
 pub fn logout(
     app: AppHandle,
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LogoutResult, String> {
-    coordinator.clear();
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    login_target_coordinator.clear();
     let cleared = crate::credentials::clear_credentials(&app).map_err(to_message)?;
     Ok(LogoutResult {
         credential_cleared: cleared,
@@ -153,15 +157,19 @@ pub fn check_app_update() -> Result<UpdateCheckResult, String> {
 #[tauri::command]
 pub async fn start_dashen_login(
     app: AppHandle,
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<CredentialLoginResult, String> {
-    coordinator.clear();
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    login_target_coordinator.clear();
     let outcome = crate::credentials::start_dashen_login_capture(app.clone())
         .await
         .map_err(to_message)?;
     let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let target = crate::login_target::reconcile_detected_target(
-        coordinator.inner(),
+        login_target_coordinator.inner(),
         &outcome.credentials,
         outcome.detected_battle_tag.as_deref(),
         &target_path,
@@ -197,12 +205,16 @@ pub fn get_login_target_status(
 #[tauri::command]
 pub async fn confirm_login_target_switch(
     app: AppHandle,
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
     let credentials = read_saved_credentials(&app)?;
     let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     Ok(crate::login_target::confirm_switch(
-        coordinator.inner(),
+        login_target_coordinator.inner(),
         &credentials,
         &target_path,
         DASHEN_ROOT_BASE,
@@ -212,20 +224,28 @@ pub async fn confirm_login_target_switch(
 
 #[tauri::command]
 pub fn keep_current_player_target(
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
-    coordinator.keep_current().map_err(to_message)
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    login_target_coordinator.keep_current().map_err(to_message)
 }
 
 #[tauri::command]
 pub async fn retry_login_target_binding(
     app: AppHandle,
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
     let credentials = read_saved_credentials(&app)?;
     let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     Ok(crate::login_target::retry_binding(
-        coordinator.inner(),
+        login_target_coordinator.inner(),
         &credentials,
         &target_path,
         DASHEN_ROOT_BASE,
@@ -236,8 +256,12 @@ pub async fn retry_login_target_binding(
 #[tauri::command]
 pub fn clear_player_target(
     app: AppHandle,
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<ClearPlayerTargetResult, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
     let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
     let cleared = crate::player_target::clear_player_target_for_path(&path).map_err(to_message)?;
     let source_role_id = read_optional_saved_credentials(&app)?
@@ -245,7 +269,7 @@ pub fn clear_player_target(
         .map(|credentials| credentials.role_id);
     Ok(ClearPlayerTargetResult {
         cleared,
-        target: coordinator.target_cleared(source_role_id),
+        target: login_target_coordinator.target_cleared(source_role_id),
     })
 }
 
@@ -350,10 +374,12 @@ pub fn get_career_mmr_build_status(app: AppHandle) -> Result<crate::CareerMmrBui
 pub async fn sync_season(
     app: AppHandle,
     request: SyncRequest,
-    sync_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<SyncSummary, String> {
-    let _permit = sync_coordinator.try_acquire().map_err(str::to_string)?;
+    let _permit = operation_coordinator
+        .try_acquire_sync()
+        .map_err(str::to_string)?;
     let paths = app_paths(&app)?;
     let root = paths.seasons();
     let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;

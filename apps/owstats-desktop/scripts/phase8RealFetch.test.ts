@@ -13,6 +13,31 @@ const commands = readFileSync(join(root, "src-tauri/src/commands.rs"), "utf8");
 const lib = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
 const models = readFileSync(join(root, "src-tauri/src/models.rs"), "utf8");
 
+function commandBody(source: string, commandName: string) {
+  const declaration = new RegExp(`pub (?:async )?fn ${commandName}\\b`).exec(source);
+  assert.ok(declaration, `backend exposes ${commandName}`);
+  const bodyStart = source.indexOf("{", declaration.index);
+  assert.notEqual(bodyStart, -1, `${commandName} has a body`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(bodyStart + 1, index);
+    }
+  }
+  assert.fail(`${commandName} body is balanced`);
+}
+
+function assertAcquiresBefore(commandName: string, acquireCall: string, firstSideEffect: string) {
+  const body = commandBody(commands, commandName);
+  const acquireIndex = body.indexOf(acquireCall);
+  const sideEffectIndex = body.indexOf(firstSideEffect);
+  assert.notEqual(acquireIndex, -1, `${commandName} acquires the shared operation permit`);
+  assert.notEqual(sideEffectIndex, -1, `${commandName} keeps its expected first state access or side effect`);
+  assert.ok(acquireIndex < sideEffectIndex, `${commandName} acquires before reading or changing account state`);
+}
+
 assert.doesNotMatch(api, /bindPlayerTarget|bind_player_target/, "product API removes arbitrary BattleTag binding");
 for (const [wrapper, command] of [
   ["getLoginTargetStatus", "get_login_target_status"],
@@ -53,6 +78,8 @@ for (const field of ["detectedBnet", "currentBnet", "message", "syncAllowed", "c
 }
 assert.match(types, /type CredentialLoginResult\s*=\s*\{[\s\S]*?status:\s*CredentialStatus;[\s\S]*?target:\s*LoginTargetStatus;/, "login result returns credential and target status together");
 assert.match(types, /type ClearPlayerTargetResult\s*=\s*\{[\s\S]*?cleared:\s*boolean;[\s\S]*?target:\s*LoginTargetStatus;/, "clear result returns the replacement login target status");
+assert.match(types, /type CredentialStatus\s*=\s*\{[\s\S]*?roleId\?:\s*number\s*\|\s*null;/, "optional Rust roleId serialization is optional in TypeScript");
+assert.match(models, /struct CredentialStatus\s*\{[\s\S]*?skip_serializing_if\s*=\s*"Option::is_none"[\s\S]*?role_id:\s*Option<i64>/, "credential roleId may be omitted by Rust serialization");
 
 assert.equal(normalizeLoginTargetName(" Alice＃1234 "), "alice#1234", "frontend target normalization matches backend hash and case handling");
 assert.notEqual(
@@ -86,4 +113,21 @@ assert.match(
   commands,
   /sync_season[\s\S]*?ensure_sync_target_ready[\s\S]*?sync_season_with_credentials_and_target_paths_output_dir_base_url/,
   "desktop sync validates the login target before starting the fetch",
+);
+
+for (const [commandName, firstSideEffect] of [
+  ["logout", "login_target_coordinator.clear()"],
+  ["start_dashen_login", "login_target_coordinator.clear()"],
+  ["confirm_login_target_switch", "read_saved_credentials(&app)"],
+  ["keep_current_player_target", "login_target_coordinator.keep_current()"],
+  ["retry_login_target_binding", "read_saved_credentials(&app)"],
+  ["clear_player_target", "player_target_path(&app)"],
+] as const) {
+  assertAcquiresBefore(commandName, "try_acquire_account_operation()", firstSideEffect);
+}
+assertAcquiresBefore("sync_season", "try_acquire_sync()", "app_paths(&app)");
+assert.doesNotMatch(
+  commandBody(commands, "cancel_dashen_login"),
+  /try_acquire_(?:account_operation|sync)/,
+  "cancel remains available while a long-running login holds the shared permit",
 );

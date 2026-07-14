@@ -60,7 +60,7 @@ export type CredentialStatus = {
   state: string;
   message: string;
   exposesSecret: boolean;
-  roleId: number | null;
+  roleId?: number | null;
   savedAt: string | null;
 };
 
