@@ -32,4 +32,5 @@
   --radius-control: 12px;
   --shadow-card: 0 8px 24px rgba(35, 40, 35, 0.035);
   --motion-fast: 180ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
