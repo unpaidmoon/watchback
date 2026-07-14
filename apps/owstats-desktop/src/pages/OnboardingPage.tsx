@@ -44,6 +44,7 @@ type DashboardSnapshot = {
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
 const DASHBOARD_SEASON = 22;
+const COMMAND_CENTER_SEASONS = [21, 22, 23] as const;
 const dashboardCache = new Map<number, DashboardSnapshot>();
 
 export function normalizeLoginTargetName(value: string) {
@@ -537,10 +538,10 @@ export function OnboardingPage() {
               <section className="syncSeasonWorkbench" aria-label="赛季同步">
                 <div className="syncSeasonPicker">
                   <span className="phase6Eyebrow">赛季同步</span>
-                  <div>
-                    <button className="ghostButton" type="button" onClick={() => setSeasonInput(String(Math.max(1, selectedSeason - 1)))} aria-label="上一赛季">−</button>
-                    <label> S <input aria-label="赛季号" inputMode="numeric" value={seasonInput} onChange={(event) => setSeasonInput(event.target.value)} /> </label>
-                    <button className="ghostButton" type="button" onClick={() => setSeasonInput(String(selectedSeason + 1))} aria-label="下一赛季">+</button>
+                  <div className="commandCenterSeasonSegments" role="group" aria-label="选择同步赛季">
+                    {COMMAND_CENTER_SEASONS.map((season) => (
+                      <button key={season} className={season === selectedSeason ? "active" : ""} type="button" aria-pressed={season === selectedSeason} onClick={() => setSeasonInput(String(season))}>{`S${season}`}</button>
+                    ))}
                   </div>
                   <p>已有赛季：{status?.availableSeasons.length ? status.availableSeasons.map((season) => `S${season}`).join(" · ") : "暂无"}</p>
                 </div>

@@ -176,6 +176,10 @@
   box-shadow: none;
 }
 
+.commandCenterSeasonSegments { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--glass-border); border-radius: var(--radius-control); background: var(--glass-secondary); }
+.commandCenterSeasonSegments button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); }
+.commandCenterSeasonSegments button.active { background: var(--action-primary); color: var(--action-on-primary); }
+
 @supports (backdrop-filter: blur(1px)) {
   .commandCenterSyncPanel,
   .commandCenterAccountPanel,

@@ -173,7 +173,9 @@ assertEqual(
 );
 assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
-assertEqual(onboardingSource.includes("S21"), false, "command center does not hard-code S21");
+assertEqual(onboardingSource.includes("const COMMAND_CENTER_SEASONS = [21, 22, 23] as const"), true, "command center exposes fixed season segments");
+assertEqual(onboardingSource.includes('aria-label="选择同步赛季"'), true, "season picker has a Chinese accessible name");
+assertEqual(onboardingSource.includes('aria-label="赛季号"'), false, "numeric season input is removed");
 assertEqual(commandCenterSource.includes("`同步 S${seasonStatus.season}`"), true, "season sync button text is generated per season");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");
