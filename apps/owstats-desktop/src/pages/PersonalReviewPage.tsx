@@ -6,6 +6,7 @@ import {
   buildReviewHref,
   parseReviewView,
   reviewScrollKey,
+  scheduleReviewScrollRestore,
   type ReviewView,
 } from "../features/review/reviewNavigation";
 import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
@@ -274,9 +275,19 @@ function ReviewScrollRestorer({ season, view }: { season: number; view: ReviewVi
     const key = reviewScrollKey(href);
     const stored = sessionStorage.getItem(key);
     if (stored === null) return;
-    sessionStorage.removeItem(key);
     const scrollY = Number(stored);
-    if (Number.isFinite(scrollY)) requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
+    if (!Number.isFinite(scrollY)) {
+      sessionStorage.removeItem(key);
+      return;
+    }
+    return scheduleReviewScrollRestore(scrollY, {
+      requestFrame: (callback) => requestAnimationFrame(callback),
+      cancelFrame: (frame) => cancelAnimationFrame(frame),
+      scrollTo: (top) => window.scrollTo({ top }),
+      readScrollY: () => window.scrollY,
+      readMaxScrollY: () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) - window.innerHeight,
+      removeStored: () => sessionStorage.removeItem(key),
+    });
   }, [season, view]);
 
   return null;
@@ -559,6 +570,28 @@ function AchievementCard({ achievement, onOpen }: { achievement: ReviewAchieveme
 
 function AchievementDialog({ achievement, onClose }: { achievement: ReviewAchievement; onClose: () => void }) {
   const nextThreshold = achievement.thresholds[Math.min(achievement.currentLevel, 2)];
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        closeButtonRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose]);
 
   return (
     <div className="phase6AchievementModalBackdrop" role="presentation" onClick={onClose}>
@@ -575,7 +608,7 @@ function AchievementDialog({ achievement, onClose }: { achievement: ReviewAchiev
             <h3>{achievement.title}</h3>
             <p>{achievement.detail}</p>
           </div>
-          <button className="phase6IconButton" type="button" onClick={onClose} aria-label="关闭成就详情">
+          <button ref={closeButtonRef} className="phase6IconButton" type="button" onClick={onClose} aria-label="关闭成就详情">
             <X size={18} />
           </button>
         </header>

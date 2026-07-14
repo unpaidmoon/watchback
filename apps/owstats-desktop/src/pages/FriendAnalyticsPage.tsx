@@ -1,6 +1,6 @@
 import { AlertCircle, Map } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   buildFriendDetailState,
   buildReviewRankingHref,
@@ -394,6 +394,8 @@ function FriendBoardCard({
   season: number;
   sourceView: ReviewView;
 }) {
+  const navigate = useNavigate();
+
   return (
     <GlassPanel className="friendBoard phase6FriendBoard" tone="solid">
       <header>
@@ -414,10 +416,11 @@ function FriendBoardCard({
               className="friendCardLink"
               key={`${board.key}-${friend.bnetId}`}
               to="/analytics/friends/detail"
-              state={detailState()}
-              onClick={() => {
+              onClick={(event) => {
+                event.preventDefault();
                 const state = detailState();
                 sessionStorage.setItem(state.returnTo.scrollKey, String(state.returnTo.scrollY));
+                navigate("/analytics/friends/detail", { state });
               }}
               aria-label={`查看${friend.name}详情`}
             >

@@ -47,6 +47,7 @@
 
 .reviewViewGrid[data-view="overview"] {
   grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  align-items: start;
 }
 
 .reviewViewGrid > * {
@@ -75,6 +76,10 @@
 .reviewRoleHeroPanel p {
   margin: var(--space-1) 0 0;
   color: var(--text-secondary);
+}
+
+.reviewWorkspace .phase6Eyebrow {
+  color: var(--data-primary);
 }
 
 .reviewOverviewMetrics,
@@ -116,6 +121,151 @@
 
 .reviewViewGrid .phase6AchievementPanel {
   width: 100%;
+}
+
+.reviewWorkspace .phase6FriendIntimacyCard {
+  border-color: var(--border-subtle);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.reviewWorkspace .phase6FriendIntimacyRankBadge {
+  border-color: color-mix(in srgb, var(--data-primary) 22%, var(--border-subtle));
+  background: var(--data-primary);
+  box-shadow: none;
+}
+
+.reviewWorkspace .phase6FriendIntimacyBar {
+  background: color-mix(in srgb, var(--data-secondary) 14%, var(--surface-control));
+}
+
+.reviewWorkspace .phase6FriendIntimacyBar span {
+  background: var(--data-secondary);
+}
+
+.reviewWorkspace .phase6FriendIntimacyMetrics div {
+  background: var(--surface-control);
+}
+
+.reviewWorkspace .phase6GlassPanelShared.solid.phase6AchievementPanel {
+  border-color: var(--border-subtle);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+  color: var(--text-primary);
+}
+
+.reviewWorkspace .phase6AchievementHeader h3 {
+  color: var(--text-primary);
+  text-shadow: none;
+}
+
+.reviewWorkspace .phase6AchievementCard {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  box-shadow: none;
+}
+
+.reviewWorkspace .phase6AchievementCard:hover,
+.reviewWorkspace .phase6AchievementCard:focus-within {
+  border-color: color-mix(in srgb, var(--data-primary) 36%, var(--border-subtle));
+  box-shadow: var(--shadow-card);
+}
+
+.reviewWorkspace .phase6AchievementMedalImage {
+  filter: drop-shadow(0 10px 16px rgba(35, 40, 35, 0.14));
+}
+
+.reviewWorkspace .phase6AchievementCard:hover .phase6AchievementMedalImage,
+.reviewWorkspace .phase6AchievementCard:focus-within .phase6AchievementMedalImage {
+  filter: drop-shadow(0 12px 18px rgba(75, 34, 209, 0.16));
+}
+
+.reviewWorkspace .phase6AchievementCopy strong {
+  color: var(--text-primary);
+}
+
+.reviewWorkspace .phase6AchievementCopy strong span {
+  border-color: color-mix(in srgb, var(--data-primary) 24%, var(--border-subtle));
+  color: var(--data-primary);
+}
+
+.reviewWorkspace .phase6AchievementCopy > span {
+  color: var(--data-primary);
+}
+
+.reviewWorkspace .phase6AchievementCopy small,
+.reviewWorkspace .phase6AchievementNext {
+  color: var(--text-secondary);
+}
+
+.reviewWorkspace .phase6AchievementProgress,
+.reviewWorkspace .phase6AchievementModalProgress {
+  background: color-mix(in srgb, var(--data-secondary) 14%, var(--surface-control));
+}
+
+.reviewWorkspace .phase6AchievementProgress span,
+.reviewWorkspace .phase6AchievementModalProgress span {
+  background: var(--data-secondary);
+}
+
+.reviewWorkspace .phase6AchievementTierRail span {
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+.reviewWorkspace .phase6AchievementTierRail span.unlocked {
+  border-color: color-mix(in srgb, var(--data-secondary) 32%, var(--border-subtle));
+  color: var(--text-secondary);
+}
+
+.reviewWorkspace .phase6AchievementTierRail span.active {
+  border-color: var(--data-primary);
+  background: var(--data-primary);
+  color: var(--action-on-primary);
+}
+
+.reviewWorkspace .phase6AchievementModalBackdrop {
+  background: rgba(32, 34, 32, 0.48);
+}
+
+.reviewWorkspace .phase6AchievementModal {
+  border-color: var(--border-subtle);
+  background: var(--surface-secondary);
+  box-shadow: 0 24px 64px rgba(32, 34, 32, 0.22);
+  color: var(--text-primary);
+}
+
+.reviewWorkspace .phase6AchievementModalHeader p,
+.reviewWorkspace .phase6AchievementBadgeStage span,
+.reviewWorkspace .phase6AchievementModalStats .metric span {
+  color: var(--text-secondary);
+}
+
+.reviewWorkspace .phase6IconButton {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.reviewWorkspace .phase6AchievementBadgeStage {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+}
+
+.reviewWorkspace .phase6AchievementBadgeStage.active {
+  border-color: color-mix(in srgb, var(--data-primary) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 8%, var(--surface-control));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--data-primary) 12%, transparent);
+}
+
+.reviewWorkspace .phase6AchievementBadgeStage strong,
+.reviewWorkspace .phase6AchievementModalStats .metric strong {
+  color: var(--data-primary);
+}
+
+.reviewWorkspace .phase6AchievementModalStats .metric {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
 }
 
 @media (max-width: 899px) {

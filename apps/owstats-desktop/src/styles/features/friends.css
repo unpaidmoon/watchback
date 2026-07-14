@@ -29,3 +29,45 @@
 .friendCardLink:focus-visible .friendCard {
   border-color: var(--data-primary);
 }
+
+.friendDetailPage {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-8);
+}
+
+.friendDetailPage .detailContent {
+  max-width: none;
+  margin-top: 0;
+}
+
+.friendDetailPage .phase6Eyebrow {
+  color: var(--data-primary);
+}
+
+.friendDetailPage .phase6ReviewPanel {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-secondary);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.friendDetailPage .boardHits article,
+.friendDetailPage .breakdownList div,
+.friendDetailPage .recentMatchRow {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+}
+
+.friendDetailPage .boardHits p,
+.friendDetailPage .boardHits span {
+  color: var(--text-secondary);
+}
+
+.friendDetailPage .ghostButton {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  box-shadow: none;
+}

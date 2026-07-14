@@ -57,6 +57,13 @@ assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
 assert.match(analyticsSource, /buildReviewRankingHref\(season\)/);
 assert.match(analyticsSource, /buildFriendDetailState\(friend\.bnetId, season, sourceView, window\.scrollY\)/);
+assert.match(analyticsSource, /event\.preventDefault\(\)/, "好友详情点击应阻止使用渲染期旧 state 的默认导航");
+assert.match(
+  analyticsSource,
+  /navigate\("\/analytics\/friends\/detail",\s*\{\s*state\s*\}\)/s,
+  "好友详情应使用点击时的滚动位置显式导航",
+);
+assert.doesNotMatch(analyticsSource, /state=\{detailState\(\)\}/, "链接不应固化渲染期滚动位置");
 assert.match(friendDetailSource, /getFriendDetails\(state\.bnetId, \{ season: state\.season \}\)/);
 assert.match(friendDetailSource, /sessionStorage\.setItem\(state\.returnTo\.scrollKey/);
 assert.match(friendDetailSource, /navigate\(state\.returnTo\.href\)/);

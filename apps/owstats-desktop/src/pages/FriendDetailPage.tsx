@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { parseFriendDetailState } from "../features/review/reviewNavigation";
 import { getFriendDetails } from "../shared/api";
-import { PageEmptyState, PageErrorState, PageLoadingState } from "../shared/page-shell";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState } from "../shared/page-shell";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { formatWinRate } from "../shared/rankingUtils";
@@ -42,7 +42,7 @@ export function FriendDetailPage() {
 
   if (!state) {
     return (
-      <section className="detailPage phase6DetailPage">
+      <section className="detailPage phase6DetailPage friendDetailPage">
         <PageEmptyState
           title="无法打开好友详情"
           description="详情入口已失效，请从战报的队友协作页重新进入。"
@@ -54,17 +54,17 @@ export function FriendDetailPage() {
   }
 
   return (
-    <section className="detailPage phase6DetailPage">
-      <header className="detailHero phase6DetailHero">
-        <button type="button" className="ghostButton" onClick={returnToReview}>
-          <ArrowLeft size={18} />
-          返回战报
-        </button>
-        <div>
-          <span className="phase6Eyebrow">好友详情</span>
-          <h2>{detail?.name ?? "好友详情"}</h2>
-        </div>
-      </header>
+    <section className="detailPage phase6DetailPage friendDetailPage">
+      <PageHeader
+        title={detail?.name ?? "好友详情"}
+        description={`S${state.season} 队友协作详情`}
+        actions={
+          <button type="button" className="ghostButton" onClick={returnToReview}>
+            <ArrowLeft size={18} />
+            返回战报
+          </button>
+        }
+      />
 
       {error && <PageErrorState message={error} onRetry={requestDetail} />}
       {loading && <PageLoadingState message="正在读取好友详情..." />}

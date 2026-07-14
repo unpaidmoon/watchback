@@ -31,6 +31,40 @@ export function reviewScrollKey(href: string) {
   return `review-scroll:${href}`;
 }
 
+export type ReviewScrollRuntime = {
+  requestFrame: (callback: () => void) => number;
+  cancelFrame: (frame: number) => void;
+  scrollTo: (top: number) => void;
+  readScrollY: () => number;
+  readMaxScrollY: () => number;
+  removeStored: () => void;
+};
+
+export function scheduleReviewScrollRestore(scrollY: number, runtime: ReviewScrollRuntime, maxAttempts = 8) {
+  let frame = 0;
+  let attempts = 0;
+  let cancelled = false;
+
+  const restore = () => {
+    if (cancelled) return;
+    attempts += 1;
+    runtime.scrollTo(scrollY);
+    const maxScrollY = Math.max(0, runtime.readMaxScrollY());
+    const reachedTarget = scrollY === 0 || (maxScrollY >= scrollY - 1 && Math.abs(runtime.readScrollY() - scrollY) <= 1);
+    if (reachedTarget || attempts >= maxAttempts) {
+      runtime.removeStored();
+      return;
+    }
+    frame = runtime.requestFrame(restore);
+  };
+
+  frame = runtime.requestFrame(restore);
+  return () => {
+    cancelled = true;
+    runtime.cancelFrame(frame);
+  };
+}
+
 export function buildFriendDetailState(
   bnetId: string,
   season: number,
