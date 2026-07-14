@@ -1,1 +1,111 @@
-/* Ranking feature rules remain in shared.css until their declaration-only extraction. */
+.rankingWorkspace {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.phase6RankingToolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: 0;
+  padding: 10px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.phase6SegmentedControl {
+  padding: var(--space-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+}
+
+.phase6SegmentedControl button {
+  min-height: 36px;
+  border-radius: calc(var(--radius-control) - 4px);
+  color: var(--text-secondary);
+}
+
+.phase6SegmentedControl button.active {
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+}
+
+.phase6RankingSearch {
+  flex: 1 1 280px;
+  min-width: 180px;
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+}
+
+.phase6RankingSearch input {
+  color: var(--text-primary);
+}
+
+.phase6RankingCount {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.phase6RankingTable {
+  gap: 0;
+  margin-top: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+  box-shadow: var(--shadow-card);
+}
+
+.phase6RankingHead,
+.phase6RankingLine {
+  border-width: 0 0 1px;
+  border-style: solid;
+  border-color: var(--border-subtle);
+  border-radius: 0;
+}
+
+.phase6RankingHead {
+  min-height: 44px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+}
+
+.phase6RankingHead button {
+  color: var(--text-secondary);
+}
+
+.phase6RankingHead button.active {
+  color: var(--data-primary);
+}
+
+.phase6RankingLine {
+  min-height: 52px;
+  background: var(--surface-secondary);
+  box-shadow: none;
+}
+
+.phase6RankingLine:last-child {
+  border-bottom: 0;
+}
+
+.phase6RankingLine > span:not(.phase6RankName):not(.phase6RankBestHero) {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .phase6RankingToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .phase6RankingCount {
+    margin-left: 0;
+  }
+}

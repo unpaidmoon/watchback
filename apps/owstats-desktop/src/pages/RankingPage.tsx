@@ -1,8 +1,9 @@
-import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
 import { resolveHeroDisplayName, resolveMapDisplayName } from "../shared/assets";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import { HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import {
@@ -56,6 +57,7 @@ export function RankingPage() {
   const [ranking, setRanking] = useState<RankingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryRequest, setRetryRequest] = useState(0);
   const rankingRequestGuard = useRef(createLatestRankingRequestGuard());
 
   useEffect(() => {
@@ -90,7 +92,7 @@ export function RankingPage() {
       });
 
     return () => rankingRequestGuard.current.invalidate(request);
-  }, [selectedSeason]);
+  }, [selectedSeason, retryRequest]);
 
   const rows = useMemo(() => {
     const source = (tab === "maps" ? ranking?.maps ?? [] : ranking?.heroes ?? []).map((row) => ({
@@ -139,12 +141,18 @@ export function RankingPage() {
 
   return (
     <section className="workspace rankingWorkspace phase6RankingWorkspace">
-      {error && (
-        <div className="errorBanner phase6RecoverableError">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
+      <PageHeader
+        title="英雄与地图排行"
+        description={tab === "heroes" ? "按本地赛季汇总英雄表现" : "按本地赛季汇总地图表现"}
+        actions={(
+          <PageSeasonSelect
+            value={selectedSeason}
+            seasons={availableSeasons}
+            disabled={availableSeasons.length === 0}
+            onChange={(season) => season !== undefined && changeSeason(season)}
+          />
+        )}
+      />
 
       <div className="rankingToolbar phase6RankingToolbar">
         <div className="segmentedControl phase6SegmentedControl">
@@ -159,28 +167,25 @@ export function RankingPage() {
           <Search size={16} />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "maps" ? "搜索地图或英雄" : "搜索英雄"} />
         </label>
-        <label className="seasonSelect phase8SeasonSelect">
-          <span>赛季</span>
-          <select
-            value={selectedSeason ?? ""}
-            disabled={availableSeasons.length === 0}
-            onChange={(event) => changeSeason(Number(event.target.value))}
-          >
-            {availableSeasons.map((season) => (
-              <option key={season} value={season}>
-                S{season}
-              </option>
-            ))}
-          </select>
-        </label>
         <span className="phase6RankingCount">
-          {selectedSeason ? `S${selectedSeason}` : "本地赛季"} · {sourceCount} 项 · 当前 {rows.length} 项
+          {sourceCount} 项 · 当前 {rows.length} 项
         </span>
       </div>
 
-      {loading && <div className="emptyState">正在计算排行...</div>}
-      {!loading && rows.length === 0 && <div className="emptyState">本地赛季数据不足，暂无排行。</div>}
-      {!loading && rows.length > 0 && <RankingTable rows={rows} tab={tab} sort={sort} onSort={changeSort} />}
+      {error ? (
+        <PageErrorState message={error} onRetry={() => setRetryRequest((value) => value + 1)} />
+      ) : loading ? (
+        <PageLoadingState message="正在计算排行..." />
+      ) : rows.length === 0 ? (
+        <PageEmptyState
+          title="暂无排行"
+          description={search ? "没有与当前搜索匹配的条目。" : "本地赛季数据不足，暂无排行。"}
+          actionLabel={search ? "清除搜索" : "重新加载"}
+          onAction={() => search ? setSearch("") : setRetryRequest((value) => value + 1)}
+        />
+      ) : (
+        <RankingTable rows={rows} tab={tab} sort={sort} onSort={changeSort} />
+      )}
     </section>
   );
 }

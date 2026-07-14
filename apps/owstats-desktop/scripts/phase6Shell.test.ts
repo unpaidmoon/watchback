@@ -134,7 +134,8 @@ assertEqual(onboardingSource.indexOf("onClick={runLogin}") < onboardingSource.in
 assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.indexOf("onClick={runLogout}"), true, "update action appears before logout action");
 assertEqual(onboardingSource.includes("phase6NextActions"), false, "command center does not duplicate capsule navigation with next-step entries");
 assertEqual(onboardingSource.includes("CommandEntry"), false, "command center removes duplicated next-step entry component");
-assertEqual(rankingSource.includes('<header className="phase6PageHeader phase6RankingHeader">'), false, "ranking page removes header card");
+assertEqual(rankingSource.includes("<PageHeader"), true, "ranking page uses the shared lightweight page header");
+assertEqual(rankingSource.includes('<header className="phase6PageHeader phase6RankingHeader">'), false, "ranking page does not restore the old thick header card");
 assertEqual(rankingSource.includes('const heroSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"]'), true, "hero ranking sortable keys exclude rating");
 assertEqual(rankingSource.includes('const mapSortKeys: RankingSortKey[] = ["matches", "winRate", "playTimeHours", "kda"]'), true, "map ranking sortable keys exclude best hero and rating");
 assertEqual(onboardingSource.includes("队友分析"), false, "command center does not duplicate friend analysis navigation");

@@ -26,7 +26,9 @@ assert.match(reviewSource, /getSeasonAnalysis\(selectedSeason/, "review page sho
 assert.match(reviewSource, /const titleSeason = selectedSeason \?\? review\.summary\.season/, "review title should use selectedSeason before backend summary season");
 
 assert.match(rankingSource, /getRankings\(selectedSeason/, "ranking page should request rankings with selectedSeason");
-assert.match(rankingSource, /<select[^>]+value=\{selectedSeason/, "ranking page should render a page-level season selector");
+assert.match(rankingSource, /<PageSeasonSelect/, "ranking page should render the shared page-level season selector");
+assert.match(rankingSource, /value=\{selectedSeason\}/, "ranking page should bind the shared selector to selectedSeason");
+assert.match(rankingSource, /seasons=\{availableSeasons\}/, "ranking page should use backend-discovered seasons");
 assert.match(rankingSource, /\.set\("season", String\(nextSeason\)\)/, "ranking page selector should persist season in the URL");
 assert.equal(rankingSource.includes("selectableSeasons"), false, "ranking page must not keep a fixed season list");
 assert.match(rankingSource, /ranking\?\.availableSeasons/, "ranking page should render seasons returned by the backend");
