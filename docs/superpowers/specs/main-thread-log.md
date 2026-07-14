@@ -867,3 +867,31 @@ Deferred map GUIDs:
 Implementation note:
 The deferred GUIDs should continue to fall back to `query_tool.fightMapUrl`
 until a later S23+ data sample confirms their map names and preview files.
+
+## 2026-07-14 登录 BattleTag 自动识别与同步门禁
+
+目标：
+在网易大神浏览器登录流程中，从当前页面带“战网昵称”标签的文本自动识别 BattleTag，并安全地关联当前登录账号与单一同步目标；不恢复任意 BattleTag 输入或绑定入口。
+
+已完成：
+- 登录采集同时跟踪凭据角色和页面 BattleTag，只接受两次稳定、同源的完整观察；角色变化、缺失或冲突会使旧配对失效。
+- 目标解析采用 `searchBnetAccount` 与 `queryCard` 两阶段校验，业务失败、身份不一致、过期请求和并发写入均失败关闭，旧目标不会被覆盖。
+- `PlayerTarget` 记录来源账号关联；旧目标和其他账号目标不能直接解锁同步。
+- Tauri 只暴露自动确认、切换确认、保留旧目标、清除和重新识别等安全动作；旧的任意绑定 command 与前端 API 已删除。
+- 指挥台不再显示 BattleTag 输入框。多账号场景同时显示当前目标与检测到的登录账号，用户确认前禁用同步。
+- 账号操作与赛季同步共用互斥门禁；同步在数据库、输出文件和上游请求前再次校验当前登录会话与目标。
+
+自动化与烟测：
+- `cargo fmt --check`：通过。
+- 登录定向测试：78 项通过。
+- `cargo test --tests`：通过；真实上游 live test 按设计忽略。
+- `npm test`、`npm run build`：通过；仅有既有的大 chunk 警告。
+- 合成 Tauri 浏览器烟测覆盖桌面与最小布局宽度、账号不一致、默认焦点、无手工输入、保留原目标和同步禁用状态。
+- 产品入口扫描只在否定契约测试中命中旧命令名称；源码和 Tauri handler 无旧入口。
+- `scripts/verify.ps1 -ChangedOnly` 在 Rust Clippy 前的敏感扫描、资源、前端、构建产物和格式检查均通过；Clippy 因 10 个早于本功能的生涯 MMR lint 退出 101，本功能未修改告警行。
+- `git diff --check`：通过。
+
+隐私与待验收：
+- 全部自动化仅使用合成数据；未读取真实凭据、浏览器 profile、真实玩家数据或真实上游响应。
+- 真实多账号切换、页面缺少 BattleTag、确认切换后的赛季同步需要用户在桌面端手工验收，只记录通过或失败，不记录账号值。
+- `npm run tauri build` 已通过并生成 MSI 与 NSIS 安装包；尚未执行安装后烟测，不声称安装版运行验收已完成。
