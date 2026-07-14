@@ -1,14 +1,16 @@
 import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigationType } from "react-router-dom";
 
 type RouteFocusLocation = {
   pathname: string;
   hash: string;
   key: string;
+  navigationType?: "POP" | "PUSH" | "REPLACE";
 };
 
 type RouteFocusRuntime = {
   getElementById: (id: string) => HTMLElement | null;
+  getPageHeading: () => HTMLElement | null;
   requestAnimationFrame: (callback: FrameRequestCallback) => number;
   cancelAnimationFrame: (handle: number) => void;
 };
@@ -29,6 +31,7 @@ const nativeFocusTargetSelector = [
 
 const browserRouteFocusRuntime: RouteFocusRuntime = {
   getElementById: (id) => document.getElementById(id),
+  getPageHeading: () => document.querySelector<HTMLElement>("main h1"),
   requestAnimationFrame: (callback) => requestAnimationFrame(callback),
   cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
 };
@@ -37,12 +40,14 @@ export function scheduleRouteFocus(
   location: RouteFocusLocation,
   runtime: RouteFocusRuntime = browserRouteFocusRuntime,
 ) {
-  if (!location.hash) {
+  if (!location.hash && location.navigationType !== "PUSH") {
     return;
   }
 
   const frame = runtime.requestAnimationFrame(() => {
-    const target = runtime.getElementById(location.hash.slice(1));
+    const target = location.hash
+      ? runtime.getElementById(location.hash.slice(1))
+      : runtime.getPageHeading();
     if (!target) {
       return;
     }
@@ -51,7 +56,9 @@ export function scheduleRouteFocus(
       target.tabIndex = -1;
     }
 
-    target.scrollIntoView({ block: "start" });
+    if (location.hash) {
+      target.scrollIntoView({ block: "start" });
+    }
     target.focus({ preventScroll: true });
   });
 
@@ -60,8 +67,12 @@ export function scheduleRouteFocus(
 
 export function RouteFocusManager() {
   const { pathname, hash, key } = useLocation();
+  const navigationType = useNavigationType();
 
-  useEffect(() => scheduleRouteFocus({ pathname, hash, key }), [pathname, hash, key]);
+  useEffect(
+    () => scheduleRouteFocus({ pathname, hash, key, navigationType }),
+    [pathname, hash, key, navigationType],
+  );
 
   return null;
 }

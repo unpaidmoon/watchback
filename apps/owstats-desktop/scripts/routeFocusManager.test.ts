@@ -9,10 +9,12 @@ type RouteFocusLocation = {
   pathname: string;
   hash: string;
   key: string;
+  navigationType?: "POP" | "PUSH" | "REPLACE";
 };
 
 type RouteFocusRuntime = {
   getElementById: (id: string) => HTMLElement | null;
+  getPageHeading: () => HTMLElement | null;
   requestAnimationFrame: (callback: (timestamp: number) => void) => number;
   cancelAnimationFrame: (handle: number) => void;
 };
@@ -68,11 +70,16 @@ function createRuntime(target: HTMLElement | null) {
     requested: [] as number[],
     cancelled: [] as number[],
     targetIds: [] as string[],
+    pageHeadingReads: 0,
   };
 
   const runtime: RouteFocusRuntime = {
     getElementById(id) {
       state.targetIds.push(id);
+      return target;
+    },
+    getPageHeading() {
+      state.pageHeadingReads += 1;
       return target;
     },
     requestAnimationFrame(callback) {
@@ -154,12 +161,32 @@ assertEqual(repeatedRuntime.state.requested.length, 2, "the same hash with a new
 repeatedRuntime.flush(repeatedRuntime.state.requested[1]);
 assertEqual(repeatedTarget.state.focusOptions.length, 1, "the replacement navigation focuses the target");
 
+const pageHeadingTarget = createTarget();
+const pageHeadingRuntime = createRuntime(pageHeadingTarget.target);
+scheduleRouteFocus(
+  { pathname: "/review", hash: "", key: "entry-h", navigationType: "PUSH" },
+  pageHeadingRuntime.runtime,
+);
+pageHeadingRuntime.flush(pageHeadingRuntime.state.requested[0]);
+assertEqual(pageHeadingRuntime.state.pageHeadingReads, 1, "a primary route push resolves the page heading");
+assertEqual(pageHeadingTarget.state.tabIndexWrites.join(","), "-1", "the page heading becomes programmatically focusable");
+assertEqual(pageHeadingTarget.state.scrollOptions.length, 0, "ordinary route focus preserves page scroll restoration");
+assertEqual(pageHeadingTarget.state.focusOptions[0]?.preventScroll, true, "ordinary route focus does not move the viewport");
+
+const popHeadingRuntime = createRuntime(createTarget().target);
+scheduleRouteFocus(
+  { pathname: "/review", hash: "", key: "entry-i", navigationType: "POP" },
+  popHeadingRuntime.runtime,
+);
+assertEqual(popHeadingRuntime.state.requested.length, 0, "browser back does not steal focus from restored page state");
+
 const routeFocusSource = readFileSync(
   new URL("../src/shared/page-shell/RouteFocusManager.tsx", import.meta.url),
   "utf8",
 );
 assertEqual(routeFocusSource.includes("const { pathname, hash, key } = useLocation()"), true, "route focus reads the location key");
-assertEqual(routeFocusSource.includes("[pathname, hash, key]"), true, "route focus reruns when the location key changes");
+assertEqual(routeFocusSource.includes("useNavigationType()"), true, "route focus distinguishes primary navigation from browser restoration");
+assertEqual(routeFocusSource.includes("[pathname, hash, key, navigationType]"), true, "route focus reruns when the location key changes");
 
 const navMarkup = renderToStaticMarkup(
   createElement(
