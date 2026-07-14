@@ -106,7 +106,7 @@ const approvedTokens = {
   "--canvas-glow-light": "rgba(250, 249, 241, 0.72)",
   "--glass-primary": "rgba(244, 246, 240, 0.68)",
   "--glass-secondary": "rgba(250, 251, 247, 0.52)",
-  "--glass-border": "rgba(255, 255, 255, 0.58)",
+  "--glass-border": "rgba(57, 64, 58, 0.09)",
   "--glass-blur": "16px",
   "--data-neutral": "#A5AAA4",
   "--status-success": "#21A366",
