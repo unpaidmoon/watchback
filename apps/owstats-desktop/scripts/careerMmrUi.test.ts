@@ -14,6 +14,27 @@ const pageSource = readFileSync(new URL("../src/pages/CareerMmrPage.tsx", import
 const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
 const typeSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
 const styleSource = readFileSync(new URL("../src/styles/features/career-mmr.css", import.meta.url), "utf8");
+const tokenSource = readFileSync(new URL("../src/styles/tokens.css", import.meta.url), "utf8");
+
+function tokenHex(name: string) {
+  const match = tokenSource.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i"));
+  assert.ok(match, `缺少 ${name} 颜色令牌`);
+  return match[1];
+}
+
+function relativeLuminance(hex: string) {
+  const channels = [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16) / 255);
+  const [red, green, blue] = channels.map((channel) =>
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+  );
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function contrastRatio(foreground: string, background: string) {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
 
 assert.match(appSource, /path="\/career-mmr"/, "生涯 MMR 页面必须注册独立路由");
 assert.match(shellSource, /生涯 MMR/, "主导航必须提供生涯 MMR 入口");
@@ -47,6 +68,13 @@ assert.match(pageSource, /setHistory\(null\);[\s\S]*setModes\(null\);[\s\S]*setS
 assert.match(pageSource, /aria-label="MMR 纵轴"/);
 assert.match(pageSource, /<title>\{formatCareerMmrTooltip\(point\)\}<\/title>/);
 assert.match(pageSource, /className="careerMmrScreenReaderSummary"/);
+assert.match(pageSource, /className=\{item\.netDelta >= 0 \? "positive" : "negative"\}/, "赛季净变化必须同时用正负号和语义色表达状态");
+assert.match(pageSource, /className="careerMmrConfidenceBound careerMmrConfidenceUpper"/, "置信上界必须使用真实区间坐标绘制冷蓝绿色辅线");
+assert.match(pageSource, /className="careerMmrConfidenceBound careerMmrConfidenceLower"/, "置信下界必须使用真实区间坐标绘制冷蓝绿色辅线");
+assert.match(pageSource, /className="careerMmrBaseline"/, "趋势图必须显示所选序列的灰色起点基准线");
+assert.match(pageSource, /aria-label="图表图例"[\s\S]*MMR 估算[\s\S]*置信区间上下界[\s\S]*起点基准/, "图表必须用中文文本解释三类线条的真实语义");
+assert.match(styleSource, /\.careerMmrConfidenceBound\s*{[\s\S]*?stroke:\s*var\(--data-secondary\)/, "置信边界辅线必须使用冷蓝绿色数据令牌");
+assert.match(styleSource, /\.careerMmrBaseline\s*{[\s\S]*?stroke:\s*var\(--data-neutral-strong\)/, "起点基准必须使用可辨认的灰色数据令牌");
 assert.match(pageSource, /生涯累计贡献/);
 assert.match(pageSource, /label="展示赛季"/);
 assert.match(pageSource, /<PageHeader/);
@@ -55,6 +83,18 @@ assert.match(pageSource, /<PageLoadingState/);
 assert.match(pageSource, /<PageErrorState/);
 assert.doesNotMatch(styleSource, /gradient/i, "生涯 MMR 不得保留蓝色渐变");
 assert.doesNotMatch(styleSource, /--phase6-|#6d8cff|#65d6c0/i, "生涯 MMR 必须只使用语义视觉令牌");
+assert.match(styleSource, /\.careerMmrModeItem \.positive[\s\S]*?color:\s*var\(--data-secondary-strong\)/, "小号正值必须使用高对比冷蓝绿色令牌");
+assert.match(styleSource, /\.careerMmrModeItem \.negative[\s\S]*?color:\s*var\(--status-danger-strong\)/, "小号负值必须使用高对比危险色令牌");
+
+for (const foreground of [tokenHex("data-secondary-strong"), tokenHex("status-danger-strong")]) {
+  for (const background of [tokenHex("surface-secondary"), tokenHex("surface-control")]) {
+    assert.ok(contrastRatio(foreground, background) >= 4.5, `${foreground} 在 ${background} 上的正文对比度必须至少为 4.5:1`);
+  }
+}
+assert.ok(
+  contrastRatio(tokenHex("data-neutral-strong"), tokenHex("surface-secondary")) >= 3,
+  "灰色基准线与图表背景的对比度必须至少为 3:1",
+);
 
 assert.equal(buildCareerMmrChart([], 760, 210), null, "空历史不应构造图表");
 const flat = buildCareerMmrChart([{ mmr: 2500, confidence: 1 }, { mmr: 2500, confidence: 1 }], 760, 210)!;

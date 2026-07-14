@@ -190,12 +190,28 @@
   overflow: visible;
 }
 
-.careerMmrPlot polyline {
+.careerMmrEstimateLine {
   fill: none;
   stroke: var(--data-primary);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.careerMmrConfidenceBound {
+  fill: none;
+  stroke: var(--data-secondary);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.careerMmrBaseline {
+  stroke: var(--data-neutral-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
   vector-effect: non-scaling-stroke;
 }
 
@@ -235,6 +251,40 @@
 .careerMmrYAxis > text {
   text-anchor: start;
   font-weight: 700;
+}
+
+.careerMmrChartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.careerMmrChartLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.careerMmrChartLegend i {
+  width: 24px;
+  height: 0;
+  border-top: 2px solid;
+}
+
+.careerMmrLegendEstimate {
+  border-color: var(--data-primary);
+}
+
+.careerMmrLegendConfidence {
+  border-color: var(--data-secondary);
+}
+
+.careerMmrLegendBaseline {
+  border-color: var(--data-neutral-strong);
+  border-top-style: dashed;
 }
 
 .careerMmrScreenReaderSummary {
@@ -286,12 +336,13 @@
 }
 
 .careerMmrModeItem .positive,
-.careerMmrSeasonTable strong {
-  color: var(--data-secondary);
+.careerMmrSeasonTable .positive {
+  color: var(--data-secondary-strong);
 }
 
-.careerMmrModeItem .negative {
-  color: var(--status-danger);
+.careerMmrModeItem .negative,
+.careerMmrSeasonTable .negative {
+  color: var(--status-danger-strong);
 }
 
 .careerMmrSeasonTable {

@@ -213,7 +213,7 @@ export function CareerMmrPage() {
       <article className="careerMmrPanel careerMmrSeasonPanel">
         <div className="careerMmrPanelTitle"><div><Clock3 size={17} /><b>赛季分解</b></div></div>
         <div className="careerMmrSeasonTable">
-          {visibleSeasonItems.map((item) => <div key={item.season}><b>S{item.season}</b><span>{item.matchesCount} 场</span><span>{formatCareerMmr(item.startMmr)} → {formatCareerMmr(item.endMmr)}</span><strong>{signedCareerDelta(item.netDelta)}</strong></div>)}
+          {visibleSeasonItems.map((item) => <div key={item.season}><b>S{item.season}</b><span>{item.matchesCount} 场</span><span>{formatCareerMmr(item.startMmr)} → {formatCareerMmr(item.endMmr)}</span><strong className={item.netDelta >= 0 ? "positive" : "negative"}>{signedCareerDelta(item.netDelta)}</strong></div>)}
           {!visibleSeasonItems.length && <div className="careerMmrEmpty">当前筛选下暂无赛季记录</div>}
         </div>
       </article>
@@ -237,13 +237,17 @@ function HistoryChart({ history }: { history: CareerMmrHistory | null }) {
   if (!chart) return <div className="careerMmrEmpty">数据不足，当前职责仍在定位中。</div>;
   const coordinates = chart.line.map((point) => `${point.x},${point.y}`).join(" ");
   const confidenceBand = chart.band.map((point) => `${point.x},${point.y}`).join(" ");
+  const confidenceUpperCoordinates = chart.band.slice(0, chart.line.length).map((point) => `${point.x},${point.y}`).join(" ");
+  const confidenceLowerCoordinates = chart.band.slice(chart.line.length).reverse().map((point) => `${point.x},${point.y}`).join(" ");
+  const baselineY = chart.line[0].y;
+  const baselineMmr = points[chart.line[0].inputIndex].mmr;
   const yTicks = buildCareerMmrYAxisTicks(chart.domainMin, chart.domainMax, 4);
   const yForValue = (value: number) => top + plotHeight - ((value - chart.domainMin) / (chart.domainMax - chart.domainMin)) * plotHeight;
   const xTickIndexes = [...new Set([0, Math.floor((chart.line.length - 1) / 2), chart.line.length - 1])];
 
   return (
     <div className="careerMmrChart">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${careerRoleLabels[history!.role]} MMR 历史走势及置信区间`}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${careerRoleLabels[history!.role]} MMR 历史走势、置信区间上下界与起点基准`}>
         <g className="careerMmrYAxis" aria-label="MMR 纵轴">
           <text x="8" y="12">MMR</text>
           {yTicks.map((tick) => {
@@ -258,7 +262,10 @@ function HistoryChart({ history }: { history: CareerMmrHistory | null }) {
         </g>
         <g className="careerMmrPlot" transform={`translate(${left} ${top})`}>
           <polygon points={confidenceBand} />
-          <polyline points={coordinates} />
+          <line className="careerMmrBaseline" x1="0" x2={plotWidth} y1={baselineY} y2={baselineY} />
+          <polyline className="careerMmrConfidenceBound careerMmrConfidenceUpper" points={confidenceUpperCoordinates} />
+          <polyline className="careerMmrConfidenceBound careerMmrConfidenceLower" points={confidenceLowerCoordinates} />
+          <polyline className="careerMmrEstimateLine" points={coordinates} />
           {chart.line.map((coordinate) => {
             const point = points[coordinate.inputIndex];
             return (
@@ -286,6 +293,11 @@ function HistoryChart({ history }: { history: CareerMmrHistory | null }) {
           })}
         </g>
       </svg>
+      <div className="careerMmrChartLegend" aria-label="图表图例">
+        <span><i className="careerMmrLegendEstimate" aria-hidden="true" />MMR 估算</span>
+        <span><i className="careerMmrLegendConfidence" aria-hidden="true" />置信区间上下界</span>
+        <span><i className="careerMmrLegendBaseline" aria-hidden="true" />起点基准：{formatCareerMmr(baselineMmr)} MMR</span>
+      </div>
       <p className="careerMmrScreenReaderSummary">
         {buildCareerMmrChartSummary(history!.role, points)}
       </p>

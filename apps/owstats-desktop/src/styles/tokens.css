@@ -12,10 +12,13 @@
   --action-on-primary: #FFFFFF;
   --data-primary: #4B22D1;
   --data-secondary: #2F8C95;
+  --data-secondary-strong: #1F6F78;
   --data-neutral: #A5AAA4;
+  --data-neutral-strong: #70756F;
   --status-success: #21A366;
   --status-success-bg: #E2F3E7;
   --status-danger: #E54848;
+  --status-danger-strong: #B42332;
   --status-danger-bg: #F8E7E5;
   --status-warning: #B58A16;
   --status-warning-bg: #F4EFD8;
