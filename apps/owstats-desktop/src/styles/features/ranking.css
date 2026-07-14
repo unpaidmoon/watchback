@@ -81,6 +81,14 @@
   color: var(--text-secondary);
 }
 
+.rankingSortHeader {
+  min-width: 0;
+}
+
+.rankingSortHeader > button {
+  width: 100%;
+}
+
 .phase6RankingHead button.active {
   color: var(--data-primary);
 }

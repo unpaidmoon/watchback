@@ -28,6 +28,13 @@ assert.match(reviewSource, /<PageErrorState/);
 assert.match(reviewSource, /<PageEmptyState/);
 assert.match(reviewSource, /\}, \[selectedSeason\]\);/s, "review data requests depend on season, not view");
 assert.doesNotMatch(reviewSource, /\[selectedSeason,\s*view\]/, "tab switches must reuse loaded season data");
+assert.match(reviewSource, /<nav className="reviewTabs" aria-label="战报内容">/, "战报页内导航应有可访问名称");
+assert.match(reviewSource, /aria-current=\{active \? "page" : undefined\}/, "战报当前标签应暴露当前页面语义");
+assert.doesNotMatch(
+  reviewSource,
+  /role="tablist"|role="tab"|aria-selected=/,
+  "战报应保持完整的页内导航模式，不混用不完整的 tab 语义",
+);
 
 const reviewRegions = qaRegionsForPath("/review").map((region) => region.id);
 assert.deepEqual(reviewRegions, ["NAV-CAPSULE", "REV-RANKS", "FRD-BOARDS", "FRD-LINEUP", "FRD-MAPS"], "review QA regions should include moved analysis modules");

@@ -5269,7 +5269,8 @@ select {
     grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(72px, 0.4fr));
   }
 
-  .phase6RankingHead button:nth-of-type(n + 3),
+  .phase6RankingHead .rankingSortHeader[data-sort-key="playTimeHours"],
+  .phase6RankingHead .rankingSortHeader[data-sort-key="kda"],
   .phase6RankingLine > span:nth-of-type(n + 4) {
     display: none;
   }

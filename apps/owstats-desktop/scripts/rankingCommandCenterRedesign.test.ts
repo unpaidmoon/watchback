@@ -32,3 +32,30 @@ assert.match(rankingCss, /\.phase6RankingLine\s*\{[^}]*min-height:\s*52px/s);
 assert.match(rankingCss, /\.phase6RankingLine\s*\{[^}]*box-shadow:\s*none/s);
 assert.match(rankingCss, /\.phase6SegmentedControl button\.active\s*\{[^}]*background:\s*var\(--action-primary\)/s);
 assert.match(rankingCss, /\.phase6RankingHead button\.active\s*\{[^}]*color:\s*var\(--data-primary\)/s);
+
+assert.match(
+  rankingSource,
+  /className="segmentedControl phase6SegmentedControl"\s+role="group"\s+aria-label="排行类型"/,
+  "英雄与地图切换应作为有名称的分段按钮组暴露",
+);
+assert.match(rankingSource, /aria-pressed=\{tab === "heroes"\}/, "英雄排行按钮应暴露按下状态");
+assert.match(rankingSource, /aria-pressed=\{tab === "maps"\}/, "地图排行按钮应暴露按下状态");
+assert.match(
+  rankingSource,
+  /className=\{`rankingTable phase6RankingTable \$\{tab\}`\}[\s\S]*?role="table"[\s\S]*?aria-rowcount=\{rows\.length \+ 1\}/,
+  "排行网格应暴露表格角色和完整行数",
+);
+assert.match(rankingSource, /className="rankingHead phase6RankingHead" role="row"/, "排行表头应暴露行角色");
+assert.match(rankingSource, /className="rankingLine phase6RankingLine"[\s\S]*?role="row"/, "排行数据应暴露行角色");
+assert.match(rankingSource, /role="columnheader"/, "排行表头单元格应暴露列标题角色");
+assert.match(rankingSource, /role="cell"/, "排行数据单元格应暴露表格单元格角色");
+assert.match(
+  rankingSource,
+  /role="columnheader"[\s\S]*?aria-sort=\{active[\s\S]*?"descending"[\s\S]*?"ascending"[\s\S]*?: undefined\}/,
+  "当前排序列应在列标题上暴露升序或降序",
+);
+assert.match(
+  rankingSource,
+  /aria-label=\{active[\s\S]*?当前[\s\S]*?点击切换为/,
+  "当前排序按钮的可访问名称应说明方向和下一步操作",
+);
