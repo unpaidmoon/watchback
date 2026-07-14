@@ -7,7 +7,7 @@ export type MatchDetailPaneProps = {
   error: string | null;
   matchId: string | null;
   onBack: () => void;
-} & Pick<CompactMatchDetailProps, "hasPrevious" | "hasNext" | "onPrevious" | "onNext" | "onRetry">;
+} & Pick<CompactMatchDetailProps, "onRetry">;
 
 export function MatchDetailPane(props: MatchDetailPaneProps) {
   const { matchId, onBack, ...detailProps } = props;

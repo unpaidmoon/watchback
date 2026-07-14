@@ -117,10 +117,6 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
               loading={false}
               error={null}
               matchId={detail.matchId}
-              hasPrevious={false}
-              hasNext
-              onPrevious={() => undefined}
-              onNext={() => undefined}
               onBack={() => undefined}
             />
           </section>

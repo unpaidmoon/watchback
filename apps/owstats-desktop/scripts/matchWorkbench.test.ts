@@ -92,10 +92,8 @@ assert.equal(
   true,
   "detail errors are only rendered for the selected match that owns the state",
 );
-assert.equal(matchesPageSource.includes("const previousMatchId = selectedMatchIndex > 0"), true, "detail navigation should derive the previous visible match");
-assert.equal(matchesPageSource.includes("const nextMatchId = selectedMatchIndex >= 0"), true, "detail navigation should derive the next visible match");
-assert.equal(matchesPageSource.includes("hasPrevious={previousMatchId !== null}"), true, "detail navigation should expose the previous boundary");
-assert.equal(matchesPageSource.includes("hasNext={nextMatchId !== null}"), true, "detail navigation should expose the next boundary");
+assert.equal(matchesPageSource.includes("previousMatchId"), false, "matches page should stop deriving previous match state");
+assert.equal(matchesPageSource.includes("nextMatchId"), false, "matches page should stop deriving next match state");
 assert.equal(matchesPageSource.includes("mobileDetailOpen"), true, "MatchesPage should own the narrow detail-entry state");
 assert.equal(matchesPageSource.includes("setMobileDetailOpen(true)"), true, "selecting a match should open narrow detail");
 assert.equal(detailPaneSource.includes("onBack"), true, "detail pane should expose narrow back navigation");
@@ -103,10 +101,10 @@ assert.equal(detailPaneSource.includes("matchDetailBackButton"), true, "detail p
 assert.equal(detailPaneSource.includes("CompactMatchDetail"), true, "MatchDetailPane should own compact detail rendering");
 assert.equal(detailPaneSource.includes('"onRetry"'), true, "MatchDetailPane should forward the retry contract");
 assert.equal(detailPaneSource.includes("选择左侧对局查看详情。"), true, "MatchDetailPane should own the unchanged empty state");
-assert.equal(detailHeaderSource.includes("上一场"), true, "the shared detail header should keep previous navigation visible");
-assert.equal(detailHeaderSource.includes("下一场"), true, "the shared detail header should keep next navigation visible");
-assert.equal(detailHeaderSource.includes("disabled={!hasPrevious}"), true, "previous navigation should remain visibly disabled at the boundary");
-assert.equal(detailHeaderSource.includes("disabled={!hasNext}"), true, "next navigation should remain visibly disabled at the boundary");
+assert.equal(detailHeaderSource.includes("hasPrevious"), false, "detail header should remove previous navigation state");
+assert.equal(detailHeaderSource.includes("hasNext"), false, "detail header should remove next navigation state");
+assert.equal(detailHeaderSource.includes("上一场"), false, "detail header should remove the previous button");
+assert.equal(detailHeaderSource.includes("下一场"), false, "detail header should remove the next button");
 assert.equal(teamTableSource.includes("matchTeamTableMarker"), true, "team tables should use a narrow semantic marker");
 assert.equal(teamTableSource.includes("renderExpansion"), true, "the shared table should preserve arena expansion content");
 assert.equal(teamTableSource.includes("<small>K/D/A</small>"), true, "detail tables should use the same K/D/A order as list cards");
@@ -245,6 +243,12 @@ assert.equal(compactDetailSource.includes("mapGuid={detail.mapGuid}"), true, "no
 assert.equal(compactDetailSource.includes("mapGuid={selected.mapGuid}"), true, "arena detail should pass the selected slice map guid to the shared header");
 assert.equal(detailPageSource.includes("<MatchDetailHeader"), true, "standalone normal detail should reuse the shared result map banner");
 assert.equal(detailHeaderSource.includes("decorative"), true, "detail banner map preview should be hidden from assistive technology");
+assert.equal(detailHeaderSource.includes("matchDetailHeaderInfo"), true, "header should own one right-aligned information group");
+assert.ok(
+  detailHeaderSource.indexOf("<h2>{mapName}</h2>") < detailHeaderSource.indexOf("matchDetailHeaderScore") &&
+    detailHeaderSource.indexOf("matchDetailHeaderScore") < detailHeaderSource.indexOf("matchDetailHeaderMeta"),
+  "header information order should be map, score, then metadata",
+);
 assert.equal(phase6ComponentsSource.includes("decorative?: boolean"), true, "MapPreview should expose an explicit decorative mode");
 assert.equal(phase6ComponentsSource.includes('aria-hidden={decorative ? "true" : undefined}'), true, "decorative image fallback should be hidden from assistive technology");
 assert.equal(detailHeaderSource.includes("--space-5"), false, "detail banner should only use defined spacing tokens");
@@ -253,7 +257,12 @@ assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-loss[\s\S
 assert.match(matchStyleSource, /\.matchDetailHeaderResultBlock\.result-draw[\s\S]*?background:\s*var\(--surface-control\)/);
 assert.doesNotMatch(matchStyleSource, /#ff8[0-9a-f]{3}|orange/i, "match result header must not introduce orange");
 assert.match(matchStyleSource, /\.matchDetailHeaderContent\s*\{[^}]*color:\s*var\(--action-on-primary\)/s, "map-side content should use the inverse text token");
-assert.match(matchStyleSource, /\.matchDetailHeaderContent \.matchDetailHeaderMeta\s*\{[^}]*color:\s*var\(--action-on-primary\)/s, "map-side metadata should retain readable contrast");
+assert.doesNotMatch(matchStyleSource, /\.matchDetailHeaderContent \.matchDetailHeaderMeta\s*\{[^}]*color:\s*var\(--action-on-primary\)/s, "metadata should use the reference image's lower-emphasis white");
+assert.match(matchStyleSource, /\.matchDetailHeaderInfo\s*\{[^}]*justify-items:\s*end;[^}]*text-align:\s*right;/s);
+assert.match(matchStyleSource, /\.matchDetailHeaderInfo h2\s*\{[^}]*font-size:\s*22px;/s);
+assert.match(matchStyleSource, /\.matchDetailHeaderScore\s*\{[^}]*font-size:\s*30px;/s);
+assert.match(matchStyleSource, /\.matchDetailHeaderMeta\s*\{[^}]*font-size:\s*13px;/s);
+assert.doesNotMatch(matchStyleSource, /\.matchDetailHeaderNavigation\s*\{/);
 
 const anonymousPlayer: PlayerRow = {
   side: "teammate",
@@ -312,10 +321,6 @@ const normalDetail: MatchDetailView = {
 };
 
 const navigationProps = {
-  hasPrevious: false,
-  hasNext: true,
-  onPrevious: () => undefined,
-  onNext: () => undefined,
   onRetry: () => undefined,
 };
 

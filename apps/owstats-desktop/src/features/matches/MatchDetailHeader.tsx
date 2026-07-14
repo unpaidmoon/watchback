@@ -10,16 +10,7 @@ export type MatchDetailHeaderProps = {
   score: string;
   duration: string;
   startTime: string;
-  hasPrevious: boolean;
-  hasNext: boolean;
-  onPrevious: () => void;
-  onNext: () => void;
 };
-
-export type MatchDetailNavigationProps = Pick<
-  MatchDetailHeaderProps,
-  "hasPrevious" | "hasNext" | "onPrevious" | "onNext"
->;
 
 export function MatchDetailHeader({
   resultLabel,
@@ -30,10 +21,6 @@ export function MatchDetailHeader({
   score,
   duration,
   startTime,
-  hasPrevious,
-  hasNext,
-  onPrevious,
-  onNext,
 }: MatchDetailHeaderProps) {
   const tone = result === "win" || result === "loss" || result === "draw" ? result : "neutral";
 
@@ -46,19 +33,15 @@ export function MatchDetailHeader({
         <span>{resultEnglishLabel(result)}</span>
       </div>
       <div className="matchDetailHeaderContent">
-        <div className="matchDetailHeaderCopy">
+        <div className="matchDetailHeaderInfo">
           <h2>{mapName}</h2>
+          <strong className="matchDetailHeaderScore" data-numeric>{score}</strong>
           <span className="matchDetailHeaderMeta">
             <span>{modeLabel}</span>
             <span>时长 {duration}</span>
             <span>开始 {startTime}</span>
           </span>
         </div>
-        <strong className="matchDetailHeaderScore" data-numeric>{score}</strong>
-        <nav className="matchDetailHeaderNavigation" aria-label="浏览相邻对局">
-          <button type="button" className="ghostButton" disabled={!hasPrevious} onClick={onPrevious}>上一场</button>
-          <button type="button" className="ghostButton" disabled={!hasNext} onClick={onNext}>下一场</button>
-        </nav>
       </div>
     </header>
   );

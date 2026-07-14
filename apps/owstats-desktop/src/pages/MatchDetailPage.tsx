@@ -157,10 +157,6 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
               score={formatFinalScore(detail)}
               duration={formatDetailDuration(detail.durationSec)}
               startTime={formatDetailStartTime(detail.beginTs)}
-              hasPrevious={false}
-              hasNext={false}
-              onPrevious={() => undefined}
-              onNext={() => undefined}
             />
           </>
         ) : (

@@ -5,7 +5,7 @@ import { resolveArenaModTraitInfo } from "../../shared/assets";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../../shared/matchDetailHeaderFormat";
 import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
-import { MatchDetailHeader, type MatchDetailNavigationProps } from "./MatchDetailHeader";
+import { MatchDetailHeader } from "./MatchDetailHeader";
 import { MatchTeamTable } from "./MatchTeamTable";
 
 export type CompactMatchDetailProps = {
@@ -14,15 +14,15 @@ export type CompactMatchDetailProps = {
   error: string | null;
   matchId: string;
   onRetry: () => void;
-} & MatchDetailNavigationProps;
+};
 
-export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, ...navigation }: CompactMatchDetailProps) {
+export function CompactMatchDetail({ detail, loading, error, matchId, onRetry }: CompactMatchDetailProps) {
   if (error) {
     return <PageErrorState message={error} actionLabel="重新加载" onRetry={onRetry} />;
   }
   if (loading && !detail) return <PageLoadingState message="正在读取对局详情..." />;
   if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情。</div>;
-  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} {...navigation} />;
+  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} />;
 
   const mapName = detail.mapName ?? "未知地图";
   return (
@@ -36,7 +36,6 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, .
         score={formatFinalScore(detail)}
         duration={formatDetailDuration(detail.durationSec)}
         startTime={formatDetailStartTime(detail.beginTs)}
-        {...navigation}
       />
 
       <div className="phase6CompactDetailScroll">
@@ -52,11 +51,7 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, .
   );
 }
 
-function CompactArenaDetail({
-  detail,
-  loading,
-  ...navigation
-}: { detail: MatchDetailView; loading: boolean } & MatchDetailNavigationProps) {
+function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; loading: boolean }) {
   const arena = detail.arenaDetail;
   const [selectedKey, setSelectedKey] = useState("summary");
   const [expandedCompactArenaPlayerKeys, setExpandedCompactArenaPlayerKeys] = useState<Set<string>>(() => new Set());
@@ -121,7 +116,6 @@ function CompactArenaDetail({
         score={formatArenaScore(selected)}
         duration={formatDetailDuration(selected.durationSec)}
         startTime={formatDetailStartTime(selected.beginTs)}
-        {...navigation}
       />
 
       <div className="phase6CompactDetailScroll">
