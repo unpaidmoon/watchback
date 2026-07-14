@@ -47,6 +47,10 @@ assertEqual(/\.pageHeader h1\s*\{[\s\S]*?font-weight:\s*700;/.test(pageShellStyl
 assertEqual(/\.commandCenterMetricsRow > span > strong\s*\{[\s\S]*?color:\s*var\(--text-primary\);[\s\S]*?font-weight:\s*400;/.test(commandCenterStyles), true, "metric values stay neutral and regular weight");
 assertEqual(/\.commandCenterMetricsRow > span\.(?:good|warn) > strong/.test(commandCenterStyles), false, "metric values do not use green or yellow text emphasis");
 assertEqual(/\.commandCenterSectionHeading h2,[\s\S]*?font-weight:\s*400;/.test(commandCenterStyles), true, "command center section titles stay regular weight");
+assertEqual(/\.phase6CommandCenter \.phase6Eyebrow\s*\{[\s\S]*?color:\s*var\(--text-secondary\);/.test(commandCenterStyles), true, "command center eyebrow text does not use purple");
+assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusStats > span\.(?:good|warn) strong\s*\{[\s\S]*?color:\s*var\(--text-primary\);/.test(commandCenterStyles), true, "season facts do not use green or yellow text");
+assertEqual(/\.phase6CommandCenter \.phase6DataHealthGrid span\s*\{[\s\S]*?background:\s*transparent;/.test(commandCenterStyles), true, "health rows remove colored pills");
+assertEqual(/\.phase6CommandCenter \.syncTargetStrip,[\s\S]*?background:\s*rgba\(250, 251, 247, 0\.38\);/.test(commandCenterStyles), true, "target strip removes the opaque white inner card");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");

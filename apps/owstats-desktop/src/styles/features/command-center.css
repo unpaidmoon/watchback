@@ -216,6 +216,38 @@
   box-shadow: none;
 }
 
+.phase6CommandCenter .phase6Eyebrow {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.phase6CommandCenter .syncTargetStrip,
+.phase6CommandCenter .phase8SeasonStatusCard,
+.phase6CommandCenter .phase8SeasonStatusStats > span {
+  border-color: var(--glass-border);
+  background: rgba(250, 251, 247, 0.38);
+  box-shadow: none;
+}
+
+.phase6CommandCenter .phase8SeasonStatusStats > span.good strong,
+.phase6CommandCenter .phase8SeasonStatusStats > span.warn strong {
+  color: var(--text-primary);
+}
+
+.phase6CommandCenter .phase6DataHealthGrid span {
+  border-color: var(--glass-border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.phase6CommandCenter .phase6DataHealthGrid span.good,
+.phase6CommandCenter .phase6DataHealthGrid span.warn {
+  border-color: var(--glass-border);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
 .phase6CommandCenter .primaryButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--action-primary) 88%, white);
 }
