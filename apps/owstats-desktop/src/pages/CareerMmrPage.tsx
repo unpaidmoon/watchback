@@ -1,5 +1,6 @@
 import { BarChart3, Clock3, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   getCareerMmrBuildStatus,
   getCareerMmrOverview,
@@ -21,7 +22,7 @@ import {
   formatCareerMmrTooltip,
   signedCareerDelta,
 } from "../shared/careerMmrFormat";
-import { PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import { productErrorMessage } from "../shared/phase6Shell";
 import type {
   CareerMmrBuildStatus,
@@ -36,6 +37,7 @@ const roles: CareerRole[] = ["tank", "damage", "support"];
 const roleNamesForAccessibility = "重装、输出、支援";
 
 export function CareerMmrPage() {
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<CareerMmrOverview | null>(null);
   const [selectedRole, setSelectedRole] = useState<CareerRole>("tank");
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>();
@@ -74,7 +76,7 @@ export function CareerMmrPage() {
   }, [overviewRetry]);
 
   useEffect(() => {
-    if (!overview) return;
+    if (!overview || overview.roles.length === 0) return;
     const request = detailRequestGuard.current.begin();
     setDetailLoading(true);
     setDetailError(null);
@@ -138,6 +140,20 @@ export function CareerMmrPage() {
       <section className="workspace careerMmrWorkspace">
         {pageHeader}
         <PageErrorState message={overviewError} onRetry={() => setOverviewRetry((value) => value + 1)} />
+      </section>
+    );
+  }
+
+  if (!overview || overview.roles.length === 0) {
+    return (
+      <section className="workspace careerMmrWorkspace">
+        {pageHeader}
+        <PageEmptyState
+          title="暂无生涯 MMR"
+          description="当前本地数据还不足以生成职责估算，请先在指挥台同步赛季数据。"
+          actionLabel="前往指挥台"
+          onAction={() => navigate("/onboarding#local-data")}
+        />
       </section>
     );
   }

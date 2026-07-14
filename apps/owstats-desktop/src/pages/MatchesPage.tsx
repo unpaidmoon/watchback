@@ -3,7 +3,14 @@ import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchDetailPane } from "../features/matches/MatchDetailPane";
 import { MatchListPane } from "../features/matches/MatchListPane";
-import { filtersFromParams, hasLoadedOptions, paramsFromFilters, validateFilters } from "../features/matches/matchFilters";
+import {
+  activeMatchFilterChips,
+  clearVisibleMatchFilters,
+  filtersFromParams,
+  hasLoadedOptions,
+  paramsFromFilters,
+  validateFilters,
+} from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
 import {
   canCommitMatchTimelineRequest,
@@ -27,7 +34,7 @@ import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
-import { PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
+import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, } from "../shared/types";
 
 const emptyOptions: FilterOptions = {
@@ -79,6 +86,7 @@ export function MatchesPage() {
   const [busy, setBusy] = useState(!canHydrateCache);
   const [error, setError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const hasVisibleFilters = activeMatchFilterChips(filters, options).length > 0;
 
   useEffect(() => () => {
     pageDataRequestIdRef.current += 1;
@@ -445,6 +453,13 @@ export function MatchesPage() {
               <PageErrorState message={error} actionLabel="重新加载" onRetry={retryMatches} />
             ) : busy ? (
               <PageLoadingState message="正在加载对局列表..." />
+            ) : matches.length === 0 ? (
+              <PageEmptyState
+                title="暂无符合条件的对局"
+                description={hasVisibleFilters ? "调整或清除筛选条件后再试。" : "当前赛季没有可展示的本地对局。"}
+                actionLabel={hasVisibleFilters ? "清除筛选" : "重新加载"}
+                onAction={() => hasVisibleFilters ? setFilters(clearVisibleMatchFilters(filters)) : retryMatches()}
+              />
             ) : (
               <MatchListPane
                 matches={matches}

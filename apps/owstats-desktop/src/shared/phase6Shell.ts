@@ -95,7 +95,12 @@ export function productErrorMessage(error: unknown): string {
     return "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
   }
 
-  return text;
+  const productText = text
+    .replace(/^(?:(?:Error|TypeError|RangeError|ReferenceError|SyntaxError):\s*)+/i, "")
+    .trim();
+  return /[\u3400-\u9fff]/.test(productText)
+    ? productText
+    : "请求失败，请稍后重新加载。";
 }
 
 export function hasDesktopBackend(host: unknown = globalThis): boolean {

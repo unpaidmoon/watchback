@@ -51,6 +51,16 @@ assert.match(
 );
 assert.match(
   matchesPageSource,
+  /matches\.length === 0 \? \(\s*<PageEmptyState[\s\S]*?title="暂无符合条件的对局"[\s\S]*?actionLabel=\{hasVisibleFilters \? "清除筛选" : "重新加载"\}/,
+  "the match list should use the shared empty state with a useful context-aware action",
+);
+assert.match(
+  matchesPageSource,
+  /onAction=\{\(\) => hasVisibleFilters \? setFilters\(clearVisibleMatchFilters\(filters\)\) : retryMatches\(\)\}/,
+  "the match empty state should clear visible filters while preserving the page season, or retry an unfiltered request",
+);
+assert.match(
+  matchesPageSource,
   /const \[detailRetryKey, setDetailRetryKey\] = useState\(0\);[\s\S]*?\}, \[selectedMatchId, detailRetryKey\]\);/,
   "detail retry should re-run the selected detail request",
 );

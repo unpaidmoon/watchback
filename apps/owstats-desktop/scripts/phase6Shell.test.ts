@@ -222,5 +222,15 @@ assertEqual(
   true,
   "tauri browser error becomes product copy",
 );
+assertEqual(
+  productErrorMessage(new Error("合成视觉验收错误：排行请求失败，请重新加载。")),
+  "合成视觉验收错误：排行请求失败，请重新加载。",
+  "JavaScript Error prefixes must not leak into Chinese product copy",
+);
+assertEqual(
+  productErrorMessage(new Error("network request failed")),
+  "请求失败，请稍后重新加载。",
+  "non-Chinese implementation errors must fall back to stable Chinese product copy",
+);
 assertEqual(hasDesktopBackend({}), false, "plain browser has no desktop backend");
 assertEqual(hasDesktopBackend({ __TAURI_INTERNALS__: {} }), true, "tauri internals indicate desktop backend");

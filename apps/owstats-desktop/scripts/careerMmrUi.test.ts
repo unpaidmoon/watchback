@@ -81,6 +81,17 @@ assert.match(pageSource, /<PageHeader/);
 assert.match(pageSource, /<PageSeasonSelect/);
 assert.match(pageSource, /<PageLoadingState/);
 assert.match(pageSource, /<PageErrorState/);
+assert.match(pageSource, /<PageEmptyState/);
+assert.match(
+  pageSource,
+  /if \(!overview \|\| overview\.roles\.length === 0\) return;/,
+  "an empty overview should not trigger role-detail requests",
+);
+assert.match(
+  pageSource,
+  /title="暂无生涯 MMR"[\s\S]*actionLabel="前往指挥台"[\s\S]*navigate\("\/onboarding#local-data"\)/,
+  "the empty state should explain missing MMR data and offer one useful recovery action",
+);
 assert.doesNotMatch(styleSource, /gradient/i, "生涯 MMR 不得保留蓝色渐变");
 assert.doesNotMatch(styleSource, /--phase6-|#6d8cff|#65d6c0/i, "生涯 MMR 必须只使用语义视觉令牌");
 assert.match(styleSource, /\.careerMmrModeItem \.positive[\s\S]*?color:\s*var\(--data-secondary-strong\)/, "小号正值必须使用高对比冷蓝绿色令牌");
