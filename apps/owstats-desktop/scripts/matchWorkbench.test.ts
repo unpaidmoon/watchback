@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
+import { MatchDetailReport } from "../src/pages/MatchDetailPage";
 import type { MatchDetailView, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
@@ -145,7 +146,11 @@ assert.match(matchStyleSource, /\.matchListPane \.phase6Timeline,\s*\.matchDetai
 assert.match(matchStyleSource, /\.filterBar\.phase6FilterBar\s*\{[^}]*background:\s*var\(--surface-secondary\)/s);
 assert.match(matchStyleSource, /\.activeFilterChips button\s*\{[^}]*border-radius:\s*999px/s);
 assert.match(matchStyleSource, /\.matchDetailPerformance \.phase6Eyebrow\s*\{[^}]*color:\s*var\(--data-primary\)/s);
-assert.match(matchStyleSource, /\.phase7CompactArenaDetail \.phase7ArenaTab\.active\s*\{[^}]*background:\s*var\(--data-primary\)/s);
+assert.match(
+  matchStyleSource,
+  /\.phase7CompactArenaDetail \.phase7ArenaTab\.active,\s*\.phase6DetailPage > \.phase7ArenaSelector \.phase7ArenaTab\.active\s*\{[^}]*background:\s*var\(--data-primary\)/s,
+  "standalone arena detail should share the semantic purple active selector",
+);
 assert.match(matchStyleSource, /\.matchTeamTable \.phase6CompactPlayerMetric strong\s*\{[^}]*white-space:\s*nowrap/s);
 
 assert.equal(detailPageSource.includes("export function MatchDetailReport"), true, "Match detail page should export reusable detail content for the workbench");
@@ -291,6 +296,18 @@ assert.match(normalMarkup, /aria-label="普通对局详情"/);
 assert.match(normalMarkup, />本人表现</);
 assert.match(normalMarkup, />队友数据</);
 assert.match(normalMarkup, />对手数据</);
+
+const standaloneNormalMarkup = renderToStaticMarkup(
+  createElement(MatchDetailReport, {
+    detail: normalDetail,
+    loading: false,
+    error: null,
+    matchId: normalDetail.matchId,
+  }),
+);
+assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
+assert.doesNotMatch(standaloneNormalMarkup, /VICTORY|DEFEAT|DRAW/);
+assert.doesNotMatch(detailPageSource, /resultEnglishLabel/, "standalone match detail should not render English result copy");
 
 const arenaDetail: MatchDetailView = {
   ...normalDetail,
