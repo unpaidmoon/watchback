@@ -625,7 +625,7 @@ assert.equal(matchesPageSource.includes("const timelineRequestIdRef = useRef(0);
 assert.equal(matchesPageSource.includes("const pageDataReadyRef = useRef(canHydrateCache);"), true, "cache hydration waits for real page metadata");
 assert.equal(matchesPageSource.includes("const currentFiltersRef = useRef(initialFilters);"), true, "async timeline commits read the current filter key");
 const setFiltersSource = matchesPageSource.match(
-  /function setFilters\(nextFilters: MatchFilters\) \{([\s\S]*?)\n\s*\}\n\n\s*function retryMatches/,
+  /function setFilters\(nextFilters: MatchFilters\) \{([\s\S]*?)\r?\n\s*\}\r?\n\r?\n\s*function retryMatches/,
 )?.[1] ?? "";
 assert.notEqual(setFiltersSource, "", "MatchesPage keeps one filter state writer");
 assert.ok(
