@@ -61,7 +61,7 @@
 
 - [ ] **Step 3: 运行测试并确认失败原因**
 
-  Run: `cd apps/owstats-desktop; npx tsx scripts/matchWorkbench.test.ts; npx tsx scripts/matchPerformanceBadges.test.ts`  
+  Run: `cd apps/owstats-desktop; npx tsx scripts/matchWorkbench.test.ts; npx tsx scripts/matchPerformanceBadges.test.ts`
   Expected: `matchWorkbench.test.ts` 与 `matchPerformanceBadges.test.ts` 因旧 UI 合同失败；其余失败不得被忽略。
 
 - [ ] **Step 4: 提交仅测试合同**
@@ -108,7 +108,7 @@
 
 - [ ] **Step 3: 运行目标测试并确认通过**
 
-  Run: `cd apps/owstats-desktop; npx tsx scripts/matchWorkbench.test.ts; npx tsx scripts/matchPerformanceBadges.test.ts`  
+  Run: `cd apps/owstats-desktop; npx tsx scripts/matchWorkbench.test.ts; npx tsx scripts/matchPerformanceBadges.test.ts`
   Expected: 两个更新的合同测试通过，且没有角斗静态标记或加载/错误状态回归。
 
 - [ ] **Step 4: 提交功能迁移**
@@ -190,7 +190,7 @@
 
 - [ ] **Step 4: 运行合同测试与构建**
 
-  Run: `cd apps/owstats-desktop; npx tsx scripts/matchWorkbench.test.ts; npx tsx scripts/matchPerformanceBadges.test.ts; npm run build`  
+  Run: `cd apps/owstats-desktop; npx tsx scripts/matchWorkbench.test.ts; npx tsx scripts/matchPerformanceBadges.test.ts; npm run build`
   Expected: 测试全通过，Vite 生产构建完成且没有 TypeScript 错误。
 
 - [ ] **Step 5: 提交头图实现**
@@ -213,12 +213,12 @@
 
 - [ ] **Step 2: 运行完整前端验证**
 
-  Run: `cd apps/owstats-desktop; npm test; npm run build`  
+  Run: `cd apps/owstats-desktop; npm test; npm run build`
   Expected: 测试套件和生产构建均成功。
 
 - [ ] **Step 3: 检查变更边界**
 
-  Run: `git diff --check; git status --short`  
+  Run: `git diff --check; git status --short`
   Expected: 无空白错误；除本计划的前端文件、测试与设计/计划文档外，不暂存或修改已有用户改动。
 
 - [ ] **Step 4: 提交最终验证使用的合同测试**
