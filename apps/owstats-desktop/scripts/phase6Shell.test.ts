@@ -39,6 +39,9 @@ const commandCenterStyles = readFileSync(new URL("../src/styles/features/command
 assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
 assertEqual(/\.commandCenterSyncPanel,[\s\S]*?\.commandCenterAccountPanel[\s\S]*?background:\s*var\(--glass-primary\);/.test(commandCenterStyles), true, "main panels use the primary glass surface");
 assertEqual(/@media \(max-width: 1440px\)[\s\S]*?\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "1440px folds metrics into two columns");
+assertEqual(/\.commandCenterAccountPanel \.phase6ProfileAvatar\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*56px;/.test(commandCenterStyles), true, "account identity uses a compact neutral avatar");
+assertEqual(/\.commandCenterTools \.phase6SettingsLauncherGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "tools use four columns on wide screens");
+assertEqual(/\.commandCenterDangerZone\s*\{[\s\S]*?background:\s*rgba\(248, 231, 229, 0\.34\);/.test(commandCenterStyles), true, "logout stays a light danger treatment");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
