@@ -65,6 +65,10 @@ assertEqual(seasonSyncGateCopy(false, false, false, false, false).statusLabel, "
 assertEqual(seasonSyncGateCopy(false, false, false, false, false).syncHint, "登录后可同步", "missing credentials keep the login recovery copy");
 assertEqual(seasonSyncGateCopy(true, false, false, false, false).statusLabel, "目标待确认", "ready credentials distinguish a blocked target");
 assertEqual(seasonSyncGateCopy(true, false, false, false, false).syncHint, "确认当前目标后可同步", "blocked target explains the required confirmation");
+assertEqual(seasonSyncGateCopy(false, false, true, false, false).statusLabel, "账号处理中", "first login identification takes precedence over static login copy");
+assertEqual(seasonSyncGateCopy(false, false, true, false, false).syncHint, "账号操作完成后可同步", "first login identification explains the active operation");
+assertEqual(seasonSyncGateCopy(true, false, true, false, false).statusLabel, "账号处理中", "target confirmation takes precedence over static target copy");
+assertEqual(seasonSyncGateCopy(true, false, true, false, false).syncHint, "账号操作完成后可同步", "target confirmation explains the active operation");
 assertEqual(seasonSyncGateCopy(true, true, true, false, true).statusLabel, "账号处理中", "account work has its own status copy");
 assertEqual(seasonSyncGateCopy(true, true, true, false, true).syncHint, "账号操作完成后可同步", "account work has its own recovery copy");
 assertEqual(seasonSyncGateCopy(true, true, true, true, true).statusLabel, "同步中", "active sync does not fall back to account-processing copy");

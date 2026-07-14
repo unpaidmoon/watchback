@@ -75,14 +75,14 @@ export function seasonSyncGateCopy(
   if (isSyncing) {
     return { statusLabel: "同步中", syncHint: "同步中" };
   }
+  if (accountOperationBusy) {
+    return { statusLabel: "账号处理中", syncHint: "账号操作完成后可同步" };
+  }
   if (!credentialReady) {
     return { statusLabel: "需要登录", syncHint: "登录后可同步" };
   }
   if (!targetSyncAllowed) {
     return { statusLabel: "目标待确认", syncHint: "确认当前目标后可同步" };
-  }
-  if (accountOperationBusy) {
-    return { statusLabel: "账号处理中", syncHint: "账号操作完成后可同步" };
   }
   return {
     statusLabel: hasData ? "本地数据可用" : "无本地数据",
