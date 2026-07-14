@@ -4,12 +4,16 @@ import type { SeasonDataStatus, SyncProgress } from "../../shared/types";
 export function SeasonStatusCard({
   seasonStatus,
   credentialReady,
+  targetSyncAllowed,
+  accountOperationBusy,
   syncingSeason,
   progress,
   onSync,
 }: {
   seasonStatus: SeasonDataStatus;
   credentialReady: boolean;
+  targetSyncAllowed: boolean;
+  accountOperationBusy: boolean;
   syncingSeason: number | null;
   progress: SyncProgress | null;
   onSync: () => void;
@@ -17,13 +21,8 @@ export function SeasonStatusCard({
   const isSyncing = syncingSeason === seasonStatus.season;
   const isSyncBlocked = syncingSeason !== null && !isSyncing;
   const hasData = seasonStatus.matchCount > 0;
-  const statusLabel = !credentialReady
-    ? "需要登录"
-    : isSyncing
-        ? "同步中"
-        : hasData
-          ? "本地数据可用"
-          : "无本地数据";
+  const syncGateReady = credentialReady && targetSyncAllowed && !accountOperationBusy;
+  const gateCopy = seasonSyncGateCopy(credentialReady, targetSyncAllowed, accountOperationBusy, isSyncing, hasData);
 
   return (
     <article className="phase8SeasonStatusCard">
@@ -32,7 +31,7 @@ export function SeasonStatusCard({
           <span className="phase6Eyebrow">当前赛季</span>
           <h3>{`S${seasonStatus.season}`}</h3>
         </div>
-        <span className={credentialReady ? "good" : "warn"}>{statusLabel}</span>
+        <span className={isSyncing || syncGateReady ? "good" : "warn"}>{gateCopy.statusLabel}</span>
       </div>
       <div className="phase8SeasonStatusStats">
         <DataFact label="本地对局" value={`${seasonStatus.matchCount} 场`} tone={hasData ? "good" : "warn"} />
@@ -55,11 +54,9 @@ export function SeasonStatusCard({
         <span>
           {isSyncing
             ? readableSyncProgress(progress)
-            : !credentialReady
-              ? "登录后可同步"
-              : "当前目标可同步"}
+            : gateCopy.syncHint}
         </span>
-        <button className="primaryButton" type="button" onClick={onSync} disabled={!credentialReady || isSyncBlocked || isSyncing}>
+        <button className="primaryButton" type="button" onClick={onSync} disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || isSyncBlocked || isSyncing}>
           <RefreshCw size={18} />
           {isSyncing ? "同步中" : `同步 S${seasonStatus.season}`}
         </button>
@@ -67,6 +64,32 @@ export function SeasonStatusCard({
     </article>
   );
 }
+
+export function seasonSyncGateCopy(
+  credentialReady: boolean,
+  targetSyncAllowed: boolean,
+  accountOperationBusy: boolean,
+  isSyncing: boolean,
+  hasData: boolean,
+) {
+  if (isSyncing) {
+    return { statusLabel: "同步中", syncHint: "同步中" };
+  }
+  if (!credentialReady) {
+    return { statusLabel: "需要登录", syncHint: "登录后可同步" };
+  }
+  if (!targetSyncAllowed) {
+    return { statusLabel: "目标待确认", syncHint: "确认当前目标后可同步" };
+  }
+  if (accountOperationBusy) {
+    return { statusLabel: "账号处理中", syncHint: "账号操作完成后可同步" };
+  }
+  return {
+    statusLabel: hasData ? "本地数据可用" : "无本地数据",
+    syncHint: "当前目标可同步",
+  };
+}
+
 export function DataFact({ label, value, tone }: { label: string; value: string; tone: "good" | "warn" | "neutral" }) {
   return (
     <span className={tone}>

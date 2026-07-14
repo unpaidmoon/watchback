@@ -411,7 +411,6 @@ export function OnboardingPage() {
 
   const credentialReady = status?.credentialStatus.state === "ready";
   const accountOperationBusy = loggingIn || loggingOut || targetAction !== null;
-  const syncTargetReady = credentialReady && Boolean(targetStatus?.syncAllowed) && !accountOperationBusy;
   const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
   const primaryTargetState = targetStatus && ["switchRequired", "bindFailed", "unidentified", "verificationRequired", "mismatchKept"].includes(targetStatus.state)
     ? targetStatus.state
@@ -606,7 +605,9 @@ export function OnboardingPage() {
                     <SeasonStatusCard
                       key={seasonStatus.season}
                       seasonStatus={seasonStatus}
-                      credentialReady={syncTargetReady}
+                      credentialReady={credentialReady}
+                      targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
+                      accountOperationBusy={accountOperationBusy}
                       syncingSeason={syncingSeason}
                       progress={syncProgress?.season === seasonStatus.season ? syncProgress : null}
                       onSync={() => runSeasonSync(seasonStatus.season)}
