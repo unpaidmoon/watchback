@@ -119,9 +119,27 @@ assertEqual(/async function runClearTarget\(\)[\s\S]*?setNotice\(result\.target\
 assertEqual(onboardingSource.includes("{!hasTargetPrimaryAction && ("), true, "target recovery does not duplicate the bottom login CTA");
 assertEqual(onboardingSource.includes("let disposed = false"), true, "late event subscriptions are disposed safely");
 assertEqual(onboardingSource.includes("if (disposed)"), true, "late event listeners immediately unlisten after cleanup");
-assertEqual(onboardingSource.includes("disabled={accountOperationBusy || !targetStatus.canConfirmSwitch}"), true, "switch confirmation shares the account busy gate");
-assertEqual(onboardingSource.includes("disabled={!hasCurrentTarget || accountOperationBusy}"), true, "clear shares the account busy gate");
-assertEqual(onboardingSource.includes("disabled={!credentialReady || accountOperationBusy}"), true, "logout shares the account busy gate");
+assertEqual(onboardingSource.includes("function acquireOperationLock()"), true, "account and season actions share one synchronous lock");
+assertEqual(
+  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)[\s\S]*?finally[\s\S]*?releaseOperationLock\(\)/.test(onboardingSource),
+  true,
+  "season sync owns and releases the shared operation lock",
+);
+assertEqual(onboardingSource.includes("disabled={accountOperationBusy || syncingSeason !== null || !targetStatus.canConfirmSwitch}"), true, "switch confirmation is disabled during season sync");
+assertEqual(onboardingSource.includes("disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}"), true, "clear is disabled during season sync");
+assertEqual(onboardingSource.includes("disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}"), true, "logout is disabled during season sync");
+assertEqual((onboardingSource.match(/accountOperationBusy \|\| syncingSeason !== null/g) ?? []).length >= 6, true, "all account action buttons are disabled during season sync");
+assertEqual(onboardingSource.includes("function invalidateDashboardCache()"), true, "account changes invalidate the cached dashboard snapshot");
+assertEqual(
+  /function beginAccountOperation\(\)[\s\S]*?invalidateDashboardCache\(\)/.test(onboardingSource),
+  true,
+  "every account operation invalidates stale cached identity before changing state",
+);
+assertEqual(
+  /useEffect\(\(\) => \{[\s\S]*?accountOperationBusy \|\| syncingSeason !== null[\s\S]*?button\.disabled[\s\S]*?button\.focus\(\)[\s\S]*?document\.activeElement === button[\s\S]*?previousPrimaryTargetStateRef\.current = primaryTargetState[\s\S]*?\}, \[primaryTargetState, accountOperationBusy, syncingSeason\]\)/.test(onboardingSource),
+  true,
+  "target recovery focus is recorded only after the enabled button receives focus",
+);
 assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
 assertEqual(onboardingSource.includes("S21"), false, "command center does not hard-code S21");

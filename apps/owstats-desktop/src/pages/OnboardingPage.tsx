@@ -168,17 +168,29 @@ export function OnboardingPage() {
     setTargetStatus(snapshot.targetStatus);
   }
 
-  function beginAccountOperation() {
+  function acquireOperationLock() {
     if (accountOperationLockRef.current) {
       return false;
     }
     accountOperationLockRef.current = true;
-    dashboardRequestGenerationRef.current += 1;
     return true;
   }
 
-  function finishAccountOperation() {
+  function releaseOperationLock() {
     accountOperationLockRef.current = false;
+  }
+
+  function invalidateDashboardCache() {
+    dashboardCache.delete(PROFILE_REVIEW_SEASON);
+    dashboardRequestGenerationRef.current += 1;
+  }
+
+  function beginAccountOperation() {
+    if (!acquireOperationLock()) {
+      return false;
+    }
+    invalidateDashboardCache();
+    return true;
   }
 
   async function runLogin() {
@@ -206,7 +218,7 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setLoggingIn(false);
       }
-      finishAccountOperation();
+      releaseOperationLock();
     }
   }
 
@@ -235,7 +247,7 @@ export function OnboardingPage() {
   }
 
   async function runSeasonSync(season: number) {
-    if (accountOperationLockRef.current) {
+    if (!acquireOperationLock()) {
       setError("当前正在处理账号操作，请完成后再同步。");
       return;
     }
@@ -253,6 +265,7 @@ export function OnboardingPage() {
       setError(productErrorMessage(err));
     } finally {
       setSyncingSeason(null);
+      releaseOperationLock();
     }
   }
 
@@ -277,7 +290,7 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setTargetAction(null);
       }
-      finishAccountOperation();
+      releaseOperationLock();
     }
   }
 
@@ -302,7 +315,7 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setTargetAction(null);
       }
-      finishAccountOperation();
+      releaseOperationLock();
     }
   }
 
@@ -327,7 +340,7 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setTargetAction(null);
       }
-      finishAccountOperation();
+      releaseOperationLock();
     }
   }
 
@@ -352,7 +365,7 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setTargetAction(null);
       }
-      finishAccountOperation();
+      releaseOperationLock();
     }
   }
 
@@ -368,7 +381,6 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setNotice(result.message);
         setLoginProgress(null);
-        dashboardCache.delete(PROFILE_REVIEW_SEASON);
         await loadDashboard();
       }
     } catch (err) {
@@ -379,7 +391,7 @@ export function OnboardingPage() {
       if (mountedRef.current) {
         setLoggingOut(false);
       }
-      finishAccountOperation();
+      releaseOperationLock();
     }
   }
 
@@ -434,11 +446,22 @@ export function OnboardingPage() {
   const topAchievements = review ? activeTopAchievements(review, 3) : [];
 
   useEffect(() => {
-    if (primaryTargetState && previousPrimaryTargetStateRef.current !== primaryTargetState) {
-      primaryTargetActionRef.current?.focus();
+    if (!primaryTargetState) {
+      previousPrimaryTargetStateRef.current = null;
+      return;
     }
-    previousPrimaryTargetStateRef.current = primaryTargetState;
-  }, [primaryTargetState]);
+    if (accountOperationBusy || syncingSeason !== null || previousPrimaryTargetStateRef.current === primaryTargetState) {
+      return;
+    }
+    const button = primaryTargetActionRef.current;
+    if (!button || button.disabled) {
+      return;
+    }
+    button.focus();
+    if (document.activeElement === button) {
+      previousPrimaryTargetStateRef.current = primaryTargetState;
+    }
+  }, [primaryTargetState, accountOperationBusy, syncingSeason]);
 
   return (
     <section className="workspace onboardingWorkspace phase6CommandCenter">
@@ -546,24 +569,24 @@ export function OnboardingPage() {
                   {targetStatus?.state === "ready" && <span className="good">当前目标已确认，可同步</span>}
                   {targetStatus?.state === "switchRequired" && (
                     <>
-                      <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runConfirmTargetSwitch} disabled={accountOperationBusy || !targetStatus.canConfirmSwitch}>
+                      <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runConfirmTargetSwitch} disabled={accountOperationBusy || syncingSeason !== null || !targetStatus.canConfirmSwitch}>
                         {targetAction === "confirm" ? "切换中…" : "切换到此账号"}
                       </button>
-                      <button className="ghostButton" type="button" onClick={runKeepCurrentTarget} disabled={accountOperationBusy}>
+                      <button className="ghostButton" type="button" onClick={runKeepCurrentTarget} disabled={accountOperationBusy || syncingSeason !== null}>
                         {targetAction === "keep" ? "保留中…" : "保留原目标"}
                       </button>
                     </>
                   )}
                   {targetStatus?.state === "bindFailed" && targetStatus.canRetry ? (
-                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={accountOperationBusy}>
+                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={accountOperationBusy || syncingSeason !== null}>
                       {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
                     </button>
                   ) : targetStatus && ["unidentified", "verificationRequired", "mismatchKept", "bindFailed"].includes(targetStatus.state) ? (
-                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy}>
+                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
                       {loggingIn ? "识别中…" : "重新识别"}
                     </button>
                   ) : null}
-                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy}>
+                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}>
                     {targetAction === "clear" ? "清除中…" : "清除"}
                   </button>
                 </div>
@@ -594,7 +617,7 @@ export function OnboardingPage() {
 
               <div className="phase6SettingsLauncherGrid syncSecondaryActions">
                 {!hasTargetPrimaryAction && (
-                  <button className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy}>
+                  <button className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
                     <LogIn size={18} />
                     {loggingIn ? "登录识别中…" : credentialReady ? "重新登录" : "登录网易大神"}
                   </button>
@@ -609,7 +632,7 @@ export function OnboardingPage() {
                   <Download size={18} />
                   {checkingUpdate ? "检查中" : "检查更新"}
                 </button>
-                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy}>
+                <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}>
                   <LogOut size={18} />
                   {loggingOut ? "退出中…" : "退出登录"}
                 </button>
