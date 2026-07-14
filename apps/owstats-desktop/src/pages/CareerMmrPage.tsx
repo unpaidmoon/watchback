@@ -1,4 +1,4 @@
-import { AlertCircle, BarChart3, Clock3, ShieldCheck, TrendingUp } from "lucide-react";
+import { BarChart3, Clock3, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getCareerMmrBuildStatus,
@@ -12,12 +12,16 @@ import {
   careerModeLabels,
   careerRoleLabels,
   buildCareerMmrChart,
+  buildCareerMmrChartSummary,
+  buildCareerMmrYAxisTicks,
   createCareerMmrRequestGuard,
   formatCareerDate,
   formatCareerMmr,
   formatCareerPercent,
+  formatCareerMmrTooltip,
   signedCareerDelta,
 } from "../shared/careerMmrFormat";
+import { PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import { productErrorMessage } from "../shared/phase6Shell";
 import type {
   CareerMmrBuildStatus,
@@ -41,12 +45,16 @@ export function CareerMmrPage() {
   const [buildStatus, setBuildStatus] = useState<CareerMmrBuildStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [overviewRetry, setOverviewRetry] = useState(0);
+  const [detailRetry, setDetailRetry] = useState(0);
   const detailRequestGuard = useRef(createCareerMmrRequestGuard());
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setOverviewError(null);
     Promise.all([getCareerMmrOverview(), getCareerMmrBuildStatus()])
       .then(async ([nextOverview, nextStatus]) => {
         if (nextStatus.modelVersion === null) {
@@ -60,16 +68,16 @@ export function CareerMmrPage() {
         setOverview(nextOverview);
         setBuildStatus(nextStatus);
       })
-      .catch((reason) => active && setError(productErrorMessage(reason)))
+      .catch((reason) => active && setOverviewError(productErrorMessage(reason)))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, []);
+  }, [overviewRetry]);
 
   useEffect(() => {
     if (!overview) return;
     const request = detailRequestGuard.current.begin();
     setDetailLoading(true);
-    setError(null);
+    setDetailError(null);
     setHistory(null);
     setModes(null);
     setSeasons(null);
@@ -85,13 +93,13 @@ export function CareerMmrPage() {
         setSeasons(nextSeasons);
       })
       .catch((reason) => {
-        if (detailRequestGuard.current.isCurrent(request)) setError(productErrorMessage(reason));
+        if (detailRequestGuard.current.isCurrent(request)) setDetailError(productErrorMessage(reason));
       })
       .finally(() => {
         if (detailRequestGuard.current.isCurrent(request)) setDetailLoading(false);
       });
     return () => detailRequestGuard.current.invalidate(request);
-  }, [overview, selectedRole, selectedSeason]);
+  }, [overview, selectedRole, selectedSeason, detailRetry]);
 
   const roleSummary = overview?.roles.find((item) => item.role === selectedRole) ?? null;
   const visibleSeasonItems = useMemo(
@@ -99,20 +107,48 @@ export function CareerMmrPage() {
     [seasons, selectedSeason],
   );
 
-  if (loading) return <section className="workspace careerMmrWorkspace"><div className="emptyState">正在计算生涯 MMR…</div></section>;
+  const pageHeader = (
+    <PageHeader
+      title="生涯 MMR"
+      description={overview?.disclaimer || "本地模型推算，并非暴雪官方隐藏分"}
+      actions={
+        <PageSeasonSelect
+          label="展示赛季"
+          value={selectedSeason}
+          seasons={overview?.discoveredSeasons ?? []}
+          includeAll
+          allLabel="全部"
+          onChange={setSelectedSeason}
+        />
+      }
+    />
+  );
+
+  if (loading) {
+    return (
+      <section className="workspace careerMmrWorkspace">
+        {pageHeader}
+        <PageLoadingState message="正在计算生涯 MMR…" />
+      </section>
+    );
+  }
+
+  if (overviewError) {
+    return (
+      <section className="workspace careerMmrWorkspace">
+        {pageHeader}
+        <PageErrorState message={overviewError} onRetry={() => setOverviewRetry((value) => value + 1)} />
+      </section>
+    );
+  }
 
   return (
     <section className="workspace careerMmrWorkspace">
-      {error && <div className="errorBanner phase6RecoverableError"><AlertCircle size={18} /><span>{error}</span></div>}
+      {pageHeader}
 
-      <header className="careerMmrHero">
-        <div>
-          <span className="careerMmrEyebrow"><ShieldCheck size={15} /> 本地生涯评级</span>
-          <h2>生涯三职责 MMR</h2>
-          <p>{overview?.disclaimer || "这是依据本地对局数据生成的估算，并非暴雪官方隐藏分。"}</p>
-        </div>
+      <section className="careerMmrSummary" aria-label="综合摘要">
         <div className="careerMmrComposite">
-          <span>综合分</span>
+          <span>综合摘要</span>
           <strong>{formatCareerMmr(overview?.compositeMmr ?? null)}</strong>
           <small>{buildStatus?.isBuilt
             ? `模型 v${buildStatus.modelVersion ?? "-"} · 已覆盖三职责`
@@ -120,7 +156,8 @@ export function CareerMmrPage() {
               ? `模型 v${buildStatus.modelVersion ?? "-"} · 已生成 ${buildStatus.summaryCount}/3 个职责，等待其余职责数据`
               : "等待本地模型构建"}</small>
         </div>
-      </header>
+        <p>三职责分别保留当前估算、置信度、峰值和有效样本；职责选择只改变下方趋势与分解。</p>
+      </section>
 
       <div className="careerMmrRoleGrid" aria-label={`${roleNamesForAccessibility}职责 MMR`}>
         {roles.map((role) => {
@@ -138,21 +175,23 @@ export function CareerMmrPage() {
         })}
       </div>
 
-      <div className="careerMmrToolbar">
+      <div className="careerMmrSectionIntro">
         <div>
           <b>{careerRoleLabels[selectedRole]}趋势</b>
-          <span>筛选只改变图表展示，不会重新计算当前 MMR。</span>
+          <span>展示赛季只改变趋势和分解，不会重新计算当前 MMR。</span>
         </div>
-        <label><span>赛季</span><select value={selectedSeason ?? ""} onChange={(event) => setSelectedSeason(event.target.value ? Number(event.target.value) : undefined)}>
-          <option value="">全部动态赛季</option>
-          {overview && overview.discoveredSeasons.map((season) => <option key={season} value={season}>S{season}</option>)}
-        </select></label>
       </div>
 
       <div className="careerMmrMainGrid">
         <article className="careerMmrPanel careerMmrHistoryPanel">
           <div className="careerMmrPanelTitle"><div><TrendingUp size={17} /><b>历史走势</b></div><span>{history?.points.length ?? 0} 个记录点</span></div>
-          {detailLoading ? <div className="careerMmrEmpty">正在加载职责历史…</div> : <HistoryChart history={history} />}
+          {detailError ? (
+            <PageErrorState message={detailError} onRetry={() => setDetailRetry((value) => value + 1)} />
+          ) : detailLoading ? (
+            <div className="careerMmrEmpty">正在加载职责历史…</div>
+          ) : (
+            <HistoryChart history={history} />
+          )}
         </article>
         <article className="careerMmrPanel">
           <div className="careerMmrPanelTitle"><div><BarChart3 size={17} /><b>模式贡献</b></div></div>
@@ -160,7 +199,10 @@ export function CareerMmrPage() {
             {modes?.items.length ? modes.items.map((item) => (
               <div key={item.modeFamily} className="careerMmrModeItem">
                 <div><b>{careerModeLabels[item.modeFamily] ?? "其他模式"}</b><span>{item.matchesCount} 场 · {Math.round(item.durationSec / 360) / 10} 小时</span></div>
-                <strong className={item.cumulativeDelta >= 0 ? "positive" : "negative"}>{signedCareerDelta(item.cumulativeDelta)}</strong>
+                <div className="careerMmrModeValue">
+                  <span>生涯累计贡献</span>
+                  <strong className={item.cumulativeDelta >= 0 ? "positive" : "negative"}>{signedCareerDelta(item.cumulativeDelta)}</strong>
+                </div>
                 <small>{item.wins} 胜 / {item.losses} 负 / {item.draws} 平</small>
               </div>
             )) : <div className="careerMmrEmpty">暂无模式贡献数据</div>}
@@ -171,7 +213,7 @@ export function CareerMmrPage() {
       <article className="careerMmrPanel careerMmrSeasonPanel">
         <div className="careerMmrPanelTitle"><div><Clock3 size={17} /><b>赛季分解</b></div></div>
         <div className="careerMmrSeasonTable">
-          {visibleSeasonItems.map((item) => <div key={item.season}><b>S{item.season}</b><span>{item.matchesCount} 场</span><span>{item.startMmr} → {item.endMmr}</span><strong>{signedCareerDelta(item.netDelta)}</strong></div>)}
+          {visibleSeasonItems.map((item) => <div key={item.season}><b>S{item.season}</b><span>{item.matchesCount} 场</span><span>{formatCareerMmr(item.startMmr)} → {formatCareerMmr(item.endMmr)}</span><strong>{signedCareerDelta(item.netDelta)}</strong></div>)}
           {!visibleSeasonItems.length && <div className="careerMmrEmpty">当前筛选下暂无赛季记录</div>}
         </div>
       </article>
@@ -184,11 +226,69 @@ export function CareerMmrPage() {
 function HistoryChart({ history }: { history: CareerMmrHistory | null }) {
   const points = history?.points ?? [];
   const width = 760;
-  const height = 210;
-  const chart = buildCareerMmrChart(points, width, height);
+  const height = 250;
+  const left = 64;
+  const top = 16;
+  const right = 20;
+  const bottom = 40;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const chart = buildCareerMmrChart(points, plotWidth, plotHeight);
   if (!chart) return <div className="careerMmrEmpty">数据不足，当前职责仍在定位中。</div>;
   const coordinates = chart.line.map((point) => `${point.x},${point.y}`).join(" ");
   const confidenceBand = chart.band.map((point) => `${point.x},${point.y}`).join(" ");
-  const latestPoint = points[points.length - 1];
-  return <div className="careerMmrChart"><svg viewBox={`0 0 ${width} ${height}`} overflow="hidden" role="img" aria-label={`${careerRoleLabels[history!.role]} MMR 历史走势及置信区间`}><polygon points={confidenceBand} /><polyline points={coordinates} /></svg><div><span>{formatCareerDate(points[0].timestamp)}</span><b>{formatCareerMmr(latestPoint?.mmr ?? null)}</b><span>{formatCareerDate(latestPoint?.timestamp ?? null)}</span></div></div>;
+  const yTicks = buildCareerMmrYAxisTicks(chart.domainMin, chart.domainMax, 4);
+  const yForValue = (value: number) => top + plotHeight - ((value - chart.domainMin) / (chart.domainMax - chart.domainMin)) * plotHeight;
+  const xTickIndexes = [...new Set([0, Math.floor((chart.line.length - 1) / 2), chart.line.length - 1])];
+
+  return (
+    <div className="careerMmrChart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${careerRoleLabels[history!.role]} MMR 历史走势及置信区间`}>
+        <g className="careerMmrYAxis" aria-label="MMR 纵轴">
+          <text x="8" y="12">MMR</text>
+          {yTicks.map((tick) => {
+            const y = yForValue(tick);
+            return (
+              <g key={tick}>
+                <line x1={left} x2={width - right} y1={y} y2={y} />
+                <text x={left - 10} y={y + 4}>{formatCareerMmr(tick)}</text>
+              </g>
+            );
+          })}
+        </g>
+        <g className="careerMmrPlot" transform={`translate(${left} ${top})`}>
+          <polygon points={confidenceBand} />
+          <polyline points={coordinates} />
+          {chart.line.map((coordinate) => {
+            const point = points[coordinate.inputIndex];
+            return (
+              <circle
+                key={`${point.timestamp}-${coordinate.inputIndex}`}
+                cx={coordinate.x}
+                cy={coordinate.y}
+                r="8"
+                tabIndex={0}
+              >
+                <title>{formatCareerMmrTooltip(point)}</title>
+              </circle>
+            );
+          })}
+        </g>
+        <g className="careerMmrXAxis" aria-label="日期横轴">
+          {xTickIndexes.map((index) => {
+            const coordinate = chart.line[index];
+            const point = points[coordinate.inputIndex];
+            return (
+              <text key={`${point.timestamp}-${index}`} x={left + coordinate.x} y={height - 8} textAnchor="middle">
+                {formatCareerDate(point.timestamp)}
+              </text>
+            );
+          })}
+        </g>
+      </svg>
+      <p className="careerMmrScreenReaderSummary">
+        {buildCareerMmrChartSummary(history!.role, points)}
+      </p>
+    </div>
+  );
 }

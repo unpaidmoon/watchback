@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildCareerMmrChart, createCareerMmrRequestGuard } from "../src/shared/careerMmrFormat";
+import {
+  buildCareerMmrChart,
+  buildCareerMmrChartSummary,
+  buildCareerMmrYAxisTicks,
+  createCareerMmrRequestGuard,
+  formatCareerMmrTooltip,
+} from "../src/shared/careerMmrFormat";
 
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("../src/shared/phase6Shell.ts", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("../src/pages/CareerMmrPage.tsx", import.meta.url), "utf8");
 const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
 const typeSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
+const styleSource = readFileSync(new URL("../src/styles/features/career-mmr.css", import.meta.url), "utf8");
 
 assert.match(appSource, /path="\/career-mmr"/, "生涯 MMR 页面必须注册独立路由");
 assert.match(shellSource, /生涯 MMR/, "主导航必须提供生涯 MMR 入口");
@@ -15,7 +22,7 @@ assert.match(pageSource, /重装/);
 assert.match(pageSource, /输出/);
 assert.match(pageSource, /支援/);
 assert.doesNotMatch(pageSource, /S21.*S22.*S23/s, "赛季选项不得硬编码");
-assert.match(pageSource, /overview\.discoveredSeasons\.map/, "赛季筛选必须来自后端动态发现结果");
+assert.match(pageSource, /seasons=\{overview\?\.discoveredSeasons \?\? \[\]\}/, "赛季筛选必须来自后端动态发现结果");
 assert.match(pageSource, /getCareerMmrOverview\(/, "页面必须通过 API 获取总览");
 assert.match(pageSource, /getRoleMmrHistory\(/, "页面必须通过 API 获取历史");
 assert.doesNotMatch(pageSource, /getRecentMmrExplanations/);
@@ -37,6 +44,17 @@ assert.doesNotMatch(pageSource, /cursorHash/, "页面不能读取或展示内部
 assert.doesNotMatch(pageSource, /matchId|playerId|bnetId|rawJson/, "页面不能读取或展示隐私标识");
 assert.match(pageSource, /aria-pressed=\{selectedRole === role\}/, "职责按钮必须暴露选中状态");
 assert.match(pageSource, /setHistory\(null\);[\s\S]*setModes\(null\);[\s\S]*setSeasons\(null\)/, "切换职责必须立即清空旧详情");
+assert.match(pageSource, /aria-label="MMR 纵轴"/);
+assert.match(pageSource, /<title>\{formatCareerMmrTooltip\(point\)\}<\/title>/);
+assert.match(pageSource, /className="careerMmrScreenReaderSummary"/);
+assert.match(pageSource, /生涯累计贡献/);
+assert.match(pageSource, /label="展示赛季"/);
+assert.match(pageSource, /<PageHeader/);
+assert.match(pageSource, /<PageSeasonSelect/);
+assert.match(pageSource, /<PageLoadingState/);
+assert.match(pageSource, /<PageErrorState/);
+assert.doesNotMatch(styleSource, /gradient/i, "生涯 MMR 不得保留蓝色渐变");
+assert.doesNotMatch(styleSource, /--phase6-|#6d8cff|#65d6c0/i, "生涯 MMR 必须只使用语义视觉令牌");
 
 assert.equal(buildCareerMmrChart([], 760, 210), null, "空历史不应构造图表");
 const flat = buildCareerMmrChart([{ mmr: 2500, confidence: 1 }, { mmr: 2500, confidence: 1 }], 760, 210)!;
@@ -44,6 +62,19 @@ assert.ok(flat.line.every((point) => Number.isFinite(point.x) && Number.isFinite
 const uncertain = buildCareerMmrChart([{ mmr: 2500, confidence: 0 }, { mmr: 2550, confidence: 0.1 }], 760, 210)!;
 assert.ok(uncertain.band.every((point) => point.y >= 0 && point.y <= 210), "低置信区间必须约束在 viewport 内");
 assert.ok(uncertain.domainMin <= 2380 && uncertain.domainMax >= 2620, "纵轴范围必须纳入置信区间上下界");
+
+const chartPoints = [
+  { timestamp: 1_720_000_000, season: 22, mmr: 2480, confidence: 0.7, delta: -12.5 },
+  { timestamp: 1_720_086_400, season: 22, mmr: 2525, confidence: 0.8, delta: 45.0 },
+];
+const chart = buildCareerMmrChart(chartPoints, 760, 210)!;
+const ticks = buildCareerMmrYAxisTicks(chart.domainMin, chart.domainMax, 4);
+assert.equal(ticks.length, 4);
+assert.ok(ticks.every((value) => Number.isFinite(value)));
+assert.match(formatCareerMmrTooltip(chartPoints[1]), /S22/);
+assert.match(formatCareerMmrTooltip(chartPoints[1]), /2,525/);
+assert.match(buildCareerMmrChartSummary("damage", chartPoints), /输出/);
+assert.match(buildCareerMmrChartSummary("damage", chartPoints), /上升 45/);
 
 const guard = createCareerMmrRequestGuard();
 const first = guard.begin();

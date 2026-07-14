@@ -1,4 +1,4 @@
-import type { CareerRole } from "./types";
+import type { CareerMmrHistoryPoint, CareerRole } from "./types";
 
 export const careerRoleLabels: Record<CareerRole, string> = {
   tank: "重装",
@@ -32,13 +32,16 @@ export function signedCareerDelta(value: number) {
 }
 
 type CareerChartInput = { mmr: number; confidence: number };
-type CareerChartPoint = { x: number; y: number };
+type CareerChartPoint = { x: number; y: number; inputIndex: number };
+type CareerChartBandPoint = { x: number; y: number };
 
 export function buildCareerMmrChart(inputs: CareerChartInput[], width: number, height: number) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-  const points = inputs.filter((point) => Number.isFinite(point.mmr) && Number.isFinite(point.confidence));
+  const points = inputs
+    .map((point, inputIndex) => ({ point, inputIndex }))
+    .filter(({ point }) => Number.isFinite(point.mmr) && Number.isFinite(point.confidence));
   if (!points.length) return null;
-  const bounds = points.flatMap((point) => {
+  const bounds = points.flatMap(({ point }) => {
     const confidence = Math.max(0, Math.min(1, point.confidence));
     const radius = (1 - confidence) * 120;
     return [point.mmr - radius, point.mmr + radius];
@@ -53,16 +56,37 @@ export function buildCareerMmrChart(inputs: CareerChartInput[], width: number, h
   const span = domainMax - domainMin;
   const x = (index: number) => points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
   const y = (value: number) => Math.max(0, Math.min(height, height - ((value - domainMin) / span) * height));
-  const line = points.map((point, index) => ({ x: x(index), y: y(point.mmr) }));
-  const upper = points.map((point, index) => ({
+  const line = points.map(({ point, inputIndex }, index) => ({ x: x(index), y: y(point.mmr), inputIndex }));
+  const upper = points.map(({ point }, index) => ({
     x: x(index),
     y: y(point.mmr + (1 - Math.max(0, Math.min(1, point.confidence))) * 120),
   }));
-  const lower = points.map((point, index) => ({
+  const lower = points.map(({ point }, index) => ({
     x: x(index),
     y: y(point.mmr - (1 - Math.max(0, Math.min(1, point.confidence))) * 120),
   })).reverse();
-  return { line, band: [...upper, ...lower] as CareerChartPoint[], domainMin, domainMax };
+  return { line: line as CareerChartPoint[], band: [...upper, ...lower] as CareerChartBandPoint[], domainMin, domainMax };
+}
+
+export function buildCareerMmrYAxisTicks(domainMin: number, domainMax: number, count: number) {
+  if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) return [0];
+  if (count < 2) return [Math.round(domainMin)];
+  const step = (domainMax - domainMin) / (count - 1);
+  return Array.from({ length: count }, (_, index) => Math.round(domainMax - index * step));
+}
+
+export function formatCareerMmrTooltip(point: CareerMmrHistoryPoint) {
+  return `S${point.season} · ${formatCareerDate(point.timestamp)} · MMR ${formatCareerMmr(point.mmr)} · 变化 ${signedCareerDelta(point.delta)}`;
+}
+
+export function buildCareerMmrChartSummary(role: CareerRole, points: CareerMmrHistoryPoint[]) {
+  const validPoints = points.filter((point) => Number.isFinite(point.mmr));
+  if (!validPoints.length) return `${careerRoleLabels[role]}暂无历史记录。`;
+  const first = validPoints[0];
+  const last = validPoints[validPoints.length - 1];
+  const change = Math.round(last.mmr - first.mmr);
+  const direction = change > 0 ? `上升 ${change}` : change < 0 ? `下降 ${Math.abs(change)}` : "保持不变";
+  return `${careerRoleLabels[role]}共有 ${validPoints.length} 个记录点，MMR 从 ${Math.round(first.mmr)} 到 ${Math.round(last.mmr)}，${direction}。`;
 }
 
 export function createCareerMmrRequestGuard() {
