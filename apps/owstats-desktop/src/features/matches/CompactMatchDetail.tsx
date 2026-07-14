@@ -2,7 +2,6 @@ import { CircleDollarSign } from "lucide-react";
 import { useEffect, useState } from "react";
 import { arenaHeaderTitle, formatArenaScore, formatArenaTabLabel } from "../../shared/arenaDetailFormat";
 import { resolveArenaModTraitInfo } from "../../shared/assets";
-import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../../shared/matchDetailHeaderFormat";
 import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
@@ -40,15 +39,6 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, .
       />
 
       <div className="phase6CompactDetailScroll">
-        <section className="matchDetailPerformance" aria-labelledby="self-performance-title">
-          <div>
-            <span className="phase6Eyebrow">个人摘要</span>
-            <h2 id="self-performance-title">本人表现</h2>
-            <p>评分与同队奖牌</p>
-          </div>
-          <MatchPerformanceBadges evaluation={detail.evaluation} teamAwards={detail.teamAwards} />
-        </section>
-
         <section className="matchDetailTeamComparison" aria-labelledby="team-comparison-title">
           <h2 id="team-comparison-title">队伍对比</h2>
           <div className="matchDetailTeamTables">

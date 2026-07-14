@@ -1,5 +1,5 @@
 import { formatCompactStat, formatMatchBannerTitle, formatMatchPreviewKey, formatScoreLine } from "../../shared/matchListFormat";
-import { primaryTagBadgeTone } from "../../shared/matchPerformanceBadges";
+import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
 import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
 import type { MatchSummary } from "../../shared/types";
 
@@ -35,11 +35,7 @@ export function MatchListCard({ match, selected, onSelect }: MatchListCardProps)
             <span className="phase6MatchListHeroLine matchListCardHeroLine">
               <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
               <strong className="matchListCardHeroName">{match.heroName}</strong>
-              {match.evaluation ? (
-                <span className={`phase6VerticalPerformanceTag badgeTone-${listPerformanceTone(match.evaluation.primaryTag)}`}>{match.evaluation.primaryTag}</span>
-              ) : (
-                <span className="phase6VerticalPerformanceTag badgeTone-blue">常规</span>
-              )}
+              <MatchPerformanceBadges evaluation={match.evaluation} teamAwards={match.teamAwards} compact />
             </span>
           </span>
         </span>
@@ -61,12 +57,6 @@ function resultPresentation(result: string) {
   if (result === "loss") return { tone: "loss", label: "失败" };
   if (result === "draw") return { tone: "draw", label: "平局" };
   return { tone: "neutral", label: "未知结果" };
-}
-
-function listPerformanceTone(primaryTag: string) {
-  if (primaryTagBadgeTone(primaryTag) === "gold") return "gold";
-  if (primaryTag === "躺赢局" || primaryTag === "背锅局") return "danger";
-  return "blue";
 }
 
 function MetricBlock({ label, value }: { label: string; value: string }) {
