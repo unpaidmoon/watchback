@@ -60,12 +60,23 @@ export type CredentialStatus = {
   state: string;
   message: string;
   exposesSecret: boolean;
-  roleId: number | null;
+  roleId?: number | null;
   savedAt: string | null;
 };
 
 export type CredentialLoginResult = {
   status: CredentialStatus;
+  target: LoginTargetStatus;
+};
+
+export type LoginTargetStatus = {
+  state: "ready" | "switchRequired" | "mismatchKept" | "bindFailed" | "unidentified" | "verificationRequired" | string;
+  detectedBnet: string | null;
+  currentBnet: string | null;
+  message: string;
+  syncAllowed: boolean;
+  canConfirmSwitch: boolean;
+  canRetry: boolean;
 };
 
 export type PlayerTargetStatus = {
@@ -75,13 +86,9 @@ export type PlayerTargetStatus = {
   boundAt?: string | null;
 };
 
-export type BindPlayerTargetResult = {
-  status: PlayerTargetStatus;
-};
-
 export type ClearPlayerTargetResult = {
   cleared: boolean;
-  status: PlayerTargetStatus;
+  target: LoginTargetStatus;
 };
 
 export type PlayerProfile = {

@@ -1,6 +1,6 @@
 # OWStatsLocal 当前开发状态
 
-> 更新日期：2026-07-12
+> 更新日期：2026-07-14
 > 稳定化阶段：STAB-007 已验证。资源、运行路径、同步身份、隐私持久化、数据库恢复、核心模块职责边界与统一验证入口均已收口。
 
 ## 产品与架构
@@ -17,7 +17,7 @@
 - 前端统一使用 `/assets/...`，Vite 不再放行开发机绝对目录；构建产物扫描禁止 `/@fs/`、开发机盘符路径和 `docs/reference`。
 - `ow-lookups.json` 是前端和 Rust importer 共用的最小正式字典；桌面运行不再读取 ignored `docs/reference` 或仓库 `data/players`。
 - `AppPaths` 统一派生数据库、设置、资料、凭据、旧 target、浏览器 profile、seasons、diagnostics 和 backups；桌面同步 JSON 直接写入 `app_data/seasons`。
-- 同步只使用当前浏览器登录账号的凭据身份；产品入口不再提供 BattleTag 目标绑定或 `searchBnetAccount`。`ready` 表示已识别当前账号，`currentPlayerMissing` 表示需重新登录，不能解锁同步。
+- 同步只使用当前浏览器登录账号的凭据身份；登录流程会从带“战网昵称”标签的当前页面文本自动识别 BattleTag，再通过 `searchBnetAccount` 与 `queryCard` 两阶段校验后建立目标。产品不再提供任意 BattleTag 输入或绑定命令；账号与目标未确认一致时不能解锁同步。
 - 新写入的赛季 JSON、SQLite raw JSON、同步错误和前端可见错误都经过统一递归脱敏。首次打开旧数据库会先备份 SQLite/赛季 JSON 至 `privacy-backups`，再对旧数据进行幂等清洗；不读取或操作旧 target 文件、真实凭据、浏览器 profile、真实数据库或玩家 dump。
 - SQLite 使用显式 v1-v4 迁移注册表；旧库升级前生成一致性副本至 `app_data/backups`，新库不生成冗余备份。所有连接统一配置 WAL、NORMAL 和 5 秒锁等待，且高于程序版本的数据库会被拒绝打开。
 - 同步错误按赛季保存为最新快照，重复同步不增长；桌面端只允许一个赛季同步在运行，中断导入会回滚，移除故障后可以重试。
@@ -89,3 +89,15 @@
 - `git archive HEAD` tracked-only 临时副本中：`npm ci --offline`、`npm test`、`npm run build`、`cargo fmt --check`、`cargo test --tests` 通过。
 - tracked-only 副本的 `npm run tauri:dev -- --no-watch` 完成编译并启动 `target\\debug\\owstats-desktop.exe`，随后正常终止烟测进程树。
 - 本轮未执行 `npm run tauri build`、安装包构建或真实上游同步；不声称安装版已验证。
+
+## 2026-07-14 登录 BattleTag 自动识别
+
+- 网易大神登录现在同时确认当前页面的凭据角色与带“战网昵称”标签的 BattleTag；两次稳定、同源的完整观察后才允许进入目标解析。
+- 无目标时自动解析并绑定；同一账号重复登录复用已确认目标；检测到其他账号时要求用户选择“切换到此账号”或“保留原目标”。
+- 页面提取失败时凭据仍可登录，但目标保持“未识别”，产品只提供“重新识别”，不显示 BattleTag 输入框。
+- 目标记录保存单一来源账号关联。登录会话、来源账号与当前目标未同时确认时，赛季同步会在数据库、输出文件和网络请求之前失败关闭。
+- 前端已覆盖未登录、自动就绪、未识别、待切换确认、保留原目标和可重试失败状态；账号操作与赛季同步互斥，旧请求和缓存不能覆盖新账号状态。
+- 自动化验证仅使用合成凭据和合成页面文本；没有读取真实浏览器 profile、真实凭据、真实玩家数据或真实上游响应。
+- `cargo fmt --check`、登录定向测试、`cargo test --tests`、`npm test`、`npm run build`、构建产物路径扫描和 `git diff --check` 均通过；真实上游 live test 按设计忽略。
+- `scripts/verify.ps1 -ChangedOnly` 的敏感扫描、资源、前端、产物和 Rust 格式阶段通过，但最终 Rust Clippy 因 10 个既有生涯 MMR lint 失败。相关代码早于本功能；本功能未修改这些告警行，因此未扩大范围修复。
+- `npm run tauri build` 通过，并生成 MSI 与 NSIS 两种安装包；尚未执行安装后烟测。真实多账号切换、提取失败页和真实赛季同步仍需由用户在桌面端手工验收，不声称安装版运行验收已完成。

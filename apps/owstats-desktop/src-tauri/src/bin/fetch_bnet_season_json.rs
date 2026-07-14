@@ -206,6 +206,7 @@ async fn main() -> Result<()> {
             resolved_bnet: Some(args.bnet.clone()),
             customer_token,
             bound_at: chrono::Utc::now().to_rfc3339(),
+            source_role_id: None,
         }
     } else if let Some(cached_player_path) = args.cached_player_path.clone() {
         let customer_token = read_cached_customer_token(&cached_player_path)?;
@@ -214,12 +215,14 @@ async fn main() -> Result<()> {
             resolved_bnet: Some(args.bnet.clone()),
             customer_token,
             bound_at: chrono::Utc::now().to_rfc3339(),
+            source_role_id: None,
         }
     } else {
         let search_payload = client.search_bnet_account(&args.bnet).await?;
         target_from_search_payload(
             &args.bnet,
             &search_payload,
+            credentials.role_id,
             &chrono::Utc::now().to_rfc3339(),
         )
         .with_context(|| search_payload_diagnostic(&search_payload))?
