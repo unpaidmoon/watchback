@@ -624,10 +624,13 @@ assert.equal(matchesPageSource.includes("const pageDataRequestIdRef = useRef(0);
 assert.equal(matchesPageSource.includes("const timelineRequestIdRef = useRef(0);"), true, "MatchesPage tracks timeline requests separately");
 assert.equal(matchesPageSource.includes("const pageDataReadyRef = useRef(canHydrateCache);"), true, "cache hydration waits for real page metadata");
 assert.equal(matchesPageSource.includes("const currentFiltersRef = useRef(initialFilters);"), true, "async timeline commits read the current filter key");
-assert.match(
-  matchesPageSource,
-  /function setFilters\(nextFilters: MatchFilters\) \{\s*currentFiltersRef\.current = nextFilters;\s*setFiltersState\(nextFilters\);\s*\}/,
-  "every filter state write synchronizes the current-filter ref",
+const setFiltersSource = matchesPageSource.match(
+  /function setFilters\(nextFilters: MatchFilters\) \{([\s\S]*?)\n\s*\}\n\n\s*function retryMatches/,
+)?.[1] ?? "";
+assert.notEqual(setFiltersSource, "", "MatchesPage keeps one filter state writer");
+assert.ok(
+  setFiltersSource.indexOf("currentFiltersRef.current = nextFilters;") < setFiltersSource.indexOf("setFiltersState(nextFilters);"),
+  "every filter state write synchronizes the current-filter ref before React state",
 );
 assert.equal(
   matchesPageSource.includes("skipInitialFilterLoadRef"),
