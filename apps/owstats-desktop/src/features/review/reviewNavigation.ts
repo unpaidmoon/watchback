@@ -1,4 +1,4 @@
-export const reviewViews = ["overview", "roles", "friends", "maps", "achievements"] as const;
+export const reviewViews = ["overview", "friends", "achievements"] as const;
 
 export type ReviewView = (typeof reviewViews)[number];
 

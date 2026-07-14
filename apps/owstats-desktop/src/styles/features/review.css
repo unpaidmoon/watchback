@@ -50,6 +50,16 @@
   align-items: start;
 }
 
+.reviewViewGrid[data-view="overview"] > .reviewRoleHeroPanel,
+.reviewMapAnalysis {
+  grid-column: 1 / -1;
+}
+
+.reviewMapAnalysis {
+  display: grid;
+  gap: var(--space-3);
+}
+
 .reviewViewGrid > * {
   min-width: 0;
 }

@@ -37,9 +37,7 @@ const romanLevels = ["I", "II", "III"] as const;
 const selectableSeasons = [23, 22, 21] as const;
 const reviewViewLabels: Record<ReviewView, string> = {
   overview: "概览",
-  roles: "职责与英雄",
   friends: "队友协作",
-  maps: "地图",
   achievements: "成就",
 };
 
@@ -262,15 +260,14 @@ export function PersonalReviewPage() {
 
       <nav className="reviewTabs" aria-label="战报内容">
         <ReviewTabButton value="overview" view={view} onSelect={changeView} />
-        <ReviewTabButton value="roles" view={view} onSelect={changeView} />
         <ReviewTabButton value="friends" view={view} onSelect={changeView} />
-        <ReviewTabButton value="maps" view={view} onSelect={changeView} />
         <ReviewTabButton value="achievements" view={view} onSelect={changeView} />
       </nav>
 
       <div className="reviewViewGrid" data-view={view}>
-        {view === "overview" && <ReviewOverview review={review} />}
-        {view === "roles" && <RoleAndHeroView review={review} />}
+        {view === "overview" && (
+          <ReviewOverview review={review} analysis={analysis} analysisLoading={analysisLoading} analysisError={analysisError} season={titleSeason} />
+        )}
         {view === "friends" && (
           <FriendAnalysisModules
             analytics={analytics}
@@ -280,7 +277,6 @@ export function PersonalReviewPage() {
             sourceView={view}
           />
         )}
-        {view === "maps" && <MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} season={titleSeason} />}
         {view === "achievements" && (
           <GlassPanel className="phase6AchievementPanel" tone="solid">
             <header className="phase6AchievementHeader">
@@ -349,9 +345,22 @@ function ReviewTabButton({
   );
 }
 
-function ReviewOverview({ review }: { review: PersonalSeasonReview }) {
+function ReviewOverview({
+  review,
+  analysis,
+  analysisLoading,
+  analysisError,
+  season,
+}: {
+  review: PersonalSeasonReview;
+  analysis: SeasonAnalysis | null;
+  analysisLoading: boolean;
+  analysisError: string | null;
+  season: number;
+}) {
   return (
     <>
+      <RoleAndHeroView review={review} />
       <GlassPanel className="reviewOverviewPanel reviewOverviewPrimary" tone="solid">
         <header>
           <span className="phase6Eyebrow">赛季概览</span>
@@ -376,6 +385,9 @@ function ReviewOverview({ review }: { review: PersonalSeasonReview }) {
           <Metric label="主职责" value={review.roleSummaries[0]?.roleLabel ?? "样本不足"} />
         </div>
       </GlassPanel>
+      <section className="reviewMapAnalysis">
+        <MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} season={season} />
+      </section>
     </>
   );
 }
