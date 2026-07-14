@@ -49,13 +49,15 @@ for (const [wrapper, command] of [
 }
 assert.match(api, /clear_player_target/, "product API exposes target clearing");
 assert.match(onboarding, /当前目标玩家/, "command center shows the bound target player");
-assert.match(onboarding, /赛季号/, "command center accepts an explicit season number");
+assert.match(onboarding, /const COMMAND_CENTER_SEASONS = \[21, 22, 23\] as const/, "command center exposes the fixed supported seasons");
+assert.match(onboarding, /aria-label="选择同步赛季"/, "command center exposes an accessible season segment group");
+assert.doesNotMatch(onboarding, /aria-label="赛季号"/, "command center no longer exposes a free-form season number input");
 assert.match(onboarding, /syncTargetStrip/, "command center uses a compact target identity strip");
 assert.match(onboarding, /syncSeasonWorkbench/, "command center groups season controls into one workbench");
 assert.match(onboarding, /syncSeasonPicker/, "command center uses a season picker");
 assert.match(onboarding, /syncSecondaryActions/, "command center separates secondary actions");
 assert.doesNotMatch(onboarding, /同步全部/, "command center must not add sync-all");
-assert.doesNotMatch(onboarding, /FIXED_COMMAND_CENTER_SEASONS/, "command center no longer fixes the season list");
+assert.doesNotMatch(onboarding, /FIXED_COMMAND_CENTER_SEASONS/, "command center uses the supported-season segment constant instead of the retired fixed-list name");
 assert.doesNotMatch(onboarding, /aria-label="BattleTag"|placeholder="BattleTag|setBattleTag|bindPlayerTarget|runBindTarget/, "command center has no manual BattleTag input path");
 for (const label of ["切换到此账号", "保留原目标", "重新绑定", "重新识别"]) {
   assert.match(onboarding, new RegExp(label), `command center exposes ${label}`);
