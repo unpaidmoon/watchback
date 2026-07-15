@@ -4,6 +4,7 @@ use crate::account_store::{
     read_manifest, write_manifest_atomic, AccountId, AccountManifest, AccountRegistryEntry,
 };
 use crate::credential_store::{save_credentials_atomic, DashenCredentials};
+use crate::login_flow::{LoginPhase, LoginProgressReporter};
 use crate::models::AccountLoginResult;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
@@ -21,6 +22,7 @@ const OLD_CREDENTIALS_FILE: &str = "old-credentials.json";
 const OLD_CREDENTIALS_MISSING_FILE: &str = "old-credentials-missing";
 const OLD_REGISTRY_FILE: &str = "old-registry.json";
 const INTENDED_REGISTRY_FILE: &str = "intended-registry.json";
+const ORPHAN_QUARANTINE_DIR: &str = "orphan-quarantine";
 
 #[derive(Debug, Clone)]
 pub struct LoginCapture {
@@ -230,7 +232,7 @@ fn recover_pending_logins_with(
             remove_pending_operation(&operation_root, &pending_root)?;
             continue;
         }
-        ensure_not_link_or_reparse(&journal_path)?;
+        ensure_regular_file_no_reparse(&journal_path)?;
         let journal: LoginOperationJournal = serde_json::from_slice(&fs::read(&journal_path)?)?;
         validate_login_journal(&journal, &operation_id)?;
         recover_login_operation(shared, &operation_root, &journal, fault)?;
@@ -284,11 +286,31 @@ fn recover_new_login(
         validate_formal_account(shared, &journal.account_id, &journal.battle_tag)?;
     } else {
         let final_root = shared.account(&journal.account_id);
+        let quarantine_parent = operation_root.join(ORPHAN_QUARANTINE_DIR);
+        let quarantined = quarantine_parent.join(journal.account_id.as_str());
+        if path_entry_exists(&quarantined)? {
+            ensure_directory_no_reparse(&quarantined)?;
+            validate_tree_no_reparse(&quarantined)?;
+            fs::remove_dir_all(&quarantined)?;
+        }
         if path_entry_exists(final_root.root())? {
             ensure_safe_accounts_root_path(shared)?;
-            ensure_not_link_or_reparse(final_root.root())?;
+            ensure_directory_no_reparse(final_root.root())?;
             fault.before_remove_published_account(&journal.account_id)?;
-            fs::remove_dir_all(final_root.root())?;
+            if !path_entry_exists(&quarantine_parent)? {
+                fs::create_dir(&quarantine_parent)?;
+            }
+            ensure_directory_no_reparse(&quarantine_parent)?;
+            fs::rename(final_root.root(), &quarantined)?;
+            ensure_directory_no_reparse(&quarantined)?;
+            validate_tree_no_reparse(&quarantined)?;
+            fs::remove_dir_all(&quarantined)?;
+        }
+        if path_entry_exists(&quarantine_parent)? {
+            ensure_directory_no_reparse(&quarantine_parent)?;
+            if fs::read_dir(&quarantine_parent)?.next().is_none() {
+                fs::remove_dir(&quarantine_parent)?;
+            }
         }
     }
     fault.before_cleanup_pending(&journal.operation_id)?;
@@ -330,7 +352,7 @@ fn recover_existing_login(
     }
     fault.after_restore_old_credentials(&journal.account_id)?;
     let old_manifest_path = operation_root.join(OLD_MANIFEST_FILE);
-    ensure_not_link_or_reparse(&old_manifest_path)?;
+    ensure_regular_file_no_reparse(&old_manifest_path)?;
     let old_manifest = fs::read(old_manifest_path)?;
     write_bytes_atomic(&paths.manifest(), &old_manifest)?;
     fault.before_cleanup_pending(&journal.operation_id)?;
@@ -358,10 +380,13 @@ fn validate_formal_account_matches_staged(
     ensure_not_link_or_reparse(&staged_root)?;
     let formal_manifest = read_manifest(&formal.manifest(), account_id)?;
     let staged_manifest = read_manifest(&staged_root.join("account.json"), account_id)?;
+    ensure_regular_file_no_reparse(&formal.credentials())?;
+    let staged_credentials_path = staged_root.join("credentials.json");
+    ensure_regular_file_no_reparse(&staged_credentials_path)?;
     let formal_credentials: DashenCredentials =
         serde_json::from_slice(&fs::read(formal.credentials())?)?;
     let staged_credentials: DashenCredentials =
-        serde_json::from_slice(&fs::read(staged_root.join("credentials.json"))?)?;
+        serde_json::from_slice(&fs::read(staged_credentials_path)?)?;
     if formal_manifest != staged_manifest || formal_credentials != staged_credentials {
         bail!("formal account does not match intended staged account")
     }
@@ -390,7 +415,7 @@ fn validate_formal_account(
     if manifest.role_id <= 0 || manifest.battle_tag != expected_battle_tag {
         bail!("formal account manifest is incomplete")
     }
-    let credentials: DashenCredentials = serde_json::from_slice(&fs::read(paths.credentials())?)?;
+    let credentials = crate::credential_store::read_credentials(&paths.credentials())?;
     if credentials.role_id <= 0
         || credentials.token.trim().is_empty()
         || credentials.role_id != manifest.role_id
@@ -402,6 +427,7 @@ fn validate_formal_account(
 
 fn ensure_safe_accounts_root_path(shared: &crate::app_paths::SharedAppPaths) -> Result<()> {
     let accounts_root = shared.accounts_root();
+    ensure_existing_directory_ancestors_safe(&accounts_root)?;
     if !path_entry_exists(&accounts_root)? {
         bail!("account storage root is missing")
     }
@@ -471,6 +497,83 @@ pub fn publish_relogin_account(
 ) -> Result<AccountLoginResult> {
     let result = publish_relogin_account_inner(manager, expected_account_id, capture);
     result.map_err(|_| anyhow!(SAFE_LOGIN_ERROR))
+}
+
+pub(crate) async fn capture_and_publish_relogin<F, Fut, R, C>(
+    manager: &AccountContextManager,
+    expected_account_id: &AccountId,
+    progress: &R,
+    capture: F,
+    was_cancelled: C,
+) -> Result<AccountLoginResult>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<LoginCapture>>,
+    R: LoginProgressReporter,
+    C: FnOnce() -> bool,
+{
+    let capture = match capture().await {
+        Ok(capture) => capture,
+        Err(_) if was_cancelled() => {
+            progress.report(LoginPhase::Cancelled, "已取消登录等待。");
+            bail!("登录已取消。")
+        }
+        Err(_) => {
+            progress.report(LoginPhase::Failed, "登录失败，请重试。");
+            bail!("账号登录处理失败，请重试。")
+        }
+    };
+    progress.report(LoginPhase::Saving, "正在安全保存账号登录信息。");
+    match publish_relogin_account(manager, expected_account_id, capture) {
+        Ok(result) if result.kind == "existingAccountUpdated" => {
+            progress.report(LoginPhase::Ready, "账号登录信息已更新。");
+            Ok(result)
+        }
+        Ok(result) => {
+            progress.report(LoginPhase::Failed, "登录账号与所选账号不一致。");
+            Ok(result)
+        }
+        Err(_) => {
+            progress.report(LoginPhase::Failed, "账号登录处理失败，请重试。");
+            bail!("账号登录处理失败，请重试。")
+        }
+    }
+}
+
+pub(crate) async fn capture_and_publish_add<F, Fut, R, C>(
+    manager: &AccountContextManager,
+    progress: &R,
+    capture: F,
+    was_cancelled: C,
+) -> Result<AccountLoginResult>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<LoginCapture>>,
+    R: LoginProgressReporter,
+    C: FnOnce() -> bool,
+{
+    let capture = match capture().await {
+        Ok(capture) => capture,
+        Err(_) if was_cancelled() => {
+            progress.report(LoginPhase::Cancelled, "已取消登录等待。");
+            bail!("登录已取消。")
+        }
+        Err(_) => {
+            progress.report(LoginPhase::Failed, "登录失败，请重试。");
+            bail!("账号登录处理失败，请重试。")
+        }
+    };
+    progress.report(LoginPhase::Saving, "正在安全保存账号登录信息。");
+    match publish_add_account(manager, capture) {
+        Ok(result) => {
+            progress.report(LoginPhase::Ready, "账号登录信息已保存。");
+            Ok(result)
+        }
+        Err(_) => {
+            progress.report(LoginPhase::Failed, "账号登录处理失败，请重试。");
+            bail!("账号登录处理失败，请重试。")
+        }
+    }
 }
 
 fn publish_relogin_account_inner(
@@ -668,6 +771,11 @@ fn update_existing(
     let staged_root = pending.account_root(account_id);
     let staged_credentials = staged_root.join("credentials.json");
     let staged_manifest = staged_root.join("account.json");
+    if let Err(error) = ensure_regular_file_no_reparse(&staged_credentials)
+        .and_then(|_| ensure_regular_file_no_reparse(&staged_manifest))
+    {
+        return fail_before_commit(pending, error);
+    }
     let staged_credentials_bytes = match fs::read(&staged_credentials) {
         Ok(bytes) => bytes,
         Err(error) => return fail_before_commit(pending, error),
@@ -752,7 +860,7 @@ fn prepare_existing_pending(
     )?;
     write_bytes_atomic(
         &pending.root.join(OLD_MANIFEST_FILE),
-        &fs::read(paths.manifest())?,
+        &read_optional_bytes(&paths.manifest())?.context("account manifest backup is missing")?,
     )?;
     match read_optional_bytes(&paths.credentials())? {
         Some(bytes) => write_bytes_atomic(&pending.root.join(OLD_CREDENTIALS_FILE), &bytes)?,
@@ -760,7 +868,8 @@ fn prepare_existing_pending(
     }
     write_bytes_atomic(
         &pending.root.join(OLD_REGISTRY_FILE),
-        &fs::read(manager.shared_paths().registry())?,
+        &read_optional_bytes(&manager.shared_paths().registry())?
+            .context("account registry backup is missing")?,
     )?;
     let staged_manifest = read_manifest(
         &pending.account_root(account_id).join("account.json"),
@@ -922,7 +1031,7 @@ fn validate_staged_account(
     account_id: &AccountId,
 ) -> Result<()> {
     let manifest = read_manifest(manifest_path, account_id)?;
-    let credentials: DashenCredentials = serde_json::from_slice(&fs::read(credentials_path)?)?;
+    let credentials = crate::credential_store::read_credentials(credentials_path)?;
     if manifest.account_id != *account_id || manifest.role_id != credentials.role_id {
         bail!("staged account identity mismatch")
     }
@@ -972,7 +1081,12 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
 
 fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("atomic path has no parent")?;
+    ensure_existing_directory_ancestors_safe(parent)?;
+    if path_entry_exists(path)? {
+        ensure_regular_file_no_reparse(path)?;
+    }
     fs::create_dir_all(parent)?;
+    ensure_directory_no_reparse(parent)?;
     let temporary = parent.join(format!(
         ".{}.{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("data"),
@@ -1005,10 +1119,11 @@ fn restore_optional_file(path: &Path, bytes: Option<&[u8]>) -> Result<()> {
 }
 
 fn read_optional_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
+    if path_entry_exists(path)? {
+        ensure_regular_file_no_reparse(path)?;
+        Ok(Some(fs::read(path)?))
+    } else {
+        Ok(None)
     }
 }
 
@@ -1042,6 +1157,7 @@ fn ensure_existing_directory_ancestors_safe(path: &Path) -> Result<()> {
 
 fn ensure_safe_accounts_root(manager: &AccountContextManager) -> Result<()> {
     let accounts_root = manager.shared_paths().accounts_root();
+    ensure_existing_directory_ancestors_safe(&accounts_root)?;
     if path_entry_exists(&accounts_root)? {
         ensure_not_link_or_reparse(&accounts_root)?;
         if !fs::metadata(&accounts_root)?.is_dir() {
@@ -1058,6 +1174,22 @@ fn ensure_not_link_or_reparse(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) {
         bail!("unsafe account operation path")
+    }
+    Ok(())
+}
+
+fn ensure_directory_no_reparse(path: &Path) -> Result<()> {
+    ensure_not_link_or_reparse(path)?;
+    if !fs::symlink_metadata(path)?.is_dir() {
+        bail!("unsafe account operation directory")
+    }
+    Ok(())
+}
+
+fn ensure_regular_file_no_reparse(path: &Path) -> Result<()> {
+    ensure_not_link_or_reparse(path)?;
+    if !fs::symlink_metadata(path)?.is_file() {
+        bail!("unsafe account operation file")
     }
     Ok(())
 }
@@ -1109,8 +1241,11 @@ fn validate_tree_no_reparse(root: &Path) -> Result<()> {
         let entry = entry?;
         let path = entry.path();
         ensure_not_link_or_reparse(&path)?;
-        if entry.file_type()?.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
             validate_tree_no_reparse(&path)?;
+        } else if !file_type.is_file() {
+            bail!("unsafe account operation tree entry")
         }
     }
     Ok(())
@@ -1119,6 +1254,8 @@ fn validate_tree_no_reparse(root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::login_flow::{LoginPhase, LoginProgressReporter};
+    use std::sync::Mutex;
 
     struct CrashAfter(PublicationFaultPoint);
 
@@ -1159,6 +1296,168 @@ mod tests {
             },
             battle_tag: battle_tag.to_string(),
         }
+    }
+
+    #[derive(Default)]
+    struct RecordingProgress(Mutex<Vec<LoginPhase>>);
+
+    impl LoginProgressReporter for RecordingProgress {
+        fn report(&self, phase: LoginPhase, _message: &str) {
+            self.0.lock().unwrap().push(phase);
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_and_publish_relogin_reports_order_and_never_overwrites_on_mismatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        let old_manifest = fs::read(shared.account(&account_id).manifest()).unwrap();
+        let old_registry = fs::read(shared.registry()).unwrap();
+        let progress = RecordingProgress::default();
+        progress.report(LoginPhase::WaitingForLogin, "waiting");
+        progress.report(LoginPhase::RoleFound, "captured");
+
+        let result = capture_and_publish_relogin(
+            &manager,
+            &account_id,
+            &progress,
+            || async {
+                let mut other = capture("Other#2022", "other-secret");
+                other.credentials.role_id = 202202;
+                Ok(other)
+            },
+            || false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.kind, "differentNewAccount");
+        assert_eq!(
+            *progress.0.lock().unwrap(),
+            vec![
+                LoginPhase::WaitingForLogin,
+                LoginPhase::RoleFound,
+                LoginPhase::Saving,
+                LoginPhase::Failed,
+            ]
+        );
+        assert_eq!(
+            fs::read(shared.account(&account_id).manifest()).unwrap(),
+            old_manifest
+        );
+        assert_eq!(fs::read(shared.registry()).unwrap(), old_registry);
+        assert_eq!(
+            serde_json::from_slice::<DashenCredentials>(
+                &fs::read(shared.account(&account_id).credentials()).unwrap()
+            )
+            .unwrap()
+            .token,
+            "old-secret"
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_and_publish_relogin_reports_ready_failed_and_cancelled_terminal_states() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+
+        let ready = RecordingProgress::default();
+        ready.report(LoginPhase::WaitingForLogin, "waiting");
+        ready.report(LoginPhase::RoleFound, "captured");
+        capture_and_publish_relogin(
+            &manager,
+            &account_id,
+            &ready,
+            || async { Ok(capture("Old#1011", "new-secret")) },
+            || false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *ready.0.lock().unwrap(),
+            vec![
+                LoginPhase::WaitingForLogin,
+                LoginPhase::RoleFound,
+                LoginPhase::Saving,
+                LoginPhase::Ready,
+            ]
+        );
+        assert_eq!(
+            serde_json::from_slice::<DashenCredentials>(
+                &fs::read(shared.account(&account_id).credentials()).unwrap()
+            )
+            .unwrap()
+            .token,
+            "new-secret"
+        );
+        assert!(!shared.pending_logins().exists());
+
+        let failed = RecordingProgress::default();
+        assert!(capture_and_publish_relogin(
+            &manager,
+            &account_id,
+            &failed,
+            || async { Err(anyhow!("token=must-not-escape")) },
+            || false,
+        )
+        .await
+        .is_err());
+        assert_eq!(*failed.0.lock().unwrap(), vec![LoginPhase::Failed]);
+
+        let cancelled = RecordingProgress::default();
+        let before_cancel = fs::read(shared.account(&account_id).credentials()).unwrap();
+        assert!(capture_and_publish_relogin(
+            &manager,
+            &account_id,
+            &cancelled,
+            || async { Err(anyhow!("cancelled token=must-not-escape")) },
+            || true,
+        )
+        .await
+        .is_err());
+        assert_eq!(*cancelled.0.lock().unwrap(), vec![LoginPhase::Cancelled]);
+        assert_eq!(
+            fs::read(shared.account(&account_id).credentials()).unwrap(),
+            before_cancel
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_and_publish_add_reports_saving_ready_and_safe_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+        let ready = RecordingProgress::default();
+
+        capture_and_publish_add(
+            &manager,
+            &ready,
+            || async { Ok(capture("New#1011", "new-secret")) },
+            || false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *ready.0.lock().unwrap(),
+            vec![LoginPhase::Saving, LoginPhase::Ready]
+        );
+
+        let failed = RecordingProgress::default();
+        assert!(capture_and_publish_add(
+            &manager,
+            &failed,
+            || async { Err(anyhow!("token=must-not-escape")) },
+            || false,
+        )
+        .await
+        .is_err());
+        assert_eq!(*failed.0.lock().unwrap(), vec![LoginPhase::Failed]);
     }
 
     fn install_existing(manager: &AccountContextManager, account_id: &AccountId) {

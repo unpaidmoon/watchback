@@ -3,8 +3,7 @@ use owstats_desktop_lib::credential_store::{
     credential_status_for_path, redact_sensitive_text, save_credentials_atomic, DashenCredentials,
 };
 use owstats_desktop_lib::credentials::{
-    capture_dashen_login_with, BrowserLoginOutcome, LoginCaptureIdentity, LoginIdentityTracker,
-    PairedIdentityStatus,
+    LoginCaptureIdentity, LoginIdentityTracker, PairedIdentityStatus,
 };
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
@@ -37,55 +36,19 @@ fn browser_capture_is_separate_from_final_credential_persistence() {
     }
 }
 
-#[tokio::test]
-async fn injectable_capture_runner_never_writes_a_final_credential_path() {
-    let temp = tempfile::tempdir().unwrap();
-    let sentinel = temp.path().join("final-credentials.json");
-    std::fs::write(&sentinel, b"unchanged").unwrap();
-    let outcome = BrowserLoginOutcome {
-        credentials: DashenCredentials {
-            role_id: 101101,
-            token: "synthetic-secret".to_string(),
-            customer_token: None,
-            dts: None,
-            server: 1,
-            saved_at: "2026-07-16T00:00:00Z".to_string(),
-        },
-        detected_battle_tag: "Synthetic#1011".to_string(),
-    };
+#[test]
+fn legacy_login_handler_never_writes_credentials_outside_staged_relogin_publish() {
+    let source = include_str!("../src/commands.rs");
+    let start = source.find("pub async fn start_dashen_login(").unwrap();
+    let body = &source[start
+        ..source[start..]
+            .find("\n#[tauri::command]")
+            .map(|offset| start + offset)
+            .unwrap()];
 
-    let captured = capture_dashen_login_with(|| async { Ok(outcome) })
-        .await
-        .unwrap();
-    assert_eq!(captured.detected_battle_tag, "Synthetic#1011");
-    assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
-
-    let cancelled = capture_dashen_login_with(|| async {
-        Err(anyhow::anyhow!("cancelled token=synthetic-secret"))
-    })
-    .await
-    .err()
-    .unwrap()
-    .to_string();
-    assert!(!cancelled.contains("synthetic-secret"));
-    assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
-
-    let invalid = capture_dashen_login_with(|| async {
-        Ok(BrowserLoginOutcome {
-            credentials: DashenCredentials {
-                role_id: 0,
-                token: String::new(),
-                customer_token: None,
-                dts: None,
-                server: 1,
-                saved_at: "2026-07-16T00:00:00Z".to_string(),
-            },
-            detected_battle_tag: "unstable".to_string(),
-        })
-    })
-    .await;
-    assert!(invalid.is_err());
-    assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+    assert!(!body.contains("save_credentials_atomic"));
+    assert!(body.contains("capture_and_publish_relogin"));
+    assert!(body.contains("read_saved_credentials_for_account"));
 }
 
 #[test]

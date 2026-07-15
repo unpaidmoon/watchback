@@ -93,6 +93,7 @@ pub struct AccountManifest {
 }
 
 pub fn read_registry(path: &Path) -> Result<AccountRegistry> {
+    ensure_regular_file(path)?;
     let registry: AccountRegistry =
         serde_json::from_slice(&fs::read(path).context("failed to read account registry")?)
             .context("invalid account registry")?;
@@ -102,12 +103,14 @@ pub fn read_registry(path: &Path) -> Result<AccountRegistry> {
 
 pub fn write_registry_atomic(path: &Path, registry: &AccountRegistry) -> Result<()> {
     validate_registry(registry)?;
+    ensure_regular_file_or_missing(path)?;
     let bytes = serde_json::to_vec_pretty(registry).context("failed to encode account registry")?;
     write_json_atomic(path, &bytes)
 }
 
 pub fn read_manifest(path: &Path, expected_account_id: &AccountId) -> Result<AccountManifest> {
     validate_manifest_directory(path, expected_account_id)?;
+    ensure_regular_file(path)?;
     let manifest: AccountManifest =
         serde_json::from_slice(&fs::read(path).context("failed to read account manifest")?)
             .context("invalid account manifest")?;
@@ -118,6 +121,7 @@ pub fn read_manifest(path: &Path, expected_account_id: &AccountId) -> Result<Acc
 pub fn write_manifest_atomic(path: &Path, manifest: &AccountManifest) -> Result<()> {
     validate_manifest_directory(path, &manifest.account_id)?;
     validate_manifest(manifest, &manifest.account_id)?;
+    ensure_regular_file_or_missing(path)?;
     let bytes = serde_json::to_vec_pretty(manifest).context("failed to encode account manifest")?;
     write_json_atomic(path, &bytes)
 }
@@ -171,6 +175,7 @@ fn write_json_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         .parent()
         .ok_or_else(|| anyhow!("account store path has no parent directory"))?;
     fs::create_dir_all(parent)?;
+    ensure_directory(parent)?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -189,4 +194,39 @@ fn write_json_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         let _ = fs::remove_file(&temporary);
     }
     write_result
+}
+
+fn ensure_regular_file(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) || !metadata.is_file() {
+        bail!("unsafe account store file")
+    }
+    Ok(())
+}
+
+fn ensure_regular_file_or_missing(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => ensure_regular_file(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn ensure_directory(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) || !metadata.is_dir() {
+        bail!("unsafe account store directory")
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x0400 != 0
+}
+
+#[cfg(not(windows))]
+fn is_windows_reparse(_metadata: &fs::Metadata) -> bool {
+    false
 }

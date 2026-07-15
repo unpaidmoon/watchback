@@ -18,7 +18,7 @@ pub struct DashenCredentials {
 }
 
 pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
-    if !path.exists() {
+    if !path_entry_exists(path)? {
         return Ok(CredentialStatus {
             state: "missing".to_string(),
             message: "尚未保存网易大神登录凭证。".to_string(),
@@ -27,6 +27,7 @@ pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
             saved_at: None,
         });
     }
+    ensure_regular_file_or_missing(path)?;
     let text = std::fs::read_to_string(path)?;
     let json: serde_json::Value = serde_json::from_str(&text)?;
     let role_id = json
@@ -60,8 +61,13 @@ pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
 }
 
 pub fn save_credentials_atomic(path: &Path, credentials: &DashenCredentials) -> Result<()> {
+    ensure_regular_file_or_missing(path)?;
     if let Some(parent) = path.parent() {
+        if path_entry_exists(parent)? {
+            ensure_directory(parent)?;
+        }
         std::fs::create_dir_all(parent)?;
+        ensure_directory(parent)?;
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = parent.join(format!(".credentials.{}.tmp", Uuid::new_v4()));
@@ -80,13 +86,61 @@ pub fn save_credentials_atomic(path: &Path, credentials: &DashenCredentials) -> 
     result
 }
 
+pub fn read_credentials(path: &Path) -> Result<DashenCredentials> {
+    ensure_regular_file_or_missing(path)?;
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
 pub fn clear_credentials_for_path(path: &Path) -> Result<bool> {
-    if path.exists() {
+    if path_entry_exists(path)? {
+        ensure_regular_file_or_missing(path)?;
         std::fs::remove_file(path)?;
         return Ok(true);
     }
 
     Ok(false)
+}
+
+fn path_entry_exists(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn ensure_regular_file_or_missing(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata)
+            if !metadata.file_type().is_symlink()
+                && !is_windows_reparse(&metadata)
+                && metadata.is_file() =>
+        {
+            Ok(())
+        }
+        Ok(_) => anyhow::bail!("unsafe credential file"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn ensure_directory(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) || !metadata.is_dir() {
+        anyhow::bail!("unsafe credential directory")
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_windows_reparse(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x0400 != 0
+}
+
+#[cfg(not(windows))]
+fn is_windows_reparse(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 pub fn redact_sensitive_text(message: &str) -> String {

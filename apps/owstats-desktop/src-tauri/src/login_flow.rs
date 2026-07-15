@@ -31,3 +31,17 @@ impl LoginProgress {
         }
     }
 }
+
+pub trait LoginProgressReporter {
+    fn report(&self, phase: LoginPhase, message: &str);
+}
+
+impl LoginProgressReporter for tauri::AppHandle {
+    fn report(&self, phase: LoginPhase, message: &str) {
+        use tauri::Emitter;
+        let _ = self.emit(
+            "credential-login-progress",
+            LoginProgress::new(phase, message),
+        );
+    }
+}

@@ -209,31 +209,34 @@ pub async fn start_dashen_login(
         .map_err(str::to_string)?;
     let account = active_account(&accounts)?;
     let shared = accounts.shared_paths().clone();
-    login_target_coordinator.clear(account.account_id());
-    let outcome = crate::credentials::capture_dashen_login(app.clone(), &shared)
-        .await
-        .map_err(to_message)?;
-    crate::credentials::emit_login_progress(
+    let capture_app = app.clone();
+    let published = crate::account_login::capture_and_publish_relogin(
+        &accounts,
+        account.account_id(),
         &app,
-        crate::login_flow::LoginPhase::Saving,
-        "正在保存本地登录凭证。",
-    );
-    crate::credential_store::save_credentials_atomic(
-        &account.paths().credentials(),
-        &outcome.credentials,
+        move || async move {
+            let outcome = crate::credentials::capture_dashen_login(capture_app, &shared).await?;
+            Ok(crate::account_login::LoginCapture {
+                credentials: outcome.credentials,
+                battle_tag: outcome.detected_battle_tag,
+            })
+        },
+        crate::credentials::login_cancelled,
     )
+    .await
     .map_err(to_message)?;
-    crate::credentials::emit_login_progress(
-        &app,
-        crate::login_flow::LoginPhase::Ready,
-        "已保存登录凭证，可以开始同步。",
-    );
+    if published.kind != "existingAccountUpdated" {
+        return Err("登录账号与当前账号不一致，当前账号未更改。".to_string());
+    }
+    let saved_credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
+        .map_err(to_message)?;
+    login_target_coordinator.clear(account.account_id());
     let target_path = crate::player_target::player_target_path_for_account(account.paths());
     let target = crate::login_target::reconcile_detected_target(
         login_target_coordinator.inner(),
         account.account_id(),
-        &outcome.credentials,
-        Some(&outcome.detected_battle_tag),
+        &saved_credentials,
+        published.battle_tag.as_deref(),
         &target_path,
         DASHEN_ROOT_BASE,
     )
@@ -253,16 +256,21 @@ pub async fn add_account(
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
-    let outcome = crate::credentials::capture_dashen_login(app, accounts.shared_paths())
-        .await
-        .map_err(to_message)?;
-    crate::account_login::publish_add_account(
+    let shared = accounts.shared_paths().clone();
+    let capture_app = app.clone();
+    crate::account_login::capture_and_publish_add(
         &accounts,
-        crate::account_login::LoginCapture {
-            credentials: outcome.credentials,
-            battle_tag: outcome.detected_battle_tag,
+        &app,
+        move || async move {
+            let outcome = crate::credentials::capture_dashen_login(capture_app, &shared).await?;
+            Ok(crate::account_login::LoginCapture {
+                credentials: outcome.credentials,
+                battle_tag: outcome.detected_battle_tag,
+            })
         },
+        crate::credentials::login_cancelled,
     )
+    .await
     .map_err(to_message)
 }
 
@@ -278,17 +286,22 @@ pub async fn relogin_account(
         .map_err(str::to_string)?;
     let account_id = crate::account_store::AccountId::parse(&account_id)
         .map_err(|_| "账号标识无效。".to_string())?;
-    let outcome = crate::credentials::capture_dashen_login(app, accounts.shared_paths())
-        .await
-        .map_err(to_message)?;
-    crate::account_login::publish_relogin_account(
+    let shared = accounts.shared_paths().clone();
+    let capture_app = app.clone();
+    crate::account_login::capture_and_publish_relogin(
         &accounts,
         &account_id,
-        crate::account_login::LoginCapture {
-            credentials: outcome.credentials,
-            battle_tag: outcome.detected_battle_tag,
+        &app,
+        move || async move {
+            let outcome = crate::credentials::capture_dashen_login(capture_app, &shared).await?;
+            Ok(crate::account_login::LoginCapture {
+                credentials: outcome.credentials,
+                battle_tag: outcome.detected_battle_tag,
+            })
         },
+        crate::credentials::login_cancelled,
     )
+    .await
     .map_err(to_message)
 }
 

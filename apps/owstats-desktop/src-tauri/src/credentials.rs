@@ -8,18 +8,18 @@ use crate::dashen_auth::{
     extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
     is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
 };
-use crate::login_flow::{LoginPhase, LoginProgress};
+use crate::login_flow::LoginPhase;
 use crate::models::{CredentialLoginCancelResult, CredentialStatus};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 pub use crate::browser_session::{select_browser, BrowserCandidate};
 pub use crate::credential_store::{
     clear_credentials_for_path, credential_status_for_path,
-    redact_sensitive_text as redacted_login_error, save_credentials_atomic, DashenCredentials,
+    redact_sensitive_text as redacted_login_error, DashenCredentials,
 };
 
 const LOGIN_URL: &str =
@@ -158,9 +158,9 @@ fn pairing_role_id(
     }
 }
 
-pub struct BrowserLoginOutcome {
-    pub credentials: DashenCredentials,
-    pub detected_battle_tag: String,
+pub(crate) struct BrowserLoginOutcome {
+    pub(crate) credentials: DashenCredentials,
+    pub(crate) detected_battle_tag: String,
 }
 
 pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<CredentialStatus> {
@@ -168,8 +168,7 @@ pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<Credent
 }
 
 pub fn read_saved_credentials_for_account(paths: &AccountPaths) -> Result<DashenCredentials> {
-    let text = std::fs::read_to_string(paths.credentials())?;
-    Ok(serde_json::from_str(&text)?)
+    crate::credential_store::read_credentials(&paths.credentials())
 }
 
 pub fn read_optional_saved_credentials_for_account(
@@ -214,7 +213,7 @@ pub(crate) async fn capture_dashen_login(
     capture_dashen_login_with(|| fetch_credentials_from_browser(&app, port)).await
 }
 
-pub async fn capture_dashen_login_with<F, Fut>(runner: F) -> Result<BrowserLoginOutcome>
+pub(crate) async fn capture_dashen_login_with<F, Fut>(runner: F) -> Result<BrowserLoginOutcome>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<BrowserLoginOutcome>>,
@@ -238,6 +237,10 @@ where
     Ok(outcome)
 }
 
+pub(crate) fn login_cancelled() -> bool {
+    LOGIN_CANCELLED.load(Ordering::SeqCst)
+}
+
 pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResult> {
     LOGIN_CANCELLED.store(true, Ordering::SeqCst);
     Ok(CredentialLoginCancelResult {
@@ -247,10 +250,8 @@ pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResul
 }
 
 pub fn emit_login_progress(app: &AppHandle, phase: LoginPhase, message: &str) {
-    let _ = app.emit(
-        "credential-login-progress",
-        LoginProgress::new(phase, message),
-    );
+    use crate::login_flow::LoginProgressReporter;
+    app.report(phase, message);
 }
 
 pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials {
@@ -274,7 +275,6 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
 
     while Instant::now() < deadline {
         if LOGIN_CANCELLED.load(Ordering::SeqCst) {
-            emit_login_progress(app, LoginPhase::Cancelled, "已取消登录等待。");
             return Err(anyhow!("已取消登录等待。"));
         }
 
@@ -399,7 +399,6 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
         }
     }
 
-    emit_login_progress(app, LoginPhase::Failed, "登录超时，未能完成凭证换取。");
     if locked_credential_role_id.is_some() || identity.credential_role_id().is_some() {
         Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
     } else {
@@ -456,4 +455,60 @@ fn string_candidates(value: &serde_json::Value) -> Option<Vec<String>> {
             .filter_map(|value| value.as_str().map(str::to_string))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn injectable_capture_runner_never_writes_a_final_credential_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let sentinel = temp.path().join("final-credentials.json");
+        std::fs::write(&sentinel, b"unchanged").unwrap();
+        let outcome = BrowserLoginOutcome {
+            credentials: DashenCredentials {
+                role_id: 101101,
+                token: "synthetic-secret".to_string(),
+                customer_token: None,
+                dts: None,
+                server: 1,
+                saved_at: "2026-07-16T00:00:00Z".to_string(),
+            },
+            detected_battle_tag: "Synthetic#1011".to_string(),
+        };
+
+        let captured = capture_dashen_login_with(|| async { Ok(outcome) })
+            .await
+            .unwrap();
+        assert_eq!(captured.detected_battle_tag, "Synthetic#1011");
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+
+        let cancelled = capture_dashen_login_with(|| async {
+            Err(anyhow::anyhow!("cancelled token=synthetic-secret"))
+        })
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(!cancelled.contains("synthetic-secret"));
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+
+        let invalid = capture_dashen_login_with(|| async {
+            Ok(BrowserLoginOutcome {
+                credentials: DashenCredentials {
+                    role_id: 0,
+                    token: String::new(),
+                    customer_token: None,
+                    dts: None,
+                    server: 1,
+                    saved_at: "2026-07-16T00:00:00Z".to_string(),
+                },
+                detected_battle_tag: "unstable".to_string(),
+            })
+        })
+        .await;
+        assert!(invalid.is_err());
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+    }
 }

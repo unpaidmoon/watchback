@@ -371,6 +371,99 @@ fn login_recovery_never_follows_a_linked_operations_parent() {
 }
 
 #[test]
+fn manager_load_rejects_a_linked_shared_account_storage_ancestor() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked_root = temp.path().join("linked-app-data");
+    let sentinel = outside.path().join("sentinel");
+    fs::write(&sentinel, b"external-must-stay-unchanged").unwrap();
+    if !create_directory_symlink(outside.path(), &linked_root) {
+        return;
+    }
+
+    let error = AccountContextManager::load(SharedAppPaths::from_app_data_dir(&linked_root))
+        .err()
+        .unwrap();
+
+    assert_eq!(error.to_string(), "账号登录恢复失败，请重试。");
+    assert_eq!(fs::read(sentinel).unwrap(), b"external-must-stay-unchanged");
+}
+
+#[test]
+fn relogin_rejects_linked_manifest_and_credentials_without_touching_external_files() {
+    for linked_name in ["account.json", "credentials.json"] {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_account(
+            &manager,
+            account_id.clone(),
+            101101,
+            "Old#1011",
+            "old-secret",
+            true,
+        );
+        let external_account = outside.path().join(account_id.as_str());
+        fs::create_dir_all(&external_account).unwrap();
+        let external = external_account.join(linked_name);
+        fs::copy(
+            shared.account(&account_id).root().join(linked_name),
+            &external,
+        )
+        .unwrap();
+        let expected = fs::read(&external).unwrap();
+        fs::remove_file(shared.account(&account_id).root().join(linked_name)).unwrap();
+        if !create_file_symlink(
+            &external,
+            &shared.account(&account_id).root().join(linked_name),
+        ) {
+            return;
+        }
+
+        assert!(publish_relogin_account(
+            &manager,
+            &account_id,
+            synthetic_capture(101101, "Old#1011", "new-secret")
+        )
+        .is_err());
+        assert_eq!(fs::read(&external).unwrap(), expected);
+    }
+}
+
+#[test]
+fn orphan_recovery_quarantines_then_rejects_nested_reparse_without_external_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    write_formal_account(&shared, &account_id, 101101, "Crash#1011", "new-secret");
+    let sentinel = outside.path().join("sentinel");
+    fs::write(&sentinel, b"external-must-stay-unchanged").unwrap();
+    if !create_directory_symlink(
+        outside.path(),
+        &shared.account(&account_id).root().join("nested-link"),
+    ) {
+        return;
+    }
+    write_login_operation_journal(
+        &shared,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "addNew",
+        &account_id,
+        "accountPublished",
+        "Crash#1011",
+    );
+
+    let error = AccountContextManager::load(shared.clone()).err().unwrap();
+
+    assert_eq!(error.to_string(), "账号登录恢复失败，请重试。");
+    assert_eq!(fs::read(sentinel).unwrap(), b"external-must-stay-unchanged");
+    assert!(shared.pending_logins().is_dir());
+}
+
+#[test]
 fn add_account_registry_write_failure_rolls_back_existing_account() {
     let temp = tempfile::tempdir().unwrap();
     let shared = SharedAppPaths::from_app_data_dir(temp.path());
@@ -1210,8 +1303,18 @@ fn create_directory_symlink(source: &std::path::Path, target: &std::path::Path) 
     std::os::windows::fs::symlink_dir(source, target).is_ok()
 }
 
+#[cfg(windows)]
+fn create_file_symlink(source: &std::path::Path, target: &std::path::Path) -> bool {
+    std::os::windows::fs::symlink_file(source, target).is_ok()
+}
+
 #[cfg(unix)]
 fn create_directory_symlink(source: &std::path::Path, target: &std::path::Path) -> bool {
+    std::os::unix::fs::symlink(source, target).is_ok()
+}
+
+#[cfg(unix)]
+fn create_file_symlink(source: &std::path::Path, target: &std::path::Path) -> bool {
     std::os::unix::fs::symlink(source, target).is_ok()
 }
 
