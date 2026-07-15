@@ -89,4 +89,8 @@ impl AccountContextSnapshot {
     pub fn paths(&self) -> &AccountPaths {
         &self.paths
     }
+
+    pub fn database(&self) -> crate::OwDatabase {
+        crate::OwDatabase::for_account(&self.paths)
+    }
 }

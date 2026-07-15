@@ -1,3 +1,4 @@
+use crate::account_context::{AccountContextManager, AccountContextSnapshot};
 use crate::importer::existing_import_summary;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
@@ -7,12 +8,11 @@ use crate::{
     CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
     FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LoginTargetStatus,
     LogoutResult, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
-    OnboardingStatusRequest, OwDatabase, PersonalReviewRequest, PersonalSeasonReview,
-    PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis,
-    SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
+    OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview, PlayerProfile,
+    PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest,
+    SyncSummary, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
-use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
 
 const DASHEN_ROOT_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool";
@@ -25,8 +25,9 @@ pub struct Overview {
 }
 
 #[tauri::command]
-pub fn get_overview(app: AppHandle) -> Result<Overview, String> {
-    let db = app_database(&app)?;
+pub fn get_overview(accounts: State<'_, AccountContextManager>) -> Result<Overview, String> {
+    let account = active_account(&accounts)?;
+    let db = account.database();
     Ok(Overview {
         database_path: db.path().display().to_string(),
         import_summary: existing_import_summary(&db).map_err(to_message)?,
@@ -34,109 +35,142 @@ pub fn get_overview(app: AppHandle) -> Result<Overview, String> {
 }
 
 #[tauri::command]
-pub fn list_match_filters(app: AppHandle) -> Result<FilterOptions, String> {
-    list_filter_options(&app_database(&app)?).map_err(to_message)
+pub fn list_match_filters(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<FilterOptions, String> {
+    let account = active_account(&accounts)?;
+    list_filter_options(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn list_match_timeline(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     filters: MatchFilters,
 ) -> Result<Vec<MatchSummary>, String> {
-    list_matches(&app_database(&app)?, filters).map_err(to_message)
+    let account = active_account(&accounts)?;
+    list_matches(&account.database(), filters).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn search_match_player_options(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     query: String,
 ) -> Result<Vec<PlayerSearchOption>, String> {
-    search_match_players(&app_database(&app)?, &query).map_err(to_message)
+    let account = active_account(&accounts)?;
+    search_match_players(&account.database(), &query).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_match_details(app: AppHandle, match_id: String) -> Result<MatchDetailView, String> {
-    get_match_detail(&app_database(&app)?, &match_id).map_err(to_message)
+pub fn get_match_details(
+    accounts: State<'_, AccountContextManager>,
+    match_id: String,
+) -> Result<MatchDetailView, String> {
+    let account = active_account(&accounts)?;
+    get_match_detail(&account.database(), &match_id).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn refresh_match_evaluations(app: AppHandle) -> Result<(), String> {
-    refresh_evaluations(&app_database(&app)?).map_err(to_message)
+pub fn refresh_match_evaluations(accounts: State<'_, AccountContextManager>) -> Result<(), String> {
+    let account = active_account(&accounts)?;
+    refresh_evaluations(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_friend_analytics(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     filters: FriendAnalyticsFilters,
 ) -> Result<FriendAnalytics, String> {
-    query_friend_analytics(&app_database(&app)?, filters).map_err(to_message)
+    let account = active_account(&accounts)?;
+    query_friend_analytics(&account.database(), filters).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_friend_details(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     bnet_id: String,
     filters: FriendAnalyticsFilters,
 ) -> Result<FriendDetail, String> {
-    query_friend_detail(&app_database(&app)?, &bnet_id, filters).map_err(to_message)
+    let account = active_account(&accounts)?;
+    query_friend_detail(&account.database(), &bnet_id, filters).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_onboarding_status(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     request: OnboardingStatusRequest,
 ) -> Result<OnboardingStatus, String> {
+    let account = active_account(&accounts)?;
     let mut status =
-        crate::get_onboarding_status(&app_database(&app)?, request).map_err(to_message)?;
+        crate::get_onboarding_status(&account.database(), request).map_err(to_message)?;
     status.credential_status =
-        crate::credentials::get_credential_status(&app).map_err(to_message)?;
+        crate::credentials::get_credential_status_for_account(account.paths())
+            .map_err(to_message)?;
     Ok(status)
 }
 
 #[tauri::command]
 pub fn get_personal_season_review(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     request: PersonalReviewRequest,
 ) -> Result<PersonalSeasonReview, String> {
-    crate::get_personal_season_review(&app_database(&app)?, request).map_err(to_message)
+    let account = active_account(&accounts)?;
+    crate::get_personal_season_review(&account.database(), request).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_credential_status(app: AppHandle) -> Result<CredentialStatus, String> {
-    crate::credentials::get_credential_status(&app).map_err(to_message)
+pub fn get_credential_status(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<CredentialStatus, String> {
+    let account = active_account(&accounts)?;
+    crate::credentials::get_credential_status_for_account(account.paths()).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_player_profile(app: AppHandle) -> Result<PlayerProfile, String> {
-    let role_id = crate::credentials::get_credential_status(&app)
+pub fn get_player_profile(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<PlayerProfile, String> {
+    let account = active_account(&accounts)?;
+    let role_id = crate::credentials::get_credential_status_for_account(account.paths())
         .map_err(to_message)?
         .role_id;
-    crate::settings::get_player_profile(&app_database(&app)?, &player_profile_path(&app)?, role_id)
+    crate::settings::get_player_profile(
+        &account.database(),
+        &account.paths().player_profile(),
+        role_id,
+    )
+    .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_user_settings(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<UserSettings, String> {
+    crate::settings::get_user_settings_for_path(&accounts.shared_paths().user_settings())
         .map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_user_settings(app: AppHandle) -> Result<UserSettings, String> {
-    crate::settings::get_user_settings_for_path(&user_settings_path(&app)?).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn save_user_settings(app: AppHandle, settings: UserSettings) -> Result<UserSettings, String> {
-    crate::settings::save_user_settings_for_path(&user_settings_path(&app)?, settings)
+pub fn save_user_settings(
+    accounts: State<'_, AccountContextManager>,
+    settings: UserSettings,
+) -> Result<UserSettings, String> {
+    crate::settings::save_user_settings_for_path(&accounts.shared_paths().user_settings(), settings)
         .map_err(to_message)
 }
 
 #[tauri::command]
 pub fn logout(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LogoutResult, String> {
+    let account = active_account(&accounts)?;
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
     login_target_coordinator.clear();
-    let cleared = crate::credentials::clear_credentials(&app).map_err(to_message)?;
+    let cleared =
+        crate::credentials::clear_credentials_for_account(account.paths()).map_err(to_message)?;
     Ok(LogoutResult {
         credential_cleared: cleared,
         message: if cleared {
@@ -148,7 +182,10 @@ pub fn logout(
 }
 
 #[tauri::command]
-pub fn check_app_update() -> Result<UpdateCheckResult, String> {
+pub fn check_app_update(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<UpdateCheckResult, String> {
+    let _shared = accounts.shared_paths();
     Ok(crate::settings::check_app_update_result(env!(
         "CARGO_PKG_VERSION"
     )))
@@ -157,17 +194,24 @@ pub fn check_app_update() -> Result<UpdateCheckResult, String> {
 #[tauri::command]
 pub async fn start_dashen_login(
     app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<CredentialLoginResult, String> {
+    let account = active_account(&accounts)?;
+    let shared = accounts.shared_paths().clone();
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
     login_target_coordinator.clear();
-    let outcome = crate::credentials::start_dashen_login_capture(app.clone())
-        .await
-        .map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let outcome = crate::credentials::start_dashen_login_capture_for_account(
+        app.clone(),
+        account.paths(),
+        &shared,
+    )
+    .await
+    .map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path_for_account(account.paths());
     let target = crate::login_target::reconcile_detected_target(
         login_target_coordinator.inner(),
         &outcome.credentials,
@@ -176,7 +220,8 @@ pub async fn start_dashen_login(
         DASHEN_ROOT_BASE,
     )
     .await;
-    let mut status = crate::credentials::get_credential_status(&app).map_err(to_message)?;
+    let mut status = crate::credentials::get_credential_status_for_account(account.paths())
+        .map_err(to_message)?;
     status.role_id = None;
     Ok(CredentialLoginResult { status, target })
 }
@@ -187,32 +232,39 @@ pub fn cancel_dashen_login(app: AppHandle) -> Result<CredentialLoginCancelResult
 }
 
 #[tauri::command]
-pub fn get_player_target_status(app: AppHandle) -> Result<PlayerTargetStatus, String> {
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    crate::player_target::player_target_status_for_path(&path).map_err(to_message)
+pub fn get_player_target_status(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<PlayerTargetStatus, String> {
+    let account = active_account(&accounts)?;
+    crate::player_target::get_player_target_status_for_account(account.paths()).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_login_target_status(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
-    let credentials = read_optional_saved_credentials(&app)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let account = active_account(&accounts)?;
+    let credentials =
+        crate::credentials::read_optional_saved_credentials_for_account(account.paths())
+            .map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path_for_account(account.paths());
     Ok(coordinator.status_or_persisted(credentials.as_ref(), &target_path))
 }
 
 #[tauri::command]
 pub async fn confirm_login_target_switch(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
+    let account = active_account(&accounts)?;
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
-    let credentials = read_saved_credentials(&app)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
+        .map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path_for_account(account.paths());
     Ok(crate::login_target::confirm_switch(
         login_target_coordinator.inner(),
         &credentials,
@@ -224,9 +276,11 @@ pub async fn confirm_login_target_switch(
 
 #[tauri::command]
 pub fn keep_current_player_target(
+    accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
+    let _account = active_account(&accounts)?;
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
@@ -235,15 +289,17 @@ pub fn keep_current_player_target(
 
 #[tauri::command]
 pub async fn retry_login_target_binding(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<LoginTargetStatus, String> {
+    let account = active_account(&accounts)?;
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
-    let credentials = read_saved_credentials(&app)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
+    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
+        .map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path_for_account(account.paths());
     Ok(crate::login_target::retry_binding(
         login_target_coordinator.inner(),
         &credentials,
@@ -255,18 +311,21 @@ pub async fn retry_login_target_binding(
 
 #[tauri::command]
 pub fn clear_player_target(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<ClearPlayerTargetResult, String> {
+    let account = active_account(&accounts)?;
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
-    let path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    let cleared = crate::player_target::clear_player_target_for_path(&path).map_err(to_message)?;
-    let source_role_id = read_optional_saved_credentials(&app)?
-        .as_ref()
-        .map(|credentials| credentials.role_id);
+    let cleared = crate::player_target::clear_player_target_for_account(account.paths())
+        .map_err(to_message)?;
+    let source_role_id =
+        crate::credentials::read_optional_saved_credentials_for_account(account.paths())
+            .map_err(to_message)?
+            .as_ref()
+            .map(|credentials| credentials.role_id);
     Ok(ClearPlayerTargetResult {
         cleared,
         target: login_target_coordinator.target_cleared(source_role_id),
@@ -274,23 +333,34 @@ pub fn clear_player_target(
 }
 
 #[tauri::command]
-pub fn get_rankings(app: AppHandle, season: Option<i64>) -> Result<RankingResponse, String> {
-    crate::ranking::get_rankings(&app_database(&app)?, season).map_err(to_message)
+pub fn get_rankings(
+    accounts: State<'_, AccountContextManager>,
+    season: Option<i64>,
+) -> Result<RankingResponse, String> {
+    let account = active_account(&accounts)?;
+    crate::ranking::get_rankings(&account.database(), season).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_season_analysis(app: AppHandle, season: Option<i64>) -> Result<SeasonAnalysis, String> {
-    crate::get_season_analysis(&app_database(&app)?, season).map_err(to_message)
+pub fn get_season_analysis(
+    accounts: State<'_, AccountContextManager>,
+    season: Option<i64>,
+) -> Result<SeasonAnalysis, String> {
+    let account = active_account(&accounts)?;
+    crate::get_season_analysis(&account.database(), season).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_career_mmr_overview(app: AppHandle) -> Result<crate::CareerMmrOverview, String> {
-    crate::career_mmr::query::get_career_mmr_overview(&app_database(&app)?).map_err(to_message)
+pub fn get_career_mmr_overview(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<crate::CareerMmrOverview, String> {
+    let account = active_account(&accounts)?;
+    crate::career_mmr::query::get_career_mmr_overview(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_role_mmr_history(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     role: String,
     season: Option<i64>,
     from: Option<i64>,
@@ -302,8 +372,9 @@ pub fn get_role_mmr_history(
     before_bucket: Option<i64>,
     before_season: Option<i64>,
 ) -> Result<crate::CareerMmrHistory, String> {
+    let account = active_account(&accounts)?;
     crate::career_mmr::query::get_role_mmr_history(
-        &app_database(&app)?,
+        &account.database(),
         crate::CareerMmrHistoryRequest {
             role,
             season,
@@ -322,76 +393,86 @@ pub fn get_role_mmr_history(
 
 #[tauri::command]
 pub fn get_role_mmr_mode_breakdown(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     role: String,
 ) -> Result<crate::CareerMmrModeBreakdown, String> {
-    crate::career_mmr::query::get_role_mmr_mode_breakdown(&app_database(&app)?, &role)
+    let account = active_account(&accounts)?;
+    crate::career_mmr::query::get_role_mmr_mode_breakdown(&account.database(), &role)
         .map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_role_mmr_season_breakdown(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     role: String,
 ) -> Result<crate::CareerMmrSeasonBreakdown, String> {
-    crate::career_mmr::query::get_role_mmr_season_breakdown(&app_database(&app)?, &role)
+    let account = active_account(&accounts)?;
+    crate::career_mmr::query::get_role_mmr_season_breakdown(&account.database(), &role)
         .map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_mmr_match_explanation(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     match_id: String,
     role: String,
 ) -> Result<crate::CareerMmrMatchExplanation, String> {
-    crate::career_mmr::query::get_mmr_match_explanation(&app_database(&app)?, &match_id, &role)
+    let account = active_account(&accounts)?;
+    crate::career_mmr::query::get_mmr_match_explanation(&account.database(), &match_id, &role)
         .map_err(to_message)
 }
 
 #[tauri::command]
 pub fn get_recent_mmr_explanations(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     role: String,
     limit: usize,
 ) -> Result<crate::CareerMmrRecentExplanations, String> {
-    crate::career_mmr::query::get_recent_mmr_explanations(&app_database(&app)?, &role, limit)
+    let account = active_account(&accounts)?;
+    crate::career_mmr::query::get_recent_mmr_explanations(&account.database(), &role, limit)
         .map_err(to_message)
 }
 
 #[tauri::command]
 pub fn rebuild_career_mmr(
-    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
 ) -> Result<crate::career_mmr::replay::CareerMmrBuildSummary, String> {
-    crate::career_mmr::replay::rebuild_career_mmr(&app_database(&app)?).map_err(to_message)
+    let account = active_account(&accounts)?;
+    crate::career_mmr::replay::rebuild_career_mmr(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
-pub fn get_career_mmr_build_status(app: AppHandle) -> Result<crate::CareerMmrBuildStatus, String> {
-    crate::career_mmr::query::get_career_mmr_build_status(&app_database(&app)?).map_err(to_message)
+pub fn get_career_mmr_build_status(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<crate::CareerMmrBuildStatus, String> {
+    let account = active_account(&accounts)?;
+    crate::career_mmr::query::get_career_mmr_build_status(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
 pub async fn sync_season(
     app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
     request: SyncRequest,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<SyncSummary, String> {
+    let account = active_account(&accounts)?;
     let _permit = operation_coordinator
         .try_acquire_sync()
         .map_err(str::to_string)?;
-    let paths = app_paths(&app)?;
-    let root = paths.seasons();
-    let credential_path = crate::credentials::credential_path(&app).map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path(&app).map_err(to_message)?;
-    let credentials = read_saved_credentials(&app)?;
+    let root = account.paths().seasons();
+    let credential_path = account.paths().credentials();
+    let target_path = account.paths().player_target();
+    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
+        .map_err(to_message)?;
     crate::login_target::ensure_sync_target_ready(
         login_coordinator.inner(),
         &credentials,
         &target_path,
     )
     .map_err(to_message)?;
-    let db = app_database(&app)?;
+    let db = account.database();
     let emit_app = app.clone();
     sync_season_with_credentials_and_target_paths_output_dir_base_url(
         &db,
@@ -408,39 +489,10 @@ pub async fn sync_season(
     .map_err(to_message)
 }
 
-fn read_saved_credentials(
-    app: &AppHandle,
-) -> Result<crate::credential_store::DashenCredentials, String> {
-    let path = crate::credentials::credential_path(app).map_err(to_message)?;
-    let text = std::fs::read_to_string(path).map_err(to_message)?;
-    serde_json::from_str(&text).map_err(to_message)
-}
-
-fn read_optional_saved_credentials(
-    app: &AppHandle,
-) -> Result<Option<crate::credential_store::DashenCredentials>, String> {
-    let path = crate::credentials::credential_path(app).map_err(to_message)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let text = std::fs::read_to_string(path).map_err(to_message)?;
-    serde_json::from_str(&text).map(Some).map_err(to_message)
-}
-
-fn app_database(app: &AppHandle) -> Result<OwDatabase, String> {
-    Ok(OwDatabase::new(app_paths(app)?.database()))
-}
-
-fn player_profile_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_paths(app)?.player_profile())
-}
-
-fn user_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_paths(app)?.user_settings())
-}
-
-fn app_paths(app: &AppHandle) -> Result<crate::app_paths::AppPaths, String> {
-    crate::app_paths::AppPaths::from_app(app).map_err(to_message)
+fn active_account(
+    accounts: &State<'_, AccountContextManager>,
+) -> Result<AccountContextSnapshot, String> {
+    accounts.active_snapshot().map_err(to_message)
 }
 
 fn to_message(error: impl std::fmt::Display) -> String {

@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
+use crate::app_paths::AccountPaths;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerTarget {
@@ -21,6 +23,18 @@ pub fn target_matches_login_role(target: &PlayerTarget, role_id: i64) -> bool {
 
 pub fn player_target_path(app: &AppHandle) -> Result<PathBuf> {
     Ok(crate::app_paths::AppPaths::from_app(app)?.legacy_player_target())
+}
+
+pub fn player_target_path_for_account(paths: &AccountPaths) -> PathBuf {
+    paths.player_target()
+}
+
+pub fn get_player_target_status_for_account(paths: &AccountPaths) -> Result<PlayerTargetStatus> {
+    player_target_status_for_path(&paths.player_target())
+}
+
+pub fn clear_player_target_for_account(paths: &AccountPaths) -> Result<bool> {
+    clear_player_target_for_path(&paths.player_target())
 }
 
 pub fn player_target_status_for_path(path: &Path) -> Result<PlayerTargetStatus> {

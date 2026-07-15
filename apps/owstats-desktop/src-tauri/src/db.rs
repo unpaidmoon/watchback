@@ -6,12 +6,21 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
     path: PathBuf,
+    backups: Option<PathBuf>,
 }
 
 impl OwDatabase {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
+            backups: None,
+        }
+    }
+
+    pub fn for_account(paths: &crate::app_paths::AccountPaths) -> Self {
+        Self {
+            path: paths.database(),
+            backups: Some(paths.backups()),
         }
     }
 
@@ -40,7 +49,14 @@ impl OwDatabase {
                 .unwrap_or(false);
         let conn = self.connect()?;
         if database_preexisted {
-            if let Some(app_data_dir) = self.path.parent() {
+            if let Some(backups) = self.backups.as_ref() {
+                crate::database::backup::backup_before_schema_migration(
+                    &conn,
+                    &self.path,
+                    backups,
+                    crate::database::migrations::CURRENT_SCHEMA_VERSION,
+                )?;
+            } else if let Some(app_data_dir) = self.path.parent() {
                 crate::database::backup::backup_before_schema_migration(
                     &conn,
                     &self.path,

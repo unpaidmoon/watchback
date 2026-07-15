@@ -4,6 +4,8 @@ use owstats_desktop_lib::account_store::{
     AccountManifest, AccountRegistry, AccountRegistryEntry,
 };
 use owstats_desktop_lib::app_paths::SharedAppPaths;
+use owstats_desktop_lib::{list_matches, CredentialStatus, MatchFilters, PlayerProfile};
+use rusqlite::params;
 use serde_json::json;
 use std::fs;
 use std::sync::Arc;
@@ -28,6 +30,204 @@ fn manifest(account_id: AccountId, battle_tag: &str) -> AccountManifest {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-02T00:00:00Z".to_string(),
     }
+}
+
+fn registry_with_active(
+    active_account_id: AccountId,
+    first_id: AccountId,
+    second_id: AccountId,
+) -> AccountRegistry {
+    AccountRegistry {
+        version: 1,
+        active_account_id: Some(active_account_id),
+        accounts: vec![
+            entry(first_id, "Synthetic#1000"),
+            entry(second_id, "Synthetic#2000"),
+        ],
+    }
+}
+
+fn seed_match_for_active_account(manager: &AccountContextManager, match_id: &str) {
+    let db = manager.active_snapshot().unwrap().database();
+    db.initialize().unwrap();
+    db.connect()
+        .unwrap()
+        .execute(
+            "INSERT INTO matches (match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid, begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at) VALUES (?1, 22, 'preset', 'SportPreset', 'normal', 'win', 'map', 'hero', 100, 1, 0, 0, 0, 0, 0, 0, 0, 0, 600, '{}', 'now')",
+            params![match_id],
+        )
+        .unwrap();
+}
+
+#[test]
+fn switching_active_context_routes_queries_to_separate_databases() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
+    let second_id = AccountId::parse("9a494190-fdee-46f2-abd2-7de46f4f4376").unwrap();
+    let manager = AccountContextManager::load(shared).unwrap();
+
+    manager
+        .replace_registry(registry_with_active(
+            first_id.clone(),
+            first_id.clone(),
+            second_id.clone(),
+        ))
+        .unwrap();
+    seed_match_for_active_account(&manager, "first-account-match");
+
+    manager
+        .replace_registry(registry_with_active(
+            second_id.clone(),
+            first_id.clone(),
+            second_id,
+        ))
+        .unwrap();
+    seed_match_for_active_account(&manager, "second-account-match");
+
+    let second_rows = list_matches(
+        &manager.active_snapshot().unwrap().database(),
+        MatchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        second_rows
+            .into_iter()
+            .map(|row| row.match_id)
+            .collect::<Vec<_>>(),
+        vec!["second-account-match"]
+    );
+
+    manager
+        .replace_registry(registry_with_active(
+            first_id.clone(),
+            first_id,
+            AccountId::parse("9a494190-fdee-46f2-abd2-7de46f4f4376").unwrap(),
+        ))
+        .unwrap();
+    let first_rows = list_matches(
+        &manager.active_snapshot().unwrap().database(),
+        MatchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        first_rows
+            .into_iter()
+            .map(|row| row.match_id)
+            .collect::<Vec<_>>(),
+        vec!["first-account-match"]
+    );
+}
+
+#[test]
+fn public_status_and_profile_serialization_hide_internal_role_ids_and_secrets() {
+    let value = json!({
+        "credentialStatus": CredentialStatus {
+            state: "ready".to_string(),
+            message: "synthetic ready".to_string(),
+            exposes_secret: false,
+            role_id: Some(987654321),
+            saved_at: Some("2026-01-01T00:00:00Z".to_string()),
+        },
+        "playerProfile": PlayerProfile {
+            role_id: Some(987654321),
+            player_id: Some("synthetic-player".to_string()),
+            avatar_url: None,
+            endorsement_level: None,
+            play_time_hours: None,
+            title: None,
+            refreshed_at: None,
+        }
+    });
+    let encoded = serde_json::to_string(&value).unwrap().to_ascii_lowercase();
+
+    for forbidden in [
+        "roleid",
+        "role_id",
+        "987654321",
+        "token",
+        "customertoken",
+        "cookie",
+        "authorization",
+        "credential\"",
+    ] {
+        assert!(
+            !encoded.contains(forbidden),
+            "public JSON exposed forbidden key or value {forbidden:?}: {encoded}"
+        );
+    }
+}
+
+#[test]
+fn player_commands_resolve_exactly_one_active_snapshot_and_avoid_legacy_paths() {
+    let source = include_str!("../src/commands.rs");
+    for forbidden in [
+        "credential_path(",
+        "player_target_path(",
+        "player_profile_path(",
+        "AppPaths::from_app",
+        "app_database(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "player command routing still uses legacy helper {forbidden}"
+        );
+    }
+
+    for command in [
+        "get_overview",
+        "list_match_filters",
+        "list_match_timeline",
+        "search_match_player_options",
+        "get_match_details",
+        "refresh_match_evaluations",
+        "get_friend_analytics",
+        "get_friend_details",
+        "get_onboarding_status",
+        "get_personal_season_review",
+        "get_credential_status",
+        "get_player_profile",
+        "get_player_target_status",
+        "get_login_target_status",
+        "confirm_login_target_switch",
+        "keep_current_player_target",
+        "retry_login_target_binding",
+        "clear_player_target",
+        "get_rankings",
+        "get_season_analysis",
+        "get_career_mmr_overview",
+        "get_role_mmr_history",
+        "get_role_mmr_mode_breakdown",
+        "get_role_mmr_season_breakdown",
+        "get_mmr_match_explanation",
+        "get_recent_mmr_explanations",
+        "rebuild_career_mmr",
+        "get_career_mmr_build_status",
+        "sync_season",
+    ] {
+        let function = command_source(source, command);
+        assert!(
+            function.contains("State<'_, AccountContextManager>"),
+            "{command} does not receive account context state"
+        );
+        assert_eq!(
+            function.matches("active_account(&accounts)?").count(),
+            1,
+            "{command} must resolve exactly one active snapshot at command entry"
+        );
+    }
+}
+
+fn command_source<'a>(source: &'a str, command: &str) -> &'a str {
+    let sync_signature = format!("pub async fn {command}");
+    let regular_signature = format!("pub fn {command}");
+    let start = source
+        .find(&sync_signature)
+        .or_else(|| source.find(&regular_signature))
+        .unwrap_or_else(|| panic!("missing command {command}"));
+    let rest = &source[start..];
+    let end = rest.find("\n#[tauri::command]").unwrap_or(rest.len());
+    &rest[..end]
 }
 
 #[test]

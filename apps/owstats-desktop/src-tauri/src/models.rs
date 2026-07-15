@@ -740,7 +740,7 @@ pub struct CredentialStatus {
     pub state: String,
     pub message: String,
     pub exposes_secret: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub role_id: Option<i64>,
     pub saved_at: Option<String>,
 }
@@ -788,6 +788,7 @@ pub struct LogoutResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerProfile {
+    #[serde(skip_serializing)]
     pub role_id: Option<i64>,
     pub player_id: Option<String>,
     pub avatar_url: Option<String>,

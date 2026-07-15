@@ -1,3 +1,4 @@
+use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::browser_session::{
     choose_debug_port, find_windows_browsers, launch_browser, open_or_find_page,
     wait_for_debug_endpoint, CdpPage,
@@ -172,11 +173,37 @@ pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
     credential_status_for_path(&credential_path(app)?)
 }
 
+pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<CredentialStatus> {
+    credential_status_for_path(&paths.credentials())
+}
+
+pub fn read_saved_credentials_for_account(paths: &AccountPaths) -> Result<DashenCredentials> {
+    let text = std::fs::read_to_string(paths.credentials())?;
+    Ok(serde_json::from_str(&text)?)
+}
+
+pub fn read_optional_saved_credentials_for_account(
+    paths: &AccountPaths,
+) -> Result<Option<DashenCredentials>> {
+    if !paths.credentials().exists() {
+        return Ok(None);
+    }
+    read_saved_credentials_for_account(paths).map(Some)
+}
+
+pub fn clear_credentials_for_account(paths: &AccountPaths) -> Result<bool> {
+    clear_credentials_for_path(&paths.credentials())
+}
+
 pub fn clear_credentials(app: &AppHandle) -> Result<bool> {
     clear_credentials_for_path(&credential_path(app)?)
 }
 
-pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<BrowserLoginOutcome> {
+pub(crate) async fn start_dashen_login_capture_for_account(
+    app: AppHandle,
+    account_paths: &AccountPaths,
+    shared_paths: &SharedAppPaths,
+) -> Result<BrowserLoginOutcome> {
     LOGIN_CANCELLED.store(false, Ordering::SeqCst);
 
     emit_login_progress(
@@ -186,7 +213,7 @@ pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<Browser
     );
     let browser = select_browser(find_windows_browsers())?;
     let port = choose_debug_port(std::process::id());
-    let profile_dir = crate::app_paths::AppPaths::from_app(&app)?.browser_profile();
+    let profile_dir = shared_paths.browser_profile();
 
     emit_login_progress(&app, LoginPhase::OpeningBrowser, "正在打开网易大神登录页。");
     launch_browser(&browser, LOGIN_URL, port, &profile_dir)
@@ -201,7 +228,7 @@ pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<Browser
 
     let outcome = fetch_credentials_from_browser(&app, port).await?;
     emit_login_progress(&app, LoginPhase::Saving, "正在保存本地登录凭证。");
-    let path = credential_path(&app)?;
+    let path = account_paths.credentials();
     save_credentials_atomic(&path, &outcome.credentials)?;
     emit_login_progress(&app, LoginPhase::Ready, "已保存登录凭证，可以开始同步。");
 
