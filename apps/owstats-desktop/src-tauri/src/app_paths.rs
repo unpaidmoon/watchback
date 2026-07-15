@@ -32,6 +32,30 @@ impl SharedAppPaths {
         self.root.join("owstats.sqlite3")
     }
 
+    pub fn legacy_credentials(&self) -> PathBuf {
+        self.root.join(".dashen_credentials.json")
+    }
+
+    pub fn legacy_player_target(&self) -> PathBuf {
+        self.root.join(".dashen_player_target.json")
+    }
+
+    pub fn legacy_player_profile(&self) -> PathBuf {
+        self.root.join("player_profile.json")
+    }
+
+    pub fn legacy_seasons(&self) -> PathBuf {
+        self.root.join("seasons")
+    }
+
+    pub fn legacy_diagnostics(&self) -> PathBuf {
+        self.root.join("diagnostics")
+    }
+
+    pub fn legacy_backups(&self) -> PathBuf {
+        self.root.join("backups")
+    }
+
     pub fn user_settings(&self) -> PathBuf {
         self.root.join("user_settings.json")
     }

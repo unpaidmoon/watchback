@@ -20,6 +20,8 @@ pub struct AccountContextSnapshot {
 
 impl AccountContextManager {
     pub fn load(shared: SharedAppPaths) -> Result<Self> {
+        crate::account_migration::recover_interrupted_migration(&shared)
+            .context("无法恢复旧账号数据迁移")?;
         let registry_path = shared.registry();
         let registry = if registry_path.try_exists().context("无法检查账号索引")? {
             read_registry(&registry_path).context("无法读取账号索引")?
@@ -78,6 +80,14 @@ impl AccountContextManager {
 
     pub fn shared_paths(&self) -> &SharedAppPaths {
         &self.shared
+    }
+
+    pub fn migration_state(&self) -> Result<crate::account_migration::LegacyMigrationState> {
+        crate::account_migration::detect_legacy_state(&self.shared)
+    }
+
+    pub fn adopt_legacy(&self, account: &AccountContextSnapshot) -> Result<()> {
+        crate::account_migration::adopt_legacy_account(&self.shared, account)
     }
 }
 

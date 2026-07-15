@@ -1,4 +1,7 @@
 use owstats_desktop_lib::account_context::AccountContextManager;
+use owstats_desktop_lib::account_migration::{
+    recover_interrupted_migration, LegacyMigrationState, MigrationJournal, MigrationPhase,
+};
 use owstats_desktop_lib::account_store::{
     read_manifest, read_registry, write_manifest_atomic, write_registry_atomic, AccountId,
     AccountManifest, AccountRegistry, AccountRegistryEntry,
@@ -10,6 +13,326 @@ use serde_json::json;
 use std::fs;
 use std::sync::Arc;
 use std::thread;
+
+struct LegacyFixture {
+    _temp: tempfile::TempDir,
+    shared: SharedAppPaths,
+    manager: AccountContextManager,
+}
+
+impl LegacyFixture {
+    fn with_database_match(match_id: &str) -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let legacy = owstats_desktop_lib::OwDatabase::new(shared.legacy_database());
+        legacy.initialize().unwrap();
+        legacy
+            .connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO matches (match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid, begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at) VALUES (?1, 22, 'preset', 'SportPreset', 'normal', 'win', 'map', 'hero', 100, 1, 0, 0, 0, 0, 0, 0, 0, 0, 600, '{}', 'now')",
+                params![match_id],
+            )
+            .unwrap();
+        fs::write(
+            shared.legacy_credentials(),
+            r#"{"role_id":10001,"token":"synthetic-legacy-token","server":1,"saved_at":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        Self {
+            _temp: temp,
+            shared,
+            manager,
+        }
+    }
+
+    fn confirm_account(&self) -> owstats_desktop_lib::account_context::AccountContextSnapshot {
+        let account_id = AccountId::parse("36be8ecb-ecc4-4a15-b4d5-7d1fa355ab9c").unwrap();
+        let paths = self.shared.account(&account_id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(
+            &paths.manifest(),
+            &manifest(account_id.clone(), "Tester#5479"),
+        )
+        .unwrap();
+        fs::write(
+            paths.credentials(),
+            r#"{"roleId":10001,"token":"synthetic-account-token","server":1,"savedAt":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        self.manager
+            .replace_registry(AccountRegistry {
+                version: 1,
+                active_account_id: Some(account_id.clone()),
+                accounts: vec![entry(account_id, "Tester#5479")],
+            })
+            .unwrap();
+        self.manager.active_snapshot().unwrap()
+    }
+
+    fn match_ids(
+        &self,
+        account: &owstats_desktop_lib::account_context::AccountContextSnapshot,
+    ) -> Vec<String> {
+        let connection = account.database().connect().unwrap();
+        let mut statement = connection
+            .prepare("SELECT match_id FROM matches ORDER BY match_id")
+            .unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn write_journal(&self, account: &AccountId, phase: MigrationPhase) {
+        fs::create_dir_all(self.shared.operations_root()).unwrap();
+        fs::write(
+            self.shared.migration_journal(),
+            serde_json::to_vec_pretty(&MigrationJournal {
+                version: 1,
+                account_id: account.clone(),
+                phase,
+                started_at: "2026-01-01T00:00:00Z".to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn staging(&self, account: &AccountId) -> std::path::PathBuf {
+        self.shared
+            .accounts_root()
+            .join(format!(".migration-{}", account.as_str()))
+    }
+}
+
+#[test]
+fn legacy_database_is_adopted_only_after_confirmed_account_identity() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+
+    assert_eq!(
+        fixture.manager.migration_state().unwrap(),
+        LegacyMigrationState::WaitingForAccount
+    );
+    assert!(fixture.shared.legacy_database().is_file());
+
+    let account = fixture.confirm_account();
+    fixture.manager.adopt_legacy(&account).unwrap();
+
+    assert_eq!(fixture.match_ids(&account), vec!["legacy-match"]);
+    assert!(!fixture.shared.legacy_database().exists());
+    assert_eq!(
+        fixture.manager.migration_state().unwrap(),
+        LegacyMigrationState::Complete
+    );
+}
+
+#[test]
+fn failed_or_repeated_legacy_migration_never_loses_or_duplicates_data() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    let valid_database = fs::read(fixture.shared.legacy_database()).unwrap();
+    fs::write(fixture.shared.legacy_player_profile(), "synthetic-profile").unwrap();
+    fs::create_dir_all(fixture.shared.legacy_seasons()).unwrap();
+    fs::write(
+        fixture.shared.legacy_seasons().join("season.json"),
+        "synthetic-season",
+    )
+    .unwrap();
+    fs::write(fixture.shared.legacy_database(), b"not-a-sqlite-database").unwrap();
+    let account = fixture.confirm_account();
+
+    assert!(fixture.manager.adopt_legacy(&account).is_err());
+    assert!(fixture.shared.legacy_database().is_file());
+    assert!(fixture.shared.legacy_credentials().is_file());
+    assert!(fixture.shared.legacy_player_profile().is_file());
+    assert!(fixture
+        .shared
+        .legacy_seasons()
+        .join("season.json")
+        .is_file());
+    fs::write(fixture.shared.legacy_database(), valid_database).unwrap();
+
+    fixture.manager.adopt_legacy(&account).unwrap();
+    fixture.manager.adopt_legacy(&account).unwrap();
+    assert_eq!(fixture.match_ids(&account), vec!["legacy-match"]);
+}
+
+#[test]
+fn recovery_from_copying_and_validating_rolls_back_without_touching_legacy_sources() {
+    for phase in [MigrationPhase::Copying, MigrationPhase::Validating] {
+        let fixture = LegacyFixture::with_database_match("legacy-match");
+        let account = fixture.confirm_account();
+        let staging = fixture.staging(account.account_id());
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("partial"), "synthetic").unwrap();
+        fixture.write_journal(account.account_id(), phase);
+
+        recover_interrupted_migration(&fixture.shared).unwrap();
+
+        assert!(fixture.shared.legacy_database().is_file());
+        assert!(!staging.exists());
+        assert!(!fixture.shared.migration_journal().exists());
+    }
+}
+
+#[test]
+fn recovery_from_publishing_finishes_publish_before_cleaning_legacy() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    let account = fixture.confirm_account();
+    let staging = fixture.staging(account.account_id());
+    fs::create_dir_all(&staging).unwrap();
+    fs::copy(
+        fixture.shared.legacy_database(),
+        staging.join("owstats.sqlite3"),
+    )
+    .unwrap();
+    fixture.write_journal(account.account_id(), MigrationPhase::Publishing);
+
+    recover_interrupted_migration(&fixture.shared).unwrap();
+
+    assert_eq!(fixture.match_ids(&account), vec!["legacy-match"]);
+    assert!(!fixture.shared.legacy_database().exists());
+    assert_eq!(
+        fixture.manager.migration_state().unwrap(),
+        LegacyMigrationState::Complete
+    );
+}
+
+#[test]
+fn recovery_from_cleaning_and_complete_never_loses_verified_target() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    let account = fixture.confirm_account();
+    fs::copy(fixture.shared.legacy_database(), account.paths().database()).unwrap();
+    fixture.write_journal(account.account_id(), MigrationPhase::CleaningLegacy);
+
+    recover_interrupted_migration(&fixture.shared).unwrap();
+    recover_interrupted_migration(&fixture.shared).unwrap();
+
+    assert_eq!(fixture.match_ids(&account), vec!["legacy-match"]);
+    assert!(!fixture.shared.legacy_database().exists());
+    assert_eq!(
+        fixture.manager.migration_state().unwrap(),
+        LegacyMigrationState::Complete
+    );
+}
+
+#[test]
+fn mismatched_legacy_identity_is_rejected_without_exposing_identifiers_or_secrets() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    fs::write(
+        fixture.shared.legacy_credentials(),
+        r#"{"role_id":99999,"token":"synthetic-private-token"}"#,
+    )
+    .unwrap();
+    let account = fixture.confirm_account();
+
+    let error = fixture
+        .manager
+        .adopt_legacy(&account)
+        .unwrap_err()
+        .to_string();
+
+    assert!(fixture.shared.legacy_database().is_file());
+    assert!(!account.paths().database().exists());
+    for forbidden in ["99999", "10001", "synthetic-private-token", "token"] {
+        assert!(!error.to_ascii_lowercase().contains(forbidden));
+    }
+}
+
+#[test]
+fn incomplete_confirmed_account_identity_never_starts_legacy_migration() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    let account = fixture.confirm_account();
+    fs::remove_file(account.paths().credentials()).unwrap();
+
+    let error = fixture
+        .manager
+        .adopt_legacy(&account)
+        .unwrap_err()
+        .to_string();
+
+    assert!(fixture.shared.legacy_database().is_file());
+    assert!(!fixture.shared.migration_journal().exists());
+    assert!(!error.contains("10001"));
+    assert!(!error.to_ascii_lowercase().contains("token"));
+}
+
+#[test]
+fn shared_user_settings_and_browser_profile_are_never_migrated_or_removed() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    fs::write(fixture.shared.user_settings(), "synthetic-settings").unwrap();
+    fs::write(fixture.shared.root().join("unknown-root-file"), "keep").unwrap();
+    fs::create_dir_all(fixture.shared.browser_profile()).unwrap();
+    fs::write(
+        fixture.shared.browser_profile().join("synthetic-profile"),
+        "profile",
+    )
+    .unwrap();
+    fs::write(fixture.shared.legacy_player_target(), "target").unwrap();
+    fs::write(fixture.shared.legacy_player_profile(), "profile").unwrap();
+    for (directory, file_name) in [
+        (fixture.shared.legacy_seasons(), "season.json"),
+        (fixture.shared.legacy_diagnostics(), "diagnostic.json"),
+        (fixture.shared.legacy_backups(), "backup.sqlite3"),
+    ] {
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(file_name), "synthetic-owned-data").unwrap();
+    }
+    let account = fixture.confirm_account();
+
+    fixture.manager.adopt_legacy(&account).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(fixture.shared.user_settings()).unwrap(),
+        "synthetic-settings"
+    );
+    assert!(fixture
+        .shared
+        .browser_profile()
+        .join("synthetic-profile")
+        .is_file());
+    assert!(!account.paths().root().join("user_settings.json").exists());
+    assert!(!account
+        .paths()
+        .root()
+        .join("chrome-dashen-profile")
+        .exists());
+    assert!(fixture.shared.root().join("unknown-root-file").is_file());
+    assert_eq!(
+        fs::read_to_string(account.paths().player_target()).unwrap(),
+        "target"
+    );
+    assert_eq!(
+        fs::read_to_string(account.paths().player_profile()).unwrap(),
+        "profile"
+    );
+    assert!(account.paths().seasons().join("season.json").is_file());
+    assert!(account
+        .paths()
+        .diagnostics()
+        .join("diagnostic.json")
+        .is_file());
+    assert!(account.paths().backups().join("backup.sqlite3").is_file());
+}
+
+#[test]
+fn damaged_or_invalid_migration_journal_is_never_guessed() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    fs::create_dir_all(fixture.shared.operations_root()).unwrap();
+    fs::write(fixture.shared.migration_journal(), r#"{"version":2}"#).unwrap();
+
+    assert_eq!(
+        owstats_desktop_lib::account_migration::detect_legacy_state(&fixture.shared).unwrap(),
+        LegacyMigrationState::RecoveryError
+    );
+    let error = recover_interrupted_migration(&fixture.shared)
+        .unwrap_err()
+        .to_string();
+    assert!(!error.contains("legacy-match"));
+    assert!(fixture.shared.legacy_database().is_file());
+}
 
 fn entry(account_id: AccountId, battle_tag: &str) -> AccountRegistryEntry {
     AccountRegistryEntry {

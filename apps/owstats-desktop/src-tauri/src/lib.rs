@@ -1,4 +1,5 @@
 pub mod account_context;
+pub mod account_migration;
 pub mod account_store;
 mod analytics;
 pub mod app_paths;
