@@ -127,6 +127,7 @@ pub(super) fn selected_season(available_seasons: &[i64], requested: Option<i64>)
     requested
         .filter(|season| available_seasons.contains(season))
         .or_else(|| available_seasons.first().copied())
+        .or(requested)
 }
 
 pub(super) fn review_rows(db: &OwDatabase, season: Option<i64>) -> Result<Vec<ReviewMatch>> {

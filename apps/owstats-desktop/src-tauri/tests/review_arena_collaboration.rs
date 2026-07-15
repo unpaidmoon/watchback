@@ -43,8 +43,26 @@ fn personal_review_discovers_all_local_seasons_and_validates_requests() {
     assert_eq!(requested.available_seasons, vec![23, 20, 15]);
     assert_eq!(requested.summary.season, Some(15));
 
+    let stadium_only =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(20) }).unwrap();
+    assert_eq!(stadium_only.available_seasons, vec![23, 20, 15]);
+    assert_eq!(stadium_only.summary.season, Some(20));
+
     let missing =
         get_personal_season_review(&db, PersonalReviewRequest { season: Some(999) }).unwrap();
     assert_eq!(missing.available_seasons, vec![23, 20, 15]);
     assert_eq!(missing.summary.season, Some(23));
+}
+
+#[test]
+fn personal_review_preserves_requested_season_when_no_local_seasons_exist() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("empty-review.sqlite3"));
+    db.initialize().unwrap();
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    assert!(review.available_seasons.is_empty());
+    assert_eq!(review.summary.season, Some(22));
 }
