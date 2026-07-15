@@ -48,6 +48,23 @@ impl LegacyFixture {
         }
     }
 
+    fn without_database() -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        fs::write(shared.legacy_player_profile(), b"profile-only").unwrap();
+        fs::write(
+            shared.legacy_credentials(),
+            r#"{"role_id":10001,"token":"synthetic-legacy-token","server":1,"saved_at":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        Self {
+            _temp: temp,
+            shared,
+            manager,
+        }
+    }
+
     fn confirm_account(&self) -> owstats_desktop_lib::account_context::AccountContextSnapshot {
         let account_id = AccountId::parse("36be8ecb-ecc4-4a15-b4d5-7d1fa355ab9c").unwrap();
         let paths = self.shared.account(&account_id);
@@ -106,7 +123,7 @@ impl LegacyFixture {
             } else {
                 fs::write(
                     self.shared.migration_content_manifest(account),
-                    r#"{"version":1,"entries":[]}"#,
+                    r#"{"version":1,"databaseRequired":false,"entries":[]}"#,
                 )
                 .unwrap();
             }
@@ -142,6 +159,7 @@ fn write_database_manifest(shared: &SharedAppPaths, account: &AccountId, databas
         shared.migration_content_manifest(account),
         serde_json::to_vec_pretty(&json!({
             "version": 1,
+            "databaseRequired": true,
             "entries": [{
                 "relativePath": "owstats.sqlite3",
                 "kind": "file",
@@ -173,6 +191,29 @@ fn legacy_database_is_adopted_only_after_confirmed_account_identity() {
         fixture.manager.migration_state().unwrap(),
         LegacyMigrationState::Complete
     );
+}
+
+#[test]
+fn legacy_files_without_database_are_published_and_cleaned_to_complete() {
+    let fixture = LegacyFixture::without_database();
+    let account = fixture.confirm_account();
+
+    fixture.manager.adopt_legacy(&account).unwrap();
+
+    assert_eq!(
+        fs::read(account.paths().player_profile()).unwrap(),
+        b"profile-only"
+    );
+    assert!(!account.paths().database().exists());
+    assert!(!fixture.shared.legacy_player_profile().exists());
+    assert!(!fixture.shared.legacy_credentials().exists());
+    assert_eq!(
+        fixture.manager.migration_state().unwrap(),
+        LegacyMigrationState::Complete
+    );
+    let journal: MigrationJournal =
+        serde_json::from_slice(&fs::read(fixture.shared.migration_journal()).unwrap()).unwrap();
+    assert_eq!(journal.phase, MigrationPhase::Complete);
 }
 
 #[test]
@@ -696,6 +737,7 @@ fn cleaning_phase_with_partial_non_database_publish_keeps_all_legacy_sources() {
             .migration_content_manifest(account.account_id()),
         serde_json::to_vec_pretty(&json!({
             "version": 1,
+            "databaseRequired": true,
             "entries": [{
                 "relativePath": "player_profile.json",
                 "kind": "file",

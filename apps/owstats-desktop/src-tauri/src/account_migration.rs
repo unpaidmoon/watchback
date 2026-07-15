@@ -28,6 +28,7 @@ pub struct LegacyMigrationEligibility {
 #[serde(rename_all = "camelCase")]
 struct MigrationContentManifest {
     version: u32,
+    database_required: bool,
     entries: Vec<MigrationContentEntry>,
 }
 
@@ -380,7 +381,8 @@ fn write_stable_content_manifest(
     account_id: &AccountId,
     staging: &Path,
 ) -> Result<()> {
-    let manifest = collect_staging_content_manifest(staging)?;
+    let mut manifest = collect_staging_content_manifest(staging)?;
+    manifest.database_required |= path_entry_exists(&shared.legacy_database())?;
     let bytes =
         serde_json::to_vec_pretty(&manifest).map_err(|_| anyhow!("无法编码迁移内容清单"))?;
     write_atomic(&shared.migration_content_manifest(account_id), &bytes)
@@ -457,6 +459,7 @@ fn collect_staging_content_manifest(staging: &Path) -> Result<MigrationContentMa
     entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(MigrationContentManifest {
         version: CONTENT_MANIFEST_VERSION,
+        database_required: path_entry_exists(&staging.join("owstats.sqlite3"))?,
         entries,
     })
 }
@@ -530,9 +533,11 @@ fn validate_content_manifest_shape(manifest: &MigrationContentManifest) -> Resul
             _ => {}
         }
     }
-    if !manifest.entries.iter().any(|entry| {
-        entry.relative_path == "owstats.sqlite3" && entry.kind == MigrationContentKind::File
-    }) {
+    if manifest.database_required
+        && !manifest.entries.iter().any(|entry| {
+            entry.relative_path == "owstats.sqlite3" && entry.kind == MigrationContentKind::File
+        })
+    {
         bail!("迁移内容清单缺少数据库，源数据保持不变")
     }
     Ok(())
