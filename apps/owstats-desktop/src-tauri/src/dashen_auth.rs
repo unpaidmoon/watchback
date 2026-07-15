@@ -20,7 +20,7 @@ pub enum RoleIdExtraction {
 }
 
 pub fn extract_battle_tag(page_text: &str) -> BattleTagExtraction {
-    let mut found = None;
+    let mut candidates = Vec::new();
 
     for line in page_text.lines() {
         let line = line.trim();
@@ -34,6 +34,23 @@ pub fn extract_battle_tag(page_text: &str) -> BattleTagExtraction {
         let Some(value) = after_colon.and_then(|text| text.split_whitespace().next()) else {
             continue;
         };
+        candidates.push(value.to_string());
+    }
+
+    extract_battle_tag_candidates(&candidates, false)
+}
+
+pub fn extract_battle_tag_candidates(
+    candidates: &[String],
+    truncated: bool,
+) -> BattleTagExtraction {
+    if truncated {
+        return BattleTagExtraction::Conflict;
+    }
+
+    let mut found = BTreeSet::new();
+    for candidate in candidates {
+        let value = candidate.trim();
         let Some((name, suffix)) = value.split_once('#') else {
             continue;
         };
@@ -44,15 +61,14 @@ pub fn extract_battle_tag(page_text: &str) -> BattleTagExtraction {
         {
             continue;
         }
-
-        match &found {
-            Some(existing) if existing != value => return BattleTagExtraction::Conflict,
-            Some(_) => {}
-            None => found = Some(value.to_string()),
-        }
+        found.insert(value.to_string());
     }
 
-    found.map_or(BattleTagExtraction::Missing, BattleTagExtraction::Found)
+    match found.len() {
+        0 => BattleTagExtraction::Missing,
+        1 => BattleTagExtraction::Found(found.into_iter().next().expect("one BattleTag")),
+        _ => BattleTagExtraction::Conflict,
+    }
 }
 
 pub fn extract_role_id(candidates: &[String]) -> Option<String> {

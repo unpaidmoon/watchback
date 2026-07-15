@@ -7,8 +7,8 @@ use owstats_desktop_lib::credentials::{
 };
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
-    BattleTagExtraction, RoleIdExtraction,
+    extract_battle_tag, extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
+    is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
 };
 use owstats_desktop_lib::login_flow::{LoginPhase, LoginProgress};
 
@@ -132,6 +132,42 @@ fn battletag_extraction_reads_only_the_first_token_after_the_colon() {
     assert_eq!(
         extract_battle_tag("战网昵称： Player#1234 切换"),
         BattleTagExtraction::Found("Player#1234".to_string())
+    );
+}
+
+#[test]
+fn battletag_candidates_accept_split_dom_values_and_deduplicate() {
+    assert_eq!(
+        extract_battle_tag_candidates(
+            &[
+                "风偏偏呢#5479".to_string(),
+                " 风偏偏呢#5479 ".to_string(),
+            ],
+            false,
+        ),
+        BattleTagExtraction::Found("风偏偏呢#5479".to_string())
+    );
+}
+
+#[test]
+fn battletag_candidates_reject_conflicts_truncation_and_invalid_values() {
+    assert_eq!(
+        extract_battle_tag_candidates(
+            &["First#1111".to_string(), "Second#2222".to_string()],
+            false,
+        ),
+        BattleTagExtraction::Conflict
+    );
+    assert_eq!(
+        extract_battle_tag_candidates(&["First#1111".to_string()], true),
+        BattleTagExtraction::Conflict
+    );
+    assert_eq!(
+        extract_battle_tag_candidates(
+            &["MissingHash".to_string(), "Invalid#12A".to_string()],
+            false,
+        ),
+        BattleTagExtraction::Missing
     );
 }
 
