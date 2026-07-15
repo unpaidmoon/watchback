@@ -29,6 +29,7 @@ enum RemovalFaultPoint {
     UnsafeTreeAfterRegistry,
     BeforeAnyDelete,
     AfterChildValidatedBeforeTraverse,
+    AfterIsolatedValidatedBeforeReadDir,
     AfterFirstDeleteMutation,
     CleanupOperation,
 }
@@ -40,6 +41,10 @@ trait RemovalFault {
 
     fn after_child_validated_before_traverse(&self, _child: &Path) -> Result<()> {
         self.after(RemovalFaultPoint::AfterChildValidatedBeforeTraverse)
+    }
+
+    fn after_isolated_validated_before_read_dir(&self, _isolated: &Path) -> Result<()> {
+        self.after(RemovalFaultPoint::AfterIsolatedValidatedBeforeReadDir)
     }
 }
 
@@ -299,6 +304,7 @@ fn remove_account_with_fault(
             }),
         };
     }
+    drop(delete_preflight.take());
     if let Err(delete_failure) = delete_tree_tracked(&quarantine, fault) {
         if delete_failure.mutations == 0 {
             drop(delete_preflight.take());
@@ -456,6 +462,8 @@ fn preflight_windows_entry(path: &Path, handles: &mut Vec<fs::File>) -> Result<(
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 
     const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const FILE_LIST_DIRECTORY: u32 = 0x1;
+    const DELETE: u32 = 0x0001_0000;
     const GENERIC_READ: u32 = 0x8000_0000;
     const FILE_SHARE_READ: u32 = 0x1;
     const FILE_SHARE_WRITE: u32 = 0x2;
@@ -474,9 +482,9 @@ fn preflight_windows_entry(path: &Path, handles: &mut Vec<fs::File>) -> Result<(
     let mut options = fs::OpenOptions::new();
     options
         .access_mode(if before.is_dir() {
-            FILE_READ_ATTRIBUTES
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE
         } else {
-            GENERIC_READ | FILE_READ_ATTRIBUTES
+            GENERIC_READ | FILE_READ_ATTRIBUTES | DELETE
         })
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS);
@@ -502,6 +510,7 @@ fn preflight_windows_entry(path: &Path, handles: &mut Vec<fs::File>) -> Result<(
     Ok(())
 }
 
+#[cfg(not(windows))]
 fn delete_tree_tracked(
     path: &Path,
     fault: &impl RemovalFault,
@@ -531,6 +540,7 @@ fn delete_tree_tracked(
     Ok(())
 }
 
+#[cfg(not(windows))]
 fn delete_directory_contents(
     path: &Path,
     fault: &impl RemovalFault,
@@ -579,6 +589,171 @@ fn delete_directory_contents(
             bail!("unsafe account data entry")
         }
         *mutations += 1;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+struct PinnedWindowsEntry {
+    handle: fs::File,
+    is_dir: bool,
+}
+
+#[cfg(windows)]
+fn pin_windows_entry(path: &Path) -> Result<PinnedWindowsEntry> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+    const FILE_LIST_DIRECTORY: u32 = 0x1;
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const DELETE: u32 = 0x0001_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    let before = fs::symlink_metadata(path).map_err(|_| anyhow!("账号数据清理失败。"))?;
+    if before.file_type().is_symlink()
+        || before.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || (!before.is_dir() && !before.is_file())
+    {
+        bail!("账号数据清理失败。")
+    }
+    let mut options = fs::OpenOptions::new();
+    options
+        .access_mode(if before.is_dir() {
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE
+        } else {
+            GENERIC_READ | FILE_READ_ATTRIBUTES | DELETE
+        })
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS);
+    let handle = options
+        .open(path)
+        .map_err(|_| anyhow!("账号数据清理失败。"))?;
+    let opened = handle
+        .metadata()
+        .map_err(|_| anyhow!("账号数据清理失败。"))?;
+    if opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || opened.is_dir() != before.is_dir()
+        || opened.is_file() != before.is_file()
+    {
+        bail!("账号数据清理失败。")
+    }
+    Ok(PinnedWindowsEntry {
+        handle,
+        is_dir: before.is_dir(),
+    })
+}
+
+#[cfg(windows)]
+fn delete_tree_tracked(
+    path: &Path,
+    fault: &impl RemovalFault,
+) -> std::result::Result<(), DeleteFailure> {
+    let preflight = match preflight_deletion_tree(path) {
+        Ok(preflight) => preflight,
+        Err(_) => return Err(DeleteFailure { mutations: 0 }),
+    };
+    drop(preflight);
+    if fault.after(RemovalFaultPoint::BeforeAnyDelete).is_err() {
+        return Err(DeleteFailure { mutations: 0 });
+    }
+    let pinned = match pin_windows_entry(path) {
+        Ok(pinned) => pinned,
+        Err(_) => return Err(DeleteFailure { mutations: 0 }),
+    };
+    let mut mutations = 0usize;
+    if delete_pinned_windows_entry(path, pinned, fault, &mut mutations, false).is_err() {
+        return Err(DeleteFailure { mutations });
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn delete_pinned_windows_entry(
+    path: &Path,
+    pinned: PinnedWindowsEntry,
+    fault: &impl RemovalFault,
+    mutations: &mut usize,
+    isolated_directory: bool,
+) -> Result<()> {
+    if pinned.is_dir {
+        if isolated_directory {
+            fault.after_isolated_validated_before_read_dir(path)?;
+        }
+        let mut entries = fs::read_dir(path)
+            .map_err(|_| anyhow!("账号数据清理失败。"))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|_| anyhow!("账号数据清理失败。"))?;
+        entries.sort();
+        for child in entries {
+            let metadata =
+                fs::symlink_metadata(&child).map_err(|_| anyhow!("账号数据清理失败。"))?;
+            if metadata.file_type().is_symlink()
+                || is_windows_reparse(&metadata)
+                || (!metadata.is_dir() && !metadata.is_file())
+            {
+                bail!("账号数据清理失败。")
+            }
+            fault.after_child_validated_before_traverse(&child)?;
+            let isolated = child.with_file_name(format!(".deleting-{}", Uuid::new_v4()));
+            fs::rename(&child, &isolated).map_err(|_| anyhow!("账号数据清理失败。"))?;
+            record_delete_mutation(fault, mutations)?;
+            let child_pin = pin_windows_entry(&isolated)?;
+            let child_is_dir = child_pin.is_dir;
+            delete_pinned_windows_entry(&isolated, child_pin, fault, mutations, child_is_dir)?;
+        }
+    }
+    mark_windows_handle_for_delete(&pinned.handle)?;
+    record_delete_mutation(fault, mutations)?;
+    drop(pinned);
+    Ok(())
+}
+
+#[cfg(windows)]
+fn record_delete_mutation(fault: &impl RemovalFault, mutations: &mut usize) -> Result<()> {
+    *mutations += 1;
+    if *mutations == 1 {
+        fault.after(RemovalFaultPoint::AfterFirstDeleteMutation)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn mark_windows_handle_for_delete(handle: &fs::File) -> Result<()> {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct FileDispositionInfo {
+        delete_file: i32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetFileInformationByHandle(
+            file: *mut c_void,
+            info_class: i32,
+            info: *const c_void,
+            size: u32,
+        ) -> i32;
+    }
+
+    const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
+    let info = FileDispositionInfo { delete_file: 1 };
+    let succeeded = unsafe {
+        SetFileInformationByHandle(
+            handle.as_raw_handle(),
+            FILE_DISPOSITION_INFO_CLASS,
+            (&info as *const FileDispositionInfo).cast(),
+            std::mem::size_of::<FileDispositionInfo>() as u32,
+        )
+    };
+    if succeeded == 0 {
+        bail!("账号数据清理失败。")
     }
     Ok(())
 }
@@ -1293,6 +1468,40 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_handle_without_delete_share_blocks_preflight_before_mutation() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_SHARE_WRITE: u32 = 0x2;
+        let (_temp, shared, id, registry) = fixture();
+        let original_database = fs::read(shared.account(&id).database()).unwrap();
+        let original_manifest = fs::read(shared.account(&id).manifest()).unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(shared.account(&id).database())
+            .unwrap();
+        assert!(preflight_deletion_tree(shared.account(&id).root()).is_err());
+
+        let removal = remove_account(&shared, &registry, &id, "2026-07-16T13:00:00Z");
+        drop(lock);
+
+        assert!(removal.is_err());
+        assert_eq!(read_registry(&shared.registry()).unwrap(), registry);
+        assert_eq!(
+            fs::read(shared.account(&id).manifest()).unwrap(),
+            original_manifest
+        );
+        assert_eq!(
+            fs::read(shared.account(&id).database()).unwrap(),
+            original_database
+        );
+        assert!(!shared.deletion_journal().exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn validated_child_replaced_by_junction_is_isolated_without_traversing_target() {
         use std::cell::Cell;
         use std::process::Command;
@@ -1354,6 +1563,67 @@ mod tests {
         fs::remove_dir(&isolated_junction).unwrap();
         recover_pending_removal(&shared).unwrap();
         assert!(!shared.deletion_journal().exists());
+        assert_eq!(
+            fs::read(outside.path().join("sentinel.txt")).unwrap(),
+            b"outside-sentinel"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pinned_isolated_directory_cannot_be_moved_before_read_dir() {
+        use std::cell::Cell;
+        use std::process::{Command, Stdio};
+
+        struct TryReplacePinned {
+            outside: PathBuf,
+            attempted: Cell<bool>,
+        }
+
+        impl RemovalFault for TryReplacePinned {
+            fn after_isolated_validated_before_read_dir(&self, isolated: &Path) -> Result<()> {
+                if self.attempted.get()
+                    || !isolated
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with(".deleting-"))
+                {
+                    return Ok(());
+                }
+                self.attempted.set(true);
+                let moved = isolated.with_file_name("attacker-moved-pinned");
+                assert!(fs::rename(isolated, &moved).is_err());
+                assert!(!moved.exists());
+                let junction = Command::new("cmd")
+                    .args(["/c", "mklink", "/J"])
+                    .arg(isolated)
+                    .arg(&self.outside)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()?;
+                assert!(!junction.success());
+                assert!(self.outside.join("sentinel.txt").is_file());
+                Ok(())
+            }
+        }
+
+        let (_temp, shared, id, registry) = fixture();
+        let nested = shared.account(&id).root().join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("inside.txt"), b"inside").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("sentinel.txt"), b"outside-sentinel").unwrap();
+        let fault = TryReplacePinned {
+            outside: outside.path().to_path_buf(),
+            attempted: Cell::new(false),
+        };
+
+        let outcome =
+            remove_account_with_fault(&shared, &registry, &id, "2026-07-16T13:00:00Z", &fault)
+                .unwrap();
+
+        assert!(fault.attempted.get());
+        assert_eq!(outcome.completion, RemovalCompletion::Removed);
         assert_eq!(
             fs::read(outside.path().join("sentinel.txt")).unwrap(),
             b"outside-sentinel"
