@@ -527,6 +527,12 @@ fn lineup_combinations(
     for row in rows {
         by_match.entry(row.match_id.clone()).or_default().push(row);
     }
+    let mut match_groups = by_match.into_iter().collect::<Vec<_>>();
+    match_groups.sort_by(|(match_id_a, rows_a), (match_id_b, rows_b)| {
+        let begin_ts_a = rows_a.first().map(|row| row.begin_ts).unwrap_or_default();
+        let begin_ts_b = rows_b.first().map(|row| row.begin_ts).unwrap_or_default();
+        (begin_ts_a, match_id_a).cmp(&(begin_ts_b, match_id_b))
+    });
 
     #[derive(Default)]
     struct ComboState {
@@ -537,7 +543,7 @@ fn lineup_combinations(
     }
 
     let mut combos = HashMap::<String, ComboState>::new();
-    for rows in by_match.into_values() {
+    for (_, rows) in match_groups {
         let Some(current) = rows.iter().find(|row| row.is_current_player) else {
             continue;
         };
@@ -577,7 +583,11 @@ fn lineup_combinations(
             .collect::<Vec<_>>()
             .join("|");
         let state = combos.entry(key).or_default();
-        state.members = members;
+        if state.members.is_empty() {
+            state.members = members;
+        } else {
+            merge_lineup_member_display(&mut state.members, &members);
+        }
         state.matches += 1;
         state.wins += if current.result == "win" { 1 } else { 0 };
         state.latest_begin_ts = state.latest_begin_ts.max(current.begin_ts);
@@ -601,6 +611,39 @@ fn lineup_combinations(
             .then_with(|| a.key.cmp(&b.key))
     });
     Ok(items)
+}
+
+fn merge_lineup_member_display(current: &mut [LineupMember], candidates: &[LineupMember]) {
+    for candidate in candidates {
+        let Some(existing) = current.iter_mut().find(|member| {
+            member.bnet_id == candidate.bnet_id && member.hero_guid == candidate.hero_guid
+        }) else {
+            continue;
+        };
+        let identity = candidate.bnet_id.as_deref().unwrap_or_default();
+        let name_fallback = if candidate.is_current_player {
+            "当前玩家"
+        } else {
+            "未知好友"
+        };
+        let candidate_name_quality = display_name_quality(&candidate.name, identity, name_fallback);
+        let current_name_quality = display_name_quality(&existing.name, identity, name_fallback);
+        if candidate_name_quality > current_name_quality
+            || (candidate_name_quality == current_name_quality && candidate_name_quality > 0)
+        {
+            existing.name = candidate.name.clone();
+        }
+
+        let candidate_hero_quality =
+            display_name_quality(&candidate.hero_name, &candidate.hero_guid, "未知英雄");
+        let current_hero_quality =
+            display_name_quality(&existing.hero_name, &existing.hero_guid, "未知英雄");
+        if candidate_hero_quality > current_hero_quality
+            || (candidate_hero_quality == current_hero_quality && candidate_hero_quality > 0)
+        {
+            existing.hero_name = candidate.hero_name.clone();
+        }
+    }
 }
 
 fn lineup_rows(db: &OwDatabase, filters: &FriendAnalyticsFilters) -> Result<Vec<LineupRow>> {
