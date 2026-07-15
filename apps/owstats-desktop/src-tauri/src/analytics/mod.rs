@@ -10,14 +10,16 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use rusqlite::ToSql;
 use std::collections::HashMap;
 
+mod arena;
 mod boards;
+use arena::arena_analytics_rows;
 use boards::build_boards;
 
 const MIN_SAMPLE: i64 = 5;
 const PHASE5_MIN_SAMPLE: i64 = 3;
 
 #[derive(Debug, Clone)]
-struct FriendMatchRow {
+pub(super) struct FriendMatchRow {
     bnet_id: String,
     name: String,
     match_id: String,
@@ -97,6 +99,7 @@ pub fn get_friend_analytics(
         rebuild_match_players_from_existing_details(db)?;
         rows = friend_rows(db, &filters, None)?;
     }
+    rows.extend(arena_analytics_rows(db, &filters)?.friend_rows);
     let aggregates = aggregate_rows(&rows);
     let intimacy_map = compute_intimacy_scores(&rows);
     let eligible: Vec<FriendAggregate> = aggregates

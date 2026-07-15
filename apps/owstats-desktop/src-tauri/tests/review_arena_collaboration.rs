@@ -1,5 +1,9 @@
-use owstats_desktop_lib::{get_personal_season_review, OwDatabase, PersonalReviewRequest};
+use owstats_desktop_lib::{
+    get_friend_analytics, get_personal_season_review, FriendAnalyticsFilters, OwDatabase,
+    PersonalReviewRequest,
+};
 use rusqlite::params;
+use serde_json::json;
 
 fn seed_match(db: &OwDatabase, match_id: &str, season: i64, bucket: &str, game_mode: &str) {
     let match_kind = if bucket == "stadium" {
@@ -65,4 +69,162 @@ fn personal_review_preserves_requested_season_when_no_local_seasons_exist() {
 
     assert!(review.available_seasons.is_empty());
     assert_eq!(review.summary.season, Some(22));
+}
+
+#[test]
+fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-friend-arena.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('synthetic-self', 'synthetic-self', '当前玩家', '{}', '2026-07-16T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    for (guid, name) in [
+        ("synthetic-self-hero", "当前英雄"),
+        ("synthetic-friend-hero", "好友英雄"),
+    ] {
+        conn.execute(
+            "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
+            params![guid, name],
+        )
+        .unwrap();
+    }
+
+    seed_match(&db, "synthetic-normal-friend", 23, "preset", "SportPreset");
+    for (bnet_id, name, hero_guid, is_current_player, is_friend, damage_taken, mitigation) in [
+        (
+            "synthetic-self",
+            "当前玩家",
+            "synthetic-self-hero",
+            1,
+            0,
+            0,
+            0,
+        ),
+        (
+            "20260716",
+            "合成好友",
+            "synthetic-friend-hero",
+            0,
+            1,
+            100,
+            50,
+        ),
+    ] {
+        conn.execute(
+            r#"
+            INSERT INTO match_players (
+                match_id, season, side, bnet_id, player_name, hero_guid, hero_name,
+                is_current_player, is_friend, kill, assist, death, hero_damage, cure,
+                resist_damage, healing_taken, damage_taken, raw_json, updated_at
+            ) VALUES (
+                'synthetic-normal-friend', 23, 'teammate', ?1, ?2, ?3, NULL,
+                ?4, ?5, 10, 5, 2, 5000, 1000, ?6, 40, ?7, '{}',
+                '2026-07-16T00:00:00Z'
+            )
+            "#,
+            params![
+                bnet_id,
+                name,
+                hero_guid,
+                is_current_player,
+                is_friend,
+                mitigation,
+                damage_taken
+            ],
+        )
+        .unwrap();
+    }
+
+    for (index, mode) in ["SportFight", "SportFight", "LeisureFight", "LeisureFight"]
+        .into_iter()
+        .enumerate()
+    {
+        let match_id = format!("synthetic-arena-{index}");
+        seed_match(&db, &match_id, 23, "stadium", mode);
+        let friend_id = if index % 2 == 0 {
+            json!("20260716")
+        } else {
+            json!(20260716)
+        };
+        let friend_bnet_id = if index % 2 == 0 {
+            json!("20260716")
+        } else {
+            json!(20260716)
+        };
+        let detail = json!({
+            "payload": {
+                "data": {
+                    "nameMap": {
+                        "synthetic-self": "当前玩家",
+                        "20260716": "合成好友"
+                    },
+                    "totalCount": {
+                        "teammateList": [
+                            {"bnetId": "synthetic-self", "heroGuid": "synthetic-self-hero", "friendBnetIds": [friend_id]},
+                            {"bnetId": friend_bnet_id, "heroGuid": "synthetic-friend-hero", "damageTaken": 900, "resistDamage": 800}
+                        ]
+                    },
+                    "roundCountList": [
+                        {
+                            "teammateList": [
+                                {"bnetId": "synthetic-self", "heroGuid": "synthetic-self-hero", "friendBnetIds": [friend_id]},
+                                {"bnetId": friend_bnet_id, "heroGuid": "synthetic-friend-hero", "kill": 99, "assist": 98, "death": 97, "heroDamage": 9600, "cure": 9500, "resistDamage": 940, "damageTaken": 930, "healingTaken": 920}
+                            ]
+                        },
+                        {
+                            "teammateList": [
+                                {"bnetId": "synthetic-self", "heroGuid": "synthetic-self-hero", "friendBnetIds": [friend_id]},
+                                {"bnetId": friend_bnet_id, "name": "合成好友", "heroGuid": "synthetic-friend-hero", "kill": 10, "assist": 5, "death": 2, "heroDamage": 5000, "cure": 1000, "resistDamage": 70, "damageTaken": 200, "healingTaken": 40}
+                            ]
+                        },
+                        {"teammateList": []}
+                    ]
+                }
+            }
+        });
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES (?1, 'fight', ?2, '2026-07-16T00:00:00Z')",
+            params![match_id, detail.to_string()],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(23),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(analytics.summary.preset_matches, 1);
+    let friend = analytics
+        .common_friend_heroes
+        .iter()
+        .find(|item| item.name == "合成好友")
+        .unwrap();
+    assert_eq!(friend.matches, 5);
+    assert_eq!(friend.intimacy_score, 25);
+    assert_eq!(friend.representative_hero_name, "好友英雄");
+
+    let front_pressure = analytics
+        .boards
+        .iter()
+        .find(|board| board.key == "front_pressure")
+        .unwrap();
+    let model_entry = front_pressure
+        .friends
+        .iter()
+        .find(|item| item.name == "合成好友")
+        .unwrap();
+    assert_eq!(model_entry.same_team_matches, 5);
+    assert_eq!(model_entry.avg_damage_taken, 180.0);
+    assert_eq!(model_entry.avg_mitigation, 66.0);
 }
