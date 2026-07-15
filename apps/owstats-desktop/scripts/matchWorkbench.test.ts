@@ -20,6 +20,17 @@ const phase6ComponentsSource = readFileSync(new URL("../src/shared/phase6Compone
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 const matchStyleSource = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 
+function sliceMediaBlock(source: string, marker: string): string {
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `missing media block: ${marker}`);
+  const nextMedia = source.indexOf("\n@media", start + marker.length);
+  return source.slice(start, nextMedia === -1 ? source.length : nextMedia);
+}
+
+const compactDesktopStyles = sliceMediaBlock(matchStyleSource, "@media (min-width: 1401px) and (max-width: 1500px) {");
+const twoRowCardStyles = sliceMediaBlock(matchStyleSource, "@media (min-width: 641px) and (max-width: 1400px) {");
+const narrowHandsetStyles = sliceMediaBlock(matchStyleSource, "@media (max-width: 400px) {");
+
 assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesPage should render the combined match workbench layout");
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
 assert.equal(matchesPageSource.includes("<MetricCard"), false, "MatchesPage should remove the metric card strip above the workbench");
@@ -123,31 +134,253 @@ assert.equal(listCardSource.includes("phase6MatchRowSelected"), true, "MatchList
 assert.equal(listCardSource.includes("<MatchPerformanceBadges"), true, "MatchListCard should render compact grade and award badges");
 assert.equal(listCardSource.includes("compact"), true, "list badges should use the compact layout");
 assert.equal(listCardSource.includes("primaryTagBadgeTone"), false, "MatchListCard should delegate primary tags to shared badges");
-assert.equal(listCardSource.includes("phase6MatchListHeroLine"), true, "MatchListCard should render a compact full-data hero row");
+assert.equal(listCardSource.includes('className="matchListCardAvatar"'), true, "MatchListCard should render the avatar as the first reference-layout column");
 assert.equal(listCardSource.includes("phase6VerticalPerformanceTag"), false, "MatchListCard should replace the legacy performance tag with shared badges");
-assert.equal(listCardSource.includes("<span>对局表现</span>"), false, "MatchListCard should omit the horizontal match performance label");
+assert.equal(listCardSource.includes("<span>对局表现</span>"), true, "MatchListCard should label the fourth reference-layout column");
 assert.equal(listCardSource.includes("<span>{match.heroName}</span>"), false, "MatchListCard should not render the hero name in compact list cards");
-assert.ok(
-  listCardSource.indexOf("phase6MatchListHeroLine") < listCardSource.indexOf("phase6MatchListStats") &&
-    listCardSource.indexOf("phase6MatchListStats") < listCardSource.indexOf("phase6MatchOpen"),
-  "MatchListCard should place list stats inside the hero row before the open affordance",
+assert.equal(listCardSource.includes("phase6MatchListStats"), false, "MatchListCard should not nest fact columns in the old hero-row layout");
+assert.equal(listCardSource.includes("phase6MatchOpen"), false, "MatchListCard should not render a redundant open affordance");
+assert.equal(listCardSource.includes("matchListCardHeader"), true, "MatchListCard should render the map summary banner");
+assert.equal(listCardSource.includes("matchListCardResultBlock"), true, "MatchListCard should render the result block inside the banner");
+assert.equal(listCardSource.includes("decorative"), true, "MatchListCard banner map should be decorative");
+assert.equal(listCardSource.includes("matchListCardBannerCopy"), true, "MatchListCard banner should show the map name and mode on the image");
+assert.match(
+  listCardSource,
+  /<span className="matchListCardBannerCopy"[^>]*>\s*<span>\{match\.mapName\}<\/span>\s*<span>\{match\.modeLabel\}<\/span>\s*<\/span>/,
+  "MatchListCard banner copy should order map name immediately before mode label",
 );
-assert.equal(listCardSource.includes("phase6MatchListStats"), true, "MatchListCard should render full stats without horizontal clipping");
-assert.equal(listCardSource.includes("matchListCardResult"), true, "MatchListCard should render result separately");
-assert.equal(listCardSource.includes("matchListCardScore"), true, "MatchListCard should render score separately");
-assert.equal(listCardSource.includes("match.heroName"), true, "MatchListCard should label the played hero");
-assert.equal(listCardSource.includes("match.beginLabel"), true, "MatchListCard should show the match time");
 assert.equal(
-  listCardSource.includes("`${match.kills}/${match.deaths}/${match.assists}`"),
+  listCardSource.includes('title={`${match.mapName} · ${match.modeLabel}`}'),
   true,
-  "MatchListCard should render K/D/A in that order",
+  "MatchListCard banner should expose the complete map and mode as its title",
 );
-assert.equal(listCardSource.includes('label="K/A/D"'), false, "MatchListCard should not keep the ambiguous K/A/D order");
-assert.match(matchStyleSource, /\.matchListCard\.phase6MatchRowSelected[\s\S]*border-color:\s*var\(--action-primary\)/);
-assert.match(matchStyleSource, /\.matchListCardResult\.result-win \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-success\)/);
-assert.match(matchStyleSource, /\.matchListCardResult\.result-loss \.matchListCardResultMarker[\s\S]*background:\s*var\(--status-danger\)/);
-assert.match(matchStyleSource, /\.matchListCard \.matchListCardMap[\s\S]*position:\s*static/);
-assert.match(matchStyleSource, /\.matchListCardHeroLine \.phase6VerticalPerformanceTag[\s\S]*writing-mode:\s*horizontal-tb/);
+assert.match(listCardSource, /<MatchPerformanceBadges[\s\S]*?showGrade=\{false\}/, "MatchListCard should omit the grade from its evaluation row");
+assert.equal(listCardSource.includes('className="matchListCardHeroName"'), false, "MatchListCard third row should not repeat the hero name");
+assert.equal(listCardSource.includes("match.beginLabel"), false, "MatchListCard should omit the match time");
+assert.equal(listCardSource.includes("matchListCardModeTime"), false, "MatchListCard should not render a separate mode/time row");
+assert.equal(listCardSource.includes('className="matchListCardPerformance"'), true, "MatchListCard should place tags and medals in the fourth reference-layout column");
+assert.equal(listCardSource.includes('label="K/A/D"'), true, "MatchListCard should use the reference K/A/D label");
+assert.equal(listCardSource.includes('label="伤害/治疗/抵挡"'), true, "MatchListCard should group the three reference metrics");
+assert.equal(
+  listCardSource.includes('className="matchListCardCombinedStats"'),
+  true,
+  "MatchListCard should identify the combined stats block with a semantic class",
+);
+assert.equal(
+  listCardSource.includes('className={`phase6MatchMetricBlock ${className}`}'),
+  true,
+  "MetricBlock should append its optional semantic class to the shared metric class",
+);
+assert.equal(
+  listCardSource.includes("`${match.kills}/${match.assists}/${match.deaths}`"),
+  true,
+  "MatchListCard should render the K/A/D value in the reference order",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList button\.matchListCard\s*\{(?=[^}]*height:\s*152px)(?=[^}]*grid-template-rows:\s*64px\s+88px)[^}]*\}/s,
+  "MatchListCard should use the fixed 64px banner and 88px data rows",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardResultBlock\s*\{[^}]*background:\s*transparent/s,
+  "MatchListCard result block should leave the six-point map outline unobscured",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardHeader\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-secondary\) 88%,\s*transparent\)/s,
+  "MatchListCard header should use the light gray surface beneath the layered map preview",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardData\s*\{[^}]*background:\s*var\(--action-on-primary\)/s,
+  "MatchListCard data area should use the white surface after the vertical color swap",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardResultBlock\s*\{(?=[^}]*gap:\s*var\(--space-1\))(?=[^}]*color:\s*var\(--text-primary\))(?=[^}]*font-size:\s*20px)[^}]*\}/s,
+  "MatchListCard result label should use the same 20px dark text treatment as the score without wrapping",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardResultBlock strong\s*\{(?=[^}]*color:\s*var\(--text-primary\))(?=[^}]*font-size:\s*20px)[^}]*\}/s,
+  "MatchListCard score should match the result label size and color",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardResultBlock\.result-win::before\s*\{[^}]*background:\s*var\(--status-success\)/s,
+  "winning cards should show the semantic success dot",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardResultBlock\.result-loss::before\s*\{[^}]*background:\s*var\(--status-danger\)/s,
+  "losing cards should show the semantic danger dot",
+);
+assert.doesNotMatch(
+  matchStyleSource,
+  /\.matchListCardResultBlock::after\s*\{/,
+  "MatchListCard result block should not recreate the removed triangle overlay",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardHeaderMap\s*\{[^}]*clip-path:\s*polygon\(26% 0,\s*100% 0,\s*100% 100%,\s*58% 100%,\s*55% 82%,\s*29% 82%\)/s,
+  "MatchListCard map preview should use the approved layered six-point outline",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardHeaderMap\.phase6AssetFallback\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--action-primary\) 78%,\s*var\(--surface-secondary\)\)/s,
+  "missing MatchListCard map previews should use the stable dark semantic-token surface",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardBannerCopy\s*\{[^}]*right:\s*var\(--space-4\)[^}]*bottom:\s*20px/s,
+  "MatchListCard banner copy should align to the approved 20px baseline",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardData\s*\{[^}]*grid-template-columns:\s*60px\s+minmax\(0,\s*0\.7fr\)\s+minmax\(0,\s*1\.2fr\)\s+minmax\(0,\s*1\.3fr\)/s,
+  "MatchListCard data row should use avatar, KAD, combined stats, and performance columns",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardData \.phase6MatchMetricBlock strong\s*\{[^}]*font-size:\s*16px/s,
+  "wide MatchListCard values should use the approved compact 16px size",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardPerformance \.phase6PerformanceBadges\s*\{[^}]*gap:\s*var\(--space-1\)/s,
+  "wide MatchListCard performance badges should use the compact 4px gap",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.phase6Timeline\s*\{[^}]*gap:\s*var\(--space-3\);[^}]*\}/s,
+  "match list cards should use the approved 12px vertical rhythm",
+);
+assert.match(
+  compactDesktopStyles,
+  /\.phase6WorkbenchList \.matchListCardData\s*\{[^}]*grid-template-columns:\s*50px\s+70px\s+minmax\(0,\s*1fr\)\s+84px[^}]*gap:\s*var\(--space-2\)[^}]*padding-inline:\s*var\(--space-3\)/s,
+  "1440px desktop cards should keep four compact data columns",
+);
+assert.match(
+  compactDesktopStyles,
+  /\.phase6WorkbenchList \.matchListCardAvatar,\s*\.phase6WorkbenchList \.matchListCardAvatar \.phase6HeroAvatarShared\s*\{[^}]*width:\s*50px[^}]*height:\s*50px/s,
+  "1440px desktop cards should use 50px avatars",
+);
+assert.match(
+  compactDesktopStyles,
+  /\.phase6WorkbenchList \.matchListCardData \.phase6MatchMetricBlock strong\s*\{[^}]*font-size:\s*16px/s,
+  "1440px desktop cards should retain readable 16px values",
+);
+assert.match(
+  compactDesktopStyles,
+  /\.phase6WorkbenchList \.matchListCardPerformance \.phase6PerformanceBadges\s*\{[^}]*gap:\s*2px/s,
+  "1440px desktop cards should use a compact badge gap",
+);
+assert.match(
+  compactDesktopStyles,
+  /\.phase6WorkbenchList \.matchListCardPerformance \.primaryTag\s*\{[^}]*min-height:\s*20px[^}]*padding:\s*0 1px[^}]*font-size:\s*12px/s,
+  "1440px desktop primary tags should remain at the 12px visible-text minimum",
+);
+assert.match(
+  compactDesktopStyles,
+  /\.phase6WorkbenchList \.matchListCardPerformance \.phase6AwardMedal\s*\{[^}]*width:\s*20px[^}]*height:\s*20px[^}]*flex:\s*0 0 20px[^}]*font-size:\s*12px/s,
+  "1440px desktop cards should compact avatars, values, tags, and medals without hiding them",
+);
+assert.match(
+  twoRowCardStyles,
+  /\.phase6WorkbenchList button\.matchListCard\s*\{[^}]*height:\s*auto[^}]*min-height:\s*152px[^}]*grid-template-rows:\s*64px auto/s,
+  "641px to 1400px cards should fall back to an auto-height two-row layout",
+);
+assert.match(
+  twoRowCardStyles,
+  /\.phase6WorkbenchList \.matchListCardData\s*\{[^}]*height:\s*auto[^}]*min-height:\s*104px[^}]*grid-template-columns:\s*54px\s+minmax\(0,\s*0\.8fr\)\s+minmax\(0,\s*1\.4fr\)[^}]*gap:\s*var\(--space-3\)/s,
+  "641px to 1400px cards should use three data columns without truncating stats",
+);
+assert.match(
+  twoRowCardStyles,
+  /\.phase6WorkbenchList \.matchListCardAvatar,\s*\.phase6WorkbenchList \.matchListCardAvatar \.phase6HeroAvatarShared\s*\{[^}]*width:\s*54px[^}]*height:\s*54px/s,
+  "641px to 1400px cards should use 54px avatars",
+);
+assert.match(
+  twoRowCardStyles,
+  /\.phase6WorkbenchList \.matchListCardData \.phase6MatchMetricBlock strong\s*\{[^}]*font-size:\s*16px/s,
+  "641px to 1400px card values should remain 16px",
+);
+assert.match(
+  twoRowCardStyles,
+  /\.phase6WorkbenchList \.matchListCardPerformance\s*\{[^}]*grid-column:\s*2\s*\/\s*-1/s,
+  "641px to 1400px performance badges should occupy the second data row",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList button\.matchListCard\s*\{[^}]*height:\s*auto/s,
+  "400px and narrower cards should remain auto-height",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardResultBlock\s*\{(?=[^}]*width:\s*40%)(?=[^}]*min-width:\s*96px)(?=[^}]*padding-inline:\s*var\(--space-1\))(?=[^}]*gap:\s*var\(--space-1\))(?=[^}]*font-size:\s*20px)[^}]*\}/s,
+  "400px and narrower result blocks should reserve a compact non-overlapping banner region",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardResultBlock strong\s*\{[^}]*font-size:\s*20px/s,
+  "400px and narrower scores should use the compact 20px size",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardBannerCopy\s*\{(?=[^}]*right:\s*var\(--space-2\))(?=[^}]*max-width:\s*calc\(100% - 112px\))[^}]*\}/s,
+  "400px and narrower banner copy should remain outside the result rectangle",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardHeaderMap\s*\{[^}]*clip-path:\s*polygon\(40% 0,\s*100% 0,\s*100% 100%,\s*58% 100%,\s*55% 82%,\s*43% 82%\)/s,
+  "400px and narrower map previews should keep the full result copy on the white layered block",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardData\s*\{(?=[^}]*min-height:\s*188px)(?=[^}]*grid-template-columns:\s*48px\s+minmax\(0,\s*1fr\))(?=[^}]*row-gap:\s*var\(--space-2\))(?=[^}]*column-gap:\s*var\(--space-3\))[^}]*\}/s,
+  "400px and narrower data rows should use the approved two-column three-row layout",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardCombinedStats\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  "400px and narrower combined stats should occupy a full row",
+);
+assert.doesNotMatch(
+  narrowHandsetStyles,
+  /\.phase6MatchMetricBlock:nth-child/,
+  "400px and narrower combined stats should not depend on DOM child position",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardPerformance\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  "400px and narrower performance badges should occupy a full row",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardAvatar,\s*\.phase6WorkbenchList \.matchListCardAvatar \.phase6HeroAvatarShared\s*\{[^}]*width:\s*48px[^}]*height:\s*48px/s,
+  "400px and narrower cards should use 48px avatars",
+);
+assert.match(
+  narrowHandsetStyles,
+  /\.phase6WorkbenchList \.matchListCardData \.phase6MatchMetricBlock strong\s*\{[^}]*font-size:\s*16px/s,
+  "400px and narrower core values should remain 16px",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardAvatar,\s*\.phase6WorkbenchList \.matchListCardAvatar \.phase6HeroAvatarShared\s*\{(?=[^}]*width:\s*60px)(?=[^}]*height:\s*60px)[^}]*\}/s,
+  "MatchListCard avatar container and image should both remain 60px square",
+);
+assert.match(
+  matchStyleSource,
+  /\.phase6WorkbenchList button\.matchListCard\.phase6MatchRowSelected\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+2px\s+var\(--action-primary\)/s,
+  "MatchListCard selected state should use the approved inset action ring",
+);
+assert.doesNotMatch(
+  matchStyleSource,
+  /\.matchListCardBadgeLine\b/,
+  "MatchListCard styles should remove the unused legacy badge-line selectors",
+);
 assert.match(matchStyleSource, /grid-template-columns:\s*minmax\([^)]*,\s*32fr\)\s+minmax\(0,\s*68fr\)/);
 assert.match(
   matchStyleSource,

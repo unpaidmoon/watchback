@@ -41,12 +41,11 @@ const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCa
 const matchStyleSource = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 assert.equal(timelineSource.includes("<MatchListCard"), true, "the timeline should delegate card rendering");
 const heroIndex = listCardSource.indexOf("<HeroAvatar");
-const heroNameIndex = listCardSource.indexOf("matchListCardHeroName");
 const badgesIndex = listCardSource.indexOf("<MatchPerformanceBadges");
-const statsIndex = listCardSource.indexOf("phase6MatchListStats");
+const statsIndex = listCardSource.indexOf('<MetricBlock label="K/A/D"');
 assert.ok(
-  heroIndex > -1 && heroNameIndex > heroIndex && badgesIndex > heroNameIndex && statsIndex > badgesIndex,
-  "match cards should show avatar, hero name, compact badges, then grouped statistics",
+  heroIndex > -1 && statsIndex > heroIndex && badgesIndex > statsIndex,
+  "match cards should show avatar, fact columns, then the compact performance column",
 );
 assert.equal(listCardSource.includes("<MatchPerformanceBadges"), true, "match list should render grade and award badges");
 assert.match(listCardSource, /<MatchPerformanceBadges[\s\S]*?compact/, "match list badges should use the compact layout");

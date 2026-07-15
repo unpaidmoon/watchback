@@ -1,4 +1,4 @@
-import { formatCompactStat, formatMatchBannerTitle, formatMatchPreviewKey, formatScoreLine } from "../../shared/matchListFormat";
+import { formatCompactStat, formatMatchPreviewKey, formatScoreLine } from "../../shared/matchListFormat";
 import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
 import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
 import type { MatchSummary } from "../../shared/types";
@@ -19,34 +19,36 @@ export function MatchListCard({ match, selected, onSelect }: MatchListCardProps)
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(match.matchId)}
     >
-      <span className="matchListCardSummary">
-        <MapPreview mapKey={formatMatchPreviewKey(match)} name={match.mapName} className="phase6MatchMapThumb matchListCardMap" />
-        <span className="matchListCardCopy">
-          <span className="matchListCardResultScore">
-            <span className={`matchListCardResult result-${result.tone}`}>
-              <span className="matchListCardResultMarker" aria-hidden="true" />
-              {result.label}
-            </span>
-            <strong className="matchListCardScore" data-numeric>{formatScoreLine(match)}</strong>
-          </span>
-          <strong className="matchListCardTitle">{formatMatchBannerTitle(match)}</strong>
-          <span className="matchListCardMeta">
-            <span>{match.beginLabel}</span>
-            <span className="phase6MatchListHeroLine matchListCardHeroLine">
-              <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
-              <strong className="matchListCardHeroName">{match.heroName}</strong>
-              <MatchPerformanceBadges evaluation={match.evaluation} teamAwards={match.teamAwards} compact />
-            </span>
-          </span>
+      <span className="matchListCardHeader">
+        <MapPreview
+          mapKey={formatMatchPreviewKey(match)}
+          name={match.mapName}
+          className="matchListCardHeaderMap"
+          decorative
+        />
+        <span className={`matchListCardResultBlock result-${result.tone}`}>
+          <span>{result.label}</span>
+          <strong data-numeric>{formatScoreLine(match)}</strong>
+        </span>
+        <span className="matchListCardBannerCopy" title={`${match.mapName} · ${match.modeLabel}`}>
+          <span>{match.mapName}</span>
+          <span>{match.modeLabel}</span>
         </span>
       </span>
-      <span className="phase6MatchDataPanel matchListCardData">
-        <span className="phase6MatchListStats matchListCardStats">
-          <MetricBlock label="K/D/A" value={`${match.kills}/${match.deaths}/${match.assists}`} />
-          <MetricBlock label="伤害" value={formatCompactStat(match.damage)} />
-          <MetricBlock label="承伤" value={formatCompactStat(match.mitigation)} />
+      <span className="matchListCardData">
+        <span className="matchListCardAvatar">
+          <HeroAvatar heroKey={match.heroGuid || match.heroName} name={match.heroName} />
         </span>
-        <span className="phase6MatchOpen">›</span>
+        <MetricBlock label="K/A/D" value={`${match.kills}/${match.assists}/${match.deaths}`} />
+        <MetricBlock
+          className="matchListCardCombinedStats"
+          label="伤害/治疗/抵挡"
+          value={[match.damage, match.healing, match.mitigation].map(formatCompactStat).join("/")}
+        />
+        <span className="matchListCardPerformance">
+          <span>对局表现</span>
+          <MatchPerformanceBadges evaluation={match.evaluation} teamAwards={match.teamAwards} compact showGrade={false} />
+        </span>
       </span>
     </button>
   );
@@ -59,9 +61,9 @@ function resultPresentation(result: string) {
   return { tone: "neutral", label: "未知结果" };
 }
 
-function MetricBlock({ label, value }: { label: string; value: string }) {
+function MetricBlock({ label, value, className = "" }: { label: string; value: string; className?: string }) {
   return (
-    <span className="phase6MatchMetricBlock">
+    <span className={`phase6MatchMetricBlock ${className}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </span>

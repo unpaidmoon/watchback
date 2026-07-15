@@ -29,6 +29,7 @@ body { min-height: 100%; margin: 0; padding: 8px; }
 .fixtureBrandMark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--action-primary); color: var(--action-on-primary); font-weight: 700; }
 .fixtureShellStatus { white-space: nowrap; }
 @media (max-width: 1099px) {
+  html, body { min-width: 0; }
   body { padding: 0; }
   .appFrame { min-height: 100vh; border-radius: 0; }
 }
@@ -129,18 +130,19 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
 function createMatch(index: number): MatchSummary {
   const result = (["win", "win", "loss", "draw"] as const)[index % 4];
   const arena = index === 2;
+  const missingMap = index === 6;
   return {
     matchId: `fixture-match-${index + 1}`,
     season: 22,
     bucket: "preset",
     matchKind: arena ? "fight" : "preset",
     gameMode: arena ? "LeisureFight" : "SportPreset",
-    modeLabel: arena ? "角斗竞技" : "竞技比赛",
+    modeLabel: index === 0 ? "预设快速模式长名称示例" : arena ? "角斗竞技" : "竞技比赛",
     result,
     resultLabel: result === "win" ? "胜利" : result === "loss" ? "失败" : "平局",
-    mapGuid: arena ? "oasis" : "shambali-monastery",
-    mapPreviewGuid: arena ? "oasis" : "shambali-monastery",
-    mapName: arena ? "绿洲城 - 花园" : "香巴里寺院",
+    mapGuid: missingMap ? "fixture-missing-map" : arena ? "oasis" : "shambali-monastery",
+    mapPreviewGuid: missingMap ? "fixture-missing-map" : arena ? "oasis" : "shambali-monastery",
+    mapName: missingMap ? "未知地图" : arena ? "绿洲城 - 花园" : "香巴里寺院",
     heroGuid: index % 2 === 0 ? "sigma" : "ana",
     heroName: index % 2 === 0 ? "西格玛" : "安娜",
     beginTs: 1783958400 - index * 3600,
@@ -154,13 +156,18 @@ function createMatch(index: number): MatchSummary {
     healing: 2410 + index * 337,
     mitigation: 12380 - index * 405,
     durationSec: 780 + index * 17,
-    evaluation: {
+    evaluation: index === 5 ? null : {
       grade: index % 3 === 0 ? "S" : "A",
       primaryTag: index % 3 === 0 ? "尽力局" : "伯仲局",
       evidenceTags: [],
       confidence: 0.86,
     },
-    teamAwards: [],
+    teamAwards: index === 0 ? [
+      { code: "damage", label: "伤害最高", tone: "gold" },
+      { code: "healing", label: "治疗最高", tone: "gold" },
+      { code: "kill", label: "击杀最高", tone: "gold" },
+      { code: "mitigation", label: "抵挡最高", tone: "gold" },
+    ] : [],
   };
 }
 
@@ -266,11 +273,20 @@ function createArenaSlice(key: string, label: string, mapName: string, teamScore
 
 function inlineLocalAssets(markup: string) {
   const publicRoot = fileURLToPath(new URL("../public", import.meta.url));
-  return markup.replace(/src="(\/assets\/[^"]+)"/g, (source, assetUrl: string) => {
+  return markup.replace(/<img\b[^>]*\bsrc="(\/assets\/[^"]+)"[^>]*\/?>/g, (source, assetUrl: string) => {
     const assetPath = resolve(publicRoot, `.${decodeURIComponent(assetUrl)}`);
-    if (!assetPath.startsWith(publicRoot) || !existsSync(assetPath)) return source;
+    if (!assetPath.startsWith(publicRoot) || !existsSync(assetPath)) {
+      const className = source.match(/\bclass="([^"]*)"/)?.[1] ?? "";
+      if (className.includes("matchListCardHeaderMap")) {
+        return `<span class="phase6AssetFallback ${className}" aria-hidden="true"></span>`;
+      }
+      return source;
+    }
     const mime = mimeType(assetPath);
-    return `src="data:${mime};base64,${readFileSync(assetPath).toString("base64")}"`;
+    return source.replace(
+      `src="${assetUrl}"`,
+      `src="data:${mime};base64,${readFileSync(assetPath).toString("base64")}"`,
+    );
   });
 }
 

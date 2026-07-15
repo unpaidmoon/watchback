@@ -15,5 +15,10 @@ export function formatMatchPreviewKey(match: MatchSummary): string {
 }
 
 export function formatCompactStat(value: number): string {
-  return groupedNumber.format(value);
+  if (value <= 10000) {
+    return groupedNumber.format(value);
+  }
+
+  const roundedToThousand = Math.round(value / 1000) * 1000;
+  return `${(roundedToThousand / 10000).toFixed(1)}w`;
 }

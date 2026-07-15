@@ -43,5 +43,9 @@ assert.equal(
   "绿洲城 - 花园 · 角斗竞技",
 );
 assert.equal(formatCompactStat(5960), "5,960");
-assert.equal(formatCompactStat(15000), "15,000");
 assert.equal(formatCompactStat(10000), "10,000");
+assert.equal(formatCompactStat(10001), "1.0w");
+assert.equal(formatCompactStat(10499), "1.0w");
+assert.equal(formatCompactStat(10500), "1.1w");
+assert.equal(formatCompactStat(21499), "2.1w");
+assert.equal(formatCompactStat(21500), "2.2w");
