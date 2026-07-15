@@ -339,7 +339,7 @@ fn arena_private_id_shaped_names_use_unknown_friend_fallback() {
     let private_names = [
         "0123456789abcdef0123456789abcdef",
         "01234567-89ab-cdef-0123-456789abcdef",
-        "0123456789abcdef0123456789abcdef",
+        "01234567890123456789012345678901",
     ];
     for (index, private_name) in private_names.into_iter().enumerate() {
         let match_id = format!("synthetic-private-arena-{index}");
