@@ -6,7 +6,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -42,7 +42,7 @@ pub enum LegacyMigrationState {
 }
 
 pub fn detect_legacy_state(shared: &SharedAppPaths) -> Result<LegacyMigrationState> {
-    if shared.migration_journal().exists() {
+    if path_entry_exists(&shared.migration_journal())? {
         return match read_journal(shared) {
             Ok(journal) if journal.phase == MigrationPhase::Complete => {
                 Ok(LegacyMigrationState::Complete)
@@ -51,7 +51,7 @@ pub fn detect_legacy_state(shared: &SharedAppPaths) -> Result<LegacyMigrationSta
             Err(_) => Ok(LegacyMigrationState::RecoveryError),
         };
     }
-    if legacy_sources(shared).iter().any(|path| path.exists()) {
+    if legacy_sources_exist(shared)? {
         Ok(LegacyMigrationState::WaitingForAccount)
     } else {
         Ok(LegacyMigrationState::None)
@@ -64,7 +64,7 @@ pub fn adopt_legacy_account(
 ) -> Result<()> {
     validate_confirmed_account(shared, account.account_id(), account.paths())?;
 
-    if shared.migration_journal().exists() {
+    if path_entry_exists(&shared.migration_journal())? {
         let journal = read_journal(shared)?;
         if journal.account_id != *account.account_id() {
             bail!("旧数据迁移已绑定其他已确认账号，无法继续")
@@ -74,7 +74,7 @@ pub fn adopt_legacy_account(
         }
         recover_interrupted_migration(shared)?;
     }
-    if !legacy_sources(shared).iter().any(|path| path.exists()) {
+    if !legacy_sources_exist(shared)? {
         return Ok(());
     }
 
@@ -106,15 +106,10 @@ pub fn adopt_legacy_account(
 }
 
 pub fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
-    if !shared.migration_journal().exists() {
+    if !path_entry_exists(&shared.migration_journal())? {
         return Ok(());
     }
     let mut journal = read_journal(shared)?;
-    if journal.phase == MigrationPhase::Complete {
-        return Ok(());
-    }
-    let paths = shared.account(&journal.account_id);
-    validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
     let staging = staging_root(shared, &journal.account_id);
 
     match journal.phase {
@@ -125,6 +120,8 @@ pub fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
             Ok(())
         }
         MigrationPhase::Publishing => {
+            let paths = shared.account(&journal.account_id);
+            validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
             validate_staging_database(&staging)?;
             publish_staging(&staging, &paths)?;
             validate_published_account(shared, &journal.account_id, &paths)?;
@@ -134,6 +131,8 @@ pub fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
             set_phase(shared, &mut journal, MigrationPhase::Complete)
         }
         MigrationPhase::CleaningLegacy => {
+            let paths = shared.account(&journal.account_id);
+            validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
             validate_published_account(shared, &journal.account_id, &paths)?;
             clean_legacy_sources(shared)?;
             remove_staging_if_present(&staging)?;
@@ -159,6 +158,8 @@ fn validate_confirmed_account_paths(
     account_id: &AccountId,
     paths: &AccountPaths,
 ) -> Result<()> {
+    require_safe_directory(paths.root())?;
+    require_safe_regular_file(&paths.manifest())?;
     let manifest = read_manifest(&paths.manifest(), account_id)
         .map_err(|_| anyhow!("已确认账号信息不完整，无法迁移旧数据"))?;
     let role_id = read_complete_credential_role(&paths.credentials())?;
@@ -181,7 +182,7 @@ fn validate_confirmed_account_paths(
 }
 
 fn validate_legacy_identity(shared: &SharedAppPaths, account: &AccountPaths) -> Result<()> {
-    if !shared.legacy_credentials().exists() {
+    if !path_entry_exists(&shared.legacy_credentials())? {
         return Ok(());
     }
     let manifest = read_manifest(
@@ -203,6 +204,7 @@ fn validate_legacy_identity(shared: &SharedAppPaths, account: &AccountPaths) -> 
 }
 
 fn read_complete_credential_role(path: &Path) -> Result<i64> {
+    require_safe_regular_file(path)?;
     let bytes = fs::read(path).map_err(|_| anyhow!("账号凭据不完整，请重新登录后再迁移"))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| anyhow!("账号凭据不完整，请重新登录后再迁移"))?;
@@ -240,7 +242,7 @@ fn copy_legacy_to_staging(shared: &SharedAppPaths, staging: &Path) -> Result<()>
         (shared.legacy_backups(), staging.join("backups")),
     ];
     for (source, destination) in mappings {
-        if source.exists() {
+        if path_entry_exists(&source)? {
             copy_path_checked(&source, &destination)?;
         }
     }
@@ -249,8 +251,10 @@ fn copy_legacy_to_staging(shared: &SharedAppPaths, staging: &Path) -> Result<()>
 
 fn validate_staging_database(staging: &Path) -> Result<()> {
     let path = staging.join("owstats.sqlite3");
-    if !path.is_file() {
-        return Ok(());
+    match safe_destination_metadata(&path)? {
+        None => return Ok(()),
+        Some(metadata) if metadata.is_file() => {}
+        Some(_) => bail!("旧数据库文件类型无效，源数据保持不变"),
     }
     crate::OwDatabase::new(&path)
         .initialize()
@@ -287,7 +291,7 @@ fn publish_staging(staging: &Path, account: &AccountPaths) -> Result<()> {
         (staging.join("backups"), account.backups()),
     ];
     for (source, destination) in mappings {
-        if source.exists() {
+        if path_entry_exists(&source)? {
             publish_path_no_overwrite(&source, &destination)?;
         }
     }
@@ -300,7 +304,10 @@ fn validate_published_account(
     paths: &AccountPaths,
 ) -> Result<()> {
     validate_confirmed_account_paths(shared, account_id, paths)?;
-    if paths.database().exists() {
+    if let Some(metadata) = safe_destination_metadata(&paths.database())? {
+        if !metadata.is_file() {
+            bail!("迁移后的账号数据库类型无效")
+        }
         let connection = Connection::open(paths.database())
             .map_err(|_| anyhow!("迁移后的账号数据库校验失败"))?;
         let integrity: String = connection
@@ -320,7 +327,7 @@ fn validate_published_account(
 
 fn clean_legacy_sources(shared: &SharedAppPaths) -> Result<()> {
     for path in legacy_sources(shared) {
-        if !path.exists() {
+        if !path_entry_exists(&path)? {
             continue;
         }
         reject_links_recursively(&path)?;
@@ -345,6 +352,23 @@ fn legacy_sources(shared: &SharedAppPaths) -> Vec<PathBuf> {
     ]
 }
 
+fn legacy_sources_exist(shared: &SharedAppPaths) -> Result<bool> {
+    for path in legacy_sources(shared) {
+        if path_entry_exists(&path)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn path_entry_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(_) => bail!("无法检查旧数据迁移路径"),
+    }
+}
+
 fn staging_root(shared: &SharedAppPaths, account_id: &AccountId) -> PathBuf {
     shared
         .accounts_root()
@@ -361,6 +385,7 @@ fn set_phase(
 }
 
 fn read_journal(shared: &SharedAppPaths) -> Result<MigrationJournal> {
+    require_safe_regular_file(&shared.migration_journal())?;
     let bytes =
         fs::read(shared.migration_journal()).map_err(|_| anyhow!("无法读取旧数据迁移状态"))?;
     let journal: MigrationJournal = serde_json::from_slice(&bytes)
@@ -382,6 +407,11 @@ fn write_journal(shared: &SharedAppPaths, journal: &MigrationJournal) -> Result<
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().ok_or_else(|| anyhow!("迁移状态路径无效"))?;
+    if let Some(metadata) = safe_destination_metadata(path)? {
+        if !metadata.is_file() {
+            bail!("迁移状态文件类型无效")
+        }
+    }
     fs::create_dir_all(parent).map_err(|_| anyhow!("无法创建迁移状态目录"))?;
     let temporary = parent.join(format!(".migration-journal-{}.tmp", Uuid::new_v4()));
     let result = (|| -> Result<()> {
@@ -422,9 +452,15 @@ fn copy_path_checked(source: &Path, destination: &Path) -> Result<()> {
 }
 
 fn publish_path_no_overwrite(source: &Path, destination: &Path) -> Result<()> {
-    reject_link(source)?;
-    if source.is_dir() {
-        if destination.exists() && !destination.is_dir() {
+    let source_metadata =
+        fs::symlink_metadata(source).map_err(|_| anyhow!("无法读取迁移暂存数据"))?;
+    reject_metadata(&source_metadata)?;
+    let destination_metadata = safe_destination_metadata(destination)?;
+    if source_metadata.is_dir() {
+        if destination_metadata
+            .as_ref()
+            .is_some_and(|metadata| !metadata.is_dir())
+        {
             bail!("账号目录已有冲突数据，迁移已停止")
         }
         fs::create_dir_all(destination).map_err(|_| anyhow!("无法发布迁移数据"))?;
@@ -434,8 +470,11 @@ fn publish_path_no_overwrite(source: &Path, destination: &Path) -> Result<()> {
         }
         return Ok(());
     }
-    if destination.exists() {
-        if destination.is_file() {
+    if !source_metadata.is_file() {
+        bail!("迁移暂存数据包含不支持的文件类型")
+    }
+    if let Some(metadata) = destination_metadata {
+        if metadata.is_file() {
             let source_bytes = fs::read(source).map_err(|_| anyhow!("无法读取迁移暂存数据"))?;
             let destination_bytes =
                 fs::read(destination).map_err(|_| anyhow!("无法读取账号现有数据"))?;
@@ -462,7 +501,7 @@ fn publish_path_no_overwrite(source: &Path, destination: &Path) -> Result<()> {
 }
 
 fn remove_staging_if_present(staging: &Path) -> Result<()> {
-    if !staging.exists() {
+    if !path_entry_exists(staging)? {
         return Ok(());
     }
     reject_links_recursively(staging)?;
@@ -470,8 +509,9 @@ fn remove_staging_if_present(staging: &Path) -> Result<()> {
 }
 
 fn reject_links_recursively(path: &Path) -> Result<()> {
-    reject_link(path)?;
-    if path.is_dir() {
+    let metadata = fs::symlink_metadata(path).map_err(|_| anyhow!("无法检查迁移文件类型"))?;
+    reject_metadata(&metadata)?;
+    if metadata.is_dir() {
         for entry in fs::read_dir(path).map_err(|_| anyhow!("无法检查迁移目录"))? {
             let entry = entry.map_err(|_| anyhow!("无法检查迁移目录"))?;
             reject_links_recursively(&entry.path())?;
@@ -482,8 +522,15 @@ fn reject_links_recursively(path: &Path) -> Result<()> {
 
 fn reject_link(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path).map_err(|_| anyhow!("无法检查迁移文件类型"))?;
+    reject_metadata(&metadata)
+}
+
+fn reject_metadata(metadata: &fs::Metadata) -> Result<()> {
     if metadata.file_type().is_symlink() {
         bail!("旧数据包含链接，迁移已停止")
+    }
+    if !metadata.is_file() && !metadata.is_dir() {
+        bail!("迁移路径包含不支持的文件类型")
     }
     #[cfg(windows)]
     {
@@ -493,6 +540,45 @@ fn reject_link(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn safe_destination_metadata(path: &Path) -> Result<Option<fs::Metadata>> {
+    let mut ancestor = path.parent();
+    while let Some(parent) = ancestor {
+        match fs::symlink_metadata(parent) {
+            Ok(metadata) => {
+                reject_metadata(&metadata)?;
+                if !metadata.is_dir() {
+                    bail!("迁移目标父级不是目录")
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(_) => bail!("无法检查迁移目标路径"),
+        }
+        ancestor = parent.parent();
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            reject_metadata(&metadata)?;
+            Ok(Some(metadata))
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(_) => bail!("无法检查迁移目标路径"),
+    }
+}
+
+fn require_safe_directory(path: &Path) -> Result<()> {
+    match safe_destination_metadata(path)? {
+        Some(metadata) if metadata.is_dir() => Ok(()),
+        _ => bail!("已确认账号目录类型无效"),
+    }
+}
+
+fn require_safe_regular_file(path: &Path) -> Result<()> {
+    match safe_destination_metadata(path)? {
+        Some(metadata) if metadata.is_file() => Ok(()),
+        _ => bail!("账号文件不完整或类型无效"),
+    }
 }
 
 #[cfg(test)]
@@ -549,5 +635,90 @@ mod tests {
         )
         .unwrap();
         assert!(read_journal(&shared).is_err());
+    }
+
+    #[test]
+    fn publish_file_conflict_matrix_never_overwrites_existing_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        fs::write(&source, b"verified-data").unwrap();
+        let absent = temp.path().join("absent");
+
+        publish_path_no_overwrite(&source, &absent).unwrap();
+        publish_path_no_overwrite(&source, &absent).unwrap();
+        assert_eq!(fs::read(&absent).unwrap(), b"verified-data");
+
+        for (name, existing) in [("empty", &b""[..]), ("different", &b"different"[..])] {
+            let destination = temp.path().join(name);
+            fs::write(&destination, existing).unwrap();
+            assert!(publish_path_no_overwrite(&source, &destination).is_err());
+            assert_eq!(fs::read(destination).unwrap(), existing);
+        }
+
+        let directory_source = temp.path().join("directory-source");
+        fs::create_dir(&directory_source).unwrap();
+        let file_destination = temp.path().join("file-destination");
+        fs::write(&file_destination, b"keep").unwrap();
+        assert!(publish_path_no_overwrite(&directory_source, &file_destination).is_err());
+
+        let file_source = temp.path().join("file-source");
+        fs::write(&file_source, b"data").unwrap();
+        let directory_destination = temp.path().join("directory-destination");
+        fs::create_dir(&directory_destination).unwrap();
+        assert!(publish_path_no_overwrite(&file_source, &directory_destination).is_err());
+    }
+
+    #[test]
+    fn publish_rejects_linked_destination_directory_without_writing_through_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("payload"), b"data").unwrap();
+        let external = temp.path().join("external");
+        fs::create_dir(&external).unwrap();
+        let linked = temp.path().join("linked");
+        if !create_test_directory_symlink(&external, &linked) {
+            return;
+        }
+
+        assert!(publish_path_no_overwrite(&source, &linked).is_err());
+        assert!(!external.join("payload").exists());
+
+        let file_source = temp.path().join("file-source");
+        fs::write(&file_source, b"data").unwrap();
+        assert!(publish_path_no_overwrite(&file_source, &linked.join("nested")).is_err());
+        assert!(!external.join("nested").exists());
+    }
+
+    #[test]
+    fn copy_rejects_link_source_as_unknown_special_type() {
+        let temp = tempfile::tempdir().unwrap();
+        let real = temp.path().join("real");
+        fs::write(&real, b"data").unwrap();
+        let linked = temp.path().join("linked");
+        if !create_test_file_symlink(&real, &linked) {
+            return;
+        }
+        assert!(copy_path_checked(&linked, &temp.path().join("copy")).is_err());
+    }
+
+    #[cfg(windows)]
+    fn create_test_directory_symlink(source: &Path, target: &Path) -> bool {
+        std::os::windows::fs::symlink_dir(source, target).is_ok()
+    }
+
+    #[cfg(unix)]
+    fn create_test_directory_symlink(source: &Path, target: &Path) -> bool {
+        std::os::unix::fs::symlink(source, target).is_ok()
+    }
+
+    #[cfg(windows)]
+    fn create_test_file_symlink(source: &Path, target: &Path) -> bool {
+        std::os::windows::fs::symlink_file(source, target).is_ok()
+    }
+
+    #[cfg(unix)]
+    fn create_test_file_symlink(source: &Path, target: &Path) -> bool {
+        std::os::unix::fs::symlink(source, target).is_ok()
     }
 }

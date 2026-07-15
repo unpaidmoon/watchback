@@ -10,6 +10,7 @@ const NO_ACTIVE_ACCOUNT_MESSAGE: &str = "尚未添加可用账号，请先在指
 pub struct AccountContextManager {
     shared: SharedAppPaths,
     registry: Arc<RwLock<AccountRegistry>>,
+    recovery_failed: Arc<RwLock<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,8 +21,8 @@ pub struct AccountContextSnapshot {
 
 impl AccountContextManager {
     pub fn load(shared: SharedAppPaths) -> Result<Self> {
-        crate::account_migration::recover_interrupted_migration(&shared)
-            .context("无法恢复旧账号数据迁移")?;
+        let recovery_failed =
+            crate::account_migration::recover_interrupted_migration(&shared).is_err();
         let registry_path = shared.registry();
         let registry = if registry_path.try_exists().context("无法检查账号索引")? {
             read_registry(&registry_path).context("无法读取账号索引")?
@@ -32,6 +33,7 @@ impl AccountContextManager {
         Ok(Self {
             shared,
             registry: Arc::new(RwLock::new(registry)),
+            recovery_failed: Arc::new(RwLock::new(recovery_failed)),
         })
     }
 
@@ -83,7 +85,21 @@ impl AccountContextManager {
     }
 
     pub fn migration_state(&self) -> Result<crate::account_migration::LegacyMigrationState> {
-        crate::account_migration::detect_legacy_state(&self.shared)
+        let mut recovery_failed = self
+            .recovery_failed
+            .write()
+            .map_err(|_| anyhow!("旧数据迁移状态暂不可用，请重试。"))?;
+        if *recovery_failed {
+            if crate::account_migration::recover_interrupted_migration(&self.shared).is_err() {
+                return Ok(crate::account_migration::LegacyMigrationState::RecoveryError);
+            }
+            *recovery_failed = false;
+        }
+        let state = crate::account_migration::detect_legacy_state(&self.shared)?;
+        if state == crate::account_migration::LegacyMigrationState::RecoveryError {
+            *recovery_failed = true;
+        }
+        Ok(state)
     }
 
     pub fn adopt_legacy(&self, account: &AccountContextSnapshot) -> Result<()> {

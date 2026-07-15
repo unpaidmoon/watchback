@@ -334,6 +334,137 @@ fn damaged_or_invalid_migration_journal_is_never_guessed() {
     assert!(fixture.shared.legacy_database().is_file());
 }
 
+#[test]
+fn manager_load_survives_recovery_error_and_retries_after_journal_is_repaired() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    let account = fixture.confirm_account();
+    fs::create_dir_all(fixture.shared.operations_root()).unwrap();
+    fs::write(
+        fixture.shared.migration_journal(),
+        r#"{"version":99,"token":"synthetic-must-not-escape"}"#,
+    )
+    .unwrap();
+
+    let manager = AccountContextManager::load(fixture.shared.clone()).unwrap();
+
+    assert_eq!(
+        manager.migration_state().unwrap(),
+        LegacyMigrationState::RecoveryError
+    );
+    assert!(fixture.shared.legacy_database().is_file());
+    assert!(fixture.shared.migration_journal().is_file());
+
+    fixture.write_journal(account.account_id(), MigrationPhase::Copying);
+    assert_eq!(
+        manager.migration_state().unwrap(),
+        LegacyMigrationState::WaitingForAccount
+    );
+    assert!(!fixture.shared.migration_journal().exists());
+    assert!(fixture.shared.legacy_database().is_file());
+}
+
+#[test]
+fn copying_and_validating_recovery_do_not_require_registry_manifest_or_credentials() {
+    for phase in [MigrationPhase::Copying, MigrationPhase::Validating] {
+        let fixture = LegacyFixture::with_database_match("legacy-match");
+        let account = fixture.confirm_account();
+        let account_id = account.account_id().clone();
+        let staging = fixture.staging(&account_id);
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("partial"), "synthetic").unwrap();
+        fixture.write_journal(&account_id, phase);
+        fs::remove_file(fixture.shared.registry()).unwrap();
+        fs::remove_file(account.paths().manifest()).unwrap();
+        fs::remove_file(account.paths().credentials()).unwrap();
+
+        recover_interrupted_migration(&fixture.shared).unwrap();
+
+        assert!(fixture.shared.legacy_database().is_file());
+        assert!(!staging.exists());
+        assert!(!fixture.shared.migration_journal().exists());
+    }
+}
+
+#[test]
+fn publishing_never_overwrites_empty_or_different_target_database() {
+    for existing in [Vec::new(), b"different-target".to_vec()] {
+        let fixture = LegacyFixture::with_database_match("legacy-match");
+        let account = fixture.confirm_account();
+        fs::write(account.paths().database(), &existing).unwrap();
+
+        assert!(fixture.manager.adopt_legacy(&account).is_err());
+
+        assert_eq!(fs::read(account.paths().database()).unwrap(), existing);
+        assert!(fixture.shared.legacy_database().is_file());
+        let journal: MigrationJournal =
+            serde_json::from_slice(&fs::read(fixture.shared.migration_journal()).unwrap()).unwrap();
+        assert_eq!(journal.phase, MigrationPhase::Publishing);
+
+        let manager = AccountContextManager::load(fixture.shared.clone()).unwrap();
+        assert_eq!(
+            manager.migration_state().unwrap(),
+            LegacyMigrationState::RecoveryError
+        );
+        assert_eq!(fs::read(account.paths().database()).unwrap(), existing);
+        assert!(fixture.shared.legacy_database().is_file());
+
+        fs::remove_file(account.paths().database()).unwrap();
+        assert_eq!(
+            manager.migration_state().unwrap(),
+            LegacyMigrationState::Complete
+        );
+        assert_eq!(fixture.match_ids(&account), vec!["legacy-match"]);
+        assert!(!fixture.shared.legacy_database().exists());
+    }
+}
+
+#[test]
+fn linked_account_root_is_rejected_before_identity_or_publish_access() {
+    let fixture = LegacyFixture::with_database_match("legacy-match");
+    let account_id = AccountId::parse("cd5e9796-e686-4298-92f4-0b49f499a727").unwrap();
+    let external_parent = tempfile::tempdir().unwrap();
+    let external = external_parent.path().join(account_id.as_str());
+    fs::create_dir_all(&external).unwrap();
+    write_manifest_atomic(
+        &external.join("account.json"),
+        &manifest(account_id.clone(), "Linked#1000"),
+    )
+    .unwrap();
+    fs::write(
+        external.join("credentials.json"),
+        r#"{"roleId":10001,"token":"synthetic-linked-token"}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(fixture.shared.accounts_root()).unwrap();
+    let linked = fixture.shared.account(&account_id);
+    if !create_directory_symlink(&external, linked.root()) {
+        return;
+    }
+    fixture
+        .manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(account_id.clone()),
+            accounts: vec![entry(account_id, "Linked#1000")],
+        })
+        .unwrap();
+    let snapshot = fixture.manager.active_snapshot().unwrap();
+
+    assert!(fixture.manager.adopt_legacy(&snapshot).is_err());
+    assert!(fixture.shared.legacy_database().is_file());
+    assert!(!external.join("owstats.sqlite3").exists());
+}
+
+#[cfg(windows)]
+fn create_directory_symlink(source: &std::path::Path, target: &std::path::Path) -> bool {
+    std::os::windows::fs::symlink_dir(source, target).is_ok()
+}
+
+#[cfg(unix)]
+fn create_directory_symlink(source: &std::path::Path, target: &std::path::Path) -> bool {
+    std::os::unix::fs::symlink(source, target).is_ok()
+}
+
 fn entry(account_id: AccountId, battle_tag: &str) -> AccountRegistryEntry {
     AccountRegistryEntry {
         account_id,
