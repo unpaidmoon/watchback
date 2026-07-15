@@ -400,9 +400,8 @@ fn publishing_never_overwrites_empty_or_different_target_database() {
             serde_json::from_slice(&fs::read(fixture.shared.migration_journal()).unwrap()).unwrap();
         assert_eq!(journal.phase, MigrationPhase::Publishing);
 
-        let manager = AccountContextManager::load(fixture.shared.clone()).unwrap();
         assert_eq!(
-            manager.migration_state().unwrap(),
+            fixture.manager.migration_state().unwrap(),
             LegacyMigrationState::RecoveryError
         );
         assert_eq!(fs::read(account.paths().database()).unwrap(), existing);
@@ -410,7 +409,7 @@ fn publishing_never_overwrites_empty_or_different_target_database() {
 
         fs::remove_file(account.paths().database()).unwrap();
         assert_eq!(
-            manager.migration_state().unwrap(),
+            fixture.manager.migration_state().unwrap(),
             LegacyMigrationState::Complete
         );
         assert_eq!(fixture.match_ids(&account), vec!["legacy-match"]);

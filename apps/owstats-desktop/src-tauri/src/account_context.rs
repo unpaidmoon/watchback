@@ -103,7 +103,17 @@ impl AccountContextManager {
     }
 
     pub fn adopt_legacy(&self, account: &AccountContextSnapshot) -> Result<()> {
-        crate::account_migration::adopt_legacy_account(&self.shared, account)
+        let result = crate::account_migration::adopt_legacy_account(&self.shared, account);
+        let journal_remains = match std::fs::symlink_metadata(self.shared.migration_journal()) {
+            Ok(_) => true,
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        };
+        let mut recovery_failed = self
+            .recovery_failed
+            .write()
+            .map_err(|_| anyhow!("旧数据迁移状态暂不可用，请重试。"))?;
+        *recovery_failed = result.is_err() && journal_remains;
+        result
     }
 }
 
