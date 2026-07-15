@@ -2,6 +2,110 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
+use crate::account_store::AccountId;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedAppPaths {
+    root: PathBuf,
+}
+
+impl SharedAppPaths {
+    pub fn from_app_data_dir(root: impl AsRef<Path>) -> Self {
+        Self {
+            root: root.as_ref().to_path_buf(),
+        }
+    }
+
+    pub fn from_app(app: &AppHandle) -> Result<Self> {
+        Ok(Self::from_app_data_dir(app.path().app_data_dir()?))
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn registry(&self) -> PathBuf {
+        self.root.join("accounts.json")
+    }
+
+    pub fn user_settings(&self) -> PathBuf {
+        self.root.join("user_settings.json")
+    }
+
+    pub fn browser_profile(&self) -> PathBuf {
+        self.root.join("chrome-dashen-profile")
+    }
+
+    pub fn accounts_root(&self) -> PathBuf {
+        self.root.join("accounts")
+    }
+
+    pub fn operations_root(&self) -> PathBuf {
+        self.root.join(".account-operations")
+    }
+
+    pub fn pending_logins(&self) -> PathBuf {
+        self.operations_root().join("pending-logins")
+    }
+
+    pub fn deletion_journal(&self) -> PathBuf {
+        self.operations_root().join("deletion-journal.json")
+    }
+
+    pub fn migration_journal(&self) -> PathBuf {
+        self.operations_root().join("migration-journal.json")
+    }
+
+    pub fn account(&self, account_id: &AccountId) -> AccountPaths {
+        AccountPaths {
+            root: self.accounts_root().join(account_id.as_str()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountPaths {
+    root: PathBuf,
+}
+
+impl AccountPaths {
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn manifest(&self) -> PathBuf {
+        self.root.join("account.json")
+    }
+
+    pub fn credentials(&self) -> PathBuf {
+        self.root.join("credentials.json")
+    }
+
+    pub fn player_target(&self) -> PathBuf {
+        self.root.join("player_target.json")
+    }
+
+    pub fn player_profile(&self) -> PathBuf {
+        self.root.join("player_profile.json")
+    }
+
+    pub fn database(&self) -> PathBuf {
+        self.root.join("owstats.sqlite3")
+    }
+
+    pub fn seasons(&self) -> PathBuf {
+        self.root.join("seasons")
+    }
+
+    pub fn diagnostics(&self) -> PathBuf {
+        self.root.join("diagnostics")
+    }
+
+    pub fn backups(&self) -> PathBuf {
+        self.root.join("backups")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
     root: PathBuf,

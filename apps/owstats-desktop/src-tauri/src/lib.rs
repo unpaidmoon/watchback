@@ -1,3 +1,4 @@
+pub mod account_store;
 mod analytics;
 pub mod app_paths;
 pub mod browser_session;
