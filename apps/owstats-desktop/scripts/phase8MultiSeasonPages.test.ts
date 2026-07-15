@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  buildReviewSeasonFallbackFromLatest,
   buildReviewSeasonFallbackParams,
   createLatestRequestGuard,
   hasReviewSeasonData,
@@ -40,11 +41,8 @@ assert.equal(shouldRequestReviewSeason(undefined, null), true, "review should di
 assert.equal(shouldRequestReviewSeason(23, null), true, "review should request an explicit season that is not loaded");
 assert.equal(shouldRequestReviewSeason(23, 23), false, "review should reuse the just-discovered season response");
 assert.equal(shouldRequestReviewSeason(22, 23), true, "review should request after changing to a different season");
-assert.match(
-  reviewSource,
-  /if \(typeof backendSeason === "number" && backendSeason > 0 && backendSeason !== selectedSeason\) \{\s*setSelectedSeason\(backendSeason\);\s*setParams\(current => buildReviewSeasonFallbackParams\(current, backendSeason\), \{ replace: true \}\);\s*\}/s,
-  "a backend season fallback should update the latest URL params without restoring a stale review tab",
-);
+assert.match(reviewSource, /const latestParamsRef = useRef\(params\);\s*latestParamsRef\.current = params;/, "review should keep a render-synchronous ref to the latest URL params");
+assert.match(reviewSource, /const nextParams = buildReviewSeasonFallbackFromLatest\(latestParamsRef, backendSeason\);\s*setParams\(nextParams, \{ replace: true \}\);/, "review fallback callback should build from the latest URL params");
 assert.match(
   reviewSource,
   /loadedReviewSeasonRef\.current = typeof backendSeason[\s\S]*?if \(typeof backendSeason[\s\S]*?setSelectedSeason\(backendSeason\)/,
@@ -63,6 +61,17 @@ assert.equal(fallbackReviewParams.get("season"), "23", "review fallback should w
 assert.equal(fallbackReviewParams.get("view"), "friends", "review fallback should preserve the latest selected tab");
 assert.equal(fallbackReviewParams.get("keep"), "1", "review fallback should preserve unrelated URL state");
 assert.equal(currentReviewParams.toString(), "season=999&view=friends&keep=1", "review fallback should not mutate the current URL params");
+
+const latestReviewParams = { current: new URLSearchParams("season=999&view=overview") };
+const fallbackReviewReady = deferred<void>();
+const pendingLatestFallback = fallbackReviewReady.promise.then(() => buildReviewSeasonFallbackFromLatest(latestReviewParams, 23));
+latestReviewParams.current = new URLSearchParams("season=999&view=friends&keep=1");
+fallbackReviewReady.resolve();
+const latestFallbackReviewParams = await pendingLatestFallback;
+assert.equal(latestFallbackReviewParams.get("season"), "23", "async review fallback should write the backend season");
+assert.equal(latestFallbackReviewParams.get("view"), "friends", "async review fallback should read the latest selected tab");
+assert.equal(latestFallbackReviewParams.get("keep"), "1", "async review fallback should read the latest unrelated URL state");
+assert.equal(latestReviewParams.current.toString(), "season=999&view=friends&keep=1", "async review fallback should not mutate the latest URL params");
 
 const coalescedReview = {} as PersonalSeasonReview;
 let coalescedReviewLoads = 0;
