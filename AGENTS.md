@@ -7,6 +7,14 @@
 - 开始工作前先执行 `git status --short`；工作树经常包含用户正在进行的改动，除非明确要求，不要清理、覆盖、暂存或提交它们。
 - 优先用 `rg` 定位代码。Tauri 问题从 `src-tauri/src/commands.rs` 进入，UI 问题从对应页面或组件进入。
 
+## Codebase Memory MCP
+
+- 进行架构分析、跨文件调用链追踪、变更影响分析或模块边界调查时，agent 应自主优先使用 `codebase-memory-mcp`，无需等待用户逐次指定。
+- 开始图谱查询前先运行 `index_status`；索引不存在或明显过期时，只允许索引当前项目根目录。
+- 架构调查优先使用 `get_architecture`、`search_graph`、`trace_path` 和 `detect_changes`；关键结论仍需用 `rg` 与源码读取复核。
+- 简单的精确文本查找继续优先使用 `rg`，不必为每个小修改调用代码图谱。
+- 不得索引项目根目录之外的路径，不得提交 `.codebase-memory/` 图谱产物，不得读取或输出凭据及真实隐私数据。
+
 ## 文档与产品准则
 
 按以下顺序读取与任务相关的材料：
