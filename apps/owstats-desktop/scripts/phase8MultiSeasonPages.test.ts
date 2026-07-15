@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   createLatestRequestGuard,
   hasReviewSeasonData,
+  parseReviewSeasonParam,
   requestPersonalSeasonReviewOnce,
   ReviewEmptyState,
   shouldRequestReviewSeason,
@@ -28,6 +29,9 @@ const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.
 const matchFiltersSource = readFileSync(new URL("../src/features/matches/matchFilters.ts", import.meta.url), "utf8");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
+assert.equal(reviewSource.includes("selectableSeasons"), false, "review page must not keep a fixed season list");
+assert.match(reviewSource, /review\?\.availableSeasons \?\? \[\]/, "review page should use backend-discovered seasons");
+assert.match(reviewSource, /seasons=\{availableSeasons\}/, "review page should bind the selector to backend-discovered seasons");
 assert.match(reviewSource, /requestPersonalSeasonReviewOnce\(selectedSeason/, "review page should request personal review with selectedSeason");
 assert.match(reviewSource, /getSeasonAnalysis\(selectedSeason/, "review page should request season analysis with the same selectedSeason");
 assert.match(reviewSource, /const titleSeason = selectedSeason \?\? review\.summary\.season/, "review title should use selectedSeason before backend summary season");
@@ -37,6 +41,12 @@ assert.equal(shouldRequestReviewSeason(23, 23), false, "review should reuse the 
 assert.equal(shouldRequestReviewSeason(22, 23), true, "review should request after changing to a different season");
 assert.match(reviewSource, /nextParams\.set\("season", String\(backendSeason\)\)/, "a discovered review season should be written to the URL");
 assert.match(reviewSource, /setParams\(nextParams, \{ replace: true \}\)/, "discovered review season should replace the incomplete URL");
+assert.match(reviewSource, /backendSeason !== selectedSeason/, "a backend season fallback should synchronize review state and URL");
+assert.equal(parseReviewSeasonParam("15"), 15, "review page should accept an older locally available URL season");
+assert.equal(parseReviewSeasonParam("20"), 20, "review page should accept a positive URL season");
+assert.equal(parseReviewSeasonParam("0"), undefined, "review page should reject a zero URL season");
+assert.equal(parseReviewSeasonParam("-1"), undefined, "review page should reject a negative URL season");
+assert.equal(parseReviewSeasonParam("15.5"), undefined, "review page should reject a fractional URL season");
 
 const coalescedReview = {} as PersonalSeasonReview;
 let coalescedReviewLoads = 0;

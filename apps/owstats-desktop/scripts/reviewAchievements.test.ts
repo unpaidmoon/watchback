@@ -12,6 +12,7 @@ const evidence: EvidenceLink = {
 };
 
 const review: PersonalSeasonReview = {
+  availableSeasons: [23, 20, 15],
   summary: {
     season: 22,
     totalMatches: 60,

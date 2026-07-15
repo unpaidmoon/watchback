@@ -267,6 +267,7 @@ const fixtureEvidence = {
 };
 
 export const fixtureReview = {
+  availableSeasons: [23, 22, 21],
   summary: {
     season: 23,
     totalMatches: 18,
@@ -536,6 +537,7 @@ export const fixtureCommandCenter = {
 } as const;
 
 export const fixtureEmptyReview = {
+  availableSeasons: [],
   summary: {
     season: null,
     totalMatches: 0,

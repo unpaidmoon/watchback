@@ -480,6 +480,7 @@ export type MapAdaptability = {
 };
 
 export type PersonalSeasonReview = {
+  availableSeasons: number[];
   summary: ReviewSummary;
   baseline: SeasonBaseline;
   roleSummaries: RoleRankSummary[];

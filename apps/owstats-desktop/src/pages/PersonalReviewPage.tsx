@@ -34,7 +34,6 @@ type ReviewAchievement = {
 type AchievementKey = "win-streak" | "win-rate" | "s-grade" | "carry" | "signature" | "peak" | "hero-focus" | "switching";
 
 const romanLevels = ["I", "II", "III"] as const;
-const selectableSeasons = [23, 22, 21] as const;
 const reviewViewLabels: Record<ReviewView, string> = {
   overview: "概览",
   friends: "队友协作",
@@ -102,7 +101,7 @@ export function ReviewEmptyState({ onAction = () => undefined }: { onAction?: ()
 export function PersonalReviewPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const requestedSeason = parseSeasonParam(params.get("season"));
+  const requestedSeason = parseReviewSeasonParam(params.get("season"));
   const view = parseReviewView(params.get("view"));
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [review, setReview] = useState<PersonalSeasonReview | null>(null);
@@ -114,6 +113,7 @@ export function PersonalReviewPage() {
   const reviewRequestGuard = useRef(createLatestRequestGuard());
   const analysisRequestGuard = useRef(createLatestRequestGuard());
   const loadedReviewSeasonRef = useRef<number | null>(null);
+  const availableSeasons = review?.availableSeasons ?? [];
 
   useEffect(() => {
     if (params.get("view") === view) return;
@@ -146,7 +146,7 @@ export function PersonalReviewPage() {
         setReview(nextReview);
         const backendSeason = nextReview.summary.season;
         loadedReviewSeasonRef.current = typeof backendSeason === "number" && backendSeason > 0 ? backendSeason : null;
-        if (selectedSeason === undefined && typeof backendSeason === "number" && backendSeason > 0) {
+        if (typeof backendSeason === "number" && backendSeason > 0 && backendSeason !== selectedSeason) {
           setSelectedSeason(backendSeason);
           const nextParams = new URLSearchParams(params);
           nextParams.set("season", String(backendSeason));
@@ -212,7 +212,8 @@ export function PersonalReviewPage() {
         actions={
           <PageSeasonSelect
             value={selectedSeason}
-            seasons={selectableSeasons}
+            seasons={availableSeasons}
+            disabled={availableSeasons.length === 0}
             onChange={(season) => {
               if (season !== undefined) changeSeason(season);
             }}
@@ -403,10 +404,10 @@ function RoleAndHeroView({ review }: { review: PersonalSeasonReview }) {
   );
 }
 
-function parseSeasonParam(value: string | null) {
+export function parseReviewSeasonParam(value: string | null) {
   if (!value) return undefined;
   const season = Number(value);
-  return Number.isFinite(season) ? season : undefined;
+  return Number.isInteger(season) && season > 0 ? season : undefined;
 }
 
 function RoleRankCard({ role, arena = false }: { role: RoleRankSummary; arena?: boolean }) {
