@@ -2,7 +2,7 @@ use crate::account_store::{read_registry, write_registry_atomic, AccountId, Acco
 use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::models::AccountSummary;
 use anyhow::{anyhow, Context, Result};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 const NO_ACTIVE_ACCOUNT_MESSAGE: &str = "尚未添加可用账号，请先在指挥台添加账号。";
 
@@ -11,6 +11,7 @@ pub struct AccountContextManager {
     shared: SharedAppPaths,
     registry: Arc<RwLock<AccountRegistry>>,
     recovery_failed: Arc<RwLock<bool>>,
+    migration_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,8 +22,10 @@ pub struct AccountContextSnapshot {
 
 impl AccountContextManager {
     pub fn load(shared: SharedAppPaths) -> Result<Self> {
-        let recovery_failed =
-            crate::account_migration::recover_interrupted_migration(&shared).is_err();
+        let eligibility_failed =
+            crate::account_migration::prepare_legacy_eligibility(&shared).is_err();
+        let recovery_failed = eligibility_failed
+            || crate::account_migration::recover_interrupted_migration(&shared).is_err();
         let registry_path = shared.registry();
         let registry = if registry_path.try_exists().context("无法检查账号索引")? {
             read_registry(&registry_path).context("无法读取账号索引")?
@@ -34,6 +37,7 @@ impl AccountContextManager {
             shared,
             registry: Arc::new(RwLock::new(registry)),
             recovery_failed: Arc::new(RwLock::new(recovery_failed)),
+            migration_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -85,6 +89,10 @@ impl AccountContextManager {
     }
 
     pub fn migration_state(&self) -> Result<crate::account_migration::LegacyMigrationState> {
+        let _migration = self
+            .migration_lock
+            .lock()
+            .map_err(|_| anyhow!("旧数据迁移操作暂不可用，请重试。"))?;
         let mut recovery_failed = self
             .recovery_failed
             .write()
@@ -103,6 +111,10 @@ impl AccountContextManager {
     }
 
     pub fn adopt_legacy(&self, account: &AccountContextSnapshot) -> Result<()> {
+        let _migration = self
+            .migration_lock
+            .lock()
+            .map_err(|_| anyhow!("旧数据迁移操作暂不可用，请重试。"))?;
         let result = crate::account_migration::adopt_legacy_account(&self.shared, account);
         let journal_remains = match std::fs::symlink_metadata(self.shared.migration_journal()) {
             Ok(_) => true,

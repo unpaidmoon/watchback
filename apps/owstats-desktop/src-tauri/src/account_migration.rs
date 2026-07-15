@@ -3,14 +3,48 @@ use crate::account_store::{read_manifest, read_registry, AccountId};
 use crate::app_paths::{AccountPaths, SharedAppPaths};
 use anyhow::{anyhow, bail, Result};
 use chrono::Utc;
-use rusqlite::Connection;
+use rusqlite::{Connection, DatabaseName, OpenFlags};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const MIGRATION_VERSION: u32 = 1;
+const ELIGIBILITY_VERSION: u32 = 1;
+const CONTENT_MANIFEST_VERSION: u32 = 1;
+const CONTENT_MANIFEST_FILE: &str = ".migration-content.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyMigrationEligibility {
+    pub version: u32,
+    pub eligible: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct MigrationContentManifest {
+    version: u32,
+    entries: Vec<MigrationContentEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct MigrationContentEntry {
+    relative_path: String,
+    kind: MigrationContentKind,
+    size: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum MigrationContentKind {
+    File,
+    Directory,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -51,18 +85,49 @@ pub fn detect_legacy_state(shared: &SharedAppPaths) -> Result<LegacyMigrationSta
             Err(_) => Ok(LegacyMigrationState::RecoveryError),
         };
     }
-    if legacy_sources_exist(shared)? {
-        Ok(LegacyMigrationState::WaitingForAccount)
-    } else {
-        Ok(LegacyMigrationState::None)
+    if !path_entry_exists(&shared.migration_eligibility())? {
+        return Ok(LegacyMigrationState::None);
     }
+    if read_eligibility(shared).is_err() {
+        return Ok(LegacyMigrationState::RecoveryError);
+    }
+    Ok(if legacy_sources_exist(shared)? {
+        LegacyMigrationState::WaitingForAccount
+    } else {
+        LegacyMigrationState::None
+    })
 }
 
-pub fn adopt_legacy_account(
+pub(crate) fn prepare_legacy_eligibility(shared: &SharedAppPaths) -> Result<()> {
+    if path_entry_exists(&shared.registry())? {
+        return Ok(());
+    }
+    if path_entry_exists(&shared.migration_eligibility())? {
+        read_eligibility(shared)?;
+        return Ok(());
+    }
+    if path_entry_exists(&shared.migration_journal())? || !legacy_sources_exist(shared)? {
+        return Ok(());
+    }
+    write_eligibility(
+        shared,
+        &LegacyMigrationEligibility {
+            version: ELIGIBILITY_VERSION,
+            eligible: true,
+            created_at: Utc::now().to_rfc3339(),
+        },
+    )
+}
+
+pub(crate) fn adopt_legacy_account(
     shared: &SharedAppPaths,
     account: &AccountContextSnapshot,
 ) -> Result<()> {
     validate_confirmed_account(shared, account.account_id(), account.paths())?;
+
+    if !path_entry_exists(&shared.migration_journal())? {
+        read_eligibility(shared).map_err(|_| anyhow!("旧数据不具备迁移资格，源数据保持不变"))?;
+    }
 
     if path_entry_exists(&shared.migration_journal())? {
         let journal = read_journal(shared)?;
@@ -94,18 +159,21 @@ pub fn adopt_legacy_account(
 
     set_phase(shared, &mut journal, MigrationPhase::Validating)?;
     validate_staging_database(&staging)?;
+    write_staging_content_manifest(&staging)?;
 
     set_phase(shared, &mut journal, MigrationPhase::Publishing)?;
     publish_staging(&staging, account.paths())?;
     validate_published_account(shared, account.account_id(), account.paths())?;
+    validate_published_content_manifest(&staging, account.paths().root())?;
 
     set_phase(shared, &mut journal, MigrationPhase::CleaningLegacy)?;
+    validate_published_content_manifest(&staging, account.paths().root())?;
     clean_legacy_sources(shared)?;
     remove_staging_if_present(&staging)?;
     set_phase(shared, &mut journal, MigrationPhase::Complete)
 }
 
-pub fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
+pub(crate) fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
     if !path_entry_exists(&shared.migration_journal())? {
         return Ok(());
     }
@@ -123,9 +191,12 @@ pub fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
             let paths = shared.account(&journal.account_id);
             validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
             validate_staging_database(&staging)?;
+            validate_staging_content_manifest(&staging)?;
             publish_staging(&staging, &paths)?;
             validate_published_account(shared, &journal.account_id, &paths)?;
+            validate_published_content_manifest(&staging, paths.root())?;
             set_phase(shared, &mut journal, MigrationPhase::CleaningLegacy)?;
+            validate_published_content_manifest(&staging, paths.root())?;
             clean_legacy_sources(shared)?;
             remove_staging_if_present(&staging)?;
             set_phase(shared, &mut journal, MigrationPhase::Complete)
@@ -134,6 +205,7 @@ pub fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
             let paths = shared.account(&journal.account_id);
             validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
             validate_published_account(shared, &journal.account_id, &paths)?;
+            validate_published_content_manifest(&staging, paths.root())?;
             clean_legacy_sources(shared)?;
             remove_staging_if_present(&staging)?;
             set_phase(shared, &mut journal, MigrationPhase::Complete)
@@ -227,8 +299,10 @@ fn read_complete_credential_role(path: &Path) -> Result<i64> {
 }
 
 fn copy_legacy_to_staging(shared: &SharedAppPaths, staging: &Path) -> Result<()> {
+    if path_entry_exists(&shared.legacy_database())? {
+        backup_legacy_database(&shared.legacy_database(), &staging.join("owstats.sqlite3"))?;
+    }
     let mappings = [
-        (shared.legacy_database(), staging.join("owstats.sqlite3")),
         (
             shared.legacy_player_target(),
             staging.join("player_target.json"),
@@ -247,6 +321,28 @@ fn copy_legacy_to_staging(shared: &SharedAppPaths, staging: &Path) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn backup_legacy_database(source: &Path, destination: &Path) -> Result<()> {
+    require_safe_regular_file(source)?;
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|_| anyhow!("无法创建数据库迁移暂存目录"))?;
+    }
+    let result = (|| -> Result<()> {
+        let connection = Connection::open_with_flags(
+            source,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|_| anyhow!("无法打开旧数据库，源数据保持不变"))?;
+        connection
+            .backup(DatabaseName::Main, destination, None)
+            .map_err(|_| anyhow!("无法创建旧数据库一致性快照，源数据保持不变"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(destination);
+    }
+    result
 }
 
 fn validate_staging_database(staging: &Path) -> Result<()> {
@@ -273,6 +369,146 @@ fn validate_staging_database(staging: &Path) -> Result<()> {
         })
         .map_err(|_| anyhow!("旧数据库校验失败，源数据保持不变"))?;
     Ok(())
+}
+
+fn write_staging_content_manifest(staging: &Path) -> Result<()> {
+    let manifest = collect_staging_content_manifest(staging)?;
+    let bytes =
+        serde_json::to_vec_pretty(&manifest).map_err(|_| anyhow!("无法编码迁移内容清单"))?;
+    write_atomic(&staging.join(CONTENT_MANIFEST_FILE), &bytes)
+}
+
+fn validate_staging_content_manifest(staging: &Path) -> Result<MigrationContentManifest> {
+    let path = staging.join(CONTENT_MANIFEST_FILE);
+    require_safe_regular_file(&path)?;
+    let bytes = fs::read(&path).map_err(|_| anyhow!("无法读取迁移内容清单"))?;
+    let manifest: MigrationContentManifest =
+        serde_json::from_slice(&bytes).map_err(|_| anyhow!("迁移内容清单损坏，源数据保持不变"))?;
+    validate_content_manifest_shape(&manifest)?;
+    if manifest != collect_staging_content_manifest(staging)? {
+        bail!("迁移暂存内容与清单不一致，源数据保持不变")
+    }
+    Ok(manifest)
+}
+
+fn validate_published_content_manifest(staging: &Path, published_root: &Path) -> Result<()> {
+    require_safe_directory(published_root)?;
+    let manifest = validate_staging_content_manifest(staging)?;
+    for entry in &manifest.entries {
+        let relative = validated_relative_path(&entry.relative_path)?;
+        let source = staging.join(&relative);
+        let destination = published_root.join(&relative);
+        let destination_metadata = safe_destination_metadata(&destination)?
+            .ok_or_else(|| anyhow!("账号数据发布不完整，旧数据保持不变"))?;
+        match entry.kind {
+            MigrationContentKind::Directory if destination_metadata.is_dir() => {}
+            MigrationContentKind::File if destination_metadata.is_file() => {
+                if destination_metadata.len() != entry.size
+                    || fs::read(&source).map_err(|_| anyhow!("无法校验迁移暂存数据"))?
+                        != fs::read(&destination).map_err(|_| anyhow!("无法校验已发布账号数据"))?
+                {
+                    bail!("账号数据发布内容不一致，旧数据保持不变")
+                }
+            }
+            _ => bail!("账号数据发布类型不一致，旧数据保持不变"),
+        }
+    }
+    Ok(())
+}
+
+fn collect_staging_content_manifest(staging: &Path) -> Result<MigrationContentManifest> {
+    require_safe_directory(staging)?;
+    let mut entries = Vec::new();
+    for relative in [
+        "player_target.json",
+        "player_profile.json",
+        "seasons",
+        "diagnostics",
+        "backups",
+    ] {
+        let path = staging.join(relative);
+        if path_entry_exists(&path)? {
+            collect_content_entry(staging, &path, &mut entries)?;
+        }
+    }
+    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(MigrationContentManifest {
+        version: CONTENT_MANIFEST_VERSION,
+        entries,
+    })
+}
+
+fn collect_content_entry(
+    root: &Path,
+    path: &Path,
+    entries: &mut Vec<MigrationContentEntry>,
+) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| anyhow!("无法读取迁移暂存内容"))?;
+    reject_metadata(&metadata)?;
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| anyhow!("迁移内容路径无效"))?;
+    let relative_path = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    let kind = if metadata.is_dir() {
+        MigrationContentKind::Directory
+    } else if metadata.is_file() {
+        MigrationContentKind::File
+    } else {
+        bail!("迁移内容包含不支持的文件类型")
+    };
+    entries.push(MigrationContentEntry {
+        relative_path,
+        kind,
+        size: if metadata.is_file() {
+            metadata.len()
+        } else {
+            0
+        },
+    });
+    if metadata.is_dir() {
+        for child in fs::read_dir(path).map_err(|_| anyhow!("无法读取迁移暂存目录"))? {
+            collect_content_entry(
+                root,
+                &child.map_err(|_| anyhow!("无法读取迁移暂存目录"))?.path(),
+                entries,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_content_manifest_shape(manifest: &MigrationContentManifest) -> Result<()> {
+    if manifest.version != CONTENT_MANIFEST_VERSION {
+        bail!("迁移内容清单版本不受支持")
+    }
+    let mut paths = HashSet::new();
+    for entry in &manifest.entries {
+        validated_relative_path(&entry.relative_path)?;
+        if !paths.insert(&entry.relative_path) {
+            bail!("迁移内容清单包含重复路径")
+        }
+        if entry.kind == MigrationContentKind::Directory && entry.size != 0 {
+            bail!("迁移内容清单目录大小无效")
+        }
+    }
+    Ok(())
+}
+
+fn validated_relative_path(value: &str) -> Result<PathBuf> {
+    let path = PathBuf::from(value);
+    if value.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        bail!("迁移内容清单路径无效")
+    }
+    Ok(path)
 }
 
 fn publish_staging(staging: &Path, account: &AccountPaths) -> Result<()> {
@@ -326,7 +562,7 @@ fn validate_published_account(
 }
 
 fn clean_legacy_sources(shared: &SharedAppPaths) -> Result<()> {
-    for path in legacy_sources(shared) {
+    for path in legacy_cleanup_paths(shared) {
         if !path_entry_exists(&path)? {
             continue;
         }
@@ -350,6 +586,13 @@ fn legacy_sources(shared: &SharedAppPaths) -> Vec<PathBuf> {
         shared.legacy_diagnostics(),
         shared.legacy_backups(),
     ]
+}
+
+fn legacy_cleanup_paths(shared: &SharedAppPaths) -> Vec<PathBuf> {
+    let mut paths = legacy_sources(shared);
+    paths.push(shared.legacy_database_wal());
+    paths.push(shared.legacy_database_shm());
+    paths
 }
 
 fn legacy_sources_exist(shared: &SharedAppPaths) -> Result<bool> {
@@ -384,6 +627,30 @@ fn set_phase(
     write_journal(shared, journal)
 }
 
+fn read_eligibility(shared: &SharedAppPaths) -> Result<LegacyMigrationEligibility> {
+    require_safe_regular_file(&shared.migration_eligibility())?;
+    let bytes =
+        fs::read(shared.migration_eligibility()).map_err(|_| anyhow!("无法读取旧数据迁移资格"))?;
+    let eligibility: LegacyMigrationEligibility = serde_json::from_slice(&bytes)
+        .map_err(|_| anyhow!("旧数据迁移资格损坏，请保留数据并联系支持"))?;
+    if eligibility.version != ELIGIBILITY_VERSION || !eligibility.eligible {
+        bail!("旧数据迁移资格无效，请保留数据并联系支持")
+    }
+    Ok(eligibility)
+}
+
+fn write_eligibility(
+    shared: &SharedAppPaths,
+    eligibility: &LegacyMigrationEligibility,
+) -> Result<()> {
+    if eligibility.version != ELIGIBILITY_VERSION || !eligibility.eligible {
+        bail!("旧数据迁移资格版本无效")
+    }
+    let bytes =
+        serde_json::to_vec_pretty(eligibility).map_err(|_| anyhow!("无法保存旧数据迁移资格"))?;
+    write_atomic(&shared.migration_eligibility(), &bytes)
+}
+
 fn read_journal(shared: &SharedAppPaths) -> Result<MigrationJournal> {
     require_safe_regular_file(&shared.migration_journal())?;
     let bytes =
@@ -413,7 +680,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
     fs::create_dir_all(parent).map_err(|_| anyhow!("无法创建迁移状态目录"))?;
-    let temporary = parent.join(format!(".migration-journal-{}.tmp", Uuid::new_v4()));
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| anyhow!("迁移状态文件名无效"))?;
+    let temporary = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
     let result = (|| -> Result<()> {
         let mut file =
             fs::File::create(&temporary).map_err(|_| anyhow!("无法创建迁移状态临时文件"))?;
@@ -638,6 +909,31 @@ mod tests {
     }
 
     #[test]
+    fn eligibility_marker_is_versioned_camel_case_atomic_and_identity_free() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        fs::write(shared.legacy_player_profile(), b"synthetic-profile").unwrap();
+
+        prepare_legacy_eligibility(&shared).unwrap();
+
+        let eligibility = read_eligibility(&shared).unwrap();
+        assert_eq!(eligibility.version, 1);
+        assert!(eligibility.eligible);
+        let encoded = fs::read_to_string(shared.migration_eligibility()).unwrap();
+        assert!(encoded.contains("\"createdAt\""));
+        for forbidden in ["accountId", "roleId", "role_id", "token", "credential"] {
+            assert!(!encoded.contains(forbidden));
+        }
+        assert!(fs::read_dir(shared.operations_root())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
+    }
+
+    #[test]
     fn publish_file_conflict_matrix_never_overwrites_existing_data() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
@@ -700,6 +996,25 @@ mod tests {
             return;
         }
         assert!(copy_path_checked(&linked, &temp.path().join("copy")).is_err());
+    }
+
+    #[test]
+    fn partial_publish_manifest_blocks_cleanup_until_every_file_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging = temp.path().join("staging");
+        let published = temp.path().join("published");
+        fs::create_dir_all(staging.join("seasons")).unwrap();
+        fs::write(staging.join("player_profile.json"), b"profile").unwrap();
+        fs::write(staging.join("seasons/22.json"), b"season").unwrap();
+        fs::create_dir_all(&published).unwrap();
+        fs::write(published.join("player_profile.json"), b"profile").unwrap();
+
+        write_staging_content_manifest(&staging).unwrap();
+
+        assert!(validate_published_content_manifest(&staging, &published).is_err());
+        fs::create_dir_all(published.join("seasons")).unwrap();
+        fs::write(published.join("seasons/22.json"), b"season").unwrap();
+        validate_published_content_manifest(&staging, &published).unwrap();
     }
 
     #[cfg(windows)]

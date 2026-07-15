@@ -32,6 +32,14 @@ impl SharedAppPaths {
         self.root.join("owstats.sqlite3")
     }
 
+    pub fn legacy_database_wal(&self) -> PathBuf {
+        self.root.join("owstats.sqlite3-wal")
+    }
+
+    pub fn legacy_database_shm(&self) -> PathBuf {
+        self.root.join("owstats.sqlite3-shm")
+    }
+
     pub fn legacy_credentials(&self) -> PathBuf {
         self.root.join(".dashen_credentials.json")
     }
@@ -82,6 +90,10 @@ impl SharedAppPaths {
 
     pub fn migration_journal(&self) -> PathBuf {
         self.operations_root().join("migration-journal.json")
+    }
+
+    pub fn migration_eligibility(&self) -> PathBuf {
+        self.operations_root().join("migration-eligibility.json")
     }
 
     pub fn account(&self, account_id: &AccountId) -> AccountPaths {
