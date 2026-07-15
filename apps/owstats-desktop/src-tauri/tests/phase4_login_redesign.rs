@@ -139,10 +139,10 @@ fn battletag_extraction_reads_only_the_first_token_after_the_colon() {
 fn battletag_candidates_accept_split_dom_values_and_deduplicate() {
     assert_eq!(
         extract_battle_tag_candidates(
-            &["风偏偏呢#5479".to_string(), " 风偏偏呢#5479 ".to_string(),],
+            &["Tester#5479".to_string(), " Tester#5479 ".to_string(),],
             false,
         ),
-        BattleTagExtraction::Found("风偏偏呢#5479".to_string())
+        BattleTagExtraction::Found("Tester#5479".to_string())
     );
 }
 
