@@ -196,7 +196,7 @@ pub fn build_collect_candidates_script() -> String {
       if (labelIndex < 0) continue;
       let evidence = text.slice(labelIndex + '战网昵称'.length);
       for (let lookahead = 1; lookahead <= 4; lookahead += 1) {
-        const match = evidence.match(/^\s*[:：]\s*([^\s#]+#[0-9]+)/);
+        const match = evidence.match(/^\s*[:：]\s*([^\s#]+#[0-9]+)(?![0-9A-Za-z#])/);
         if (match) {
           add(battleTagGroup, match[1], MAX_BATTLETAG_CANDIDATES);
           break;

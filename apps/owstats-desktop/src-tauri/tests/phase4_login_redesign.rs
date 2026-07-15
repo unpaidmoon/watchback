@@ -190,6 +190,7 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     assert!(script.contains("createTreeWalker"));
     assert!(script.contains("NodeFilter.SHOW_TEXT"));
     assert!(script.contains("战网昵称"));
+    assert!(script.contains("(?![0-9A-Za-z#])"));
     assert!(script.contains("iframe.contentDocument"));
     assert!(script.contains("roleCandidates:"));
     assert!(script.contains("current:"));
