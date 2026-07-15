@@ -83,10 +83,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
         [],
     )
     .unwrap();
-    for (guid, name) in [
-        ("synthetic-self-hero", "当前英雄"),
-        ("synthetic-friend-hero", "   "),
-    ] {
+    for (guid, name) in [("synthetic-self-hero", "当前英雄")] {
         conn.execute(
             "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
             params![guid, name],
@@ -117,9 +114,9 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
         ),
         (
             "20260716",
-            "合成好友",
+            "可信好友",
             "synthetic-friend-hero",
-            "未知英雄",
+            "可信英雄",
             0,
             1,
             100,
@@ -172,8 +169,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
             "payload": {
                 "data": {
                     "nameMap": {
-                        "synthetic-self": "当前玩家",
-                        "20260716": "合成好友"
+                        "synthetic-self": "当前玩家"
                     },
                     "totalCount": {
                         "teammateList": [
@@ -191,7 +187,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
                         {
                             "teammateList": [
                                 {"bnetId": "synthetic-self", "heroGuid": "synthetic-self-hero", "friendBnetIds": [friend_id]},
-                                {"bnetId": friend_bnet_id, "name": "合成好友", "heroGuid": "synthetic-friend-hero", "kill": 10, "assist": 5, "death": 2, "heroDamage": 5000, "cure": 1000, "resistDamage": 70, "damageTaken": 200, "healingTaken": 40}
+                                {"bnetId": friend_bnet_id, "heroGuid": "synthetic-friend-hero", "kill": 10, "assist": 5, "death": 2, "heroDamage": 5000, "cure": 1000, "resistDamage": 70, "damageTaken": 200, "healingTaken": 40}
                             ]
                         },
                         {"teammateList": []}
@@ -220,11 +216,12 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     let friend = analytics
         .common_friend_heroes
         .iter()
-        .find(|item| item.name == "合成好友")
+        .find(|item| item.bnet_id == "20260716")
         .unwrap();
+    assert_eq!(friend.name, "可信好友");
     assert_eq!(friend.matches, 5);
     assert_eq!(friend.intimacy_score, 25);
-    assert_eq!(friend.representative_hero_name, "未知英雄");
+    assert_eq!(friend.representative_hero_name, "可信英雄");
 
     let front_pressure = analytics
         .boards
@@ -234,8 +231,9 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     let model_entry = front_pressure
         .friends
         .iter()
-        .find(|item| item.name == "合成好友")
+        .find(|item| item.bnet_id == "20260716")
         .unwrap();
+    assert_eq!(model_entry.name, "可信好友");
     assert_eq!(model_entry.same_team_matches, 5);
     assert_eq!(model_entry.avg_damage_taken, 180.0);
     assert_eq!(model_entry.avg_mitigation, 66.0);
@@ -324,4 +322,83 @@ fn arena_identity_fallback_prefers_latest_projection_update() {
     .unwrap();
 
     assert_eq!(analytics.summary.friend_rows, 1);
+}
+
+#[test]
+fn arena_private_id_shaped_names_use_unknown_friend_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-private-name.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('synthetic-self', 'synthetic-self', '当前玩家', '{}', '2026-07-16T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+
+    let private_names = [
+        "0123456789abcdef0123456789abcdef",
+        "01234567-89ab-cdef-0123-456789abcdef",
+        "0123456789abcdef0123456789abcdef",
+    ];
+    for (index, private_name) in private_names.into_iter().enumerate() {
+        let match_id = format!("synthetic-private-arena-{index}");
+        seed_match(&db, &match_id, 23, "stadium", "SportFight");
+        let detail = json!({
+            "payload": {
+                "data": {
+                    "roundCountList": [{
+                        "teammateList": [
+                            {
+                                "bnetId": "synthetic-self",
+                                "heroGuid": "synthetic-self-hero",
+                                "friendBnetIds": ["synthetic-private-friend"]
+                            },
+                            {
+                                "bnetId": "synthetic-private-friend",
+                                "name": private_name,
+                                "heroGuid": "synthetic-friend-hero"
+                            }
+                        ]
+                    }]
+                }
+            }
+        });
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES (?1, 'fight', ?2, '2026-07-16T00:00:00Z')",
+            params![match_id, detail.to_string()],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(23),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+
+    let friend = analytics
+        .common_friend_heroes
+        .iter()
+        .find(|item| item.bnet_id == "synthetic-private-friend")
+        .unwrap();
+    assert_eq!(friend.name, "未知好友");
+    for visible_name in analytics
+        .common_friend_heroes
+        .iter()
+        .map(|item| item.name.as_str())
+        .chain(
+            analytics
+                .boards
+                .iter()
+                .flat_map(|board| board.friends.iter())
+                .map(|item| item.name.as_str()),
+        )
+    {
+        assert!(!private_names.contains(&visible_name));
+    }
 }

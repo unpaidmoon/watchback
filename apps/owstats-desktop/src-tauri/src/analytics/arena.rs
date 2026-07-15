@@ -267,10 +267,18 @@ fn safe_player_name(
 ) -> String {
     scalar_field(player, "name")
         .or_else(|| name_map.get(bnet_id).and_then(scalar_value))
-        .filter(|name| name != bnet_id && !looks_like_long_numeric_id(name))
+        .filter(|name| name != bnet_id && !looks_like_private_id(name))
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn looks_like_long_numeric_id(value: &str) -> bool {
-    value.len() >= 4 && value.chars().all(|item| item.is_ascii_digit())
+pub(super) fn looks_like_private_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().all(|item| item.is_ascii_digit()) {
+        return !trimmed.is_empty();
+    }
+    let compact = trimmed
+        .chars()
+        .filter(|item| *item != '-')
+        .collect::<String>();
+    compact.len() == 32 && compact.chars().all(|item| item.is_ascii_hexdigit())
 }

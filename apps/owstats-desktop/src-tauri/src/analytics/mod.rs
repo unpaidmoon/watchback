@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 mod arena;
 mod boards;
-use arena::arena_analytics_rows;
+use arena::{arena_analytics_rows, looks_like_private_id};
 use boards::build_boards;
 
 const MIN_SAMPLE: i64 = 5;
@@ -53,6 +53,8 @@ pub(super) struct FriendAggregate {
     pub(super) mitigation: i64,
     pub(super) damage_taken: i64,
     pub(super) healing_taken: i64,
+    name_begin_ts: i64,
+    name_match_id: String,
 }
 
 impl FriendAggregate {
@@ -418,6 +420,8 @@ fn common_friend_heroes(
     #[derive(Default)]
     struct FriendState {
         name: String,
+        name_begin_ts: i64,
+        name_match_id: String,
         matches: i64,
         wins: i64,
         latest_begin_ts: i64,
@@ -426,6 +430,8 @@ fn common_friend_heroes(
     #[derive(Default)]
     struct HeroState {
         name: String,
+        name_begin_ts: i64,
+        name_match_id: String,
         matches: i64,
         latest_begin_ts: i64,
     }
@@ -433,12 +439,30 @@ fn common_friend_heroes(
     let mut by_friend = HashMap::<String, FriendState>::new();
     for row in rows {
         let friend = by_friend.entry(row.bnet_id.clone()).or_default();
-        friend.name = row.name.clone();
+        update_preferred_name(
+            &mut friend.name,
+            &mut friend.name_begin_ts,
+            &mut friend.name_match_id,
+            &row.name,
+            row.begin_ts,
+            &row.match_id,
+            &row.bnet_id,
+            "未知好友",
+        );
         friend.matches += 1;
         friend.wins += if row.result == "win" { 1 } else { 0 };
         friend.latest_begin_ts = friend.latest_begin_ts.max(row.begin_ts);
         let hero = friend.heroes.entry(row.hero_guid.clone()).or_default();
-        hero.name = row.hero_name.clone();
+        update_preferred_name(
+            &mut hero.name,
+            &mut hero.name_begin_ts,
+            &mut hero.name_match_id,
+            &row.hero_name,
+            row.begin_ts,
+            &row.match_id,
+            &row.hero_guid,
+            "未知英雄",
+        );
         hero.matches += 1;
         hero.latest_begin_ts = hero.latest_begin_ts.max(row.begin_ts);
     }
@@ -716,8 +740,19 @@ fn aggregate_rows(rows: &[FriendMatchRow]) -> Vec<FriendAggregate> {
                 mitigation: 0,
                 damage_taken: 0,
                 healing_taken: 0,
+                name_begin_ts: i64::MIN,
+                name_match_id: String::new(),
             });
-        item.name = row.name.clone();
+        update_preferred_name(
+            &mut item.name,
+            &mut item.name_begin_ts,
+            &mut item.name_match_id,
+            &row.name,
+            row.begin_ts,
+            &row.match_id,
+            &row.bnet_id,
+            "未知好友",
+        );
         item.same_team_matches += 1;
         item.wins += if row.result == "win" { 1 } else { 0 };
         item.kills += row.kills;
@@ -732,6 +767,60 @@ fn aggregate_rows(rows: &[FriendMatchRow]) -> Vec<FriendAggregate> {
     let mut values = by_friend.into_values().collect::<Vec<_>>();
     values.sort_by(|a, b| a.name.cmp(&b.name));
     values
+}
+
+fn update_preferred_name(
+    current: &mut String,
+    current_begin_ts: &mut i64,
+    current_match_id: &mut String,
+    candidate: &str,
+    candidate_begin_ts: i64,
+    candidate_match_id: &str,
+    identity: &str,
+    fallback: &str,
+) {
+    let candidate = candidate.trim();
+    let candidate_quality = display_name_quality(candidate, identity, fallback);
+    let current_quality = display_name_quality(current, identity, fallback);
+    let candidate_is_newer = (candidate_begin_ts, candidate_match_id, candidate)
+        > (
+            *current_begin_ts,
+            current_match_id.as_str(),
+            current.as_str(),
+        );
+    if candidate_quality > current_quality
+        || (candidate_quality == current_quality && candidate_is_newer)
+    {
+        *current = if candidate_quality > 0 {
+            candidate.to_string()
+        } else {
+            fallback.to_string()
+        };
+        *current_begin_ts = candidate_begin_ts;
+        *current_match_id = candidate_match_id.to_string();
+    } else if current.is_empty() || current_quality == 0 {
+        *current = fallback.to_string();
+    }
+}
+
+fn display_name_quality(value: &str, identity: &str, fallback: &str) -> u8 {
+    let value = value.trim();
+    let trusted = !value.is_empty()
+        && value != identity
+        && value != fallback
+        && !matches!(value, "未知玩家" | "未知好友" | "未知英雄")
+        && !looks_like_private_id(value);
+    if trusted {
+        2
+    } else if fallback == "未知英雄"
+        && value == identity
+        && !value.is_empty()
+        && !looks_like_private_id(value)
+    {
+        1
+    } else {
+        0
+    }
 }
 
 fn compute_intimacy_scores(rows: &[FriendMatchRow]) -> HashMap<String, i64> {
