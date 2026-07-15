@@ -8,6 +8,7 @@ import {
 } from "../src/shared/phase6Shell.ts";
 import { checkAppUpdate, getPlayerProfile, getUserSettings, logout, saveUserSettings } from "../src/shared/api.ts";
 import { formatCompactTimestamp, seasonSyncGateCopy } from "../src/features/command-center/SeasonHealthPanel.tsx";
+import { resolveCommandCenterSeason } from "../src/features/command-center/SeasonSyncWorkbench.tsx";
 import type { OnboardingStatus, SyncProgress } from "../src/shared/types.ts";
 import { readFileSync } from "node:fs";
 
@@ -29,7 +30,8 @@ assertEqual(typeof logout, "function", "logout API wrapper exists");
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const seasonHealthSource = readFileSync(new URL("../src/features/command-center/SeasonHealthPanel.tsx", import.meta.url), "utf8");
-const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}`;
+const seasonWorkbenchSource = readFileSync(new URL("../src/features/command-center/SeasonSyncWorkbench.tsx", import.meta.url), "utf8");
+const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}\n${seasonWorkbenchSource}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const styles = [
   readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8"),
@@ -101,6 +103,8 @@ assertEqual(
   "07-12 10:56",
   "compact timestamp removes only the year while preserving local month day and minute",
 );
+assertEqual(resolveCommandCenterSeason(21, [23, 22, 21, 20, 19, 18, 17, 16, 15], 23), 21, "valid user selection survives refresh");
+assertEqual(resolveCommandCenterSeason(24, [23, 22, 21, 20, 19, 18, 17, 16, 15], 23), 23, "invalid selection falls back to current season");
 assertEqual(seasonSyncGateCopy(false, false, false, false, false).statusLabel, "需要登录", "missing credentials keep the login status copy");
 assertEqual(seasonSyncGateCopy(false, false, false, false, false).syncHint, "登录后可同步", "missing credentials keep the login recovery copy");
 assertEqual(seasonSyncGateCopy(true, false, false, false, false).statusLabel, "目标待确认", "ready credentials distinguish a blocked target");
@@ -190,8 +194,17 @@ assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command 
 assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
 assertEqual(onboardingSource.includes("const COMMAND_CENTER_SEASONS = [21, 22, 23] as const"), true, "command center exposes fixed season segments");
 assertEqual(onboardingSource.includes('aria-label="选择同步赛季"'), true, "season picker has a Chinese accessible name");
+assertEqual(seasonWorkbenchSource.includes('aria-label="选择同步赛季"'), true, "dynamic season select has a Chinese accessible name");
+assertEqual(seasonWorkbenchSource.includes("syncableSeasons.map"), true, "season options come from the backend catalog");
+assertEqual(seasonWorkbenchSource.includes("已同步数据"), true, "ledger has the confirmed Chinese heading");
+assertEqual(seasonWorkbenchSource.includes("详情覆盖度"), true, "ledger shows coverage");
+assertEqual(seasonWorkbenchSource.includes("本地对局"), true, "ledger shows local matches");
+assertEqual(seasonWorkbenchSource.includes("最近同步"), true, "ledger shows compact time");
+assertEqual(seasonWorkbenchSource.includes("普通对局"), false, "ledger omits non-approved columns");
+assertEqual(seasonWorkbenchSource.includes("角斗对局"), false, "ledger omits non-approved columns");
+assertEqual(seasonWorkbenchSource.includes("aria-pressed"), true, "ledger rows expose their selected state");
 assertEqual(onboardingSource.includes('aria-label="赛季号"'), false, "numeric season input is removed");
-assertEqual(commandCenterSource.includes("`同步 S${seasonStatus.season}`"), true, "season sync button text is generated per season");
+assertEqual(seasonWorkbenchSource.includes("`同步 S${selectedSeason}`"), true, "season sync button text follows the selected season");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
