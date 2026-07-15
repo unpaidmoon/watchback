@@ -442,8 +442,21 @@ pub fn publish_add_account(
     manager: &AccountContextManager,
     capture: LoginCapture,
 ) -> Result<AccountLoginResult> {
-    let result = publish_add_account_inner(manager, capture);
-    result.map_err(|_| anyhow!(SAFE_LOGIN_ERROR))
+    let mut result = publish_add_account_inner(manager, capture).map_err(publication_error)?;
+    if let Some(account_id) = result
+        .account_id
+        .as_deref()
+        .and_then(|value| AccountId::parse(value).ok())
+    {
+        if adopt_legacy_if_waiting(manager, &account_id).is_err() {
+            result.message = if result.kind == "newAccountAdded" {
+                "账号已添加，旧数据暂待恢复。".to_string()
+            } else {
+                "账号登录已更新，旧数据暂待恢复。".to_string()
+            };
+        }
+    }
+    Ok(result)
 }
 
 fn publish_add_account_inner(
@@ -495,8 +508,15 @@ pub fn publish_relogin_account(
     expected_account_id: &AccountId,
     capture: LoginCapture,
 ) -> Result<AccountLoginResult> {
-    let result = publish_relogin_account_inner(manager, expected_account_id, capture);
-    result.map_err(|_| anyhow!(SAFE_LOGIN_ERROR))
+    publish_relogin_account_inner(manager, expected_account_id, capture).map_err(publication_error)
+}
+
+fn publication_error(error: anyhow::Error) -> anyhow::Error {
+    if error.to_string() == crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR {
+        anyhow!(crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR)
+    } else {
+        anyhow!(SAFE_LOGIN_ERROR)
+    }
 }
 
 pub(crate) async fn capture_and_publish_relogin<F, Fut, R, C>(
@@ -533,8 +553,11 @@ where
             progress.report(LoginPhase::Failed, "登录账号与所选账号不一致。");
             Ok(result)
         }
-        Err(_) => {
+        Err(error) => {
             progress.report(LoginPhase::Failed, "账号登录处理失败，请重试。");
+            if error.to_string() == crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR {
+                bail!(crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR)
+            }
             bail!("账号登录处理失败，请重试。")
         }
     }
@@ -569,8 +592,11 @@ where
             progress.report(LoginPhase::Ready, "账号登录信息已保存。");
             Ok(result)
         }
-        Err(_) => {
+        Err(error) => {
             progress.report(LoginPhase::Failed, "账号登录处理失败，请重试。");
+            if error.to_string() == crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR {
+                bail!(crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR)
+            }
             bail!("账号登录处理失败，请重试。")
         }
     }
@@ -751,10 +777,6 @@ fn add_new(
         return Ok(result);
     }
 
-    let migration_warning = adopt_legacy_if_waiting(manager, &account_id).is_err();
-    if migration_warning {
-        result.message = "账号已添加，旧数据暂待恢复。".to_string();
-    }
     finish_committed(pending, result, fault)
 }
 
@@ -764,7 +786,7 @@ fn update_existing(
     registry: &crate::account_store::AccountRegistry,
     account_id: &AccountId,
     capture: LoginCapture,
-    from_add: bool,
+    _from_add: bool,
     fault: &impl PublicationFault,
 ) -> Result<AccountLoginResult> {
     let paths = manager.shared_paths().account(account_id);
@@ -833,10 +855,6 @@ fn update_existing(
         pending.preserve();
         result.message = pending_cleanup_message();
         return Ok(result);
-    }
-    let migration_warning = from_add && adopt_legacy_if_waiting(manager, account_id).is_err();
-    if migration_warning {
-        result.message = "账号登录已更新，旧数据暂待恢复。".to_string();
     }
     finish_committed(pending, result, fault)
 }

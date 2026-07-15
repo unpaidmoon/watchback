@@ -2781,6 +2781,54 @@ fn remove_rejects_nested_link_without_touching_external_sentinel() {
     assert_eq!(manager.registry_snapshot().unwrap(), registry);
 }
 
+#[cfg(windows)]
+#[test]
+fn remove_deterministically_rejects_windows_junction_without_external_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("44444444-4444-4444-8444-444444444444").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let paths = shared.account(&account_id);
+    fs::create_dir_all(paths.root()).unwrap();
+    write_manifest_atomic(
+        &paths.manifest(),
+        &manifest(account_id.clone(), "Junction#4000"),
+    )
+    .unwrap();
+    let sentinel = outside.path().join("sentinel");
+    fs::write(&sentinel, b"junction-external-unchanged").unwrap();
+    let junction = paths.root().join("junction");
+    let output = std::process::Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(&junction)
+        .arg(outside.path())
+        .output()
+        .expect("cmd /c mklink /J must be available on Windows");
+    assert!(
+        output.status.success(),
+        "deterministic junction setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(account_id.clone()),
+        accounts: vec![entry(account_id.clone(), "Junction#4000")],
+    };
+    manager.replace_registry(registry.clone()).unwrap();
+
+    assert_eq!(
+        manager
+            .remove_account(&account_id, "2026-07-16T13:00:00Z")
+            .unwrap_err()
+            .to_string(),
+        "账号数据不完整，无法退出。"
+    );
+    assert_eq!(fs::read(sentinel).unwrap(), b"junction-external-unchanged");
+    assert_eq!(manager.registry_snapshot().unwrap(), registry);
+    std::fs::remove_dir(&junction).unwrap();
+}
+
 #[test]
 fn switch_and_add_account_share_one_lifecycle_mutex() {
     let temp = tempfile::tempdir().unwrap();
@@ -2848,4 +2896,67 @@ fn account_management_commands_hold_shared_operation_permit() {
     for command in ["list_accounts", "switch_account", "remove_account"] {
         assert!(lib.contains(&format!("commands::{command}")));
     }
+}
+
+#[test]
+fn pending_deletion_recovery_gate_blocks_every_account_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    install_account(
+        &manager,
+        account_id.clone(),
+        101101,
+        "First#1000",
+        "synthetic-existing-secret",
+        true,
+    );
+    fs::create_dir_all(shared.operations_root()).unwrap();
+    fs::write(shared.deletion_journal(), b"{}").unwrap();
+    let expected = "账号退出恢复失败，请重试。";
+
+    assert_eq!(
+        manager
+            .switch_active(&account_id, "2026-07-16T13:00:00Z")
+            .unwrap_err()
+            .to_string(),
+        expected
+    );
+    assert_eq!(
+        manager
+            .remove_account(&account_id, "2026-07-16T13:00:00Z")
+            .unwrap_err()
+            .to_string(),
+        expected
+    );
+    assert_eq!(
+        publish_add_account(
+            &manager,
+            synthetic_capture(202202, "Second#2000", "synthetic-new-secret"),
+        )
+        .unwrap_err()
+        .to_string(),
+        expected
+    );
+    assert_eq!(
+        publish_relogin_account(
+            &manager,
+            &account_id,
+            synthetic_capture(101101, "First#1000", "synthetic-refresh-secret"),
+        )
+        .unwrap_err()
+        .to_string(),
+        expected
+    );
+    let snapshot = manager.active_snapshot().unwrap();
+    assert_eq!(
+        manager.adopt_legacy(&snapshot).unwrap_err().to_string(),
+        expected
+    );
+
+    fs::remove_file(shared.deletion_journal()).unwrap();
+    assert!(manager
+        .switch_active(&account_id, "2026-07-16T13:01:00Z")
+        .is_ok());
 }

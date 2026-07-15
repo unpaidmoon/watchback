@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use std::sync::{Arc, Mutex, RwLock};
 
 const NO_ACTIVE_ACCOUNT_MESSAGE: &str = "尚未添加可用账号，请先在指挥台添加账号。";
+pub(crate) const ACCOUNT_DELETION_RECOVERY_ERROR: &str = "账号退出恢复失败，请重试。";
 
 #[derive(Clone)]
 pub struct AccountContextManager {
@@ -120,20 +121,70 @@ impl AccountContextManager {
     pub fn remove_account(&self, account_id: &AccountId, now: &str) -> Result<RemoveAccountResult> {
         let _mutation = self.lock_login_publication()?;
         let registry = self.registry_snapshot()?;
-        let updated =
-            crate::account_removal::remove_account(&self.shared, &registry, account_id, now)?;
+        let removal =
+            crate::account_removal::remove_account(&self.shared, &registry, account_id, now);
+        self.finish_removal(removal)
+    }
+
+    #[cfg(test)]
+    fn remove_account_with_test_fault(
+        &self,
+        account_id: &AccountId,
+        fault: crate::account_removal::TestRemovalFault,
+    ) -> Result<RemoveAccountResult> {
+        let _mutation = self.lock_login_publication()?;
+        let registry = self.registry_snapshot()?;
+        let removal = crate::account_removal::remove_account_with_test_fault(
+            &self.shared,
+            &registry,
+            account_id,
+            "2026-07-16T13:00:00Z",
+            fault,
+        );
+        self.finish_removal(removal)
+    }
+
+    fn finish_removal(
+        &self,
+        removal: Result<crate::account_removal::RemovalOutcome>,
+    ) -> Result<RemoveAccountResult> {
+        let disk_registry = match std::fs::symlink_metadata(self.shared.registry()) {
+            Ok(_) => read_registry(&self.shared.registry())
+                .map_err(|_| anyhow!("账号状态恢复失败，请重试。"))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.registry_snapshot()?
+            }
+            Err(_) => return Err(anyhow!("账号状态恢复失败，请重试。")),
+        };
         {
             let mut current = self
                 .registry
                 .write()
                 .map_err(|_| anyhow!("账号状态暂不可用，请重试。"))?;
-            *current = updated.clone();
+            *current = disk_registry.clone();
         }
+        let outcome = removal?;
+        if outcome.registry != disk_registry {
+            return Err(anyhow!("账号状态恢复失败，请重试。"));
+        }
+        let (removed, message) = match outcome.completion {
+            crate::account_removal::RemovalCompletion::Removed => {
+                (true, "账号已退出，本地账号数据已清理。")
+            }
+            crate::account_removal::RemovalCompletion::RemovedPendingCleanup => {
+                (true, "账号已退出，剩余本地文件将在重启后继续清理。")
+            }
+            crate::account_removal::RemovalCompletion::NotRemoved => {
+                (false, "账号退出失败，账号未更改。")
+            }
+        };
         Ok(RemoveAccountResult {
-            removed: true,
-            active_account_id: updated.active_account_id.map(|id| id.as_str().to_string()),
-            message: "账号已退出，本地账号数据已进入安全清理流程。".to_string(),
-            reload_required: true,
+            removed,
+            active_account_id: disk_registry
+                .active_account_id
+                .map(|id| id.as_str().to_string()),
+            message: message.to_string(),
+            reload_required: removed,
         })
     }
 
@@ -155,9 +206,36 @@ impl AccountContextManager {
     }
 
     pub(crate) fn lock_login_publication(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
-        self.login_lock
+        let guard = self
+            .login_lock
             .lock()
-            .map_err(|_| anyhow!("账号登录操作暂不可用，请重试。"))
+            .map_err(|_| anyhow!("账号操作暂不可用，请重试。"))?;
+        self.recover_deletion_while_locked()?;
+        Ok(guard)
+    }
+
+    fn recover_deletion_while_locked(&self) -> Result<()> {
+        crate::account_removal::recover_pending_removal(&self.shared)
+            .map_err(|_| anyhow!(ACCOUNT_DELETION_RECOVERY_ERROR))?;
+        match std::fs::symlink_metadata(self.shared.deletion_journal()) {
+            Ok(_) => return Err(anyhow!(ACCOUNT_DELETION_RECOVERY_ERROR)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(anyhow!(ACCOUNT_DELETION_RECOVERY_ERROR)),
+        }
+        match std::fs::symlink_metadata(self.shared.registry()) {
+            Ok(_) => {
+                let registry = read_registry(&self.shared.registry())
+                    .map_err(|_| anyhow!(ACCOUNT_DELETION_RECOVERY_ERROR))?;
+                let mut current = self
+                    .registry
+                    .write()
+                    .map_err(|_| anyhow!("账号状态暂不可用，请重试。"))?;
+                *current = registry;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(anyhow!(ACCOUNT_DELETION_RECOVERY_ERROR)),
+        }
+        Ok(())
     }
 
     pub(crate) fn snapshot_for(&self, account_id: &AccountId) -> AccountContextSnapshot {
@@ -194,6 +272,7 @@ impl AccountContextManager {
     }
 
     pub fn adopt_legacy(&self, account: &AccountContextSnapshot) -> Result<()> {
+        let _lifecycle = self.lock_login_publication()?;
         let _migration = self
             .migration_lock
             .lock()
@@ -223,5 +302,77 @@ impl AccountContextSnapshot {
 
     pub fn database(&self) -> crate::OwDatabase {
         crate::OwDatabase::for_account(&self.paths)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::account_removal::TestRemovalFault;
+    use crate::account_store::{
+        read_registry, write_manifest_atomic, AccountManifest, AccountRegistryEntry,
+    };
+    use std::fs;
+
+    fn manager_fixture() -> (tempfile::TempDir, AccountContextManager, AccountId) {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let paths = shared.account(&id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(
+            &paths.manifest(),
+            &AccountManifest {
+                version: 1,
+                account_id: id.clone(),
+                role_id: 101101,
+                battle_tag: "Synthetic#1000".into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        fs::write(paths.database(), b"synthetic-db").unwrap();
+        manager
+            .replace_registry(AccountRegistry {
+                version: 1,
+                active_account_id: Some(id.clone()),
+                accounts: vec![AccountRegistryEntry {
+                    account_id: id.clone(),
+                    battle_tag: "Synthetic#1000".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    last_used_at: "2026-01-02T00:00:00Z".into(),
+                    credential_state: "ready".into(),
+                }],
+            })
+            .unwrap();
+        (temp, manager, id)
+    }
+
+    #[test]
+    fn removal_failures_always_reload_memory_from_disk() {
+        for (fault, expected_removed) in [
+            (TestRemovalFault::BeforeAnyDelete, false),
+            (TestRemovalFault::AfterFirstDeleteMutation, true),
+            (TestRemovalFault::JournalAfterRegistryUpdated, true),
+        ] {
+            let (_temp, manager, id) = manager_fixture();
+            let result = manager.remove_account_with_test_fault(&id, fault).unwrap();
+            assert_eq!(result.removed, expected_removed);
+            assert_eq!(
+                manager.registry_snapshot().unwrap(),
+                read_registry(&manager.shared.registry()).unwrap()
+            );
+            assert_eq!(
+                manager
+                    .registry_snapshot()
+                    .unwrap()
+                    .accounts
+                    .iter()
+                    .any(|entry| entry.account_id == id),
+                !expected_removed
+            );
+        }
     }
 }

@@ -332,6 +332,7 @@ pub fn switch_account(
 pub fn remove_account(
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     account_id: String,
 ) -> Result<crate::RemoveAccountResult, String> {
     let _permit = operation_coordinator
@@ -339,9 +340,21 @@ pub fn remove_account(
         .map_err(str::to_string)?;
     let account_id = crate::account_store::AccountId::parse(&account_id)
         .map_err(|_| "账号标识无效。".to_string())?;
-    accounts
+    let result = accounts
         .remove_account(&account_id, &chrono::Utc::now().to_rfc3339())
-        .map_err(to_message)
+        .map_err(to_message)?;
+    clear_removed_account_target(&login_target_coordinator, &account_id, &result);
+    Ok(result)
+}
+
+fn clear_removed_account_target(
+    coordinator: &crate::login_target::LoginTargetCoordinator,
+    account_id: &crate::account_store::AccountId,
+    result: &crate::RemoveAccountResult,
+) {
+    if result.removed {
+        coordinator.clear(account_id);
+    }
 }
 
 #[tauri::command]
@@ -624,4 +637,40 @@ fn active_account(
 
 fn to_message(error: impl std::fmt::Display) -> String {
     crate::redaction::safe_error_message(error)
+}
+
+#[cfg(test)]
+mod account_management_tests {
+    use super::*;
+
+    #[test]
+    fn removing_one_account_clears_only_its_login_target_session() {
+        let coordinator = crate::login_target::LoginTargetCoordinator::default();
+        let first =
+            crate::account_store::AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let second =
+            crate::account_store::AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+        coordinator.target_cleared(&first, Some(101101));
+        coordinator.target_cleared(&second, Some(202202));
+        let removed = crate::RemoveAccountResult {
+            removed: true,
+            active_account_id: Some(second.as_str().into()),
+            message: "账号已退出。".into(),
+            reload_required: true,
+        };
+        clear_removed_account_target(&coordinator, &first, &removed);
+        assert!(coordinator.status(&first).is_none());
+        assert!(coordinator.status(&second).is_some());
+
+        coordinator.target_cleared(&first, Some(101101));
+        let not_removed = crate::RemoveAccountResult {
+            removed: false,
+            active_account_id: Some(first.as_str().into()),
+            message: "账号未退出。".into(),
+            reload_required: false,
+        };
+        clear_removed_account_target(&coordinator, &first, &not_removed);
+        assert!(coordinator.status(&first).is_some());
+        assert!(coordinator.status(&second).is_some());
+    }
 }
