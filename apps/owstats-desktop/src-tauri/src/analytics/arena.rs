@@ -157,14 +157,21 @@ fn rows_for_match(
     if friend_ids.is_empty() {
         return ArenaMatchRows::default();
     }
-    let recognized = teammates
+    let mut emitted = HashSet::new();
+    let mut recognized = teammates
         .iter()
-        .filter_map(|player| scalar_field(player, "bnetId"))
-        .filter(|bnet_id| friend_ids.contains(bnet_id) && bnet_id != current_bnet_id)
-        .collect::<HashSet<_>>();
+        .filter_map(|player| {
+            let bnet_id = scalar_field(player, "bnetId")?;
+            (friend_ids.contains(&bnet_id)
+                && bnet_id != current_bnet_id
+                && emitted.insert(bnet_id.clone()))
+            .then_some((bnet_id, player))
+        })
+        .collect::<Vec<_>>();
     if recognized.is_empty() {
         return ArenaMatchRows::default();
     }
+    recognized.sort_by(|(a, _), (b, _)| a.cmp(b));
     let group_size = 1 + recognized.len() as i64;
     let name_map = data
         .get("nameMap")
@@ -192,14 +199,9 @@ fn rows_for_match(
         is_current_player: true,
         is_friend: false,
     }];
-    let mut emitted = HashSet::new();
-    let friend_rows = teammates
-        .iter()
-        .filter_map(|player| {
-            let bnet_id = scalar_field(player, "bnetId")?;
-            if !recognized.contains(&bnet_id) || !emitted.insert(bnet_id.clone()) {
-                return None;
-            }
+    let friend_rows = recognized
+        .into_iter()
+        .filter_map(|(bnet_id, player)| {
             let hero_guid = scalar_field(player, "heroGuid").unwrap_or_default();
             let hero_name = hero_names
                 .get(&hero_guid)

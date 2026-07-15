@@ -273,6 +273,84 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
 }
 
 #[test]
+fn arena_lineup_key_is_stable_when_friend_order_changes_between_matches() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-stable-arena-lineup.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('synthetic-self', 'synthetic-self', '当前玩家', '{}', '2026-07-16T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    for (guid, name) in [
+        ("synthetic-self-hero", "当前英雄"),
+        ("synthetic-friend-a-hero", "好友A英雄"),
+        ("synthetic-friend-b-hero", "好友B英雄"),
+    ] {
+        conn.execute(
+            "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
+            params![guid, name],
+        )
+        .unwrap();
+    }
+
+    for index in 0..3 {
+        let match_id = format!("synthetic-stable-arena-{index}");
+        seed_match(&db, &match_id, 23, "stadium", "SportFight");
+        let friends = if index % 2 == 0 {
+            vec![
+                json!({"bnetId": "friend-a", "name": "好友A", "heroGuid": "synthetic-friend-a-hero"}),
+                json!({"bnetId": "friend-b", "name": "好友B", "heroGuid": "synthetic-friend-b-hero"}),
+            ]
+        } else {
+            vec![
+                json!({"bnetId": "friend-b", "name": "好友B", "heroGuid": "synthetic-friend-b-hero"}),
+                json!({"bnetId": "friend-a", "name": "好友A", "heroGuid": "synthetic-friend-a-hero"}),
+            ]
+        };
+        let mut teammates = vec![json!({
+            "bnetId": "synthetic-self",
+            "name": "当前玩家",
+            "heroGuid": "synthetic-self-hero",
+            "friendBnetIds": ["friend-a", "friend-b"]
+        })];
+        teammates.extend(friends);
+        let detail = json!({
+            "payload": {
+                "data": {
+                    "roundCountList": [{"teammateList": teammates}]
+                }
+            }
+        });
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES (?1, 'fight', ?2, '2026-07-16T00:00:00Z')",
+            params![match_id, detail.to_string()],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(23),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(analytics.lineup_combinations.len(), 1);
+    let lineup = &analytics.lineup_combinations[0];
+    assert_eq!(lineup.matches, 3);
+    assert_eq!(lineup.members.len(), 3);
+    assert!(lineup.members[0].is_current_player);
+    assert_eq!(lineup.members[0].bnet_id.as_deref(), Some("synthetic-self"));
+    assert_eq!(lineup.members[1].bnet_id.as_deref(), Some("friend-a"));
+    assert_eq!(lineup.members[2].bnet_id.as_deref(), Some("friend-b"));
+}
+
+#[test]
 fn arena_identity_fallback_prefers_latest_projection_update() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("synthetic-identity-fallback.sqlite3"));
