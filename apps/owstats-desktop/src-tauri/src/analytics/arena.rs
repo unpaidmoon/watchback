@@ -1,4 +1,4 @@
-use super::{FriendMatchRow, LineupRow};
+use super::{begin_bound, non_empty, FriendMatchRow, LineupRow};
 use crate::db::OwDatabase;
 use crate::models::FriendAnalyticsFilters;
 use anyhow::Result;
@@ -43,10 +43,7 @@ pub(super) fn arena_analytics_rows(
         "#,
     );
     let mut owned: Vec<Box<dyn ToSql>> = Vec::new();
-    if let Some(season) = filters.season {
-        sql.push_str(" AND m.season = ?");
-        owned.push(Box::new(season));
-    }
+    append_match_filters(&mut sql, &mut owned, filters);
     sql.push_str(" ORDER BY m.begin_ts DESC, m.match_id");
     let params = owned
         .iter()
@@ -79,6 +76,38 @@ pub(super) fn arena_analytics_rows(
         friend_rows,
         lineup_rows,
     })
+}
+
+fn append_match_filters(
+    sql: &mut String,
+    owned: &mut Vec<Box<dyn ToSql>>,
+    filters: &FriendAnalyticsFilters,
+) {
+    if let Some(season) = filters.season {
+        sql.push_str(" AND m.season = ?");
+        owned.push(Box::new(season));
+    }
+    if let Some(map) = non_empty(&filters.map) {
+        sql.push_str(" AND (m.map_guid = ? OR m.map_name = ?)");
+        owned.push(Box::new(map.clone()));
+        owned.push(Box::new(map));
+    }
+    if let Some(result) = non_empty(&filters.result) {
+        sql.push_str(" AND m.result = ?");
+        owned.push(Box::new(result));
+    }
+    if let Some(mode) = non_empty(&filters.mode) {
+        sql.push_str(" AND m.game_mode = ?");
+        owned.push(Box::new(mode));
+    }
+    if let Some(from) = non_empty(&filters.date_from).and_then(|date| begin_bound(&date, false)) {
+        sql.push_str(" AND m.begin_ts >= ?");
+        owned.push(Box::new(from));
+    }
+    if let Some(to) = non_empty(&filters.date_to).and_then(|date| begin_bound(&date, true)) {
+        sql.push_str(" AND m.begin_ts <= ?");
+        owned.push(Box::new(to));
+    }
 }
 
 fn current_player_bnet_id(conn: &rusqlite::Connection) -> Result<Option<String>> {
@@ -199,7 +228,7 @@ fn rows_for_match(
         is_current_player: true,
         is_friend: false,
     }];
-    let friend_rows = recognized
+    let friend_rows: Vec<FriendMatchRow> = recognized
         .into_iter()
         .filter_map(|(bnet_id, player)| {
             let hero_guid = scalar_field(player, "heroGuid").unwrap_or_default();
@@ -243,9 +272,13 @@ fn rows_for_match(
             })
         })
         .collect();
-    ArenaMatchRows {
-        friend_rows,
-        lineup_rows,
+    if friend_rows.is_empty() {
+        ArenaMatchRows::default()
+    } else {
+        ArenaMatchRows {
+            friend_rows,
+            lineup_rows,
+        }
     }
 }
 

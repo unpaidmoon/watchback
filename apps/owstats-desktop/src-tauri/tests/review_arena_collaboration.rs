@@ -28,6 +28,84 @@ fn seed_match(db: &OwDatabase, match_id: &str, season: i64, bucket: &str, game_m
     .unwrap();
 }
 
+fn seed_current_player(db: &OwDatabase) {
+    db.connect()
+        .unwrap()
+        .execute(
+            "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('boundary-self', 'boundary-self', '当前玩家', '{}', '2026-07-16T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+}
+
+fn seed_boundary_arena_match(
+    db: &OwDatabase,
+    match_id: &str,
+    season: i64,
+    mode: &str,
+    result: &str,
+    map_guid: &str,
+    map_name: &str,
+    begin_ts: i64,
+    friend_id: &str,
+    friend_hero: &str,
+) {
+    seed_match(db, match_id, season, "stadium", mode);
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE matches SET result=?2, map_guid=?3, map_name=?4, begin_ts=?5 WHERE match_id=?1",
+        params![match_id, result, map_guid, map_name, begin_ts],
+    )
+    .unwrap();
+    let detail = json!({
+        "payload": {
+            "data": {
+                "roundCountList": [{
+                    "teammateList": [
+                        {
+                            "bnetId": "boundary-self",
+                            "name": "当前玩家",
+                            "heroGuid": "boundary-self-hero",
+                            "friendBnetIds": [friend_id]
+                        },
+                        {
+                            "bnetId": friend_id,
+                            "name": "边界好友",
+                            "heroGuid": friend_hero,
+                            "kill": 3,
+                            "heroDamage": 300
+                        },
+                        {
+                            "bnetId": friend_id,
+                            "name": "重复好友不应重复计数",
+                            "heroGuid": friend_hero,
+                            "kill": 99,
+                            "heroDamage": 9900
+                        }
+                    ],
+                    "enemyList": [{
+                        "bnetId": friend_id,
+                        "name": "敌方同 ID 不应计数",
+                        "heroGuid": "enemy-hero"
+                    }]
+                }]
+            }
+        }
+    });
+    conn.execute(
+        "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES (?1, 'fight', ?2, '2026-07-16T00:00:00Z')",
+        params![match_id, detail.to_string()],
+    )
+    .unwrap();
+}
+
+fn arena_friend_rows(db: &OwDatabase, filters: FriendAnalyticsFilters) -> i64 {
+    get_friend_analytics(db, filters)
+        .unwrap()
+        .summary
+        .friend_rows
+}
+
 #[test]
 fn personal_review_discovers_all_local_seasons_and_validates_requests() {
     let temp = tempfile::tempdir().unwrap();
@@ -621,4 +699,271 @@ fn raw_hero_guid_never_becomes_representative_hero_name() {
     assert!(!friend
         .representative_hero_name
         .contains("synthetic-raw-hero-guid"));
+}
+
+#[test]
+fn arena_friend_rows_require_identity_friend_ids_valid_round_and_selected_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-arena-boundaries.sqlite3"));
+    db.initialize().unwrap();
+    seed_current_player(&db);
+
+    for index in 0..3 {
+        seed_boundary_arena_match(
+            &db,
+            &format!("selected-season-{index}"),
+            20,
+            "SportFight",
+            "win",
+            "boundary-map",
+            "边界地图",
+            1_789_000_000 + index,
+            "boundary-friend",
+            "boundary-hero",
+        );
+        seed_boundary_arena_match(
+            &db,
+            &format!("other-season-{index}"),
+            15,
+            "LeisureFight",
+            "win",
+            "boundary-map",
+            "边界地图",
+            1_789_000_100 + index,
+            "boundary-friend",
+            "boundary-hero",
+        );
+    }
+    seed_boundary_arena_match(
+        &db,
+        "missing-friend-ids",
+        20,
+        "SportFight",
+        "win",
+        "boundary-map",
+        "边界地图",
+        1_789_000_200,
+        "boundary-friend",
+        "boundary-hero",
+    );
+    seed_boundary_arena_match(
+        &db,
+        "empty-friend-ids",
+        20,
+        "SportFight",
+        "win",
+        "boundary-map",
+        "边界地图",
+        1_789_000_202,
+        "boundary-friend",
+        "boundary-hero",
+    );
+    seed_boundary_arena_match(
+        &db,
+        "unsupported-arena-mode",
+        20,
+        "UnknownFight",
+        "win",
+        "boundary-map",
+        "边界地图",
+        1_789_000_203,
+        "boundary-friend",
+        "boundary-hero",
+    );
+    seed_boundary_arena_match(
+        &db,
+        "invalid-last-round",
+        20,
+        "SportFight",
+        "win",
+        "boundary-map",
+        "边界地图",
+        1_789_000_201,
+        "boundary-friend",
+        "boundary-hero",
+    );
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE match_details SET raw_detail_json=json_remove(raw_detail_json, '$.payload.data.roundCountList[0].teammateList[0].friendBnetIds') WHERE match_id='missing-friend-ids'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE match_details SET raw_detail_json=json_set(raw_detail_json, '$.payload.data.roundCountList[0].teammateList[0].friendBnetIds', json('[]')) WHERE match_id='empty-friend-ids'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE match_details SET raw_detail_json=?1 WHERE match_id='invalid-last-round'",
+        [json!({
+            "payload": {
+                "data": {
+                    "roundCountList": [{"teammateList": [{"bnetId": "someone-else"}]}]
+                }
+            }
+        })
+        .to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(20),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(analytics.summary.friend_rows, 3);
+    let friend = analytics
+        .common_friend_heroes
+        .iter()
+        .find(|item| item.bnet_id == "boundary-friend")
+        .unwrap();
+    assert_eq!(friend.matches, 3);
+    assert_eq!(friend.intimacy_score, 15);
+    assert_eq!(analytics.lineup_combinations.len(), 1);
+    assert_eq!(analytics.lineup_combinations[0].matches, 3);
+
+    let no_identity = OwDatabase::new(temp.path().join("synthetic-no-identity.sqlite3"));
+    no_identity.initialize().unwrap();
+    seed_boundary_arena_match(
+        &no_identity,
+        "no-identity",
+        20,
+        "SportFight",
+        "win",
+        "boundary-map",
+        "边界地图",
+        1_789_000_000,
+        "boundary-friend",
+        "boundary-hero",
+    );
+    assert_eq!(
+        arena_friend_rows(
+            &no_identity,
+            FriendAnalyticsFilters {
+                season: Some(20),
+                ..FriendAnalyticsFilters::default()
+            }
+        ),
+        0
+    );
+}
+
+#[test]
+fn arena_friend_rows_obey_match_and_last_round_hero_filters() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-arena-filters.sqlite3"));
+    db.initialize().unwrap();
+    seed_current_player(&db);
+    let conn = db.connect().unwrap();
+    for (guid, name) in [("competitive-hero", "竞技英雄"), ("quick-hero", "快速英雄")] {
+        conn.execute(
+            "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
+            params![guid, name],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    for index in 0..3 {
+        seed_boundary_arena_match(
+            &db,
+            &format!("competitive-filter-{index}"),
+            20,
+            "SportFight",
+            "win",
+            "competitive-map-guid",
+            "竞技地图",
+            1_789_000_000 + index,
+            "boundary-friend",
+            "competitive-hero",
+        );
+        seed_boundary_arena_match(
+            &db,
+            &format!("quick-filter-{index}"),
+            20,
+            "LeisureFight",
+            "loss",
+            "quick-map-guid",
+            "快速地图",
+            1_789_000_100 + index,
+            "boundary-friend",
+            "quick-hero",
+        );
+    }
+
+    for filters in [
+        FriendAnalyticsFilters {
+            season: Some(20),
+            mode: Some("LeisureFight".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            hero: Some("quick-hero".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            hero: Some("快速英雄".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            map: Some("quick-map-guid".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            map: Some("快速地图".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            result: Some("loss".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+    ] {
+        assert_eq!(arena_friend_rows(&db, filters), 3);
+    }
+
+    for filters in [
+        FriendAnalyticsFilters {
+            season: Some(20),
+            mode: Some("SportPreset".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            hero: Some("missing-hero".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            map: Some("missing-map".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            result: Some("draw".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            date_from: Some("2099-01-01".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+        FriendAnalyticsFilters {
+            season: Some(20),
+            date_to: Some("2000-01-01".into()),
+            ..FriendAnalyticsFilters::default()
+        },
+    ] {
+        let analytics = get_friend_analytics(&db, filters).unwrap();
+        assert_eq!(analytics.summary.friend_rows, 0);
+        assert!(analytics.lineup_combinations.is_empty());
+    }
 }
