@@ -4,8 +4,8 @@ use crate::browser_session::{
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
-    BattleTagExtraction, RoleIdExtraction,
+    extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
+    is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
 };
 use crate::login_flow::{LoginPhase, LoginProgress};
 use crate::models::{CredentialLoginCancelResult, CredentialStatus};
@@ -364,14 +364,15 @@ async fn collect_login_identity(
         .evaluate(&build_collect_candidates_script(), false)
         .await
         .ok()?;
-    let page_text = collected.get("pageText")?.as_str()?;
+    let (battle_tag_candidates, battle_tag_truncated) =
+        candidate_group(collected.get("battleTagCandidates")?)?;
     let role_candidates = collected.get("roleCandidates")?;
     let (current_candidates, current_truncated) =
-        role_candidate_group(role_candidates.get("current")?)?;
+        candidate_group(role_candidates.get("current")?)?;
     let (storage_candidates, storage_truncated) =
-        role_candidate_group(role_candidates.get("storage")?)?;
+        candidate_group(role_candidates.get("storage")?)?;
     let (resource_candidates, resource_truncated) =
-        role_candidate_group(role_candidates.get("resources")?)?;
+        candidate_group(role_candidates.get("resources")?)?;
     let credential_candidates = current_candidates
         .iter()
         .chain(&storage_candidates)
@@ -386,11 +387,11 @@ async fn collect_login_identity(
             &resource_candidates,
             current_truncated || storage_truncated || resource_truncated,
         ),
-        extract_battle_tag(page_text),
+        extract_battle_tag_candidates(&battle_tag_candidates, battle_tag_truncated),
     ))
 }
 
-fn role_candidate_group(value: &serde_json::Value) -> Option<(Vec<String>, bool)> {
+fn candidate_group(value: &serde_json::Value) -> Option<(Vec<String>, bool)> {
     Some((
         string_candidates(value.get("values")?)?,
         value.get("truncated")?.as_bool()?,

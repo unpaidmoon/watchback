@@ -188,6 +188,12 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     let script = build_collect_candidates_script();
 
     assert!(script.contains("pageText:"));
+    assert!(script.contains("battleTagCandidates:"));
+    assert!(script.contains("MAX_BATTLETAG_CANDIDATES"));
+    assert!(script.contains("createTreeWalker"));
+    assert!(script.contains("NodeFilter.SHOW_TEXT"));
+    assert!(script.contains("战网昵称"));
+    assert!(script.contains("iframe.contentDocument"));
     assert!(script.contains("roleCandidates:"));
     assert!(script.contains("current:"));
     assert!(script.contains("storage:"));
@@ -201,6 +207,7 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     assert!(script.contains("performance.getEntriesByType"));
     assert!(script.contains("localStorage"));
     assert!(script.contains("sessionStorage"));
+    assert!(!script.contains("outerHTML"));
 }
 
 #[test]

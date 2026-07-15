@@ -168,21 +168,53 @@ pub fn build_collect_candidates_script() -> String {
     r#"
 (() => {
   const MAX_ROLE_EVIDENCE_VALUES = 500;
+  const MAX_BATTLETAG_CANDIDATES = 20;
   const pageText = document.documentElement?.innerText ?? '';
   const createGroup = () => ({ values: [], truncated: false });
   const currentGroup = createGroup();
   const storageGroup = createGroup();
   const resourceGroup = createGroup();
-  const add = (group, value) => {
+  const battleTagGroup = createGroup();
+  const add = (group, value, limit = MAX_ROLE_EVIDENCE_VALUES) => {
     if (value === undefined || value === null) return;
     const text = String(value);
     if (!text) return;
-    if (group.values.length >= MAX_ROLE_EVIDENCE_VALUES) {
+    if (group.values.length >= limit) {
       group.truncated = true;
       return;
     }
     group.values.push(text);
   };
+  const collectBattleTags = (doc) => {
+    if (!doc?.body || battleTagGroup.truncated) return;
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+    for (let index = 0; index < textNodes.length; index += 1) {
+      const text = String(textNodes[index].nodeValue ?? '');
+      const labelIndex = text.indexOf('战网昵称');
+      if (labelIndex < 0) continue;
+      let evidence = text.slice(labelIndex + '战网昵称'.length);
+      for (let lookahead = 1; lookahead <= 4; lookahead += 1) {
+        const match = evidence.match(/^\s*[:：]\s*([^\s#]+#[0-9]+)/);
+        if (match) {
+          add(battleTagGroup, match[1], MAX_BATTLETAG_CANDIDATES);
+          break;
+        }
+        const nextNode = textNodes[index + lookahead];
+        if (!nextNode) break;
+        evidence += ` ${String(nextNode.nodeValue ?? '')}`;
+      }
+    }
+    for (const iframe of doc.querySelectorAll('iframe')) {
+      try {
+        collectBattleTags(iframe.contentDocument);
+      } catch (_) {
+        // Cross-origin frames are intentionally inaccessible.
+      }
+    }
+  };
+  collectBattleTags(document);
   add(currentGroup, location.href);
   add(currentGroup, pageText);
   for (const storage of [localStorage, sessionStorage]) {
@@ -197,6 +229,7 @@ pub fn build_collect_candidates_script() -> String {
   }
   return {
     pageText: pageText,
+    battleTagCandidates: battleTagGroup,
     roleCandidates: {
       current: currentGroup,
       storage: storageGroup,
