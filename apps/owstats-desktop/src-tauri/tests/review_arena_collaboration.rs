@@ -150,6 +150,139 @@ fn personal_review_preserves_requested_season_when_no_local_seasons_exist() {
 }
 
 #[test]
+fn personal_review_excludes_non_positive_seasons_and_falls_back_to_latest_valid_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("review-invalid-season.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_match(&db, "synthetic-s0", 0, "preset", "SportPreset");
+    seed_match(&db, "synthetic-s20", 20, "stadium", "SportFight");
+
+    let latest = get_personal_season_review(&db, PersonalReviewRequest { season: None }).unwrap();
+    assert_eq!(latest.available_seasons, vec![20]);
+    assert_eq!(latest.summary.season, Some(20));
+
+    let requested_zero =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(0) }).unwrap();
+    assert_eq!(requested_zero.available_seasons, vec![20]);
+    assert_eq!(requested_zero.summary.season, Some(20));
+}
+
+#[test]
+fn lineup_display_sanitizes_private_ids_and_raw_hero_guids_across_normal_and_arena() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-private-lineup.sqlite3"));
+    db.initialize().unwrap();
+    let current_id = "123e4567-e89b-12d3-a456-426614174000";
+    let friend_id = "12345678901234567890123456789012";
+    let current_hero_guid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let friend_hero_guid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('private-self', ?1, ?1, '{}', '2026-07-16T00:00:00Z')",
+        [current_id],
+    )
+    .unwrap();
+    for guid in [current_hero_guid, friend_hero_guid] {
+        conn.execute(
+            "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?1, '2026-07-16T00:00:00Z')",
+            [guid],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    seed_match(&db, "private-normal", 23, "preset", "SportPreset");
+    let conn = db.connect().unwrap();
+    for (bnet_id, hero_guid, is_current_player, is_friend) in [
+        (current_id, current_hero_guid, 1, 0),
+        (friend_id, friend_hero_guid, 0, 1),
+    ] {
+        conn.execute(
+            r#"
+            INSERT INTO match_players (
+                match_id, season, side, bnet_id, player_name, hero_guid, hero_name,
+                is_current_player, is_friend, raw_json, updated_at
+            ) VALUES (
+                'private-normal', 23, 'teammate', ?1, ?1, ?2, ?2,
+                ?3, ?4, '{}', '2026-07-16T00:00:00Z'
+            )
+            "#,
+            params![bnet_id, hero_guid, is_current_player, is_friend],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    for index in 0..2 {
+        let match_id = format!("private-arena-{index}");
+        seed_match(&db, &match_id, 23, "stadium", "SportFight");
+        let detail = json!({
+            "payload": {
+                "data": {
+                    "roundCountList": [{
+                        "teammateList": [
+                            {
+                                "bnetId": current_id,
+                                "name": current_id,
+                                "heroGuid": current_hero_guid,
+                                "friendBnetIds": [friend_id]
+                            },
+                            {
+                                "bnetId": friend_id,
+                                "name": friend_id,
+                                "heroGuid": friend_hero_guid
+                            }
+                        ]
+                    }]
+                }
+            }
+        });
+        db.connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES (?1, 'fight', ?2, '2026-07-16T00:00:00Z')",
+                params![match_id, detail.to_string()],
+            )
+            .unwrap();
+    }
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(23),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(analytics.lineup_combinations.len(), 1);
+    let lineup = &analytics.lineup_combinations[0];
+    assert_eq!(lineup.matches, 3);
+    let current = lineup
+        .members
+        .iter()
+        .find(|member| member.is_current_player)
+        .unwrap();
+    assert_eq!(current.bnet_id.as_deref(), Some(current_id));
+    assert_eq!(current.hero_guid, current_hero_guid);
+    assert_eq!(current.name, "当前玩家");
+    assert_eq!(current.hero_name, "未知英雄");
+    let friend = lineup
+        .members
+        .iter()
+        .find(|member| !member.is_current_player)
+        .unwrap();
+    assert_eq!(friend.bnet_id.as_deref(), Some(friend_id));
+    assert_eq!(friend.hero_guid, friend_hero_guid);
+    assert_eq!(friend.name, "未知好友");
+    assert_eq!(friend.hero_name, "未知英雄");
+    for member in &lineup.members {
+        assert_ne!(member.name, member.bnet_id.as_deref().unwrap());
+        assert_ne!(member.hero_name, member.hero_guid);
+    }
+}
+
+#[test]
 fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("synthetic-friend-arena.sqlite3"));

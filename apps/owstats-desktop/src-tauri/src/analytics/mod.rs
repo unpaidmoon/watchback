@@ -557,17 +557,21 @@ fn lineup_combinations(
         let mut members = Vec::new();
         members.push(LineupMember {
             bnet_id: Some(current.bnet_id.clone()),
-            name: current.name.clone(),
+            name: safe_lineup_display_name(&current.name, &current.bnet_id, "当前玩家"),
             hero_guid: current.hero_guid.clone(),
-            hero_name: current.hero_name.clone(),
+            hero_name: safe_lineup_display_name(&current.hero_name, &current.hero_guid, "未知英雄"),
             is_current_player: true,
         });
         for friend in &friends {
             members.push(LineupMember {
                 bnet_id: Some(friend.bnet_id.clone()),
-                name: friend.name.clone(),
+                name: safe_lineup_display_name(&friend.name, &friend.bnet_id, "未知好友"),
                 hero_guid: friend.hero_guid.clone(),
-                hero_name: friend.hero_name.clone(),
+                hero_name: safe_lineup_display_name(
+                    &friend.hero_name,
+                    &friend.hero_guid,
+                    "未知英雄",
+                ),
                 is_current_player: false,
             });
         }
@@ -860,6 +864,14 @@ fn display_name_quality(value: &str, identity: &str, fallback: &str) -> u8 {
         2
     } else {
         0
+    }
+}
+
+fn safe_lineup_display_name(value: &str, identity: &str, fallback: &str) -> String {
+    if display_name_quality(value, identity, fallback) > 0 {
+        value.trim().to_string()
+    } else {
+        fallback.to_string()
     }
 }
 

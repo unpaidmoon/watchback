@@ -116,7 +116,8 @@ pub(super) fn get_personal_season_review_impl(
 
 pub(super) fn available_review_seasons(db: &OwDatabase) -> Result<Vec<i64>> {
     let conn = db.connect()?;
-    let mut stmt = conn.prepare("SELECT DISTINCT season FROM matches ORDER BY season DESC")?;
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT season FROM matches WHERE season > 0 ORDER BY season DESC")?;
     let seasons = stmt
         .query_map([], |row| row.get(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
