@@ -96,6 +96,11 @@ impl SharedAppPaths {
         self.operations_root().join("migration-eligibility.json")
     }
 
+    pub fn migration_content_manifest(&self, account_id: &AccountId) -> PathBuf {
+        self.operations_root()
+            .join(format!("migration-content-{}.json", account_id.as_str()))
+    }
+
     pub fn account(&self, account_id: &AccountId) -> AccountPaths {
         AccountPaths {
             root: self.accounts_root().join(account_id.as_str()),

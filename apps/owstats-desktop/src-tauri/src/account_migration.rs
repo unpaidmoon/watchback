@@ -5,6 +5,7 @@ use anyhow::{anyhow, bail, Result};
 use chrono::Utc;
 use rusqlite::{Connection, DatabaseName, OpenFlags};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -14,7 +15,6 @@ use uuid::Uuid;
 const MIGRATION_VERSION: u32 = 1;
 const ELIGIBILITY_VERSION: u32 = 1;
 const CONTENT_MANIFEST_VERSION: u32 = 1;
-const CONTENT_MANIFEST_FILE: &str = ".migration-content.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +37,8 @@ struct MigrationContentEntry {
     relative_path: String,
     kind: MigrationContentKind,
     size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -159,18 +161,18 @@ pub(crate) fn adopt_legacy_account(
 
     set_phase(shared, &mut journal, MigrationPhase::Validating)?;
     validate_staging_database(&staging)?;
-    write_staging_content_manifest(&staging)?;
+    write_stable_content_manifest(shared, account.account_id(), &staging)?;
 
     set_phase(shared, &mut journal, MigrationPhase::Publishing)?;
     publish_staging(&staging, account.paths())?;
     validate_published_account(shared, account.account_id(), account.paths())?;
-    validate_published_content_manifest(&staging, account.paths().root())?;
+    validate_published_content_manifest(shared, account.account_id(), account.paths().root())?;
 
     set_phase(shared, &mut journal, MigrationPhase::CleaningLegacy)?;
-    validate_published_content_manifest(&staging, account.paths().root())?;
+    validate_published_content_manifest(shared, account.account_id(), account.paths().root())?;
     clean_legacy_sources(shared)?;
-    remove_staging_if_present(&staging)?;
-    set_phase(shared, &mut journal, MigrationPhase::Complete)
+    set_phase(shared, &mut journal, MigrationPhase::Complete)?;
+    cleanup_complete_artifacts(shared, account.account_id(), &staging)
 }
 
 pub(crate) fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<()> {
@@ -182,7 +184,7 @@ pub(crate) fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<(
 
     match journal.phase {
         MigrationPhase::Copying | MigrationPhase::Validating => {
-            remove_staging_if_present(&staging)?;
+            cleanup_complete_artifacts(shared, &journal.account_id, &staging)?;
             fs::remove_file(shared.migration_journal())
                 .map_err(|_| anyhow!("无法回滚未完成的旧数据迁移"))?;
             Ok(())
@@ -191,26 +193,28 @@ pub(crate) fn recover_interrupted_migration(shared: &SharedAppPaths) -> Result<(
             let paths = shared.account(&journal.account_id);
             validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
             validate_staging_database(&staging)?;
-            validate_staging_content_manifest(&staging)?;
+            validate_staging_content_manifest(shared, &journal.account_id, &staging)?;
             publish_staging(&staging, &paths)?;
             validate_published_account(shared, &journal.account_id, &paths)?;
-            validate_published_content_manifest(&staging, paths.root())?;
+            validate_published_content_manifest(shared, &journal.account_id, paths.root())?;
             set_phase(shared, &mut journal, MigrationPhase::CleaningLegacy)?;
-            validate_published_content_manifest(&staging, paths.root())?;
+            validate_published_content_manifest(shared, &journal.account_id, paths.root())?;
             clean_legacy_sources(shared)?;
-            remove_staging_if_present(&staging)?;
-            set_phase(shared, &mut journal, MigrationPhase::Complete)
+            set_phase(shared, &mut journal, MigrationPhase::Complete)?;
+            cleanup_complete_artifacts(shared, &journal.account_id, &staging)
         }
         MigrationPhase::CleaningLegacy => {
             let paths = shared.account(&journal.account_id);
             validate_confirmed_account_paths(shared, &journal.account_id, &paths)?;
             validate_published_account(shared, &journal.account_id, &paths)?;
-            validate_published_content_manifest(&staging, paths.root())?;
+            validate_published_content_manifest(shared, &journal.account_id, paths.root())?;
             clean_legacy_sources(shared)?;
-            remove_staging_if_present(&staging)?;
-            set_phase(shared, &mut journal, MigrationPhase::Complete)
+            set_phase(shared, &mut journal, MigrationPhase::Complete)?;
+            cleanup_complete_artifacts(shared, &journal.account_id, &staging)
         }
-        MigrationPhase::Complete => Ok(()),
+        MigrationPhase::Complete => {
+            cleanup_complete_artifacts(shared, &journal.account_id, &staging)
+        }
     }
 }
 
@@ -371,32 +375,51 @@ fn validate_staging_database(staging: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_staging_content_manifest(staging: &Path) -> Result<()> {
+fn write_stable_content_manifest(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+    staging: &Path,
+) -> Result<()> {
     let manifest = collect_staging_content_manifest(staging)?;
     let bytes =
         serde_json::to_vec_pretty(&manifest).map_err(|_| anyhow!("无法编码迁移内容清单"))?;
-    write_atomic(&staging.join(CONTENT_MANIFEST_FILE), &bytes)
+    write_atomic(&shared.migration_content_manifest(account_id), &bytes)
 }
 
-fn validate_staging_content_manifest(staging: &Path) -> Result<MigrationContentManifest> {
-    let path = staging.join(CONTENT_MANIFEST_FILE);
+fn read_stable_content_manifest(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+) -> Result<MigrationContentManifest> {
+    let path = shared.migration_content_manifest(account_id);
     require_safe_regular_file(&path)?;
     let bytes = fs::read(&path).map_err(|_| anyhow!("无法读取迁移内容清单"))?;
     let manifest: MigrationContentManifest =
         serde_json::from_slice(&bytes).map_err(|_| anyhow!("迁移内容清单损坏，源数据保持不变"))?;
     validate_content_manifest_shape(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_staging_content_manifest(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+    staging: &Path,
+) -> Result<MigrationContentManifest> {
+    let manifest = read_stable_content_manifest(shared, account_id)?;
     if manifest != collect_staging_content_manifest(staging)? {
         bail!("迁移暂存内容与清单不一致，源数据保持不变")
     }
     Ok(manifest)
 }
 
-fn validate_published_content_manifest(staging: &Path, published_root: &Path) -> Result<()> {
+fn validate_published_content_manifest(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+    published_root: &Path,
+) -> Result<()> {
     require_safe_directory(published_root)?;
-    let manifest = validate_staging_content_manifest(staging)?;
+    let manifest = read_stable_content_manifest(shared, account_id)?;
     for entry in &manifest.entries {
         let relative = validated_relative_path(&entry.relative_path)?;
-        let source = staging.join(&relative);
         let destination = published_root.join(&relative);
         let destination_metadata = safe_destination_metadata(&destination)?
             .ok_or_else(|| anyhow!("账号数据发布不完整，旧数据保持不变"))?;
@@ -404,8 +427,7 @@ fn validate_published_content_manifest(staging: &Path, published_root: &Path) ->
             MigrationContentKind::Directory if destination_metadata.is_dir() => {}
             MigrationContentKind::File if destination_metadata.is_file() => {
                 if destination_metadata.len() != entry.size
-                    || fs::read(&source).map_err(|_| anyhow!("无法校验迁移暂存数据"))?
-                        != fs::read(&destination).map_err(|_| anyhow!("无法校验已发布账号数据"))?
+                    || entry.sha256.as_deref() != Some(&file_sha256(&destination)?)
                 {
                     bail!("账号数据发布内容不一致，旧数据保持不变")
                 }
@@ -420,6 +442,7 @@ fn collect_staging_content_manifest(staging: &Path) -> Result<MigrationContentMa
     require_safe_directory(staging)?;
     let mut entries = Vec::new();
     for relative in [
+        "owstats.sqlite3",
         "player_target.json",
         "player_profile.json",
         "seasons",
@@ -468,6 +491,11 @@ fn collect_content_entry(
         } else {
             0
         },
+        sha256: if metadata.is_file() {
+            Some(file_sha256(path)?)
+        } else {
+            None
+        },
     });
     if metadata.is_dir() {
         for child in fs::read_dir(path).map_err(|_| anyhow!("无法读取迁移暂存目录"))? {
@@ -491,11 +519,29 @@ fn validate_content_manifest_shape(manifest: &MigrationContentManifest) -> Resul
         if !paths.insert(&entry.relative_path) {
             bail!("迁移内容清单包含重复路径")
         }
-        if entry.kind == MigrationContentKind::Directory && entry.size != 0 {
-            bail!("迁移内容清单目录大小无效")
+        match entry.kind {
+            MigrationContentKind::Directory if entry.size != 0 || entry.sha256.is_some() => {
+                bail!("迁移内容清单目录信息无效")
+            }
+            MigrationContentKind::File if !matches!(entry.sha256.as_deref(), Some(value) if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())) =>
+            {
+                bail!("迁移内容清单文件摘要无效")
+            }
+            _ => {}
         }
     }
+    if !manifest.entries.iter().any(|entry| {
+        entry.relative_path == "owstats.sqlite3" && entry.kind == MigrationContentKind::File
+    }) {
+        bail!("迁移内容清单缺少数据库，源数据保持不变")
+    }
     Ok(())
+}
+
+fn file_sha256(path: &Path) -> Result<String> {
+    require_safe_regular_file(path)?;
+    let bytes = fs::read(path).map_err(|_| anyhow!("无法校验迁移内容"))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 fn validated_relative_path(value: &str) -> Result<PathBuf> {
@@ -779,6 +825,20 @@ fn remove_staging_if_present(staging: &Path) -> Result<()> {
     fs::remove_dir_all(staging).map_err(|_| anyhow!("无法清理旧数据迁移暂存目录"))
 }
 
+fn cleanup_complete_artifacts(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+    staging: &Path,
+) -> Result<()> {
+    remove_staging_if_present(staging)?;
+    let manifest = shared.migration_content_manifest(account_id);
+    if path_entry_exists(&manifest)? {
+        require_safe_regular_file(&manifest)?;
+        fs::remove_file(manifest).map_err(|_| anyhow!("无法清理迁移内容清单"))?;
+    }
+    Ok(())
+}
+
 fn reject_links_recursively(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path).map_err(|_| anyhow!("无法检查迁移文件类型"))?;
     reject_metadata(&metadata)?;
@@ -1001,20 +1061,24 @@ mod tests {
     #[test]
     fn partial_publish_manifest_blocks_cleanup_until_every_file_matches() {
         let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let account_id = AccountId::parse("36be8ecb-ecc4-4a15-b4d5-7d1fa355ab9c").unwrap();
         let staging = temp.path().join("staging");
         let published = temp.path().join("published");
         fs::create_dir_all(staging.join("seasons")).unwrap();
+        fs::write(staging.join("owstats.sqlite3"), b"database").unwrap();
         fs::write(staging.join("player_profile.json"), b"profile").unwrap();
         fs::write(staging.join("seasons/22.json"), b"season").unwrap();
         fs::create_dir_all(&published).unwrap();
+        fs::write(published.join("owstats.sqlite3"), b"database").unwrap();
         fs::write(published.join("player_profile.json"), b"profile").unwrap();
 
-        write_staging_content_manifest(&staging).unwrap();
+        write_stable_content_manifest(&shared, &account_id, &staging).unwrap();
 
-        assert!(validate_published_content_manifest(&staging, &published).is_err());
+        assert!(validate_published_content_manifest(&shared, &account_id, &published).is_err());
         fs::create_dir_all(published.join("seasons")).unwrap();
         fs::write(published.join("seasons/22.json"), b"season").unwrap();
-        validate_published_content_manifest(&staging, &published).unwrap();
+        validate_published_content_manifest(&shared, &account_id, &published).unwrap();
     }
 
     #[cfg(windows)]
