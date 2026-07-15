@@ -158,9 +158,9 @@ fn pairing_role_id(
     }
 }
 
-pub(crate) struct BrowserLoginOutcome {
-    pub(crate) credentials: DashenCredentials,
-    pub(crate) detected_battle_tag: String,
+pub struct BrowserLoginOutcome {
+    pub credentials: DashenCredentials,
+    pub detected_battle_tag: String,
 }
 
 pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<CredentialStatus> {
@@ -211,7 +211,31 @@ pub(crate) async fn capture_dashen_login(
         "请在浏览器中完成登录，应用会自动识别登录状态。",
     );
 
-    fetch_credentials_from_browser(&app, port).await
+    capture_dashen_login_with(|| fetch_credentials_from_browser(&app, port)).await
+}
+
+pub async fn capture_dashen_login_with<F, Fut>(runner: F) -> Result<BrowserLoginOutcome>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<BrowserLoginOutcome>>,
+{
+    let outcome = runner()
+        .await
+        .map_err(|error| anyhow!(redacted_login_error(&error.to_string())))?;
+    if outcome.credentials.role_id <= 0 || outcome.credentials.token.trim().is_empty() {
+        return Err(anyhow!("登录凭证不完整，请重新登录。"));
+    }
+    let battle_tag = outcome.detected_battle_tag.trim();
+    let valid_battle_tag = battle_tag.split_once('#').is_some_and(|(name, suffix)| {
+        !name.is_empty()
+            && !suffix.is_empty()
+            && !suffix.contains('#')
+            && suffix.chars().all(|character| character.is_ascii_digit())
+    });
+    if !valid_battle_tag {
+        return Err(anyhow!("未能稳定识别 BattleTag，请重新登录。"));
+    }
+    Ok(outcome)
 }
 
 pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResult> {

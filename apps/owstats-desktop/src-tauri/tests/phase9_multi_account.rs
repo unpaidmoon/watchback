@@ -425,6 +425,223 @@ fn account_login_commands_acquire_account_operation_before_capture_and_are_regis
     assert!(lib.contains("commands::relogin_account"));
 }
 
+fn login_operation_dir(shared: &SharedAppPaths, operation_id: &str) -> std::path::PathBuf {
+    shared.pending_logins().join(operation_id)
+}
+
+fn write_login_operation_journal(
+    shared: &SharedAppPaths,
+    operation_id: &str,
+    kind: &str,
+    account_id: &AccountId,
+    phase: &str,
+    battle_tag: &str,
+) -> std::path::PathBuf {
+    let operation = login_operation_dir(shared, operation_id);
+    fs::create_dir_all(&operation).unwrap();
+    fs::write(
+        operation.join("operation.json"),
+        serde_json::to_vec_pretty(&json!({
+            "version": 1,
+            "operationId": operation_id,
+            "kind": kind,
+            "accountId": account_id.as_str(),
+            "phase": phase,
+            "battleTag": battle_tag,
+            "startedAt": "2026-07-16T00:00:00Z",
+            "updatedAt": "2026-07-16T00:00:01Z"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    operation
+}
+
+fn write_formal_account(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+    role_id: i64,
+    battle_tag: &str,
+    token: &str,
+) {
+    let paths = shared.account(account_id);
+    fs::create_dir_all(paths.root()).unwrap();
+    let mut value = manifest(account_id.clone(), battle_tag);
+    value.role_id = role_id;
+    write_manifest_atomic(&paths.manifest(), &value).unwrap();
+    owstats_desktop_lib::credential_store::save_credentials_atomic(
+        &paths.credentials(),
+        &synthetic_capture(role_id, battle_tag, token).credentials,
+    )
+    .unwrap();
+}
+
+#[test]
+fn interrupted_new_login_after_account_rename_is_rolled_back_on_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    write_formal_account(&shared, &account_id, 101101, "Crash#1011", "new-secret");
+    write_login_operation_journal(
+        &shared,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "addNew",
+        &account_id,
+        "accountPublished",
+        "Crash#1011",
+    );
+
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    assert!(manager.registry_snapshot().unwrap().accounts.is_empty());
+    assert!(!shared.account(&account_id).root().exists());
+    assert!(!shared.pending_logins().exists());
+}
+
+#[test]
+fn interrupted_new_login_after_registry_commit_is_kept_and_cleaned_on_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    write_formal_account(&shared, &account_id, 101101, "Crash#1011", "new-secret");
+    write_registry_atomic(
+        &shared.registry(),
+        &AccountRegistry {
+            version: 1,
+            active_account_id: Some(account_id.clone()),
+            accounts: vec![entry(account_id.clone(), "Crash#1011")],
+        },
+    )
+    .unwrap();
+    write_login_operation_journal(
+        &shared,
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "addNew",
+        &account_id,
+        "accountPublished",
+        "Crash#1011",
+    );
+
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+    assert!(shared.account(&account_id).root().is_dir());
+    assert!(!shared.pending_logins().exists());
+}
+
+fn interrupted_existing_login_fixture(
+    phase: &str,
+    registry_is_new: bool,
+) -> (
+    tempfile::TempDir,
+    SharedAppPaths,
+    AccountId,
+    std::path::PathBuf,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    write_formal_account(&shared, &account_id, 101101, "Old#1011", "old-secret");
+    let old_manifest = fs::read(shared.account(&account_id).manifest()).unwrap();
+    let old_credentials = fs::read(shared.account(&account_id).credentials()).unwrap();
+    let old_registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(account_id.clone()),
+        accounts: vec![entry(account_id.clone(), "Old#1011")],
+    };
+    write_registry_atomic(&shared.registry(), &old_registry).unwrap();
+    let old_registry_bytes = fs::read(shared.registry()).unwrap();
+    let operation = write_login_operation_journal(
+        &shared,
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "updateExisting",
+        &account_id,
+        phase,
+        "New#1011",
+    );
+    fs::write(operation.join("old-manifest.json"), old_manifest).unwrap();
+    fs::write(operation.join("old-credentials.json"), old_credentials).unwrap();
+    fs::write(operation.join("old-registry.json"), old_registry_bytes).unwrap();
+    if matches!(
+        phase,
+        "credentialsPublished" | "manifestPublished" | "registryCommitted"
+    ) {
+        owstats_desktop_lib::credential_store::save_credentials_atomic(
+            &shared.account(&account_id).credentials(),
+            &synthetic_capture(101101, "New#1011", "new-secret").credentials,
+        )
+        .unwrap();
+    }
+    if matches!(phase, "manifestPublished" | "registryCommitted") {
+        let mut new_manifest = manifest(account_id.clone(), "New#1011");
+        new_manifest.role_id = 101101;
+        write_manifest_atomic(&shared.account(&account_id).manifest(), &new_manifest).unwrap();
+    }
+    if registry_is_new {
+        write_registry_atomic(
+            &shared.registry(),
+            &AccountRegistry {
+                version: 1,
+                active_account_id: Some(account_id.clone()),
+                accounts: vec![entry(account_id.clone(), "New#1011")],
+            },
+        )
+        .unwrap();
+    }
+    (temp, shared, account_id, operation)
+}
+
+#[test]
+fn interrupted_existing_login_after_credentials_write_restores_old_state() {
+    let (_temp, shared, account_id, _) =
+        interrupted_existing_login_fixture("credentialsPublished", false);
+    AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(saved_credentials(&shared, &account_id).token, "old-secret");
+    assert_eq!(
+        read_manifest(&shared.account(&account_id).manifest(), &account_id)
+            .unwrap()
+            .battle_tag,
+        "Old#1011"
+    );
+    assert!(!shared.pending_logins().exists());
+}
+
+#[test]
+fn interrupted_existing_login_after_manifest_write_restores_old_state() {
+    let (_temp, shared, account_id, _) =
+        interrupted_existing_login_fixture("manifestPublished", false);
+    AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(saved_credentials(&shared, &account_id).token, "old-secret");
+    assert_eq!(
+        read_manifest(&shared.account(&account_id).manifest(), &account_id)
+            .unwrap()
+            .battle_tag,
+        "Old#1011"
+    );
+    assert_eq!(
+        read_registry(&shared.registry()).unwrap().accounts[0].battle_tag,
+        "Old#1011"
+    );
+    assert!(!shared.pending_logins().exists());
+}
+
+#[test]
+fn interrupted_existing_login_after_registry_write_keeps_new_state() {
+    let (_temp, shared, account_id, _) =
+        interrupted_existing_login_fixture("manifestPublished", true);
+    AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(saved_credentials(&shared, &account_id).token, "new-secret");
+    assert_eq!(
+        read_manifest(&shared.account(&account_id).manifest(), &account_id)
+            .unwrap()
+            .battle_tag,
+        "New#1011"
+    );
+    assert_eq!(
+        read_registry(&shared.registry()).unwrap().accounts[0].battle_tag,
+        "New#1011"
+    );
+    assert!(!shared.pending_logins().exists());
+}
+
 struct LegacyFixture {
     _temp: tempfile::TempDir,
     shared: SharedAppPaths,

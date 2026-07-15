@@ -23,6 +23,8 @@ pub struct AccountContextSnapshot {
 
 impl AccountContextManager {
     pub fn load(shared: SharedAppPaths) -> Result<Self> {
+        crate::account_login::recover_pending_logins(&shared)
+            .map_err(|_| anyhow!("账号登录恢复失败，请重试。"))?;
         let eligibility_failed =
             crate::account_migration::prepare_legacy_eligibility(&shared).is_err();
         let recovery_failed = eligibility_failed
