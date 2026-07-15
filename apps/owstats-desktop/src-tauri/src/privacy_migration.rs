@@ -15,18 +15,20 @@ const MARKER_VALUE: &str = "complete";
 /// Credentials and the retired player-target file are neither read nor copied.
 pub fn migrate_legacy_persistence(
     conn: &Connection,
-    app_data_dir: &Path,
     database_path: &Path,
+    seasons_dir: &Path,
+    backups_dir: &Path,
 ) -> Result<()> {
     if migration_complete(conn)? {
         return Ok(());
     }
 
-    let backup_dir = app_data_dir
-        .join("privacy-backups")
-        .join(Utc::now().format("%Y%m%dT%H%M%S%.fZ").to_string());
-    create_backup(app_data_dir, database_path, &backup_dir)?;
-    sanitize_season_files(&app_data_dir.join("seasons"))?;
+    let backup_dir = backups_dir.join(format!(
+        "privacy-{}",
+        Utc::now().format("%Y%m%dT%H%M%S%.fZ")
+    ));
+    create_backup(database_path, seasons_dir, &backup_dir)?;
+    sanitize_season_files(seasons_dir)?;
     sanitize_sqlite_rows(conn)?;
 
     conn.execute(
@@ -48,15 +50,14 @@ fn migration_complete(conn: &Connection) -> Result<bool> {
     Ok(value.as_deref() == Some(MARKER_VALUE))
 }
 
-fn create_backup(app_data_dir: &Path, database_path: &Path, backup_dir: &Path) -> Result<()> {
+fn create_backup(database_path: &Path, seasons_dir: &Path, backup_dir: &Path) -> Result<()> {
     fs::create_dir_all(backup_dir)?;
     if database_path.exists() {
         fs::copy(database_path, backup_dir.join("owstats.sqlite3"))
             .context("failed to back up the legacy database")?;
     }
-    let seasons = app_data_dir.join("seasons");
-    if seasons.exists() {
-        copy_json_tree(&seasons, &backup_dir.join("seasons"))?;
+    if seasons_dir.exists() {
+        copy_json_tree(seasons_dir, &backup_dir.join("seasons"))?;
     }
     Ok(())
 }
@@ -204,7 +205,13 @@ mod tests {
             params!["token=legacy-message-secret", r#"{"authorization":"legacy-error-secret"}"#],
         ).unwrap();
 
-        migrate_legacy_persistence(&conn, temp.path(), &database_path).unwrap();
+        migrate_legacy_persistence(
+            &conn,
+            &database_path,
+            &temp.path().join("seasons"),
+            &temp.path().join("privacy-backups"),
+        )
+        .unwrap();
 
         let season = fs::read_to_string(temp.path().join("seasons").join("22.json")).unwrap();
         let entry: String = conn
@@ -239,7 +246,13 @@ mod tests {
         assert!(backup_dirs[0].join("owstats.sqlite3").is_file());
         assert!(backup_dirs[0].join("seasons").join("22.json").is_file());
         assert!(migration_complete(&conn).unwrap());
-        migrate_legacy_persistence(&conn, temp.path(), &database_path).unwrap();
+        migrate_legacy_persistence(
+            &conn,
+            &database_path,
+            &temp.path().join("seasons"),
+            &temp.path().join("privacy-backups"),
+        )
+        .unwrap();
         assert_eq!(
             fs::read_dir(temp.path().join("privacy-backups"))
                 .unwrap()
@@ -258,7 +271,13 @@ mod tests {
             .unwrap();
         fs::write(temp.path().join("seasons"), "not a directory").unwrap();
 
-        assert!(migrate_legacy_persistence(&conn, temp.path(), &database_path).is_err());
+        assert!(migrate_legacy_persistence(
+            &conn,
+            &database_path,
+            &temp.path().join("seasons"),
+            &temp.path().join("privacy-backups"),
+        )
+        .is_err());
         assert!(!migration_complete(&conn).unwrap());
     }
 

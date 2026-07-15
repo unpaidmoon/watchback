@@ -12,7 +12,6 @@ use crate::login_flow::{LoginPhase, LoginProgress};
 use crate::models::{CredentialLoginCancelResult, CredentialStatus};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -165,14 +164,6 @@ pub(crate) struct BrowserLoginOutcome {
     pub(crate) detected_battle_tag: Option<String>,
 }
 
-pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
-    Ok(crate::app_paths::AppPaths::from_app(app)?.credentials())
-}
-
-pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
-    credential_status_for_path(&credential_path(app)?)
-}
-
 pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<CredentialStatus> {
     credential_status_for_path(&paths.credentials())
 }
@@ -193,10 +184,6 @@ pub fn read_optional_saved_credentials_for_account(
 
 pub fn clear_credentials_for_account(paths: &AccountPaths) -> Result<bool> {
     clear_credentials_for_path(&paths.credentials())
-}
-
-pub fn clear_credentials(app: &AppHandle) -> Result<bool> {
-    clear_credentials_for_path(&credential_path(app)?)
 }
 
 pub(crate) async fn start_dashen_login_capture_for_account(
