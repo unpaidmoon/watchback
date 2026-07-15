@@ -556,6 +556,8 @@ export type SeasonAnalysis = {
 
 export type OnboardingStatus = {
   selectedSeason: number | null;
+  currentSeason: number;
+  syncableSeasons: number[];
   availableSeasons: number[];
   canEnterReview: boolean;
   credentialStatus: CredentialStatus;

@@ -52,7 +52,7 @@ export function SeasonSyncWorkbench({
     isSyncing,
     selectedHasData,
   );
-  const firstSeason = syncableSeasons.at(-1) ?? currentSeason;
+  const firstSeason = syncableSeasons[syncableSeasons.length - 1] ?? currentSeason;
 
   return (
     <section className="seasonSyncWorkbench" aria-label="赛季同步工作台">

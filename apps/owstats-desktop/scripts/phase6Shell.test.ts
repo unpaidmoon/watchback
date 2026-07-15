@@ -134,8 +134,8 @@ assertEqual(onboardingSource.includes("phase6PlayerPass"), false, "command cente
 assertEqual(onboardingSource.includes("phase6CoverageMeter"), true, "command center shows data coverage");
 assertEqual(onboardingSource.includes("phase6DataCoverageCard"), true, "data area keeps one unified coverage card");
 assertEqual(onboardingSource.includes("seasonStatuses"), true, "command center reads the selected season status from onboarding status");
-assertEqual(onboardingSource.includes("FIXED_COMMAND_CENTER_SEASONS"), false, "command center does not fix the season list");
-assertEqual(onboardingSource.includes("seasonInput"), true, "command center accepts an explicit season number");
+assertEqual(onboardingSource.includes("COMMAND_CENTER_SEASONS"), false, "command center does not fix the season list");
+assertEqual(onboardingSource.includes("selectedSeason"), true, "command center keeps page-local season selection");
 assertEqual(onboardingSource.includes("BattleTag"), false, "command center never exposes BattleTag input or manual binding copy");
 assertEqual(onboardingSource.includes('aria-label="BattleTag"'), false, "command center removes the BattleTag input");
 assertEqual(onboardingSource.includes("battleTag"), false, "command center removes BattleTag input state");
@@ -144,17 +144,17 @@ assertEqual(onboardingSource.includes("切换到此账号"), true, "account mism
 assertEqual(onboardingSource.includes("保留原目标"), true, "account mismatch offers an explicit keep action");
 assertEqual(onboardingSource.includes("重新绑定"), true, "retryable binding failure offers a retry action");
 assertEqual(onboardingSource.includes("重新识别"), true, "unidentified account offers a fresh login identification action");
-assertEqual(onboardingSource.includes("credentialReady={credentialReady}"), true, "season card receives the real credential state");
-assertEqual(onboardingSource.includes("targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}"), true, "season card receives the backend target gate separately");
-assertEqual(onboardingSource.includes("accountOperationBusy={accountOperationBusy}"), true, "season card receives the account operation state separately");
-assertEqual(onboardingSource.includes("credentialReady={syncTargetReady}"), false, "season card never receives a mixed gate disguised as credential state");
+assertEqual(onboardingSource.includes("credentialReady={credentialReady}"), true, "season workbench receives the real credential state");
+assertEqual(onboardingSource.includes("targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}"), true, "season workbench receives the backend target gate separately");
+assertEqual(onboardingSource.includes("accountOperationBusy={accountOperationBusy}"), true, "season workbench receives the account operation state separately");
+assertEqual(onboardingSource.includes("credentialReady={syncTargetReady}"), false, "season workbench never receives a mixed gate disguised as credential state");
 assertEqual(
-  /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| isSyncBlocked \|\| isSyncing\}/.test(seasonHealthSource),
+  /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null\}/.test(seasonWorkbenchSource),
   true,
   "season sync button combines credential, target, account-operation and sync gates",
 );
 assertEqual(onboardingSource.includes("const accountOperationBusy = loggingIn || loggingOut || targetAction !== null"), true, "account actions share one busy gate");
-assertEqual(seasonHealthSource.includes("credentialReady && targetSyncAllowed && !accountOperationBusy"), true, "account actions suspend season sync without changing credential semantics");
+assertEqual(seasonWorkbenchSource.includes("seasonSyncGateCopy("), true, "account actions use the shared season gate copy without changing credential semantics");
 assertEqual(onboardingSource.includes("accountOperationLockRef"), true, "account handlers have a synchronous re-entry guard");
 assertEqual(onboardingSource.includes("dashboardRequestGenerationRef"), true, "dashboard refreshes invalidate stale responses");
 assertEqual(onboardingSource.includes("mountedRef"), true, "dashboard responses cannot update an unmounted command center");
@@ -175,6 +175,16 @@ assertEqual(
   true,
   "season sync owns and releases the shared operation lock",
 );
+assertEqual(
+  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)\s*\{[\s\S]*?setSyncError\(/.test(onboardingSource),
+  true,
+  "season sync lock failures stay beside the sync control",
+);
+assertEqual(
+  /function selectSyncSeason\(season: number\)[\s\S]*?setSyncError\(null\)[\s\S]*?setSyncNotice\(null\)[\s\S]*?setSelectedSeason\(season\)/.test(onboardingSource),
+  true,
+  "changing seasons clears stale sync feedback",
+);
 assertEqual(onboardingSource.includes("disabled={accountOperationBusy || syncingSeason !== null || !targetStatus.canConfirmSwitch}"), true, "switch confirmation is disabled during season sync");
 assertEqual(onboardingSource.includes("disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}"), true, "clear is disabled during season sync");
 assertEqual(onboardingSource.includes("disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}"), true, "logout is disabled during season sync");
@@ -190,10 +200,7 @@ assertEqual(
   true,
   "target recovery focus is recorded only after the enabled button receives focus",
 );
-assertEqual(onboardingSource.includes("phase8SeasonStatusGrid"), true, "command center renders the selected season card");
-assertEqual(commandCenterSource.includes("phase8SeasonStatusCard"), true, "command center renders individual season status cards");
-assertEqual(onboardingSource.includes("const COMMAND_CENTER_SEASONS = [21, 22, 23] as const"), true, "command center exposes fixed season segments");
-assertEqual(onboardingSource.includes('aria-label="选择同步赛季"'), true, "season picker has a Chinese accessible name");
+assertEqual(onboardingSource.includes("<SeasonSyncWorkbench"), true, "command center renders the dynamic season workbench");
 assertEqual(seasonWorkbenchSource.includes('aria-label="选择同步赛季"'), true, "dynamic season select has a Chinese accessible name");
 assertEqual(seasonWorkbenchSource.includes("syncableSeasons.map"), true, "season options come from the backend catalog");
 assertEqual(seasonWorkbenchSource.includes("已同步数据"), true, "ledger has the confirmed Chinese heading");
@@ -206,7 +213,7 @@ assertEqual(seasonWorkbenchSource.includes("aria-pressed"), true, "ledger rows e
 assertEqual(onboardingSource.includes('aria-label="赛季号"'), false, "numeric season input is removed");
 assertEqual(seasonWorkbenchSource.includes("`同步 S${selectedSeason}`"), true, "season sync button text follows the selected season");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
-assertEqual(onboardingSource.includes("currentSeason"), false, "command center does not introduce global current season state");
+assertEqual(onboardingSource.includes("status.currentSeason"), true, "command center consumes the backend current season without global state");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
 assertEqual(onboardingSource.includes("dumpSeason"), false, "command center does not expose diagnostic dump API wrapper");
 assertEqual(onboardingSource.includes("commandCenterMetricsRow"), true, "top metrics own credential, match count, coverage and last sync facts");
@@ -249,6 +256,8 @@ assertEqual(credentialTone("failed"), "bad", "failed credential is bad");
 
 const status: OnboardingStatus = {
   selectedSeason: 22,
+  currentSeason: 23,
+  syncableSeasons: [23, 22, 21, 20, 19, 18, 17, 16, 15],
   availableSeasons: [22],
   canEnterReview: true,
   credentialStatus: {
