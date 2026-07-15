@@ -69,10 +69,7 @@ fn command_center_status_returns_no_seasons_for_an_empty_database() {
     let status = get_onboarding_status(&db, OnboardingStatusRequest { season: None }).unwrap();
 
     assert_eq!(status.current_season, 23);
-    assert_eq!(
-        status.syncable_seasons,
-        (15..=23).rev().collect::<Vec<_>>()
-    );
+    assert_eq!(status.syncable_seasons, (15..=23).rev().collect::<Vec<_>>());
     let seasons = status
         .season_statuses
         .iter()
