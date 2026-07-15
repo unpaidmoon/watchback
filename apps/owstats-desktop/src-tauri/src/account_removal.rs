@@ -28,6 +28,7 @@ enum RemovalFaultPoint {
     BeforeDelete,
     UnsafeTreeAfterRegistry,
     BeforeAnyDelete,
+    AfterChildValidatedBeforeTraverse,
     AfterFirstDeleteMutation,
     CleanupOperation,
 }
@@ -35,6 +36,10 @@ enum RemovalFaultPoint {
 trait RemovalFault {
     fn after(&self, _point: RemovalFaultPoint) -> Result<()> {
         Ok(())
+    }
+
+    fn after_child_validated_before_traverse(&self, _child: &Path) -> Result<()> {
+        self.after(RemovalFaultPoint::AfterChildValidatedBeforeTraverse)
     }
 }
 
@@ -163,7 +168,7 @@ fn remove_account_with_fault(
     }
     ensure_safe_shared_roots(shared)?;
     let original = shared.account(account_id).root().to_path_buf();
-    ensure_safe_tree(&original).map_err(|_| anyhow!("账号数据不完整，无法退出。"))?;
+    preflight_deletion_tree(&original).map_err(|_| anyhow!("账号数据不完整，无法退出。"))?;
 
     let mut new_registry = old_registry.clone();
     new_registry
@@ -201,11 +206,20 @@ fn remove_account_with_fault(
         let _ = cleanup_operation(shared, &journal, fault);
         return Err(error).context("账号数据暂时被占用，无法退出。");
     }
+    let mut delete_preflight = Some(match preflight_deletion_tree(&quarantine) {
+        Ok(preflight) => preflight,
+        Err(error) => {
+            let _ = fs::rename(&quarantine, &original);
+            let _ = cleanup_operation(shared, &journal, fault);
+            return Err(error).context("账号数据不完整，无法退出。");
+        }
+    });
     journal.phase = DeletionPhase::Quarantined;
     let quarantine_journal_result = fault
         .after(RemovalFaultPoint::JournalAfterQuarantine)
         .and_then(|_| write_journal(shared, &journal));
     if quarantine_journal_result.is_err() {
+        drop(delete_preflight.take());
         if fault.after(RemovalFaultPoint::RollbackRename).is_err()
             || fs::rename(&quarantine, &original).is_err()
         {
@@ -215,6 +229,7 @@ fn remove_account_with_fault(
         return Err(anyhow!("账号退出失败，账号未更改。"));
     }
     if let Err(error) = fault.after(RemovalFaultPoint::AfterQuarantined) {
+        drop(delete_preflight.take());
         return match rollback_before_registry(shared, &journal, &original, &quarantine, fault)? {
             PreRegistryRollback::Restored => Err(error),
             PreRegistryRollback::RemovalCommitted(outcome) => Ok(outcome),
@@ -222,12 +237,14 @@ fn remove_account_with_fault(
     }
 
     if let Err(error) = fault.after(RemovalFaultPoint::BeforeRegistryWrite) {
+        drop(delete_preflight.take());
         return match rollback_before_registry(shared, &journal, &original, &quarantine, fault)? {
             PreRegistryRollback::Restored => Err(error),
             PreRegistryRollback::RemovalCommitted(outcome) => Ok(outcome),
         };
     }
     if let Err(error) = write_registry_atomic(&shared.registry(), &new_registry) {
+        drop(delete_preflight.take());
         return match rollback_before_registry(shared, &journal, &original, &quarantine, fault)? {
             PreRegistryRollback::Restored => Err(error).context("无法保存账号索引，账号未退出。"),
             PreRegistryRollback::RemovalCommitted(outcome) => Ok(outcome),
@@ -245,6 +262,7 @@ fn remove_account_with_fault(
         });
     }
     if let Err(error) = fault.after(RemovalFaultPoint::AfterRegistryUpdated) {
+        drop(delete_preflight.take());
         return match rollback_after_registry(shared, &mut journal, &original, &quarantine, fault)? {
             RollbackDisposition::RolledBack => Err(error),
             RollbackDisposition::PendingRemoval => Ok(RemovalOutcome {
@@ -254,6 +272,7 @@ fn remove_account_with_fault(
         };
     }
     if let Err(error) = fault.after(RemovalFaultPoint::BeforeDelete) {
+        drop(delete_preflight.take());
         return match rollback_after_registry(shared, &mut journal, &original, &quarantine, fault)? {
             RollbackDisposition::RolledBack => Err(error),
             RollbackDisposition::PendingRemoval => Ok(RemovalOutcome {
@@ -268,6 +287,7 @@ fn remove_account_with_fault(
         .is_err()
         || ensure_safe_tree(&quarantine).is_err()
     {
+        drop(delete_preflight.take());
         return match rollback_after_registry(shared, &mut journal, &original, &quarantine, fault)? {
             RollbackDisposition::RolledBack => Ok(RemovalOutcome {
                 registry: old_registry.clone(),
@@ -281,6 +301,7 @@ fn remove_account_with_fault(
     }
     if let Err(delete_failure) = delete_tree_tracked(&quarantine, fault) {
         if delete_failure.mutations == 0 {
+            drop(delete_preflight.take());
             return match rollback_after_registry(
                 shared,
                 &mut journal,
@@ -412,10 +433,83 @@ struct DeleteFailure {
     mutations: usize,
 }
 
+struct DeletionPreflight {
+    #[cfg(windows)]
+    _handles: Vec<fs::File>,
+}
+
+#[cfg(not(windows))]
+fn preflight_deletion_tree(path: &Path) -> Result<DeletionPreflight> {
+    ensure_safe_tree(path)?;
+    Ok(DeletionPreflight {})
+}
+
+#[cfg(windows)]
+fn preflight_deletion_tree(path: &Path) -> Result<DeletionPreflight> {
+    let mut handles = Vec::new();
+    preflight_windows_entry(path, &mut handles)?;
+    Ok(DeletionPreflight { _handles: handles })
+}
+
+#[cfg(windows)]
+fn preflight_windows_entry(path: &Path, handles: &mut Vec<fs::File>) -> Result<()> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const FILE_SHARE_DELETE: u32 = 0x4;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    let before = fs::symlink_metadata(path)?;
+    if before.file_type().is_symlink()
+        || before.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || (!before.is_dir() && !before.is_file())
+    {
+        bail!("unsafe deletion entry")
+    }
+    let mut options = fs::OpenOptions::new();
+    options
+        .access_mode(if before.is_dir() {
+            FILE_READ_ATTRIBUTES
+        } else {
+            GENERIC_READ | FILE_READ_ATTRIBUTES
+        })
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS);
+    let handle = options.open(path)?;
+    let opened = handle.metadata()?;
+    if opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || opened.is_dir() != before.is_dir()
+        || opened.is_file() != before.is_file()
+    {
+        bail!("unsafe deletion entry")
+    }
+    handles.push(handle);
+
+    if before.is_dir() {
+        let mut entries = fs::read_dir(path)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort();
+        for child in entries {
+            preflight_windows_entry(&child, handles)?;
+        }
+    }
+    Ok(())
+}
+
 fn delete_tree_tracked(
     path: &Path,
     fault: &impl RemovalFault,
 ) -> std::result::Result<(), DeleteFailure> {
+    let _preflight = match preflight_deletion_tree(path) {
+        Ok(preflight) => preflight,
+        Err(_) => return Err(DeleteFailure { mutations: 0 }),
+    };
     if fault.after(RemovalFaultPoint::BeforeAnyDelete).is_err() {
         return Err(DeleteFailure { mutations: 0 });
     }
@@ -442,6 +536,13 @@ fn delete_directory_contents(
     fault: &impl RemovalFault,
     mutations: &mut usize,
 ) -> Result<()> {
+    let directory_metadata = fs::symlink_metadata(path)?;
+    if !directory_metadata.is_dir()
+        || directory_metadata.file_type().is_symlink()
+        || is_windows_reparse(&directory_metadata)
+    {
+        bail!("unsafe linked account data")
+    }
     let mut entries = fs::read_dir(path)?
         .map(|entry| entry.map(|value| value.path()))
         .collect::<std::io::Result<Vec<_>>>()?;
@@ -451,14 +552,12 @@ fn delete_directory_contents(
         if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) {
             bail!("unsafe linked account data")
         }
-        if metadata.is_dir() {
-            delete_directory_contents(&child, fault, mutations)?;
-            fs::remove_dir(&child)?;
-        } else if metadata.is_file() {
-            fs::remove_file(&child)?;
-        } else {
+        if !metadata.is_dir() && !metadata.is_file() {
             bail!("unsafe account data entry")
         }
+        fault.after_child_validated_before_traverse(&child)?;
+        let isolated = child.with_file_name(format!(".deleting-{}", Uuid::new_v4()));
+        fs::rename(&child, &isolated)?;
         *mutations += 1;
         if *mutations == 1
             && fault
@@ -467,6 +566,19 @@ fn delete_directory_contents(
         {
             bail!("synthetic partial deletion")
         }
+        let isolated_metadata = fs::symlink_metadata(&isolated)?;
+        if isolated_metadata.file_type().is_symlink() || is_windows_reparse(&isolated_metadata) {
+            bail!("unsafe linked account data")
+        }
+        if isolated_metadata.is_dir() {
+            delete_directory_contents(&isolated, fault, mutations)?;
+            fs::remove_dir(&isolated)?;
+        } else if isolated_metadata.is_file() {
+            fs::remove_file(&isolated)?;
+        } else {
+            bail!("unsafe account data entry")
+        }
+        *mutations += 1;
     }
     Ok(())
 }
@@ -503,16 +615,6 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
         quarantine_exists,
         journal.phase,
     ) {
-        (true, false, false, true, DeletionPhase::RestoreFailed) => {
-            write_registry_atomic(&shared.registry(), &journal.new_registry)?;
-            ensure_safe_tree(&quarantine)?;
-            delete_tree_tracked(&quarantine, &NoRemovalFault)
-                .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
-            let mut complete = journal.clone();
-            complete.phase = DeletionPhase::Complete;
-            write_journal(shared, &complete)?;
-            cleanup_operation(shared, &complete, &NoRemovalFault)
-        }
         (
             true,
             false,
@@ -584,6 +686,39 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
         }
         _ => bail!("账号退出恢复状态不一致"),
     }
+}
+
+pub(crate) fn deletion_journal_proves_removed_account(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+    login_old_registry: &AccountRegistry,
+    login_intended_registry: &AccountRegistry,
+    disk_registry: &AccountRegistry,
+) -> bool {
+    let journal_path = shared.deletion_journal();
+    let metadata = match fs::symlink_metadata(&journal_path) {
+        Ok(metadata) => metadata,
+        Err(_) => return false,
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() || is_windows_reparse(&metadata) {
+        return false;
+    }
+    let journal: DeletionJournal = match fs::read(&journal_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    {
+        Some(journal) => journal,
+        None => return false,
+    };
+    validate_journal(shared, &journal).is_ok()
+        && &journal.account_id == account_id
+        && (&journal.old_registry == login_old_registry
+            || &journal.old_registry == login_intended_registry)
+        && &journal.new_registry == disk_registry
+        && !disk_registry
+            .accounts
+            .iter()
+            .any(|entry| &entry.account_id == account_id)
 }
 
 fn recover_restore_failed(
@@ -1128,6 +1263,101 @@ mod tests {
         assert!(shared.deletion_journal().is_file());
         recover_pending_removal(&shared).unwrap();
         assert!(!shared.deletion_journal().exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_exclusive_database_lock_prevents_every_removal_mutation() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let (_temp, shared, id, registry) = fixture();
+        let original_database = fs::read(shared.account(&id).database()).unwrap();
+        let _exclusive = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(shared.account(&id).database())
+            .unwrap();
+        assert!(preflight_deletion_tree(shared.account(&id).root()).is_err());
+
+        let removal = remove_account(&shared, &registry, &id, "2026-07-16T13:00:00Z");
+        drop(_exclusive);
+        assert!(removal.is_err());
+        assert_eq!(read_registry(&shared.registry()).unwrap(), registry);
+        assert!(shared.account(&id).manifest().is_file());
+        assert_eq!(
+            fs::read(shared.account(&id).database()).unwrap(),
+            original_database
+        );
+        assert!(!shared.deletion_journal().exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validated_child_replaced_by_junction_is_isolated_without_traversing_target() {
+        use std::cell::Cell;
+        use std::process::Command;
+
+        struct ReplaceAfterValidation {
+            outside: PathBuf,
+            replaced: Cell<bool>,
+        }
+
+        impl RemovalFault for ReplaceAfterValidation {
+            fn after_child_validated_before_traverse(&self, child: &Path) -> Result<()> {
+                if self.replaced.get()
+                    || child.file_name().and_then(|name| name.to_str()) != Some("nested")
+                {
+                    return Ok(());
+                }
+                let moved = child.with_file_name("attacker-moved");
+                fs::rename(child, &moved)?;
+                let status = Command::new("cmd")
+                    .args(["/c", "mklink", "/J"])
+                    .arg(child)
+                    .arg(&self.outside)
+                    .status()?;
+                if !status.success() {
+                    bail!("failed to create synthetic junction")
+                }
+                self.replaced.set(true);
+                Ok(())
+            }
+        }
+
+        let (_temp, shared, id, registry) = fixture();
+        fs::create_dir(shared.account(&id).root().join("nested")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("sentinel.txt"), b"outside-sentinel").unwrap();
+        let fault = ReplaceAfterValidation {
+            outside: outside.path().to_path_buf(),
+            replaced: Cell::new(false),
+        };
+
+        let outcome =
+            remove_account_with_fault(&shared, &registry, &id, "2026-07-16T13:00:00Z", &fault)
+                .unwrap();
+
+        assert_eq!(outcome.completion, RemovalCompletion::RemovedPendingCleanup);
+        assert_eq!(
+            fs::read(outside.path().join("sentinel.txt")).unwrap(),
+            b"outside-sentinel"
+        );
+        assert!(shared.deletion_journal().is_file());
+        let journal: DeletionJournal =
+            serde_json::from_slice(&fs::read(shared.deletion_journal()).unwrap()).unwrap();
+        let quarantine = quarantine_path(&shared, &journal.operation_id, &id).unwrap();
+        let isolated_junction = fs::read_dir(&quarantine)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| is_windows_reparse(&fs::symlink_metadata(path).unwrap()))
+            .expect("replaced junction must remain isolated for safe retry");
+        fs::remove_dir(&isolated_junction).unwrap();
+        recover_pending_removal(&shared).unwrap();
+        assert!(!shared.deletion_journal().exists());
+        assert_eq!(
+            fs::read(outside.path().join("sentinel.txt")).unwrap(),
+            b"outside-sentinel"
+        );
     }
 
     #[test]

@@ -236,8 +236,15 @@ impl AccountContextManager {
             .login_lock
             .lock()
             .map_err(|_| anyhow!("账号操作暂不可用，请重试。"))?;
+        crate::account_login::recover_pending_logins(&self.shared)
+            .map_err(|_| anyhow!("账号登录恢复失败，请重试。"))?;
         self.recover_deletion_while_locked()?;
         Ok(guard)
+    }
+
+    pub(crate) fn prepare_login_capture(&self) -> Result<()> {
+        drop(self.lock_login_publication()?);
+        Ok(())
     }
 
     fn recover_deletion_while_locked(&self) -> Result<()> {

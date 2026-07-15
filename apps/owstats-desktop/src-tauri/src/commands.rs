@@ -207,6 +207,7 @@ pub async fn start_dashen_login(
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
+    accounts.prepare_login_capture().map_err(to_message)?;
     let account = active_account(&accounts)?;
     let shared = accounts.shared_paths().clone();
     let capture_app = app.clone();

@@ -334,6 +334,16 @@ fn recover_existing_login(
         return remove_pending_operation(operation_root, &shared.pending_logins());
     }
     if registry != &old_registry {
+        if crate::account_removal::deletion_journal_proves_removed_account(
+            shared,
+            &journal.account_id,
+            &old_registry,
+            &intended_registry,
+            registry,
+        ) {
+            fault.before_cleanup_pending(&journal.operation_id)?;
+            return remove_pending_operation(operation_root, &shared.pending_logins());
+        }
         bail!("account registry is neither previous nor committed state")
     }
     let paths = shared.account(&journal.account_id);
@@ -532,6 +542,7 @@ where
     R: LoginProgressReporter,
     C: FnOnce() -> bool,
 {
+    manager.prepare_login_capture().map_err(publication_error)?;
     let capture = match capture().await {
         Ok(capture) => capture,
         Err(_) if was_cancelled() => {
@@ -575,6 +586,7 @@ where
     R: LoginProgressReporter,
     C: FnOnce() -> bool,
 {
+    manager.prepare_login_capture().map_err(publication_error)?;
     let capture = match capture().await {
         Ok(capture) => capture,
         Err(_) if was_cancelled() => {
@@ -1762,6 +1774,104 @@ mod tests {
         let restarted = AccountContextManager::load(shared.clone()).unwrap();
         assert_eq!(restarted.registry_snapshot().unwrap().accounts.len(), 1);
         assert!(!shared.pending_logins().exists());
+    }
+
+    #[test]
+    fn remove_recovers_committed_relogin_cleanup_before_deleting_account() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        let result = publish_relogin_account_inner_with_fault(
+            &manager,
+            &account_id,
+            capture("Old#1011", "new-secret"),
+            &CrashAfter(PublicationFaultPoint::CleanupPending),
+        )
+        .unwrap();
+        assert_eq!(result.message, pending_cleanup_message());
+        assert!(shared.pending_logins().is_dir());
+
+        let removed = manager
+            .remove_account(&account_id, "2026-07-16T13:00:00Z")
+            .unwrap();
+        assert!(removed.removed);
+        assert!(!shared.pending_logins().exists());
+        drop(manager);
+
+        let restarted = AccountContextManager::load(shared).unwrap();
+        assert!(restarted.registry_snapshot().unwrap().accounts.is_empty());
+    }
+
+    #[test]
+    fn restart_clears_stale_login_only_when_pending_deletion_proves_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        publish_relogin_account_inner_with_fault(
+            &manager,
+            &account_id,
+            capture("Old#1011", "new-secret"),
+            &CrashAfter(PublicationFaultPoint::CleanupPending),
+        )
+        .unwrap();
+        let committed_registry = manager.registry_snapshot().unwrap();
+        let removal = crate::account_removal::remove_account_with_test_fault(
+            &shared,
+            &committed_registry,
+            &account_id,
+            "2026-07-16T13:00:00Z",
+            crate::account_removal::TestRemovalFault::RollbackRestoreCommitsRemoval,
+        )
+        .unwrap();
+        assert!(removal.registry.accounts.is_empty());
+        assert!(shared.pending_logins().is_dir());
+        assert!(shared.deletion_journal().is_file());
+        drop(manager);
+
+        let restarted = AccountContextManager::load(shared.clone()).unwrap();
+        assert!(restarted.registry_snapshot().unwrap().accounts.is_empty());
+        assert!(!shared.pending_logins().exists());
+        assert!(!shared.deletion_journal().exists());
+    }
+
+    #[tokio::test]
+    async fn capture_wrapper_recovers_before_starting_browser_work() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        fs::create_dir_all(shared.pending_logins()).unwrap();
+        fs::create_dir_all(
+            shared
+                .pending_logins()
+                .join("11111111-1111-4111-8111-111111111111"),
+        )
+        .unwrap();
+        fs::write(
+            shared
+                .pending_logins()
+                .join("11111111-1111-4111-8111-111111111111")
+                .join(JOURNAL_FILE),
+            b"{}",
+        )
+        .unwrap();
+        let capture_started = std::sync::atomic::AtomicBool::new(false);
+
+        assert!(capture_and_publish_add(
+            &manager,
+            &RecordingProgress::default(),
+            || async {
+                capture_started.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(capture("Never#1000", "never-secret"))
+            },
+            || false,
+        )
+        .await
+        .is_err());
+        assert!(!capture_started.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
