@@ -1,3 +1,4 @@
+use owstats_desktop_lib::account_store::AccountId;
 use owstats_desktop_lib::credential_store::DashenCredentials;
 use owstats_desktop_lib::login_target::{
     bind_detected_target_with_base_url, confirm_switch, decide_target_action,
@@ -13,6 +14,31 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+fn account_id(value: &str) -> AccountId {
+    AccountId::parse(value).unwrap()
+}
+
+fn default_account_id() -> AccountId {
+    account_id("d59caecf-8e74-4b6c-b690-45e75f7fed9c")
+}
+
+#[test]
+fn login_target_sessions_are_strictly_scoped_by_account_id() {
+    let coordinator = LoginTargetCoordinator::default();
+    let first = account_id("d59caecf-8e74-4b6c-b690-45e75f7fed9c");
+    let second = account_id("9a494190-fdee-46f2-abd2-7de46f4f4376");
+    coordinator.replace_switch_required(&first, 101, "First#1000", "Saved#9999");
+
+    assert_eq!(coordinator.status(&second), None);
+    let error = coordinator.keep_current(&second).unwrap_err().to_string();
+    assert!(!error.contains("First#1000"));
+    assert!(!error.contains("Saved#9999"));
+
+    let first_status = coordinator.status(&first).unwrap();
+    assert_eq!(first_status.state, "switchRequired");
+    assert_eq!(first_status.detected_bnet.as_deref(), Some("First#1000"));
+}
 
 #[test]
 fn target_only_matches_the_login_role_that_created_it() {
@@ -83,9 +109,9 @@ fn target_action_normalizes_whitespace_fullwidth_hash_and_case() {
 #[test]
 fn keeping_a_different_target_disables_sync() {
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_switch_required(202, "Second#2000", "Current#1000");
+    coordinator.replace_switch_required(&default_account_id(), 202, "Second#2000", "Current#1000");
 
-    let status = coordinator.keep_current().unwrap();
+    let status = coordinator.keep_current(&default_account_id()).unwrap();
 
     assert_eq!(status.state, "mismatchKept");
     assert_eq!(status.detected_bnet.as_deref(), Some("Second#2000"));
@@ -97,9 +123,9 @@ fn keeping_a_different_target_disables_sync() {
 #[test]
 fn a_new_login_replaces_the_entire_previous_session() {
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_bind_failed(101, "First#1000", "first failure");
+    coordinator.replace_bind_failed(&default_account_id(), 101, "First#1000", "first failure");
 
-    let status = coordinator.replace_unidentified(202);
+    let status = coordinator.replace_unidentified(&default_account_id(), 202);
 
     assert_eq!(status.state, "unidentified");
     assert_eq!(status.detected_bnet, None);
@@ -110,7 +136,8 @@ fn a_new_login_replaces_the_entire_previous_session() {
 #[test]
 fn public_status_json_contains_no_role_or_token_fields() {
     let coordinator = LoginTargetCoordinator::default();
-    let status = coordinator.replace_ready(101, "Visible#1000", "Visible#1000");
+    let status =
+        coordinator.replace_ready(&default_account_id(), 101, "Visible#1000", "Visible#1000");
 
     let json = serde_json::to_string(&status).unwrap();
 
@@ -162,6 +189,7 @@ fn persisted_target_from_current_login_role_allows_sync_after_restart() {
 
     let status = ensure_sync_target_ready(
         &LoginTargetCoordinator::default(),
+        &default_account_id(),
         &credentials(101),
         &target_path,
     )
@@ -179,6 +207,7 @@ fn target_from_another_login_role_is_rejected_before_sync() {
 
     let error = ensure_sync_target_ready(
         &LoginTargetCoordinator::default(),
+        &default_account_id(),
         &credentials(101),
         &target_path,
     )
@@ -206,6 +235,7 @@ fn legacy_target_without_source_role_is_rejected_before_sync() {
 
     let error = ensure_sync_target_ready(
         &LoginTargetCoordinator::default(),
+        &default_account_id(),
         &credentials(101),
         &target_path,
     )
@@ -221,11 +251,16 @@ fn non_ready_login_session_rejects_sync_even_when_persisted_target_matches() {
     let target_path = temp.path().join("target.json");
     save_target(&target_path, "Current#1000", 101, "synthetic-player-key");
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_unidentified(101);
+    coordinator.replace_unidentified(&default_account_id(), 101);
 
-    let error = ensure_sync_target_ready(&coordinator, &credentials(101), &target_path)
-        .unwrap_err()
-        .to_string();
+    let error = ensure_sync_target_ready(
+        &coordinator,
+        &default_account_id(),
+        &credentials(101),
+        &target_path,
+    )
+    .unwrap_err()
+    .to_string();
 
     assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
 }
@@ -233,22 +268,22 @@ fn non_ready_login_session_rejects_sync_even_when_persisted_target_matches() {
 #[test]
 fn clearing_a_target_keeps_retry_only_for_a_reliable_current_session_tag() {
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_ready(101, "Current#1000", "Current#1000");
+    coordinator.replace_ready(&default_account_id(), 101, "Current#1000", "Current#1000");
 
-    let retryable = coordinator.target_cleared(Some(101));
+    let retryable = coordinator.target_cleared(&default_account_id(), Some(101));
 
     assert_eq!(retryable.state, "bindFailed");
     assert!(retryable.can_retry);
     assert_eq!(retryable.detected_bnet.as_deref(), Some("Current#1000"));
 
-    coordinator.clear();
-    let unidentified = coordinator.target_cleared(Some(101));
+    coordinator.clear(&default_account_id());
+    let unidentified = coordinator.target_cleared(&default_account_id(), Some(101));
     assert_eq!(unidentified.state, "unidentified");
     assert!(!unidentified.can_retry);
     assert_eq!(unidentified.detected_bnet, None);
 
-    coordinator.replace_ready(101, "Current#1000", "Current#1000");
-    let logged_out = coordinator.target_cleared(None);
+    coordinator.replace_ready(&default_account_id(), 101, "Current#1000", "Current#1000");
+    let logged_out = coordinator.target_cleared(&default_account_id(), None);
     assert_eq!(logged_out.state, "unidentified");
     assert!(!logged_out.can_retry);
     assert_eq!(logged_out.detected_bnet, None);
@@ -267,12 +302,21 @@ async fn persisted_ready_target_never_becomes_a_retryable_detected_identity() {
     let coordinator = LoginTargetCoordinator::default();
     let credentials = credentials(101);
 
-    let restored = coordinator.status_or_persisted(Some(&credentials), &target_path);
-    let repeated = coordinator.status_or_persisted(Some(&credentials), &target_path);
+    let restored =
+        coordinator.status_or_persisted(&default_account_id(), Some(&credentials), &target_path);
+    let repeated =
+        coordinator.status_or_persisted(&default_account_id(), Some(&credentials), &target_path);
     clear_player_target_for_path(&target_path).unwrap();
-    let cleared = coordinator.target_cleared(Some(101));
+    let cleared = coordinator.target_cleared(&default_account_id(), Some(101));
     let server = spawn_request_counting_server();
-    let retry = retry_binding(&coordinator, &credentials, &target_path, &server.base_url).await;
+    let retry = retry_binding(
+        &coordinator,
+        &default_account_id(),
+        &credentials,
+        &target_path,
+        &server.base_url,
+    )
+    .await;
     let requests = server.requests.lock().unwrap().clone();
     server.join();
 
@@ -298,6 +342,7 @@ async fn missing_detected_battletag_is_unidentified_and_cannot_sync() {
     let coordinator = LoginTargetCoordinator::default();
     let status = reconcile_detected_target(
         &coordinator,
+        &default_account_id(),
         &credentials(101),
         None,
         &temp.path().join("target.json"),
@@ -328,6 +373,7 @@ async fn automatic_binding_searches_then_queries_and_persists_only_target_secret
 
     let status = reconcile_detected_target(
         &coordinator,
+        &default_account_id(),
         &credentials(101),
         Some("Fresh#1000"),
         &target_path,
@@ -360,6 +406,7 @@ async fn same_target_and_role_reuses_persisted_target_without_http() {
 
     let status = reconcile_detected_target(
         &coordinator,
+        &default_account_id(),
         &credentials(101),
         Some(" current＃1000 "),
         &target_path,
@@ -392,6 +439,7 @@ async fn same_tag_from_a_different_role_is_resolved_again_for_current_login() {
 
     let status = reconcile_detected_target(
         &LoginTargetCoordinator::default(),
+        &default_account_id(),
         &credentials(202),
         Some("current#1000"),
         &target_path,
@@ -415,6 +463,7 @@ async fn different_target_waits_for_confirmation_without_overwriting() {
 
     let status = reconcile_detected_target(
         &coordinator,
+        &default_account_id(),
         &credentials(202),
         Some("Second#2000"),
         &target_path,
@@ -446,10 +495,11 @@ async fn confirming_switch_uses_only_the_current_session_detected_tag() {
     let target_path = temp.path().join("target.json");
     save_target(&target_path, "Current#1000", 101, "old-player-key");
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_switch_required(202, "Second#2000", "Current#1000");
+    coordinator.replace_switch_required(&default_account_id(), 202, "Second#2000", "Current#1000");
 
     let status = confirm_switch(
         &coordinator,
+        &default_account_id(),
         &credentials(202),
         &target_path,
         &server.base_url,
@@ -485,6 +535,7 @@ async fn bind_failure_keeps_old_target_and_can_retry_with_session_tag() {
 
     let failed = reconcile_detected_target(
         &coordinator,
+        &default_account_id(),
         &credentials(202),
         Some("Current#1000"),
         &target_path,
@@ -505,6 +556,7 @@ async fn bind_failure_keeps_old_target_and_can_retry_with_session_tag() {
 
     let retried = retry_binding(
         &coordinator,
+        &default_account_id(),
         &credentials(202),
         &target_path,
         &server.base_url,
@@ -528,20 +580,32 @@ fn restart_requires_verified_role_association() {
     save_target(&target_path, "Current#1000", 101, "old-player-key");
     let coordinator = LoginTargetCoordinator::default();
 
-    let ready = coordinator.status_or_persisted(Some(&credentials(101)), &target_path);
+    let ready = coordinator.status_or_persisted(
+        &default_account_id(),
+        Some(&credentials(101)),
+        &target_path,
+    );
     assert_eq!(ready.state, "ready");
     assert!(ready.sync_allowed);
 
-    coordinator.clear();
-    let mismatch = coordinator.status_or_persisted(Some(&credentials(202)), &target_path);
+    coordinator.clear(&default_account_id());
+    let mismatch = coordinator.status_or_persisted(
+        &default_account_id(),
+        Some(&credentials(202)),
+        &target_path,
+    );
     assert_eq!(mismatch.state, "verificationRequired");
     assert!(!mismatch.sync_allowed);
 
     let mut legacy = read_player_target_for_path(&target_path).unwrap();
     legacy.source_role_id = None;
     save_player_target_for_path(&target_path, &legacy).unwrap();
-    coordinator.clear();
-    let legacy_status = coordinator.status_or_persisted(Some(&credentials(101)), &target_path);
+    coordinator.clear(&default_account_id());
+    let legacy_status = coordinator.status_or_persisted(
+        &default_account_id(),
+        Some(&credentials(101)),
+        &target_path,
+    );
     assert_eq!(legacy_status.state, "verificationRequired");
     assert!(!legacy_status.sync_allowed);
 }
@@ -552,14 +616,19 @@ fn in_memory_ready_status_is_not_reused_for_missing_or_different_credentials() {
     let target_path = temp.path().join("target.json");
     save_target(&target_path, "Current#1000", 101, "old-player-key");
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_ready(101, "Current#1000", "Current#1000");
+    coordinator.replace_ready(&default_account_id(), 101, "Current#1000", "Current#1000");
 
-    let wrong_role = coordinator.status_or_persisted(Some(&credentials(202)), &target_path);
+    let wrong_role = coordinator.status_or_persisted(
+        &default_account_id(),
+        Some(&credentials(202)),
+        &target_path,
+    );
     assert_eq!(wrong_role.state, "verificationRequired");
     assert!(!wrong_role.sync_allowed);
 
-    coordinator.replace_ready(101, "Current#1000", "Current#1000");
-    let missing_credentials = coordinator.status_or_persisted(None, &target_path);
+    coordinator.replace_ready(&default_account_id(), 101, "Current#1000", "Current#1000");
+    let missing_credentials =
+        coordinator.status_or_persisted(&default_account_id(), None, &target_path);
     assert_eq!(missing_credentials.state, "verificationRequired");
     assert!(!missing_credentials.sync_allowed);
 }
@@ -571,7 +640,7 @@ async fn stale_switch_request_cannot_commit_after_a_new_login_round_starts() {
     let target_path = temp.path().join("target.json");
     save_target(&target_path, "Current#1000", 101, "old-player-key");
     let coordinator = LoginTargetCoordinator::default();
-    coordinator.replace_switch_required(202, "Second#2000", "Current#1000");
+    coordinator.replace_switch_required(&default_account_id(), 202, "Second#2000", "Current#1000");
 
     let old_coordinator = coordinator.clone();
     let old_target_path = target_path.clone();
@@ -579,6 +648,7 @@ async fn stale_switch_request_cannot_commit_after_a_new_login_round_starts() {
     let old_request = tokio::spawn(async move {
         confirm_switch(
             &old_coordinator,
+            &default_account_id(),
             &credentials(202),
             &old_target_path,
             &old_base_url,
@@ -587,20 +657,61 @@ async fn stale_switch_request_cannot_commit_after_a_new_login_round_starts() {
     });
     server.wait_until_query().await;
 
-    coordinator.replace_unidentified(303);
+    coordinator.replace_unidentified(&default_account_id(), 303);
     server.release();
     let stale_result = old_request.await.unwrap();
     server.join();
 
     assert_eq!(stale_result.state, "verificationRequired");
     assert!(!stale_result.sync_allowed);
-    let current_session = coordinator.status().unwrap();
+    let current_session = coordinator.status(&default_account_id()).unwrap();
     assert_eq!(current_session.state, "unidentified");
     assert_eq!(current_session.detected_bnet, None);
     let persisted = read_player_target_for_path(&target_path).unwrap();
     assert_eq!(persisted.input_bnet, "Current#1000");
     assert_eq!(persisted.source_role_id, Some(101));
     assert_eq!(persisted.customer_token, "old-player-key");
+}
+
+#[tokio::test]
+async fn binding_ticket_completion_updates_only_its_own_account_session() {
+    let mut server = spawn_blocking_query_server("First#1000", "first-player-key");
+    let temp = tempfile::tempdir().unwrap();
+    let first_target_path = temp.path().join("first-target.json");
+    save_target(&first_target_path, "Saved#9999", 101, "saved-player-key");
+    let coordinator = LoginTargetCoordinator::default();
+    let first = account_id("d59caecf-8e74-4b6c-b690-45e75f7fed9c");
+    let second = account_id("9a494190-fdee-46f2-abd2-7de46f4f4376");
+    coordinator.replace_switch_required(&first, 202, "First#1000", "Saved#9999");
+
+    let old_coordinator = coordinator.clone();
+    let old_account = first.clone();
+    let old_target_path = first_target_path.clone();
+    let old_base_url = server.base_url.clone();
+    let binding = tokio::spawn(async move {
+        confirm_switch(
+            &old_coordinator,
+            &old_account,
+            &credentials(202),
+            &old_target_path,
+            &old_base_url,
+        )
+        .await
+    });
+    server.wait_until_query().await;
+
+    coordinator.replace_unidentified(&second, 303);
+    server.release();
+    let first_result = binding.await.unwrap();
+    server.join();
+
+    assert_eq!(first_result.state, "ready");
+    assert_eq!(coordinator.status(&first).unwrap().state, "ready");
+    let second_status = coordinator.status(&second).unwrap();
+    assert_eq!(second_status.state, "unidentified");
+    assert_eq!(second_status.detected_bnet, None);
+    assert_eq!(second_status.current_bnet, None);
+    assert!(read_player_target_for_path(&first_target_path).is_ok());
 }
 
 #[tokio::test]

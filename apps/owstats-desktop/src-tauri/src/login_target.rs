@@ -1,3 +1,4 @@
+use crate::account_store::AccountId;
 use crate::credential_store::{redact_sensitive_text, DashenCredentials};
 use crate::dashen_client::{DashenClient, DashenCredentials as ClientCredentials};
 use crate::models::{LoginTargetStatus, PlayerTargetStatus};
@@ -7,6 +8,7 @@ use crate::player_target::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -38,12 +40,13 @@ pub fn decide_target_action(detected: &str, current: Option<&str>) -> TargetActi
 
 #[derive(Clone, Default)]
 pub struct LoginTargetCoordinator {
-    session: Arc<Mutex<Option<LoginTargetSession>>>,
+    sessions: Arc<Mutex<HashMap<AccountId, LoginTargetSession>>>,
     generation: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone)]
 struct LoginTargetSession {
+    generation: u64,
     source_role_id: i64,
     detected_bnet: Option<String>,
     status: LoginTargetStatus,
@@ -51,6 +54,7 @@ struct LoginTargetSession {
 
 #[derive(Debug, Clone)]
 struct BindingTicket {
+    account_id: AccountId,
     generation: u64,
     source_role_id: i64,
     detected_bnet: String,
@@ -58,25 +62,30 @@ struct BindingTicket {
 }
 
 impl LoginTargetCoordinator {
-    pub fn clear(&self) {
-        let mut guard = self.session.lock().expect("login target session poisoned");
-        self.next_generation();
-        *guard = None;
-    }
-
-    pub fn status(&self) -> Option<LoginTargetStatus> {
-        self.session
+    pub fn clear(&self, account_id: &AccountId) {
+        self.sessions
             .lock()
             .expect("login target session poisoned")
-            .as_ref()
+            .remove(account_id);
+    }
+
+    pub fn status(&self, account_id: &AccountId) -> Option<LoginTargetStatus> {
+        self.sessions
+            .lock()
+            .expect("login target session poisoned")
+            .get(account_id)
             .map(|session| session.status.clone())
     }
 
-    pub fn target_cleared(&self, source_role_id: Option<i64>) -> LoginTargetStatus {
+    pub fn target_cleared(
+        &self,
+        account_id: &AccountId,
+        source_role_id: Option<i64>,
+    ) -> LoginTargetStatus {
         let detected_bnet = {
-            let guard = self.session.lock().expect("login target session poisoned");
+            let guard = self.sessions.lock().expect("login target session poisoned");
             guard
-                .as_ref()
+                .get(account_id)
                 .filter(|session| Some(session.source_role_id) == source_role_id)
                 .and_then(|session| session.detected_bnet.clone())
                 .filter(|value| !value.trim().is_empty())
@@ -84,13 +93,14 @@ impl LoginTargetCoordinator {
 
         match (source_role_id, detected_bnet) {
             (Some(role_id), Some(detected_bnet)) => self.replace_bind_failed(
+                account_id,
                 role_id,
                 &detected_bnet,
                 "本地同步目标已清除，请重试自动绑定。",
             ),
-            (Some(role_id), None) => self.replace_unidentified(role_id),
+            (Some(role_id), None) => self.replace_unidentified(account_id, role_id),
             (None, _) => {
-                self.clear();
+                self.clear(account_id);
                 status(
                     "unidentified",
                     None,
@@ -104,8 +114,13 @@ impl LoginTargetCoordinator {
         }
     }
 
-    pub fn replace_unidentified(&self, source_role_id: i64) -> LoginTargetStatus {
+    pub fn replace_unidentified(
+        &self,
+        account_id: &AccountId,
+        source_role_id: i64,
+    ) -> LoginTargetStatus {
         self.replace(
+            account_id,
             source_role_id,
             None,
             status(
@@ -122,11 +137,13 @@ impl LoginTargetCoordinator {
 
     pub fn replace_ready(
         &self,
+        account_id: &AccountId,
         source_role_id: i64,
         detected_bnet: &str,
         current_bnet: &str,
     ) -> LoginTargetStatus {
         self.replace(
+            account_id,
             source_role_id,
             Some(detected_bnet.to_string()),
             status(
@@ -143,10 +160,12 @@ impl LoginTargetCoordinator {
 
     fn replace_persisted_ready(
         &self,
+        account_id: &AccountId,
         source_role_id: i64,
         current_bnet: &str,
     ) -> LoginTargetStatus {
         self.replace(
+            account_id,
             source_role_id,
             None,
             status(
@@ -163,11 +182,13 @@ impl LoginTargetCoordinator {
 
     pub fn replace_switch_required(
         &self,
+        account_id: &AccountId,
         source_role_id: i64,
         detected_bnet: &str,
         current_bnet: &str,
     ) -> LoginTargetStatus {
         self.replace(
+            account_id,
             source_role_id,
             Some(detected_bnet.to_string()),
             status(
@@ -184,11 +205,13 @@ impl LoginTargetCoordinator {
 
     pub fn replace_bind_failed(
         &self,
+        account_id: &AccountId,
         source_role_id: i64,
         detected_bnet: &str,
         message: &str,
     ) -> LoginTargetStatus {
         self.replace(
+            account_id,
             source_role_id,
             Some(detected_bnet.to_string()),
             status(
@@ -203,16 +226,16 @@ impl LoginTargetCoordinator {
         )
     }
 
-    pub fn keep_current(&self) -> Result<LoginTargetStatus> {
+    pub fn keep_current(&self, account_id: &AccountId) -> Result<LoginTargetStatus> {
         let mut guard = self
-            .session
+            .sessions
             .lock()
             .map_err(|_| anyhow!("登录目标状态不可用"))?;
         let session = guard
-            .as_mut()
+            .get_mut(account_id)
             .filter(|session| session.status.state == "switchRequired")
             .ok_or_else(|| anyhow!("当前没有待确认的账号切换"))?;
-        self.next_generation();
+        session.generation = self.next_generation();
         session.status = status(
             "mismatchKept",
             session.detected_bnet.as_deref(),
@@ -227,22 +250,20 @@ impl LoginTargetCoordinator {
 
     pub fn status_or_persisted(
         &self,
+        account_id: &AccountId,
         credentials: Option<&DashenCredentials>,
         target_path: &Path,
     ) -> LoginTargetStatus {
         {
-            let guard = self.session.lock().expect("login target session poisoned");
-            if let Some(session) = guard.as_ref() {
+            let guard = self.sessions.lock().expect("login target session poisoned");
+            if let Some(session) = guard.get(account_id) {
                 if credentials
                     .map(|credentials| credentials.role_id == session.source_role_id)
                     .unwrap_or(false)
                 {
                     return session.status.clone();
                 }
-                return verification_status(
-                    session.status.current_bnet.as_deref(),
-                    "当前登录凭据与内存目标状态不匹配，请重新识别。",
-                );
+                return verification_status(None, "当前登录凭据与内存目标状态不匹配，请重新识别。");
             }
         }
 
@@ -254,6 +275,7 @@ impl LoginTargetCoordinator {
         };
         let Ok(target) = read_player_target_for_path(target_path) else {
             return self.replace_verification_required(
+                account_id,
                 credentials.role_id,
                 None,
                 "当前目标尚未通过本次登录验证，请重新识别。",
@@ -261,9 +283,10 @@ impl LoginTargetCoordinator {
         };
         let current_bnet = target_display_bnet(&target);
         if target_matches_login_role(&target, credentials.role_id) {
-            self.replace_persisted_ready(credentials.role_id, &current_bnet)
+            self.replace_persisted_ready(account_id, credentials.role_id, &current_bnet)
         } else {
             self.replace_verification_required(
+                account_id,
                 credentials.role_id,
                 Some(&current_bnet),
                 "当前目标与登录账号的关联尚未验证，请重新识别。",
@@ -273,11 +296,13 @@ impl LoginTargetCoordinator {
 
     fn replace_verification_required(
         &self,
+        account_id: &AccountId,
         source_role_id: i64,
         current_bnet: Option<&str>,
         message: &str,
     ) -> LoginTargetStatus {
         self.replace(
+            account_id,
             source_role_id,
             None,
             status(
@@ -292,13 +317,18 @@ impl LoginTargetCoordinator {
         )
     }
 
-    fn begin_existing_binding(&self, role_id: i64, required_state: &str) -> Result<BindingTicket> {
+    fn begin_existing_binding(
+        &self,
+        account_id: &AccountId,
+        role_id: i64,
+        required_state: &str,
+    ) -> Result<BindingTicket> {
         let mut guard = self
-            .session
+            .sessions
             .lock()
             .map_err(|_| anyhow!("登录目标状态不可用"))?;
         let session = guard
-            .as_mut()
+            .get_mut(account_id)
             .filter(|session| session.source_role_id == role_id)
             .filter(|session| session.status.state == required_state)
             .ok_or_else(|| anyhow!("本轮没有可用的已识别账号"))?;
@@ -309,6 +339,7 @@ impl LoginTargetCoordinator {
             .ok_or_else(|| anyhow!("本轮没有可用的已识别账号"))?;
         let current_bnet = session.status.current_bnet.clone();
         let generation = self.next_generation();
+        session.generation = generation;
         session.status = status(
             "binding",
             Some(&detected_bnet),
@@ -319,6 +350,7 @@ impl LoginTargetCoordinator {
             false,
         );
         Ok(BindingTicket {
+            account_id: account_id.clone(),
             generation,
             source_role_id: role_id,
             detected_bnet,
@@ -328,26 +360,32 @@ impl LoginTargetCoordinator {
 
     fn begin_new_binding(
         &self,
+        account_id: &AccountId,
         role_id: i64,
         detected_bnet: &str,
         current_bnet: Option<&str>,
     ) -> BindingTicket {
-        let mut guard = self.session.lock().expect("login target session poisoned");
+        let mut guard = self.sessions.lock().expect("login target session poisoned");
         let generation = self.next_generation();
-        *guard = Some(LoginTargetSession {
-            source_role_id: role_id,
-            detected_bnet: Some(detected_bnet.to_string()),
-            status: status(
-                "binding",
-                Some(detected_bnet),
-                current_bnet,
-                "正在验证并绑定当前登录账号。",
-                false,
-                false,
-                false,
-            ),
-        });
+        guard.insert(
+            account_id.clone(),
+            LoginTargetSession {
+                generation,
+                source_role_id: role_id,
+                detected_bnet: Some(detected_bnet.to_string()),
+                status: status(
+                    "binding",
+                    Some(detected_bnet),
+                    current_bnet,
+                    "正在验证并绑定当前登录账号。",
+                    false,
+                    false,
+                    false,
+                ),
+            },
+        );
         BindingTicket {
+            account_id: account_id.clone(),
             generation,
             source_role_id: role_id,
             detected_bnet: detected_bnet.to_string(),
@@ -361,8 +399,8 @@ impl LoginTargetCoordinator {
         target_path: &Path,
         target: &PlayerTarget,
     ) -> LoginTargetStatus {
-        let mut guard = self.session.lock().expect("login target session poisoned");
-        if !self.ticket_matches(ticket, guard.as_ref()) {
+        let mut guard = self.sessions.lock().expect("login target session poisoned");
+        if !self.ticket_matches(ticket, guard.get(&ticket.account_id)) {
             return stale_operation_status();
         }
         if let Err(error) = save_target_atomic(target_path, target) {
@@ -370,53 +408,65 @@ impl LoginTargetCoordinator {
                 &ticket.detected_bnet,
                 &redact_sensitive_text(&error.to_string()),
             );
-            self.next_generation();
-            *guard = Some(LoginTargetSession {
-                source_role_id: ticket.source_role_id,
-                detected_bnet: Some(ticket.detected_bnet.clone()),
-                status: failed.clone(),
-            });
+            let generation = self.next_generation();
+            guard.insert(
+                ticket.account_id.clone(),
+                LoginTargetSession {
+                    generation,
+                    source_role_id: ticket.source_role_id,
+                    detected_bnet: Some(ticket.detected_bnet.clone()),
+                    status: failed.clone(),
+                },
+            );
             return failed;
         }
 
         let current_bnet = target_display_bnet(target);
         let ready = ready_status(&ticket.detected_bnet, &current_bnet);
-        self.next_generation();
-        *guard = Some(LoginTargetSession {
-            source_role_id: ticket.source_role_id,
-            detected_bnet: Some(ticket.detected_bnet.clone()),
-            status: ready.clone(),
-        });
+        let generation = self.next_generation();
+        guard.insert(
+            ticket.account_id.clone(),
+            LoginTargetSession {
+                generation,
+                source_role_id: ticket.source_role_id,
+                detected_bnet: Some(ticket.detected_bnet.clone()),
+                status: ready.clone(),
+            },
+        );
         ready
     }
 
     fn commit_failure(&self, ticket: &BindingTicket, error: &anyhow::Error) -> LoginTargetStatus {
-        let mut guard = self.session.lock().expect("login target session poisoned");
-        if !self.ticket_matches(ticket, guard.as_ref()) {
+        let mut guard = self.sessions.lock().expect("login target session poisoned");
+        if !self.ticket_matches(ticket, guard.get(&ticket.account_id)) {
             return stale_operation_status();
         }
         let failed = bind_failed_status(
             &ticket.detected_bnet,
             &redact_sensitive_text(&error.to_string()),
         );
-        self.next_generation();
-        *guard = Some(LoginTargetSession {
-            source_role_id: ticket.source_role_id,
-            detected_bnet: Some(ticket.detected_bnet.clone()),
-            status: failed.clone(),
-        });
+        let generation = self.next_generation();
+        guard.insert(
+            ticket.account_id.clone(),
+            LoginTargetSession {
+                generation,
+                source_role_id: ticket.source_role_id,
+                detected_bnet: Some(ticket.detected_bnet.clone()),
+                status: failed.clone(),
+            },
+        );
         failed
     }
 
     fn ticket_matches(&self, ticket: &BindingTicket, session: Option<&LoginTargetSession>) -> bool {
-        self.generation.load(Ordering::SeqCst) == ticket.generation
-            && session
-                .map(|session| {
-                    session.source_role_id == ticket.source_role_id
-                        && session.status.state == ticket.expected_state
-                        && session.detected_bnet.as_deref() == Some(ticket.detected_bnet.as_str())
-                })
-                .unwrap_or(false)
+        session
+            .map(|session| {
+                session.generation == ticket.generation
+                    && session.source_role_id == ticket.source_role_id
+                    && session.status.state == ticket.expected_state
+                    && session.detected_bnet.as_deref() == Some(ticket.detected_bnet.as_str())
+            })
+            .unwrap_or(false)
     }
 
     fn next_generation(&self) -> u64 {
@@ -425,27 +475,33 @@ impl LoginTargetCoordinator {
 
     fn replace(
         &self,
+        account_id: &AccountId,
         source_role_id: i64,
         detected_bnet: Option<String>,
         status: LoginTargetStatus,
     ) -> LoginTargetStatus {
-        let mut guard = self.session.lock().expect("login target session poisoned");
-        self.next_generation();
-        *guard = Some(LoginTargetSession {
-            source_role_id,
-            detected_bnet,
-            status: status.clone(),
-        });
+        let mut guard = self.sessions.lock().expect("login target session poisoned");
+        let generation = self.next_generation();
+        guard.insert(
+            account_id.clone(),
+            LoginTargetSession {
+                generation,
+                source_role_id,
+                detected_bnet,
+                status: status.clone(),
+            },
+        );
         status
     }
 }
 
 pub fn ensure_sync_target_ready(
     coordinator: &LoginTargetCoordinator,
+    account_id: &AccountId,
     credentials: &DashenCredentials,
     target_path: &Path,
 ) -> Result<LoginTargetStatus> {
-    let status = coordinator.status_or_persisted(Some(credentials), target_path);
+    let status = coordinator.status_or_persisted(account_id, Some(credentials), target_path);
     let target_is_current = read_player_target_for_path(target_path)
         .map(|target| target_matches_login_role(&target, credentials.role_id))
         .unwrap_or(false);
@@ -509,6 +565,7 @@ async fn resolve_detected_target_with_base_url(
 
 pub async fn reconcile_detected_target(
     coordinator: &LoginTargetCoordinator,
+    account_id: &AccountId,
     credentials: &DashenCredentials,
     detected_bnet: Option<&str>,
     target_path: &Path,
@@ -518,13 +575,14 @@ pub async fn reconcile_detected_target(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
-        return coordinator.replace_unidentified(credentials.role_id);
+        return coordinator.replace_unidentified(account_id, credentials.role_id);
     };
 
     let current = read_player_target_for_path(target_path).ok();
     match current.as_ref() {
         None => {
-            let ticket = coordinator.begin_new_binding(credentials.role_id, detected_bnet, None);
+            let ticket =
+                coordinator.begin_new_binding(account_id, credentials.role_id, detected_bnet, None);
             resolve_and_commit(coordinator, credentials, target_path, root_base_url, ticket).await
         }
         Some(target)
@@ -533,7 +591,12 @@ pub async fn reconcile_detected_target(
                 && target_matches_login_role(target, credentials.role_id) =>
         {
             let current_bnet = target_display_bnet(target);
-            coordinator.replace_ready(credentials.role_id, detected_bnet, &current_bnet)
+            coordinator.replace_ready(
+                account_id,
+                credentials.role_id,
+                detected_bnet,
+                &current_bnet,
+            )
         }
         Some(target)
             if decide_target_action(detected_bnet, Some(&target_display_bnet(target)))
@@ -541,6 +604,7 @@ pub async fn reconcile_detected_target(
         {
             let current_bnet = target_display_bnet(target);
             let ticket = coordinator.begin_new_binding(
+                account_id,
                 credentials.role_id,
                 detected_bnet,
                 Some(&current_bnet),
@@ -548,6 +612,7 @@ pub async fn reconcile_detected_target(
             resolve_and_commit(coordinator, credentials, target_path, root_base_url, ticket).await
         }
         Some(target) => coordinator.replace_switch_required(
+            account_id,
             credentials.role_id,
             detected_bnet,
             &target_display_bnet(target),
@@ -557,11 +622,12 @@ pub async fn reconcile_detected_target(
 
 pub async fn confirm_switch(
     coordinator: &LoginTargetCoordinator,
+    account_id: &AccountId,
     credentials: &DashenCredentials,
     target_path: &Path,
     root_base_url: &str,
 ) -> LoginTargetStatus {
-    match coordinator.begin_existing_binding(credentials.role_id, "switchRequired") {
+    match coordinator.begin_existing_binding(account_id, credentials.role_id, "switchRequired") {
         Ok(ticket) => {
             resolve_and_commit(coordinator, credentials, target_path, root_base_url, ticket).await
         }
@@ -574,11 +640,12 @@ pub async fn confirm_switch(
 
 pub async fn retry_binding(
     coordinator: &LoginTargetCoordinator,
+    account_id: &AccountId,
     credentials: &DashenCredentials,
     target_path: &Path,
     root_base_url: &str,
 ) -> LoginTargetStatus {
-    match coordinator.begin_existing_binding(credentials.role_id, "bindFailed") {
+    match coordinator.begin_existing_binding(account_id, credentials.role_id, "bindFailed") {
         Ok(ticket) => {
             resolve_and_commit(coordinator, credentials, target_path, root_base_url, ticket).await
         }

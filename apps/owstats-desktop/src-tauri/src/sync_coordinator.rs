@@ -16,6 +16,7 @@ impl SyncCoordinator {
         self.try_acquire()
     }
 
+    #[allow(dead_code)]
     pub fn try_acquire_sync(&self) -> Result<OperationPermit, &'static str> {
         self.try_acquire()
     }
