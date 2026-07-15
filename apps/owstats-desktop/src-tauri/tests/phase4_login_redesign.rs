@@ -13,6 +13,30 @@ use owstats_desktop_lib::dashen_auth::{
 use owstats_desktop_lib::login_flow::{LoginPhase, LoginProgress};
 
 #[test]
+fn browser_capture_is_separate_from_final_credential_persistence() {
+    let source = include_str!("../src/credentials.rs");
+    let start = source
+        .find("pub(crate) async fn capture_dashen_login(")
+        .expect("capture_dashen_login should exist");
+    let body = &source[start
+        ..source[start..]
+            .find("\npub fn cancel_dashen_login")
+            .map(|offset| start + offset)
+            .unwrap()];
+    for forbidden in [
+        "credential_path",
+        "credentials()",
+        "save_credentials_atomic",
+        "legacy_credentials",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "capture function persisted final credentials through {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn login_progress_never_exposes_sensitive_values() {
     let progress = LoginProgress::new(
         LoginPhase::TokenPending,

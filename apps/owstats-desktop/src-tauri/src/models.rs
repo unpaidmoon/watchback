@@ -764,6 +764,16 @@ pub struct AccountManagerStatus {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountLoginResult {
+    pub kind: String,
+    pub account_id: Option<String>,
+    pub battle_tag: Option<String>,
+    pub message: String,
+    pub should_offer_switch: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialLoginResult {

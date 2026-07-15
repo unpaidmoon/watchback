@@ -3,6 +3,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::Path;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -62,16 +63,21 @@ pub fn save_credentials_atomic(path: &Path, credentials: &DashenCredentials) -> 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = parent.join(format!(".credentials.{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
         let mut file = std::fs::File::create(&tmp)?;
         let text = serde_json::to_string_pretty(credentials)?;
         file.write_all(text.as_bytes())?;
         file.flush()?;
         file.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(tmp, path)?;
-    Ok(())
+    result
 }
 
 pub fn clear_credentials_for_path(path: &Path) -> Result<bool> {

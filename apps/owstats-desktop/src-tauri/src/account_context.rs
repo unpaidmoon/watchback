@@ -12,6 +12,7 @@ pub struct AccountContextManager {
     registry: Arc<RwLock<AccountRegistry>>,
     recovery_failed: Arc<RwLock<bool>>,
     migration_lock: Arc<Mutex<()>>,
+    login_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +39,7 @@ impl AccountContextManager {
             registry: Arc::new(RwLock::new(registry)),
             recovery_failed: Arc::new(RwLock::new(recovery_failed)),
             migration_lock: Arc::new(Mutex::new(())),
+            login_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -82,6 +84,19 @@ impl AccountContextManager {
         write_registry_atomic(&self.shared.registry(), &registry).context("无法保存账号索引")?;
         *current = registry;
         Ok(())
+    }
+
+    pub(crate) fn lock_login_publication(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
+        self.login_lock
+            .lock()
+            .map_err(|_| anyhow!("账号登录操作暂不可用，请重试。"))
+    }
+
+    pub(crate) fn snapshot_for(&self, account_id: &AccountId) -> AccountContextSnapshot {
+        AccountContextSnapshot {
+            account_id: account_id.clone(),
+            paths: self.shared.account(account_id),
+        }
     }
 
     pub fn shared_paths(&self) -> &SharedAppPaths {

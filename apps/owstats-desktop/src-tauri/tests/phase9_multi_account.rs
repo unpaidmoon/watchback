@@ -1,4 +1,7 @@
 use owstats_desktop_lib::account_context::AccountContextManager;
+use owstats_desktop_lib::account_login::{
+    publish_add_account, publish_relogin_account, LoginCapture,
+};
 use owstats_desktop_lib::account_migration::{
     LegacyMigrationState, MigrationJournal, MigrationPhase,
 };
@@ -7,6 +10,7 @@ use owstats_desktop_lib::account_store::{
     AccountManifest, AccountRegistry, AccountRegistryEntry,
 };
 use owstats_desktop_lib::app_paths::SharedAppPaths;
+use owstats_desktop_lib::credential_store::DashenCredentials;
 use owstats_desktop_lib::{list_matches, CredentialStatus, MatchFilters, PlayerProfile};
 use rusqlite::params;
 use serde_json::json;
@@ -14,6 +18,412 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::sync::{Arc, Barrier};
 use std::thread;
+
+fn synthetic_capture(role_id: i64, battle_tag: &str, token: &str) -> LoginCapture {
+    LoginCapture {
+        credentials: DashenCredentials {
+            role_id,
+            token: token.to_string(),
+            customer_token: Some(format!("customer-{role_id}")),
+            dts: Some("synthetic-dts".to_string()),
+            server: 1,
+            saved_at: "2026-07-16T00:00:00Z".to_string(),
+        },
+        battle_tag: battle_tag.to_string(),
+    }
+}
+
+fn saved_credentials(shared: &SharedAppPaths, account_id: &AccountId) -> DashenCredentials {
+    serde_json::from_slice(&fs::read(shared.account(account_id).credentials()).unwrap()).unwrap()
+}
+
+fn install_account(
+    manager: &AccountContextManager,
+    account_id: AccountId,
+    role_id: i64,
+    battle_tag: &str,
+    token: &str,
+    active: bool,
+) {
+    let paths = manager.shared_paths().account(&account_id);
+    fs::create_dir_all(paths.root()).unwrap();
+    let mut account_manifest = manifest(account_id.clone(), battle_tag);
+    account_manifest.role_id = role_id;
+    write_manifest_atomic(&paths.manifest(), &account_manifest).unwrap();
+    owstats_desktop_lib::credential_store::save_credentials_atomic(
+        &paths.credentials(),
+        &synthetic_capture(role_id, battle_tag, token).credentials,
+    )
+    .unwrap();
+    let mut registry = manager.registry_snapshot().unwrap();
+    registry
+        .accounts
+        .push(entry(account_id.clone(), battle_tag));
+    if active {
+        registry.active_account_id = Some(account_id);
+    }
+    manager.replace_registry(registry).unwrap();
+}
+
+#[test]
+fn add_account_creates_new_or_updates_existing_role_without_duplicates() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+
+    let added = publish_add_account(
+        &manager,
+        synthetic_capture(101101, "First#1011", "synthetic-first-secret"),
+    )
+    .unwrap();
+    assert_eq!(added.kind, "newAccountAdded");
+    let account_id = AccountId::parse(added.account_id.as_deref().unwrap()).unwrap();
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+    assert_eq!(
+        manager.registry_snapshot().unwrap().active_account_id,
+        Some(account_id.clone())
+    );
+
+    let updated = publish_add_account(
+        &manager,
+        synthetic_capture(101101, "Renamed#1011", "synthetic-renamed-secret"),
+    )
+    .unwrap();
+    assert_eq!(updated.kind, "existingAccountUpdated");
+    assert_eq!(updated.account_id.as_deref(), Some(account_id.as_str()));
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+    assert_eq!(
+        read_manifest(&shared.account(&account_id).manifest(), &account_id)
+            .unwrap()
+            .battle_tag,
+        "Renamed#1011"
+    );
+    assert_eq!(
+        saved_credentials(&shared, &account_id).token,
+        "synthetic-renamed-secret"
+    );
+    assert!(!shared.pending_logins().exists());
+}
+
+#[test]
+fn relogin_with_another_role_never_overwrites_selected_account() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let selected = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    install_account(
+        &manager,
+        selected.clone(),
+        101101,
+        "First#1011",
+        "synthetic-old-secret",
+        true,
+    );
+
+    let result = publish_relogin_account(
+        &manager,
+        &selected,
+        synthetic_capture(202202, "Other#2022", "synthetic-other-secret"),
+    )
+    .unwrap();
+    assert_eq!(result.kind, "differentNewAccount");
+    assert_eq!(result.account_id, None);
+    assert!(!result.should_offer_switch);
+    assert_eq!(
+        saved_credentials(&shared, &selected).token,
+        "synthetic-old-secret"
+    );
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+    assert!(!shared.pending_logins().exists());
+}
+
+#[test]
+fn relogin_mismatch_existing_returns_safe_switch_without_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let selected = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let other = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    install_account(
+        &manager,
+        selected.clone(),
+        101101,
+        "First#1011",
+        "old-one",
+        true,
+    );
+    install_account(
+        &manager,
+        other.clone(),
+        202202,
+        "Other#2022",
+        "old-two",
+        false,
+    );
+    let before = manager.registry_snapshot().unwrap();
+
+    let result = publish_relogin_account(
+        &manager,
+        &selected,
+        synthetic_capture(202202, "OtherRenamed#2022", "new-two"),
+    )
+    .unwrap();
+    assert_eq!(result.kind, "differentExistingAccount");
+    assert_eq!(result.account_id.as_deref(), Some(other.as_str()));
+    assert_eq!(result.battle_tag.as_deref(), Some("Other#2022"));
+    assert!(result.should_offer_switch);
+    assert_eq!(manager.registry_snapshot().unwrap(), before);
+    assert_eq!(saved_credentials(&shared, &selected).token, "old-one");
+    assert_eq!(saved_credentials(&shared, &other).token, "old-two");
+}
+
+#[test]
+fn relogin_same_role_atomically_updates_selected_account() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let selected = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    install_account(
+        &manager,
+        selected.clone(),
+        101101,
+        "First#1011",
+        "synthetic-old-secret",
+        true,
+    );
+
+    let result = publish_relogin_account(
+        &manager,
+        &selected,
+        synthetic_capture(101101, "Renamed#1011", "synthetic-new-secret"),
+    )
+    .unwrap();
+    assert_eq!(result.kind, "existingAccountUpdated");
+    assert_eq!(result.account_id.as_deref(), Some(selected.as_str()));
+    assert_eq!(
+        saved_credentials(&shared, &selected).token,
+        "synthetic-new-secret"
+    );
+    assert_eq!(
+        read_manifest(&shared.account(&selected).manifest(), &selected)
+            .unwrap()
+            .battle_tag,
+        "Renamed#1011"
+    );
+    assert_eq!(
+        manager.registry_snapshot().unwrap().accounts[0].battle_tag,
+        "Renamed#1011"
+    );
+}
+
+#[test]
+fn add_account_keeps_published_login_when_eligible_legacy_migration_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    fs::write(
+        shared.legacy_credentials(),
+        r#"{"roleId":909090,"token":"synthetic-legacy-secret","server":1,"savedAt":"2026-01-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(
+        manager.migration_state().unwrap(),
+        LegacyMigrationState::WaitingForAccount
+    );
+
+    let result = publish_add_account(
+        &manager,
+        synthetic_capture(101101, "First#1011", "synthetic-current-secret"),
+    )
+    .unwrap();
+    let account_id = AccountId::parse(result.account_id.as_deref().unwrap()).unwrap();
+    assert_eq!(result.kind, "newAccountAdded");
+    assert!(result.message.contains("待恢复"));
+    assert_eq!(
+        saved_credentials(&shared, &account_id).token,
+        "synthetic-current-secret"
+    );
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+}
+
+#[test]
+fn add_account_allows_duplicate_battle_tag_for_different_roles_and_serializes_safely() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager =
+        AccountContextManager::load(SharedAppPaths::from_app_data_dir(temp.path())).unwrap();
+    publish_add_account(
+        &manager,
+        synthetic_capture(101101, "Same#1000", "first-secret"),
+    )
+    .unwrap();
+    let result = publish_add_account(
+        &manager,
+        synthetic_capture(202202, "Same#1000", "second-secret"),
+    )
+    .unwrap();
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 2);
+    let json = serde_json::to_string(&result).unwrap().to_ascii_lowercase();
+    for forbidden in [
+        "roleid",
+        "role_id",
+        "token",
+        "customertoken",
+        "cookie",
+        "authorization",
+        "credential",
+        temp.path().to_string_lossy().as_ref(),
+    ] {
+        assert!(
+            !json.contains(forbidden),
+            "result exposed forbidden content"
+        );
+    }
+}
+
+#[test]
+fn invalid_capture_does_not_publish_and_cleans_pending() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    for capture in [
+        synthetic_capture(0, "Valid#1000", "secret"),
+        synthetic_capture(101101, "Valid#1000", " "),
+        synthetic_capture(101101, "unstable", "secret"),
+        synthetic_capture(101101, "#1000", "secret"),
+        synthetic_capture(101101, "Invalid#suffix", "secret"),
+    ] {
+        let error = publish_add_account(&manager, capture)
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"));
+        assert!(manager.registry_snapshot().unwrap().accounts.is_empty());
+        assert!(!shared.pending_logins().exists());
+    }
+}
+
+#[test]
+fn incomplete_stored_manifest_never_allows_duplicate_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    install_account(
+        &manager,
+        account_id.clone(),
+        101101,
+        "First#1011",
+        "synthetic-old-secret",
+        true,
+    );
+    let mut incomplete = manifest(account_id.clone(), "First#1011");
+    incomplete.role_id = 0;
+    write_manifest_atomic(&shared.account(&account_id).manifest(), &incomplete).unwrap();
+
+    assert!(publish_add_account(
+        &manager,
+        synthetic_capture(101101, "Renamed#1011", "synthetic-new-secret")
+    )
+    .is_err());
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+    assert_eq!(
+        saved_credentials(&shared, &account_id).token,
+        "synthetic-old-secret"
+    );
+}
+
+#[test]
+fn add_account_never_publishes_through_linked_accounts_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    if !create_directory_symlink(outside.path(), &shared.accounts_root()) {
+        return;
+    }
+
+    assert!(publish_add_account(
+        &manager,
+        synthetic_capture(101101, "First#1011", "synthetic-secret")
+    )
+    .is_err());
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    assert!(manager.registry_snapshot().unwrap().accounts.is_empty());
+}
+
+#[test]
+fn add_account_registry_write_failure_rolls_back_existing_account() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    install_account(
+        &manager,
+        account_id.clone(),
+        101101,
+        "First#1011",
+        "old-secret",
+        true,
+    );
+    let old_manifest = fs::read(shared.account(&account_id).manifest()).unwrap();
+    fs::remove_file(shared.registry()).unwrap();
+    fs::create_dir(shared.registry()).unwrap();
+
+    assert!(publish_add_account(
+        &manager,
+        synthetic_capture(101101, "Renamed#1011", "new-secret")
+    )
+    .is_err());
+    assert_eq!(saved_credentials(&shared, &account_id).token, "old-secret");
+    assert_eq!(
+        fs::read(shared.account(&account_id).manifest()).unwrap(),
+        old_manifest
+    );
+    assert!(!shared.pending_logins().exists());
+}
+
+#[test]
+fn concurrent_add_same_role_never_creates_duplicate_accounts() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = Arc::new(
+        AccountContextManager::load(SharedAppPaths::from_app_data_dir(temp.path())).unwrap(),
+    );
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for suffix in ["One#1000", "Two#1000"] {
+        let manager = Arc::clone(&manager);
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            publish_add_account(
+                &manager,
+                synthetic_capture(101101, suffix, "synthetic-secret"),
+            )
+            .unwrap()
+        }));
+    }
+    barrier.wait();
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
+}
+
+#[test]
+fn account_login_commands_acquire_account_operation_before_capture_and_are_registered() {
+    let commands = include_str!("../src/commands.rs");
+    for command in ["add_account", "relogin_account"] {
+        let function = command_source(commands, command);
+        let permit = function.find("try_acquire_account_operation()").unwrap();
+        let capture = function.find("capture_dashen_login(").unwrap();
+        assert!(
+            permit < capture,
+            "{command} captured before acquiring permit"
+        );
+    }
+    let lib = include_str!("../src/lib.rs");
+    assert!(lib.contains("commands::add_account"));
+    assert!(lib.contains("commands::relogin_account"));
+}
 
 struct LegacyFixture {
     _temp: tempfile::TempDir,

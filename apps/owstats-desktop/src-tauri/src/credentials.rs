@@ -160,8 +160,7 @@ fn pairing_role_id(
 
 pub(crate) struct BrowserLoginOutcome {
     pub(crate) credentials: DashenCredentials,
-    #[allow(dead_code)]
-    pub(crate) detected_battle_tag: Option<String>,
+    pub(crate) detected_battle_tag: String,
 }
 
 pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<CredentialStatus> {
@@ -186,9 +185,8 @@ pub fn clear_credentials_for_account(paths: &AccountPaths) -> Result<bool> {
     clear_credentials_for_path(&paths.credentials())
 }
 
-pub(crate) async fn start_dashen_login_capture_for_account(
+pub(crate) async fn capture_dashen_login(
     app: AppHandle,
-    account_paths: &AccountPaths,
     shared_paths: &SharedAppPaths,
 ) -> Result<BrowserLoginOutcome> {
     LOGIN_CANCELLED.store(false, Ordering::SeqCst);
@@ -213,13 +211,7 @@ pub(crate) async fn start_dashen_login_capture_for_account(
         "请在浏览器中完成登录，应用会自动识别登录状态。",
     );
 
-    let outcome = fetch_credentials_from_browser(&app, port).await?;
-    emit_login_progress(&app, LoginPhase::Saving, "正在保存本地登录凭证。");
-    let path = account_paths.credentials();
-    save_credentials_atomic(&path, &outcome.credentials)?;
-    emit_login_progress(&app, LoginPhase::Ready, "已保存登录凭证，可以开始同步。");
-
-    Ok(outcome)
+    fetch_credentials_from_browser(&app, port).await
 }
 
 pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResult> {
@@ -327,10 +319,19 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                     paired_identity.and_then(|(paired_role_id, battle_tag)| {
                         (paired_role_id == role_id).then_some(battle_tag)
                     });
-                return Ok(BrowserLoginOutcome {
-                    credentials,
-                    detected_battle_tag,
-                });
+                if let Some(detected_battle_tag) = detected_battle_tag {
+                    return Ok(BrowserLoginOutcome {
+                        credentials,
+                        detected_battle_tag,
+                    });
+                }
+                emit_login_progress(
+                    app,
+                    LoginPhase::WaitingForLogin,
+                    "已取得同步凭证，正在稳定识别 BattleTag。",
+                );
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
             }
 
             if is_signature_helper_missing(&result) {

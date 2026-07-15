@@ -4,10 +4,10 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_credentials_and_target_paths_output_dir_base_url, ClearPlayerTargetResult,
-    CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus, FilterOptions,
-    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LoginTargetStatus,
-    LogoutResult, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, AccountLoginResult,
+    ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus,
+    FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary,
+    LoginTargetStatus, LogoutResult, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
     OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview, PlayerProfile,
     PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest,
     SyncSummary, UpdateCheckResult, UserSettings,
@@ -210,19 +210,30 @@ pub async fn start_dashen_login(
     let account = active_account(&accounts)?;
     let shared = accounts.shared_paths().clone();
     login_target_coordinator.clear(account.account_id());
-    let outcome = crate::credentials::start_dashen_login_capture_for_account(
-        app.clone(),
-        account.paths(),
-        &shared,
+    let outcome = crate::credentials::capture_dashen_login(app.clone(), &shared)
+        .await
+        .map_err(to_message)?;
+    crate::credentials::emit_login_progress(
+        &app,
+        crate::login_flow::LoginPhase::Saving,
+        "正在保存本地登录凭证。",
+    );
+    crate::credential_store::save_credentials_atomic(
+        &account.paths().credentials(),
+        &outcome.credentials,
     )
-    .await
     .map_err(to_message)?;
+    crate::credentials::emit_login_progress(
+        &app,
+        crate::login_flow::LoginPhase::Ready,
+        "已保存登录凭证，可以开始同步。",
+    );
     let target_path = crate::player_target::player_target_path_for_account(account.paths());
     let target = crate::login_target::reconcile_detected_target(
         login_target_coordinator.inner(),
         account.account_id(),
         &outcome.credentials,
-        outcome.detected_battle_tag.as_deref(),
+        Some(&outcome.detected_battle_tag),
         &target_path,
         DASHEN_ROOT_BASE,
     )
@@ -231,6 +242,54 @@ pub async fn start_dashen_login(
         .map_err(to_message)?;
     status.role_id = None;
     Ok(CredentialLoginResult { status, target })
+}
+
+#[tauri::command]
+pub async fn add_account(
+    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+) -> Result<AccountLoginResult, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    let outcome = crate::credentials::capture_dashen_login(app, accounts.shared_paths())
+        .await
+        .map_err(to_message)?;
+    crate::account_login::publish_add_account(
+        &accounts,
+        crate::account_login::LoginCapture {
+            credentials: outcome.credentials,
+            battle_tag: outcome.detected_battle_tag,
+        },
+    )
+    .map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn relogin_account(
+    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    account_id: String,
+) -> Result<AccountLoginResult, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    let account_id = crate::account_store::AccountId::parse(&account_id)
+        .map_err(|_| "账号标识无效。".to_string())?;
+    let outcome = crate::credentials::capture_dashen_login(app, accounts.shared_paths())
+        .await
+        .map_err(to_message)?;
+    crate::account_login::publish_relogin_account(
+        &accounts,
+        &account_id,
+        crate::account_login::LoginCapture {
+            credentials: outcome.credentials,
+            battle_tag: outcome.detected_battle_tag,
+        },
+    )
+    .map_err(to_message)
 }
 
 #[tauri::command]
