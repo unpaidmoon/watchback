@@ -419,10 +419,19 @@ mod tests {
         assert_eq!(manager.list_accounts().unwrap_err().to_string(), expected);
         assert!(manager.shared.deletion_journal().is_file());
         assert!(!manager.shared.account(&id).root().exists());
+        fs::create_dir_all(manager.shared.account(&id).root()).unwrap();
+        fs::write(
+            manager.shared.account(&id).root().join("conflict-marker"),
+            b"synthetic-conflict",
+        )
+        .unwrap();
+        assert_eq!(manager.active_snapshot().unwrap_err().to_string(), expected);
+        assert_eq!(manager.status().unwrap_err().to_string(), expected);
 
         let restarted = AccountContextManager::load(manager.shared.clone()).unwrap();
         assert!(restarted.registry_snapshot().unwrap().accounts.is_empty());
         assert!(restarted.list_accounts().unwrap().is_empty());
+        assert!(!manager.shared.account(&id).root().exists());
         assert!(!manager.shared.deletion_journal().exists());
     }
 

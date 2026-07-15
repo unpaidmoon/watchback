@@ -26,6 +26,7 @@ enum RemovalFaultPoint {
     BeforeRegistryWrite,
     AfterRegistryUpdated,
     BeforeDelete,
+    UnsafeTreeAfterRegistry,
     BeforeAnyDelete,
     AfterFirstDeleteMutation,
     CleanupOperation,
@@ -262,7 +263,11 @@ fn remove_account_with_fault(
         };
     }
 
-    if ensure_safe_tree(&quarantine).is_err() {
+    if fault
+        .after(RemovalFaultPoint::UnsafeTreeAfterRegistry)
+        .is_err()
+        || ensure_safe_tree(&quarantine).is_err()
+    {
         return match rollback_after_registry(shared, &mut journal, &original, &quarantine, fault)? {
             RollbackDisposition::RolledBack => Ok(RemovalOutcome {
                 registry: old_registry.clone(),
@@ -383,7 +388,9 @@ fn rollback_after_registry(
     if fault.after(RemovalFaultPoint::RollbackRename).is_err()
         || fs::rename(quarantine, original).is_err()
     {
-        bail!("账号退出恢复失败，请重试。")
+        journal.phase = DeletionPhase::RegistryUpdated;
+        let _ = write_journal(shared, journal);
+        return Ok(RollbackDisposition::PendingRemoval);
     }
     if fault.after(RemovalFaultPoint::AfterRollbackRename).is_err() {
         bail!("账号退出恢复失败，请重试。")
@@ -485,6 +492,10 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
     let original_exists = entry_exists(&original)?;
     let quarantine_exists = entry_exists(&quarantine)?;
 
+    if journal.phase == DeletionPhase::RestoreFailed {
+        return recover_restore_failed(shared, &journal, &disk_registry, &original, &quarantine);
+    }
+
     match (
         disk_registry == journal.old_registry,
         disk_registry == journal.new_registry,
@@ -514,15 +525,25 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
             fs::rename(&quarantine, &original)?;
             cleanup_operation(shared, &journal, &NoRemovalFault)
         }
-        (false, true, false, true, DeletionPhase::RollingBack) => {
-            ensure_safe_tree(&quarantine)?;
-            fs::rename(&quarantine, &original)?;
-            write_registry_atomic(&shared.registry(), &journal.old_registry)?;
-            cleanup_operation(shared, &journal, &NoRemovalFault)
-        }
         (false, true, true, false, DeletionPhase::RollingBack) => {
             write_registry_atomic(&shared.registry(), &journal.old_registry)?;
             cleanup_operation(shared, &journal, &NoRemovalFault)
+        }
+        (false, true, true, true, DeletionPhase::RegistryUpdated) => {
+            validate_quarantined_target(&quarantine, &journal)?;
+            ensure_safe_tree(&original)?;
+            let conflict = conflicting_original_path(shared, &journal)?;
+            if entry_exists(&conflict)? {
+                bail!("账号退出恢复目录冲突")
+            }
+            fs::rename(&original, &conflict)?;
+            delete_conflicting_original(shared, &journal)?;
+            delete_tree_tracked(&quarantine, &NoRemovalFault)
+                .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
+            let mut complete = journal.clone();
+            complete.phase = DeletionPhase::Complete;
+            write_journal(shared, &complete)?;
+            cleanup_operation(shared, &complete, &NoRemovalFault)
         }
         (
             false,
@@ -532,8 +553,10 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
             DeletionPhase::Prepared
             | DeletionPhase::Quarantined
             | DeletionPhase::RestoreFailed
-            | DeletionPhase::RegistryUpdated,
+            | DeletionPhase::RegistryUpdated
+            | DeletionPhase::RollingBack,
         ) => {
+            delete_conflicting_original(shared, &journal)?;
             ensure_safe_tree(&quarantine)?;
             delete_tree_tracked(&quarantine, &NoRemovalFault)
                 .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
@@ -553,6 +576,7 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
             | DeletionPhase::RegistryUpdated
             | DeletionPhase::Complete,
         ) => {
+            delete_conflicting_original(shared, &journal)?;
             let mut complete = journal.clone();
             complete.phase = DeletionPhase::Complete;
             write_journal(shared, &complete)?;
@@ -560,6 +584,83 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
         }
         _ => bail!("账号退出恢复状态不一致"),
     }
+}
+
+fn recover_restore_failed(
+    shared: &SharedAppPaths,
+    journal: &DeletionJournal,
+    disk_registry: &AccountRegistry,
+    original: &Path,
+    quarantine: &Path,
+) -> Result<()> {
+    if disk_registry != &journal.old_registry && disk_registry != &journal.new_registry {
+        bail!("账号退出恢复索引不一致")
+    }
+    validate_quarantined_target(quarantine, journal)?;
+    let original_exists = entry_exists(original)?;
+    if original_exists {
+        ensure_safe_tree(original)?;
+    }
+    let conflict = conflicting_original_path(shared, journal)?;
+    let conflict_exists = entry_exists(&conflict)?;
+    if conflict_exists {
+        ensure_safe_tree(&conflict)?;
+    }
+    if original_exists && conflict_exists {
+        bail!("账号退出恢复目录冲突")
+    }
+
+    if disk_registry == &journal.old_registry {
+        write_registry_atomic(&shared.registry(), &journal.new_registry)?;
+    }
+    let mut committed = journal.clone();
+    committed.phase = DeletionPhase::RegistryUpdated;
+    write_journal(shared, &committed)?;
+
+    if original_exists {
+        fs::rename(original, &conflict)?;
+    }
+    delete_conflicting_original(shared, &committed)?;
+    if entry_exists(quarantine)? {
+        validate_quarantined_target(quarantine, journal)?;
+        delete_tree_tracked(quarantine, &NoRemovalFault)
+            .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
+    }
+    committed.phase = DeletionPhase::Complete;
+    write_journal(shared, &committed)?;
+    cleanup_operation(shared, &committed, &NoRemovalFault)
+}
+
+fn validate_quarantined_target(path: &Path, journal: &DeletionJournal) -> Result<()> {
+    ensure_safe_tree(path)?;
+    let manifest = read_manifest(&path.join("account.json"), &journal.account_id)?;
+    let entry = journal
+        .old_registry
+        .accounts
+        .iter()
+        .find(|entry| entry.account_id == journal.account_id)
+        .ok_or_else(|| anyhow!("账号退出恢复目标无效"))?;
+    if manifest.battle_tag != entry.battle_tag {
+        bail!("账号退出恢复目标无效")
+    }
+    Ok(())
+}
+
+fn conflicting_original_path(
+    shared: &SharedAppPaths,
+    journal: &DeletionJournal,
+) -> Result<PathBuf> {
+    Ok(operation_root(shared, &journal.operation_id)?.join("conflicting-original"))
+}
+
+fn delete_conflicting_original(shared: &SharedAppPaths, journal: &DeletionJournal) -> Result<()> {
+    let conflict = conflicting_original_path(shared, journal)?;
+    if entry_exists(&conflict)? {
+        ensure_safe_tree(&conflict)?;
+        delete_tree_tracked(&conflict, &NoRemovalFault)
+            .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
+    }
+    Ok(())
 }
 
 fn select_fallback(shared: &SharedAppPaths, registry: &AccountRegistry) -> Option<AccountId> {
@@ -607,21 +708,53 @@ pub(crate) fn deletion_recovery_required(
     shared: &SharedAppPaths,
     registry: &AccountRegistry,
 ) -> bool {
-    if !matches!(fs::symlink_metadata(shared.deletion_journal()), Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() && !is_windows_reparse(&metadata))
-    {
-        return false;
+    let journal_path = shared.deletion_journal();
+    let metadata = match fs::symlink_metadata(&journal_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() || is_windows_reparse(&metadata) {
+        return true;
     }
-    registry.accounts.iter().any(|entry| {
-        let root = shared.account(&entry.account_id);
-        match fs::symlink_metadata(root.root()) {
-            Ok(metadata) => {
-                !metadata.is_dir()
-                    || metadata.file_type().is_symlink()
-                    || is_windows_reparse(&metadata)
-            }
-            Err(_) => true,
-        }
-    })
+    let journal: DeletionJournal = match fs::read(&journal_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    {
+        Some(journal) => journal,
+        None => return true,
+    };
+    if validate_journal(shared, &journal).is_err() || journal.phase == DeletionPhase::RestoreFailed
+    {
+        return true;
+    }
+
+    let operation_id = match Uuid::parse_str(&journal.operation_id) {
+        Ok(operation_id) if operation_id.to_string() == journal.operation_id => operation_id,
+        _ => return true,
+    };
+    let original = shared.account(&journal.account_id).root().to_path_buf();
+    let quarantine = shared
+        .operations_root()
+        .join("deletions")
+        .join(operation_id.to_string())
+        .join(journal.account_id.as_str());
+    let original_exists = match entry_exists(&original) {
+        Ok(exists) => exists,
+        Err(_) => return true,
+    };
+    let quarantine_exists = match entry_exists(&quarantine) {
+        Ok(exists) => exists,
+        Err(_) => return true,
+    };
+    if original_exists && quarantine_exists {
+        return true;
+    }
+
+    registry
+        .accounts
+        .iter()
+        .any(|entry| !stored_account_is_complete(shared, entry))
 }
 
 fn stored_account_is_complete(
@@ -1161,6 +1294,120 @@ mod tests {
                 assert_eq!(fs::read(shared.account(id).database()).unwrap(), *bytes);
             }
             assert!(shared.deletion_journal().is_file());
+        }
+    }
+
+    #[test]
+    fn recovery_required_checks_manifest_restore_failure_and_double_directory_states() {
+        let (_temp, shared, journal, _) = strict_journal_fixture();
+        assert!(!deletion_recovery_required(&shared, &journal.old_registry));
+
+        fs::write(
+            shared
+                .account(&journal.new_registry.accounts[0].account_id)
+                .manifest(),
+            b"{}",
+        )
+        .unwrap();
+        assert!(deletion_recovery_required(&shared, &journal.old_registry));
+
+        let (_temp, shared, mut journal, _) = strict_journal_fixture();
+        journal.phase = DeletionPhase::RestoreFailed;
+        fs::write(
+            shared.deletion_journal(),
+            serde_json::to_vec_pretty(&journal).unwrap(),
+        )
+        .unwrap();
+        assert!(deletion_recovery_required(&shared, &journal.old_registry));
+
+        let (_temp, shared, journal, _) = strict_journal_fixture();
+        let quarantine =
+            quarantine_path(&shared, &journal.operation_id, &journal.account_id).unwrap();
+        fs::create_dir_all(&quarantine).unwrap();
+        assert!(deletion_recovery_required(&shared, &journal.old_registry));
+    }
+
+    #[test]
+    fn rolling_back_with_new_registry_and_quarantine_finishes_deletion() {
+        let (_temp, shared, mut journal, _) = strict_journal_fixture();
+        let original = shared.account(&journal.account_id).root().to_path_buf();
+        let quarantine =
+            quarantine_path(&shared, &journal.operation_id, &journal.account_id).unwrap();
+        fs::create_dir_all(quarantine.parent().unwrap()).unwrap();
+        fs::rename(&original, &quarantine).unwrap();
+        write_registry_atomic(&shared.registry(), &journal.new_registry).unwrap();
+        journal.phase = DeletionPhase::RollingBack;
+        fs::write(
+            shared.deletion_journal(),
+            serde_json::to_vec_pretty(&journal).unwrap(),
+        )
+        .unwrap();
+
+        recover_pending_removal(&shared).unwrap();
+
+        assert_eq!(
+            read_registry(&shared.registry()).unwrap(),
+            journal.new_registry
+        );
+        assert!(!original.exists());
+        assert!(!quarantine.exists());
+        assert!(!shared.deletion_journal().exists());
+    }
+
+    #[test]
+    fn registry_updated_with_original_and_quarantine_finishes_both_directories() {
+        let (_temp, shared, mut journal, _) = strict_journal_fixture();
+        let original = shared.account(&journal.account_id).root().to_path_buf();
+        let quarantine =
+            quarantine_path(&shared, &journal.operation_id, &journal.account_id).unwrap();
+        fs::create_dir_all(quarantine.parent().unwrap()).unwrap();
+        fs::rename(&original, &quarantine).unwrap();
+        fs::create_dir_all(&original).unwrap();
+        fs::write(original.join("conflict-marker"), b"synthetic-conflict").unwrap();
+        write_registry_atomic(&shared.registry(), &journal.new_registry).unwrap();
+        journal.phase = DeletionPhase::RegistryUpdated;
+        fs::write(
+            shared.deletion_journal(),
+            serde_json::to_vec_pretty(&journal).unwrap(),
+        )
+        .unwrap();
+
+        recover_pending_removal(&shared).unwrap();
+
+        assert_eq!(
+            read_registry(&shared.registry()).unwrap(),
+            journal.new_registry
+        );
+        assert!(!original.exists());
+        assert!(!quarantine.exists());
+        assert!(!shared.deletion_journal().exists());
+    }
+
+    #[test]
+    fn impossible_post_registry_restore_finishes_as_pending_deletion_for_every_caller() {
+        for trigger in [
+            RemovalFaultPoint::AfterRegistryUpdated,
+            RemovalFaultPoint::BeforeDelete,
+            RemovalFaultPoint::UnsafeTreeAfterRegistry,
+            RemovalFaultPoint::BeforeAnyDelete,
+        ] {
+            let (_temp, shared, id, registry) = fixture();
+            let outcome = remove_account_with_fault(
+                &shared,
+                &registry,
+                &id,
+                "2026-07-16T13:00:00Z",
+                &FailAt(vec![trigger, RemovalFaultPoint::RollbackRename]),
+            )
+            .unwrap();
+            assert_eq!(outcome.completion, RemovalCompletion::RemovedPendingCleanup);
+            assert_eq!(read_registry(&shared.registry()).unwrap(), outcome.registry);
+            assert!(outcome.registry.accounts.is_empty());
+            assert!(!shared.account(&id).root().exists());
+            assert!(shared.deletion_journal().is_file());
+            recover_pending_removal(&shared).unwrap();
+            assert!(!shared.deletion_journal().exists());
+            assert!(!shared.account(&id).root().exists());
         }
     }
 
