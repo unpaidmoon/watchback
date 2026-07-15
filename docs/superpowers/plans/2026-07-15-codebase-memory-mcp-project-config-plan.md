@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Register the existing Codebase Memory MCP binary with Codex, restrict it to `D:\Codex\OW_data\owstats-local`, refresh the existing project graph, and verify the privacy boundary.
+**Goal:** Install Codebase Memory MCP v0.9.0 for Codex, restrict it to `D:\Codex\OW_data\owstats-local`, refresh the project graph, and verify the privacy boundary.
 
-**Architecture:** Codex launches the installed STDIO server from its user configuration and injects `CBM_ALLOWED_ROOT` into only that server process. The repository keeps its existing `.cbmignore`; graph data remains in the tool's local cache and no machine-specific runtime path is added to tracked application files.
+**Architecture:** Codex launches the installed STDIO server from its user configuration and injects `CBM_ALLOWED_ROOT` plus `CBM_INDEX_SUPERVISOR=0` into only that server process. Disabling the v0.9.0 index supervisor ensures the root check runs before indexing; the repository keeps its existing `.cbmignore`, graph data remains in the tool's local cache, and no machine-specific runtime path is added to tracked application files.
 
-**Tech Stack:** Codex CLI MCP configuration, PowerShell, TOML, `codebase-memory-mcp 0.8.1`, persistent SQLite knowledge graph.
+**Tech Stack:** Codex CLI MCP configuration, PowerShell, TOML, `codebase-memory-mcp 0.9.0`, persistent SQLite knowledge graph.
 
 ---
 
@@ -27,7 +27,7 @@ git status --short
 codex mcp list
 ```
 
-Expected: the pre-existing user changes remain visible, the binary reports `codebase-memory-mcp 0.8.1`, and no MCP server named `codebase-memory-mcp` is registered.
+Expected: the pre-existing user changes remain visible, the original binary reports `codebase-memory-mcp 0.8.1`, and no MCP server named `codebase-memory-mcp` is registered.
 
 - [ ] **Step 2: Back up the Codex configuration without overwriting an older backup**
 
@@ -56,6 +56,24 @@ git check-ignore -v -- 'data/.dashen_credentials.json'
 
 Expected: `.cbmignore` excludes database, SQLite, log, and `.codebase-memory/` artifacts; Git reports that `.gitignore` excludes `data/.dashen_credentials.json`. Do not open the credentials file.
 
+- [ ] **Step 4: Install the checksum-verified v0.9.0 standard binary without configuring other clients**
+
+Run:
+
+```powershell
+$installer = Join-Path $env:TEMP 'codebase-memory-mcp-install-v0.9.0.ps1'
+Invoke-WebRequest `
+  -Uri 'https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.9.0/install.ps1' `
+  -OutFile $installer `
+  -UseBasicParsing
+Unblock-File -LiteralPath $installer
+& $installer --standard --skip-config
+Remove-Item -LiteralPath $installer -Force
+& 'C:\Users\cyb\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe' --version
+```
+
+Expected: the installer prints `Checksum verified`, skips agent configuration, and the binary reports `codebase-memory-mcp 0.9.0`.
+
 ### Task 2: Register the project-restricted MCP server
 
 **Files:**
@@ -68,6 +86,7 @@ Run:
 ```powershell
 codex mcp add codebase-memory-mcp `
   --env 'CBM_ALLOWED_ROOT=D:\Codex\OW_data\owstats-local' `
+  --env 'CBM_INDEX_SUPERVISOR=0' `
   -- 'C:\Users\cyb\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe'
 ```
 
@@ -82,7 +101,7 @@ codex mcp get codebase-memory-mcp
 codex mcp list
 ```
 
-Expected: the server is enabled, transport is STDIO, the command is the v0.8.1 executable, and `CBM_ALLOWED_ROOT` equals the repository root.
+Expected: the server is enabled, transport is STDIO, the command is the v0.9.0 executable, `CBM_ALLOWED_ROOT` equals the repository root, and `CBM_INDEX_SUPERVISOR` equals `0`.
 
 - [ ] **Step 3: Verify that Codex configuration remains parseable**
 
@@ -105,13 +124,53 @@ Expected: exit code `0`.
 Run:
 
 ```powershell
-$env:CBM_ALLOWED_ROOT = 'D:\Codex\OW_data\owstats-local'
-try {
-    & 'C:\Users\cyb\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe' cli index_repository '{"repo_path":"C:\\Windows\\Temp"}' 2>&1
-    if ($LASTEXITCODE -eq 0) { throw 'Out-of-root indexing was unexpectedly accepted' }
-} finally {
-    Remove-Item Env:CBM_ALLOWED_ROOT -ErrorAction SilentlyContinue
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = 'C:\Users\cyb\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe'
+$psi.UseShellExecute = $false
+$psi.RedirectStandardInput = $true
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$psi.CreateNoWindow = $true
+$psi.EnvironmentVariables['CBM_ALLOWED_ROOT'] = 'D:\Codex\OW_data\owstats-local'
+$psi.EnvironmentVariables['CBM_INDEX_SUPERVISOR'] = '0'
+$process = New-Object System.Diagnostics.Process
+$process.StartInfo = $psi
+[void]$process.Start()
+$stderrTask = $process.StandardError.ReadToEndAsync()
+
+function Read-McpResponse([int]$id) {
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $task = $process.StandardOutput.ReadLineAsync()
+        if (-not $task.Wait(3000)) { throw "Timed out waiting for MCP response $id" }
+        if (-not $task.Result) { continue }
+        $response = $task.Result | ConvertFrom-Json
+        if ($response.id -eq $id) { return $response }
+    }
+    throw "MCP response $id not found"
 }
+
+$initialize = @{
+    jsonrpc = '2.0'; id = 1; method = 'initialize'
+    params = @{
+        protocolVersion = '2025-06-18'; capabilities = @{}
+        clientInfo = @{ name = 'boundary-probe'; version = '1.0' }
+    }
+} | ConvertTo-Json -Compress -Depth 8
+$process.StandardInput.WriteLine($initialize)
+$process.StandardInput.Flush()
+$null = Read-McpResponse 1
+$process.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}')
+$call = @{
+    jsonrpc = '2.0'; id = 2; method = 'tools/call'
+    params = @{ name = 'index_repository'; arguments = @{ repo_path = 'C:\Windows\Temp' } }
+} | ConvertTo-Json -Compress -Depth 8
+$process.StandardInput.WriteLine($call)
+$process.StandardInput.Flush()
+$result = Read-McpResponse 2
+$text = $result.result.content[0].text
+if ($text -ne 'repo_path is outside the allowed root') { throw "Boundary failed: $text" }
+$process.StandardInput.Close()
+if (-not $process.WaitForExit(3000)) { $process.Kill() }
 ```
 
 Expected: the command refuses the path because it is outside `CBM_ALLOWED_ROOT`; it must not begin indexing `C:\Windows\Temp`.
@@ -128,11 +187,13 @@ Run:
 
 ```powershell
 $env:CBM_ALLOWED_ROOT = 'D:\Codex\OW_data\owstats-local'
+$env:CBM_INDEX_SUPERVISOR = '0'
 try {
-    & 'C:\Users\cyb\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe' cli index_repository '{"repo_path":"D:\\Codex\\OW_data\\owstats-local"}'
+    & 'C:\Users\cyb\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe' cli index_repository --repo-path 'D:\Codex\OW_data\owstats-local'
     if ($LASTEXITCODE -ne 0) { throw 'Index refresh failed' }
 } finally {
     Remove-Item Env:CBM_ALLOWED_ROOT -ErrorAction SilentlyContinue
+    Remove-Item Env:CBM_INDEX_SUPERVISOR -ErrorAction SilentlyContinue
 }
 ```
 
@@ -160,8 +221,8 @@ Run:
 
 ```powershell
 $name = $project.name
-& $binary cli index_status (ConvertTo-Json @{ project = $name } -Compress)
-& $binary cli get_architecture (ConvertTo-Json @{ project = $name } -Compress)
+& $binary cli index_status --project $name
+& $binary cli get_architecture --project $name --aspects overview
 ```
 
 Expected: status is ready/current and architecture returns non-empty language or package data covering the repository's TypeScript/TSX and Rust surfaces.
@@ -188,9 +249,10 @@ Expected: `git diff --check` succeeds; pre-existing user changes remain, and MCP
 Report:
 
 ```text
-Installed binary: existing codebase-memory-mcp 0.8.1 reused
+Installed binary: codebase-memory-mcp 0.9.0, checksum verified
 Codex MCP registration: configured and enabled
 Allowed root: D:\Codex\OW_data\owstats-local
+Index supervisor: disabled so the allowed-root gate executes before indexing
 Project graph: refreshed and queried
 Out-of-root probe: rejected
 Privacy data touched: no
