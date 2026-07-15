@@ -67,6 +67,12 @@ export function shouldRequestReviewSeason(selectedSeason: number | undefined, lo
   return selectedSeason === undefined || selectedSeason !== loadedSeason;
 }
 
+export function buildReviewSeasonFallbackParams(current: URLSearchParams, backendSeason: number) {
+  const next = new URLSearchParams(current);
+  next.set("season", String(backendSeason));
+  return next;
+}
+
 const inFlightReviewRequests = new Map<string, Promise<PersonalSeasonReview>>();
 
 export function requestPersonalSeasonReviewOnce(
@@ -148,10 +154,7 @@ export function PersonalReviewPage() {
         loadedReviewSeasonRef.current = typeof backendSeason === "number" && backendSeason > 0 ? backendSeason : null;
         if (typeof backendSeason === "number" && backendSeason > 0 && backendSeason !== selectedSeason) {
           setSelectedSeason(backendSeason);
-          const nextParams = new URLSearchParams(params);
-          nextParams.set("season", String(backendSeason));
-          nextParams.set("view", view);
-          setParams(nextParams, { replace: true });
+          setParams(current => buildReviewSeasonFallbackParams(current, backendSeason), { replace: true });
         }
       })
       .catch((err) => {

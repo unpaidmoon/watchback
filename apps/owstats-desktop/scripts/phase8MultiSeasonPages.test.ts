@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  buildReviewSeasonFallbackParams,
   createLatestRequestGuard,
   hasReviewSeasonData,
   parseReviewSeasonParam,
@@ -39,12 +40,10 @@ assert.equal(shouldRequestReviewSeason(undefined, null), true, "review should di
 assert.equal(shouldRequestReviewSeason(23, null), true, "review should request an explicit season that is not loaded");
 assert.equal(shouldRequestReviewSeason(23, 23), false, "review should reuse the just-discovered season response");
 assert.equal(shouldRequestReviewSeason(22, 23), true, "review should request after changing to a different season");
-assert.match(reviewSource, /nextParams\.set\("season", String\(backendSeason\)\)/, "a discovered review season should be written to the URL");
-assert.match(reviewSource, /setParams\(nextParams, \{ replace: true \}\)/, "discovered review season should replace the incomplete URL");
 assert.match(
   reviewSource,
-  /if \(typeof backendSeason === "number" && backendSeason > 0 && backendSeason !== selectedSeason\) \{\s*setSelectedSeason\(backendSeason\);\s*const nextParams = new URLSearchParams\(params\);\s*nextParams\.set\("season", String\(backendSeason\)\);\s*nextParams\.set\("view", view\);\s*setParams\(nextParams, \{ replace: true \}\);\s*\}/s,
-  "a backend season fallback should synchronize review state, season URL, and view URL in the same success branch",
+  /if \(typeof backendSeason === "number" && backendSeason > 0 && backendSeason !== selectedSeason\) \{\s*setSelectedSeason\(backendSeason\);\s*setParams\(current => buildReviewSeasonFallbackParams\(current, backendSeason\), \{ replace: true \}\);\s*\}/s,
+  "a backend season fallback should update the latest URL params without restoring a stale review tab",
 );
 assert.match(
   reviewSource,
@@ -57,6 +56,13 @@ assert.equal(parseReviewSeasonParam("0"), undefined, "review page should reject 
 assert.equal(parseReviewSeasonParam("-1"), undefined, "review page should reject a negative URL season");
 assert.equal(parseReviewSeasonParam("15.5"), undefined, "review page should reject a fractional URL season");
 assert.equal(parseReviewSeasonParam("abc"), undefined, "review page should reject a non-numeric URL season");
+
+const currentReviewParams = new URLSearchParams("season=999&view=friends&keep=1");
+const fallbackReviewParams = buildReviewSeasonFallbackParams(currentReviewParams, 23);
+assert.equal(fallbackReviewParams.get("season"), "23", "review fallback should write the backend season");
+assert.equal(fallbackReviewParams.get("view"), "friends", "review fallback should preserve the latest selected tab");
+assert.equal(fallbackReviewParams.get("keep"), "1", "review fallback should preserve unrelated URL state");
+assert.equal(currentReviewParams.toString(), "season=999&view=friends&keep=1", "review fallback should not mutate the current URL params");
 
 const coalescedReview = {} as PersonalSeasonReview;
 let coalescedReviewLoads = 0;
