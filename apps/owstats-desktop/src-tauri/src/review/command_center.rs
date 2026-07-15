@@ -1,12 +1,5 @@
 use super::*;
 
-pub(super) const MIN_SYNC_SEASON: i64 = 15;
-pub(super) const CURRENT_SEASON: i64 = 23;
-
-fn syncable_seasons() -> Vec<i64> {
-    (MIN_SYNC_SEASON..=CURRENT_SEASON).rev().collect()
-}
-
 pub(super) fn get_onboarding_status_impl(
     db: &OwDatabase,
     request: OnboardingStatusRequest,
@@ -22,14 +15,14 @@ pub(super) fn get_onboarding_status_impl(
     };
     let selected = request
         .season
-        .filter(|season| (MIN_SYNC_SEASON..=CURRENT_SEASON).contains(season))
-        .or(Some(CURRENT_SEASON));
-    let status_seasons = available_seasons
-        .iter()
-        .copied()
-        .filter(|season| (MIN_SYNC_SEASON..=CURRENT_SEASON).contains(season))
-        .rev()
-        .collect::<Vec<_>>();
+        .or_else(|| available_seasons.iter().copied().max());
+    let mut status_seasons = available_seasons.clone();
+    if let Some(season) = selected {
+        if !status_seasons.contains(&season) {
+            status_seasons.push(season);
+            status_seasons.sort_unstable();
+        }
+    }
     let season_statuses = command_center_season_statuses(db, &status_seasons)?;
     let (preset_matches, detail_matches, last_seen) = if let Some(season) = selected {
         conn.query_row(
@@ -58,8 +51,6 @@ pub(super) fn get_onboarding_status_impl(
 
     Ok(OnboardingStatus {
         selected_season: selected,
-        current_season: CURRENT_SEASON,
-        syncable_seasons: syncable_seasons(),
         available_seasons,
         can_enter_review,
         credential_status: CredentialStatus {

@@ -89,197 +89,11 @@
   font-weight: 400;
 }
 
-.commandCenterSyncPanel .seasonSyncWorkbench {
+.commandCenterSyncPanel .syncSeasonWorkbench {
   margin-top: 20px;
   border: 0;
   background: rgba(250, 251, 247, 0.38);
   box-shadow: none;
-}
-
-.seasonSyncWorkbench {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
-}
-
-.seasonSyncControl {
-  min-width: 0;
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  padding: 22px;
-  border-right: 1px solid var(--glass-border);
-}
-
-.seasonSyncControl > div:first-child {
-  display: grid;
-  gap: 4px;
-}
-
-.seasonSyncControl label {
-  color: var(--text-primary);
-  font-size: 18px;
-  font-weight: 400;
-}
-
-.seasonSyncControl select {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--surface-control);
-  color: var(--text-primary);
-  font: inherit;
-  cursor: pointer;
-}
-
-.seasonSyncControl select:focus-visible,
-.syncedSeasonLedgerRow:focus-visible {
-  outline: 2px solid var(--data-primary);
-  outline-offset: 2px;
-}
-
-.seasonSyncRange,
-.seasonSyncFeedback {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.seasonSyncButton {
-  width: 100%;
-  justify-content: center;
-}
-
-.seasonSyncFeedback {
-  min-height: 36px;
-}
-
-.seasonSyncFeedback .error {
-  color: var(--status-danger-strong);
-}
-
-.seasonSyncFeedback .good {
-  color: var(--text-secondary);
-}
-
-.syncedSeasonLedger {
-  min-width: 0;
-  padding: 22px;
-}
-
-.syncedSeasonLedgerHeading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
-.syncedSeasonLedgerHeading h3 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 18px;
-  font-weight: 400;
-}
-
-.syncedSeasonLedgerHeading span,
-.syncedSeasonLedgerHeader {
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-
-.syncedSeasonLedgerTable {
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.syncedSeasonLedgerHeader,
-.syncedSeasonLedgerRow {
-  display: grid;
-  grid-template-columns: minmax(64px, 0.55fr) minmax(150px, 1.5fr) minmax(88px, 0.75fr) minmax(112px, 0.9fr);
-  gap: 12px;
-  align-items: center;
-}
-
-.syncedSeasonLedgerHeader {
-  min-height: 36px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.syncedSeasonLedgerRow {
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--glass-border);
-  background: transparent;
-  color: var(--text-primary);
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 180ms ease, box-shadow 180ms ease;
-}
-
-.syncedSeasonLedgerRow:hover {
-  background: rgba(250, 251, 247, 0.48);
-}
-
-.syncedSeasonLedgerRow.selected {
-  background: color-mix(in srgb, var(--data-primary) 6%, transparent);
-  box-shadow: inset 3px 0 var(--data-primary);
-}
-
-.syncedSeasonLedgerRow.syncing {
-  background: color-mix(in srgb, var(--data-secondary) 7%, transparent);
-}
-
-.syncedSeasonName {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-}
-
-.syncedSeasonName small {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.syncedSeasonCoverage {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(56px, 1fr) 40px;
-  gap: 8px;
-  align-items: center;
-}
-
-.syncedSeasonCoverageTrack {
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-tertiary) 18%, transparent);
-}
-
-.syncedSeasonCoverageTrack > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--data-primary);
-}
-
-.syncedSeasonLedgerEmpty,
-.seasonSyncWorkbenchLoading {
-  min-height: 160px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 24px;
-  color: var(--text-secondary);
-  text-align: center;
 }
 
 .commandCenterSyncPanel .syncTargetStrip {
@@ -370,6 +184,10 @@
   box-shadow: none;
 }
 
+.commandCenterSeasonSegments { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--glass-border); border-radius: var(--radius-control); background: var(--glass-secondary); }
+.commandCenterSeasonSegments button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); }
+.commandCenterSeasonSegments button.active { background: var(--action-primary); color: var(--action-on-primary); }
+
 @supports (backdrop-filter: blur(1px)) {
   .commandCenterSyncPanel,
   .commandCenterAccountPanel,
@@ -403,10 +221,17 @@
   font-weight: 400;
 }
 
-.phase6CommandCenter .syncTargetStrip {
+.phase6CommandCenter .syncTargetStrip,
+.phase6CommandCenter .phase8SeasonStatusCard,
+.phase6CommandCenter .phase8SeasonStatusStats > span {
   border-color: var(--glass-border);
   background: rgba(250, 251, 247, 0.38);
   box-shadow: none;
+}
+
+.phase6CommandCenter .phase8SeasonStatusStats > span.good strong,
+.phase6CommandCenter .phase8SeasonStatusStats > span.warn strong {
+  color: var(--text-primary);
 }
 
 .phase6CommandCenter .phase6DataHealthGrid span {
@@ -430,6 +255,23 @@
   box-shadow: none;
 }
 
+.phase6CommandCenter .phase8SeasonStatusCard {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.phase6CommandCenter .phase8SeasonStatusStats > span {
+  border: 0;
+  border-left: 1px solid var(--glass-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.phase6CommandCenter .phase8SeasonStatusStats > span:first-child {
+  border-left: 0;
+}
 
 .phase6CommandCenter .primaryButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--action-primary) 88%, white);
@@ -449,7 +291,8 @@
   box-shadow: none;
 }
 
-.phase6CommandCenter .phase6CoverageTrack > span {
+.phase6CommandCenter .phase6CoverageTrack > span,
+.phase6CommandCenter .phase8SeasonCoverage .phase6CoverageTrack > span {
   background: var(--data-primary);
 }
 
@@ -465,17 +308,6 @@
 
   .commandCenterTools .phase6SettingsLauncherGrid {
     width: 100%;
-  }
-}
-
-@media (max-width: 920px) {
-  .seasonSyncWorkbench {
-    grid-template-columns: 1fr;
-  }
-
-  .seasonSyncControl {
-    border-right: 0;
-    border-bottom: 1px solid var(--glass-border);
   }
 }
 

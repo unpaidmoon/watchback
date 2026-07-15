@@ -485,8 +485,6 @@ export const fixtureRanking = {
 
 export const fixtureOnboarding = {
   selectedSeason: 23,
-  currentSeason: 23,
-  syncableSeasons: [23, 22, 21, 20, 19, 18, 17, 16, 15],
   availableSeasons: [23, 22, 21],
   canEnterReview: true,
   credentialStatus: {
@@ -601,8 +599,6 @@ export const fixtureEmptyRanking = {
 
 export const fixtureEmptyOnboarding = {
   selectedSeason: 23,
-  currentSeason: 23,
-  syncableSeasons: [23, 22, 21, 20, 19, 18, 17, 16, 15],
   availableSeasons: [23, 22, 21],
   canEnterReview: false,
   credentialStatus: {

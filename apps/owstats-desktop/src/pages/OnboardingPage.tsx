@@ -28,8 +28,7 @@ import {
   startDashenLogin,
   syncSeason,
 } from "../shared/api";
-import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
-import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
+import { DataFact, formatTimestamp, SeasonStatusCard } from "../features/command-center/SeasonHealthPanel";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
@@ -44,7 +43,9 @@ type DashboardSnapshot = {
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
-let dashboardCache: DashboardSnapshot | null = null;
+const DASHBOARD_SEASON = 22;
+const COMMAND_CENTER_SEASONS = [21, 22, 23] as const;
+const dashboardCache = new Map<number, DashboardSnapshot>();
 
 export function normalizeLoginTargetName(value: string) {
   return value.trim().replace(/＃/g, "#").toLowerCase();
@@ -58,10 +59,8 @@ export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [targetStatus, setTargetStatus] = useState<LoginTargetStatus | null>(null);
-  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [seasonInput, setSeasonInput] = useState("23");
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
@@ -124,7 +123,7 @@ export function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    const cached = dashboardCache;
+    const cached = dashboardCache.get(DASHBOARD_SEASON);
     if (cached) {
       applyDashboardSnapshot(cached);
     }
@@ -146,7 +145,7 @@ export function OnboardingPage() {
         return;
       }
       const snapshot = { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
-      dashboardCache = snapshot;
+      dashboardCache.set(DASHBOARD_SEASON, snapshot);
       applyDashboardSnapshot(snapshot);
     } catch (err) {
       if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
@@ -159,11 +158,6 @@ export function OnboardingPage() {
     setStatus(snapshot.status);
     setProfile(snapshot.profile);
     setTargetStatus(snapshot.targetStatus);
-    setSelectedSeason((current) => resolveCommandCenterSeason(
-      current ?? snapshot.status.currentSeason,
-      snapshot.status.syncableSeasons,
-      snapshot.status.currentSeason,
-    ));
   }
 
   function acquireOperationLock() {
@@ -179,7 +173,7 @@ export function OnboardingPage() {
   }
 
   function invalidateDashboardCache() {
-    dashboardCache = null;
+    dashboardCache.delete(DASHBOARD_SEASON);
     dashboardRequestGenerationRef.current += 1;
   }
 
@@ -246,33 +240,25 @@ export function OnboardingPage() {
 
   async function runSeasonSync(season: number) {
     if (!acquireOperationLock()) {
-      setSyncError("当前正在处理账号操作，请完成后再同步。");
+      setError("当前正在处理账号操作，请完成后再同步。");
       return;
     }
     dashboardRequestGenerationRef.current += 1;
     setSyncingSeason(season);
     setNotice(null);
     setError(null);
-    setSyncNotice(null);
-    setSyncError(null);
     setSyncProgress(null);
     try {
       const summary = await syncSeason(season);
       clearMatchesPageCache();
       await loadDashboard();
-      setSyncNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
+      setNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
     } catch (err) {
-      setSyncError(productErrorMessage(err));
+      setError(productErrorMessage(err));
     } finally {
       setSyncingSeason(null);
       releaseOperationLock();
     }
-  }
-
-  function selectSyncSeason(season: number) {
-    setSyncError(null);
-    setSyncNotice(null);
-    setSelectedSeason(season);
   }
 
   async function runConfirmTargetSwitch() {
@@ -434,6 +420,19 @@ export function OnboardingPage() {
   const presetMatches = status?.localData.presetMatches ?? 0;
   const detailMatches = status?.localData.detailMatches ?? 0;
   const coveragePercent = presetMatches > 0 ? Math.min(100, Math.round((detailMatches / presetMatches) * 100)) : 0;
+  const selectedSeason = Number.parseInt(seasonInput, 10);
+  const seasonStatuses = Number.isSafeInteger(selectedSeason) && selectedSeason > 0
+    ? [status?.seasonStatuses.find((item) => item.season === selectedSeason) ?? {
+        season: selectedSeason,
+        matchCount: 0,
+        detailCount: 0,
+        normalMatchCount: 0,
+        arenaMatchCount: 0,
+        failedDetailCount: 0,
+        lastSyncedOrImportedAt: null,
+        coveragePercent: 0,
+      }]
+    : [];
 
   useEffect(() => {
     if (!primaryTargetState) {
@@ -463,6 +462,9 @@ export function OnboardingPage() {
             <button className="ghostButton" type="button" onClick={runUpdateCheck} disabled={checkingUpdate}>
               <Download size={18} />
               {checkingUpdate ? "检查中" : "检查更新"}
+            </button>
+            <button className="primaryButton" type="button" onClick={() => runSeasonSync(selectedSeason)} disabled={!Number.isSafeInteger(selectedSeason) || selectedSeason <= 0 || !credentialReady || !targetStatus?.syncAllowed || accountOperationBusy || syncingSeason !== null}>
+              {syncingSeason === selectedSeason ? "同步中…" : `同步 S${seasonInput}`}
             </button>
           </>
         )}
@@ -533,25 +535,31 @@ export function OnboardingPage() {
                   </button>
                 </div>
               </section>
-              {status && selectedSeason !== null ? (
-                <SeasonSyncWorkbench
-                  selectedSeason={selectedSeason}
-                  currentSeason={status.currentSeason}
-                  syncableSeasons={status?.syncableSeasons ?? []}
-                  seasonStatuses={status.seasonStatuses}
-                  credentialReady={credentialReady}
-                  targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
-                  accountOperationBusy={accountOperationBusy}
-                  syncingSeason={syncingSeason}
-                  progress={syncProgress}
-                  syncError={syncError}
-                  syncNotice={syncNotice}
-                  onSelectSeason={selectSyncSeason}
-                  onSync={runSeasonSync}
-                />
-              ) : (
-                <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>
-              )}
+              <section className="syncSeasonWorkbench" aria-label="赛季同步">
+                <div className="syncSeasonPicker">
+                  <span className="phase6Eyebrow">赛季同步</span>
+                  <div className="commandCenterSeasonSegments" role="group" aria-label="选择同步赛季">
+                    {COMMAND_CENTER_SEASONS.map((season) => (
+                      <button key={season} className={season === selectedSeason ? "active" : ""} type="button" aria-pressed={season === selectedSeason} onClick={() => setSeasonInput(String(season))}>{`S${season}`}</button>
+                    ))}
+                  </div>
+                  <p>已有赛季：{status?.availableSeasons.length ? status.availableSeasons.map((season) => `S${season}`).join(" · ") : "暂无"}</p>
+                </div>
+                <div className="phase8SeasonStatusGrid" aria-label="赛季本地数据状态">
+                  {seasonStatuses.map((seasonStatus) => (
+                    <SeasonStatusCard
+                      key={seasonStatus.season}
+                      seasonStatus={seasonStatus}
+                      credentialReady={credentialReady}
+                      targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
+                      accountOperationBusy={accountOperationBusy}
+                      syncingSeason={syncingSeason}
+                      progress={syncProgress?.season === seasonStatus.season ? syncProgress : null}
+                      onSync={() => runSeasonSync(seasonStatus.season)}
+                    />
+                  ))}
+                </div>
+              </section>
           </section>
 
           <aside className="commandCenterAccountPanel" aria-labelledby="command-center-account-title">

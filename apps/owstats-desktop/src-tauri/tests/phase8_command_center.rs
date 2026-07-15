@@ -68,8 +68,6 @@ fn command_center_status_returns_no_seasons_for_an_empty_database() {
 
     let status = get_onboarding_status(&db, OnboardingStatusRequest { season: None }).unwrap();
 
-    assert_eq!(status.current_season, 23);
-    assert_eq!(status.syncable_seasons, (15..=23).rev().collect::<Vec<_>>());
     let seasons = status
         .season_statuses
         .iter()
@@ -161,17 +159,8 @@ fn command_center_status_keeps_multiple_seasons_isolated() {
     let db = status_db();
     seed_match(
         &db,
-        14,
-        "s14-normal",
-        "preset",
-        "normal",
-        "2026-06-14T01:00:00Z",
-        true,
-    );
-    seed_match(
-        &db,
-        15,
-        "s15-normal",
+        21,
+        "s21-normal",
         "preset",
         "normal",
         "2026-07-01T01:00:00Z",
@@ -179,8 +168,8 @@ fn command_center_status_keeps_multiple_seasons_isolated() {
     );
     seed_match(
         &db,
-        20,
-        "s20-normal",
+        22,
+        "s22-normal",
         "preset",
         "normal",
         "2026-07-02T01:00:00Z",
@@ -188,8 +177,8 @@ fn command_center_status_keeps_multiple_seasons_isolated() {
     );
     seed_match(
         &db,
-        20,
-        "s20-arena",
+        22,
+        "s22-arena",
         "stadium",
         "fight",
         "2026-07-02T02:00:00Z",
@@ -204,17 +193,10 @@ fn command_center_status_keeps_multiple_seasons_isolated() {
         "2026-07-03T01:00:00Z",
         false,
     );
-    seed_error(&db, 15, "s15-normal");
+    seed_error(&db, 21, "s21-normal");
     seed_error(&db, 23, "s23-arena");
 
-    let status = get_onboarding_status(&db, OnboardingStatusRequest { season: Some(20) }).unwrap();
-    let seasons = status
-        .season_statuses
-        .iter()
-        .map(|item| item.season)
-        .collect::<Vec<_>>();
-    assert_eq!(seasons, vec![23, 20, 15]);
-    assert_eq!(status.available_seasons, vec![14, 15, 20, 23]);
+    let status = get_onboarding_status(&db, OnboardingStatusRequest { season: Some(22) }).unwrap();
     let by_season = |season| {
         status
             .season_statuses
@@ -223,16 +205,16 @@ fn command_center_status_keeps_multiple_seasons_isolated() {
             .unwrap()
     };
 
-    assert_eq!(by_season(15).match_count, 1);
-    assert_eq!(by_season(15).detail_count, 0);
-    assert_eq!(by_season(15).normal_match_count, 1);
-    assert_eq!(by_season(15).arena_match_count, 0);
-    assert_eq!(by_season(15).failed_detail_count, 1);
-    assert_eq!(by_season(20).match_count, 2);
-    assert_eq!(by_season(20).detail_count, 2);
-    assert_eq!(by_season(20).normal_match_count, 1);
-    assert_eq!(by_season(20).arena_match_count, 1);
-    assert_eq!(by_season(20).failed_detail_count, 0);
+    assert_eq!(by_season(21).match_count, 1);
+    assert_eq!(by_season(21).detail_count, 0);
+    assert_eq!(by_season(21).normal_match_count, 1);
+    assert_eq!(by_season(21).arena_match_count, 0);
+    assert_eq!(by_season(21).failed_detail_count, 1);
+    assert_eq!(by_season(22).match_count, 2);
+    assert_eq!(by_season(22).detail_count, 2);
+    assert_eq!(by_season(22).normal_match_count, 1);
+    assert_eq!(by_season(22).arena_match_count, 1);
+    assert_eq!(by_season(22).failed_detail_count, 0);
     assert_eq!(by_season(23).match_count, 1);
     assert_eq!(by_season(23).detail_count, 0);
     assert_eq!(by_season(23).normal_match_count, 0);

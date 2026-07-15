@@ -19,15 +19,15 @@ fn public_query_and_review_dtos_keep_dynamic_season_contracts_on_an_empty_databa
     assert!(matches.is_empty());
     assert_eq!(review.summary.season, Some(22));
     assert!(friends.boards.iter().all(|board| board.friends.is_empty()));
-    assert!(onboarding.season_statuses.is_empty());
-    assert_eq!(onboarding.current_season, 23);
     assert_eq!(
-        onboarding.syncable_seasons,
-        (15..=23).rev().collect::<Vec<_>>()
+        onboarding
+            .season_statuses
+            .iter()
+            .map(|status| status.season)
+            .collect::<Vec<_>>(),
+        vec![22]
     );
     let json = serde_json::to_value(&onboarding).unwrap();
     assert!(json.get("seasonStatuses").is_some());
-    assert!(json.get("currentSeason").is_some());
-    assert!(json.get("syncableSeasons").is_some());
     assert!(json.get("credentialStatus").is_some());
 }
