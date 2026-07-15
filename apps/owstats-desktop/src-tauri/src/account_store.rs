@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 const ACCOUNT_STORE_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountId(String);
 
 impl AccountId {
@@ -52,6 +52,7 @@ impl Default for AccountId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountRegistry {
     pub version: u32,
     pub active_account_id: Option<AccountId>,
@@ -69,6 +70,7 @@ impl Default for AccountRegistry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountRegistryEntry {
     pub account_id: AccountId,
     pub battle_tag: String,
@@ -78,6 +80,7 @@ pub struct AccountRegistryEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountManifest {
     pub version: u32,
     pub account_id: AccountId,

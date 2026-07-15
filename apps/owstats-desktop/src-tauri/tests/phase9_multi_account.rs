@@ -34,6 +34,8 @@ fn account_paths_are_isolated_and_reject_traversal() {
     let first_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
     let second_id = AccountId::parse("9a494190-fdee-46f2-abd2-7de46f4f4376").unwrap();
     let generated_id = AccountId::new();
+    fn assert_ord<T: Ord>() {}
+    assert_ord::<AccountId>();
     assert_eq!(
         AccountId::parse(generated_id.as_str()).unwrap(),
         generated_id
@@ -56,6 +58,10 @@ fn account_paths_are_isolated_and_reject_traversal() {
     assert!(first.backups().starts_with(first.root()));
 
     assert_eq!(shared.registry().file_name().unwrap(), "accounts.json");
+    assert_eq!(
+        shared.legacy_database(),
+        temp.path().join("owstats.sqlite3")
+    );
     assert!(shared.user_settings().starts_with(shared.root()));
     assert!(shared.browser_profile().starts_with(shared.root()));
     assert_eq!(
@@ -105,6 +111,34 @@ fn registry_round_trip_and_contains_no_credential_secret_fields() {
 
     let value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(shared.registry()).unwrap()).unwrap();
+    let object = value.as_object().unwrap();
+    assert!(object.contains_key("activeAccountId"));
+    assert!(!object.contains_key("active_account_id"));
+    let first_account = object["accounts"][0].as_object().unwrap();
+    for key in [
+        "accountId",
+        "battleTag",
+        "createdAt",
+        "lastUsedAt",
+        "credentialState",
+    ] {
+        assert!(
+            first_account.contains_key(key),
+            "missing camelCase key {key}"
+        );
+    }
+    for key in [
+        "account_id",
+        "battle_tag",
+        "created_at",
+        "last_used_at",
+        "credential_state",
+    ] {
+        assert!(
+            !first_account.contains_key(key),
+            "wrote snake_case key {key}"
+        );
+    }
     let mut keys = Vec::new();
     collect_object_keys(&value, &mut keys);
     for forbidden in [
@@ -140,27 +174,27 @@ fn registry_rejects_unsupported_version_duplicates_and_missing_active_account() 
     let other = "9a494190-fdee-46f2-abd2-7de46f4f4376";
 
     let cases = [
-        json!({ "version": 2, "active_account_id": null, "accounts": [] }),
+        json!({ "version": 2, "activeAccountId": null, "accounts": [] }),
         json!({
             "version": 1,
-            "active_account_id": null,
+            "activeAccountId": null,
             "accounts": [
-                { "account_id": id, "battle_tag": "Synthetic#1000", "created_at": "a", "last_used_at": "b", "credential_state": "ready" },
-                { "account_id": id, "battle_tag": "Synthetic#2000", "created_at": "a", "last_used_at": "b", "credential_state": "missing" }
+                { "accountId": id, "battleTag": "Synthetic#1000", "createdAt": "a", "lastUsedAt": "b", "credentialState": "ready" },
+                { "accountId": id, "battleTag": "Synthetic#2000", "createdAt": "a", "lastUsedAt": "b", "credentialState": "missing" }
             ]
         }),
         json!({
             "version": 1,
-            "active_account_id": other,
+            "activeAccountId": other,
             "accounts": [
-                { "account_id": id, "battle_tag": "Synthetic#1000", "created_at": "a", "last_used_at": "b", "credential_state": "ready" }
+                { "accountId": id, "battleTag": "Synthetic#1000", "createdAt": "a", "lastUsedAt": "b", "credentialState": "ready" }
             ]
         }),
         json!({
             "version": 1,
-            "active_account_id": null,
+            "activeAccountId": null,
             "accounts": [
-                { "account_id": "../outside", "battle_tag": "Synthetic#1000", "created_at": "a", "last_used_at": "b", "credential_state": "ready" }
+                { "accountId": "../outside", "battleTag": "Synthetic#1000", "createdAt": "a", "lastUsedAt": "b", "credentialState": "ready" }
             ]
         }),
     ];
@@ -188,6 +222,27 @@ fn manifest_round_trip_rejects_version_and_account_id_mismatch() {
         read_manifest(&account.manifest(), &expected).unwrap(),
         manifest(expected.clone(), "Synthetic#1000")
     );
+    let manifest_value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(account.manifest()).unwrap()).unwrap();
+    let manifest_object = manifest_value.as_object().unwrap();
+    for key in ["accountId", "roleId", "battleTag", "createdAt", "updatedAt"] {
+        assert!(
+            manifest_object.contains_key(key),
+            "missing camelCase key {key}"
+        );
+    }
+    for key in [
+        "account_id",
+        "role_id",
+        "battle_tag",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            !manifest_object.contains_key(key),
+            "wrote snake_case key {key}"
+        );
+    }
     write_manifest_atomic(
         &account.manifest(),
         &manifest(expected.clone(), "Synthetic#1001"),
@@ -202,11 +257,11 @@ fn manifest_round_trip_rejects_version_and_account_id_mismatch() {
 
     let unsupported = json!({
         "version": 2,
-        "account_id": expected.as_str(),
-        "role_id": 10001,
-        "battle_tag": "Synthetic#1000",
-        "created_at": "a",
-        "updated_at": "b"
+        "accountId": expected.as_str(),
+        "roleId": 10001,
+        "battleTag": "Synthetic#1000",
+        "createdAt": "a",
+        "updatedAt": "b"
     });
     fs::write(
         account.manifest(),

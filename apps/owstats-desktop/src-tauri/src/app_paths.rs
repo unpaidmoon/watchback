@@ -28,6 +28,10 @@ impl SharedAppPaths {
         self.root.join("accounts.json")
     }
 
+    pub fn legacy_database(&self) -> PathBuf {
+        self.root.join("owstats.sqlite3")
+    }
+
     pub fn user_settings(&self) -> PathBuf {
         self.root.join("user_settings.json")
     }
