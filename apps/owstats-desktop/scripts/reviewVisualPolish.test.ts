@@ -60,13 +60,28 @@ assert.match(
 );
 assert.match(
   reviewCss,
-  /\.reviewOverviewPanel,[\s\S]*?\.reviewRoleHeroPanel\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
-  "战报一级面板应使用低边界玻璃表面且不叠加阴影",
+  /\.reviewRoleHeroPanel\s*\{[^}]*border:\s*1px solid var\(--glass-border\);[^}]*background:\s*var\(--glass-primary\);[^}]*box-shadow:\s*none;/s,
+  "战报职责与英雄面板应使用低边界玻璃表面且不叠加阴影",
 );
 assert.match(
   reviewCss,
-  /\.reviewOverviewMetrics\s+\.metric,[\s\S]*?\.reviewHeroSummary\s+\.metric\s*\{[^}]*background:\s*var\(--glass-secondary\);[^}]*box-shadow:\s*none;/s,
-  "战报内部指标块应使用次级玻璃表面，不应成为第二层浮卡",
+  /\.reviewHeroSummary\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);[^}]*margin-bottom:\s*var\(--space-5\);[^}]*border:\s*1px solid var\(--glass-border\);/s,
+  "战报赛季事实带应置于顶部并使用三列低层级表面",
+);
+assert.match(
+  reviewCss,
+  /\.reviewHeroSummary\s*>\s*\*\s*\+\s*\*\s*\{[^}]*border-left:\s*1px solid var\(--glass-border\);/s,
+  "战报赛季事实带应使用细分隔线而非独立小卡",
+);
+assert.match(
+  reviewCss,
+  /\.reviewHeroAvatarList\s*\{[^}]*display:\s*flex;[^}]*gap:\s*var\(--space-2\);/s,
+  "战报常用英雄头像应保持紧凑间距",
+);
+assert.match(
+  reviewCss,
+  /\.reviewHeroSummary\s+\.metric\s+strong\s*\{[^}]*font-size:\s*32px;/s,
+  "战报赛季事实的核心数值应提升为主视觉",
 );
 assert.match(reviewSource, /closeButtonRef\.current\?\.focus\(\)/, "成就弹窗打开时应把焦点移入弹窗");
 assert.match(reviewSource, /event\.key === "Escape"/, "成就弹窗应支持 Escape 关闭");

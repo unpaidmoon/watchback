@@ -64,7 +64,6 @@
   min-width: 0;
 }
 
-.reviewOverviewPanel,
 .reviewRoleHeroPanel {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-secondary);
@@ -72,64 +71,69 @@
   box-shadow: none;
 }
 
-.reviewOverviewPanel header,
-.reviewRoleHeroPanel .phase6RoleReportHeader {
-  margin-bottom: var(--space-4);
-}
-
-.reviewOverviewPanel h2,
-.reviewRoleHeroPanel h2 {
-  margin: var(--space-1) 0 0;
-}
-
-.reviewOverviewPanel p,
-.reviewRoleHeroPanel p {
-  margin: var(--space-1) 0 0;
-  color: var(--text-secondary);
-}
-
 .reviewWorkspace .phase6Eyebrow {
   color: var(--text-secondary);
   font-weight: 400;
 }
 
-.reviewOverviewMetrics,
 .reviewHeroSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-3);
-}
-
-.reviewOverviewMetrics.compact {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.reviewOverviewMetrics .metric,
-.reviewHeroSummary .metric {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: var(--space-5);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-control);
-  background: var(--glass-secondary);
+  background: rgba(250, 251, 247, 0.38);
   box-shadow: none;
 }
 
-.reviewOverviewMetrics .metric span,
-.reviewHeroSummary .metric span {
+.reviewHeroSummary > * {
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.reviewHeroSummary > * + * {
+  border-left: 1px solid var(--glass-border);
+}
+
+.reviewHeroSummary .metric,
+.reviewHeroAvatars {
+  display: grid;
+  gap: var(--space-1);
+  background: transparent;
+  box-shadow: none;
+}
+
+.reviewHeroSummary .metric span,
+.reviewHeroAvatars > span {
   color: var(--text-secondary);
   font-size: 12px;
 }
 
-.reviewOverviewMetrics .metric strong,
 .reviewHeroSummary .metric strong {
   color: var(--text-primary);
+  font-size: 32px;
+  line-height: 1.2;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 
-.reviewHeroSummary {
+.reviewHeroAvatarList {
+  display: flex;
+  align-items: center;
+  min-height: 41px;
+  gap: var(--space-2);
+}
+
+.reviewRoleRankGroup {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.reviewRoleRankGroup + .reviewRoleRankGroup {
   margin-top: var(--space-4);
+}
+
+.reviewStadiumRankGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .reviewViewGrid .phase6AchievementPanel {
@@ -286,8 +290,24 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .reviewOverviewMetrics,
   .reviewHeroSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reviewHeroSummary > * + * {
+    border-left: 0;
+  }
+
+  .reviewHeroSummary > :nth-child(2) {
+    border-left: 1px solid var(--glass-border);
+  }
+
+  .reviewHeroSummary > :nth-child(3) {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .reviewStadiumRankGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -297,8 +317,18 @@
     width: 100%;
   }
 
-  .reviewOverviewMetrics,
   .reviewHeroSummary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reviewHeroSummary > :nth-child(2),
+  .reviewHeroSummary > :nth-child(3) {
+    grid-column: auto;
+    border-left: 0;
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .reviewStadiumRankGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

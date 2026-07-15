@@ -25,6 +25,11 @@ const runtimeConfig = {
   heroes: dictionary(cache.heroes),
   maps: dictionary(cache.maps),
   attrs: Object.fromEntries(Object.entries(cache.attrs ?? {}).map(([key, value]) => [key, pick(value, ["text", "type"])])),
+  heroRoles: Object.fromEntries(
+    (queryTool.heroList ?? [])
+      .filter((hero) => hero.heroGuid && ["tank", "dps", "healer"].includes(hero.roleType))
+      .map((hero) => [hero.heroGuid, hero.roleType]),
+  ),
   heroPerkList: Object.fromEntries(
     Object.entries(queryTool.heroPerkList ?? {}).map(([key, perks]) => [key, perks.map((perk) => pick(perk, perkFields))]),
   ),

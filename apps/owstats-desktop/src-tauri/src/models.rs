@@ -562,6 +562,7 @@ pub struct PersonalSeasonReview {
     pub summary: ReviewSummary,
     pub baseline: SeasonBaseline,
     pub role_summaries: Vec<RoleRankSummary>,
+    pub stadium_role_summaries: Vec<RoleRankSummary>,
     pub phase5_highlights: Phase5ReviewHighlights,
     pub top_conclusions: Vec<ReviewConclusion>,
     pub personal_bests: Vec<PersonalBest>,

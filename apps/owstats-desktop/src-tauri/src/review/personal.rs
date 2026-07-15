@@ -85,6 +85,7 @@ pub(super) fn get_personal_season_review_impl(
     let top_conclusions = top_conclusions(&personal_bests, &hero_pool, &maps, &baseline);
     let phase5_highlights = phase5_highlights(db, season, &streaks)?;
     let role_summaries = role_summaries(db, season)?;
+    let stadium_role_summaries = stadium_role_summaries(db, season)?;
 
     Ok(PersonalSeasonReview {
         summary: ReviewSummary {
@@ -101,6 +102,7 @@ pub(super) fn get_personal_season_review_impl(
         },
         baseline,
         role_summaries,
+        stadium_role_summaries,
         phase5_highlights,
         top_conclusions,
         personal_bests,

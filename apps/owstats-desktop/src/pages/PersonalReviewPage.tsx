@@ -10,7 +10,7 @@ import {
   type ReviewView,
 } from "../features/review/reviewNavigation";
 import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
-import { achievementBadgeUrl, rankAssetUrl } from "../shared/assets";
+import { achievementBadgeUrl, arenaRankAssetUrl, rankAssetUrl } from "../shared/assets";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
@@ -361,30 +361,6 @@ function ReviewOverview({
   return (
     <>
       <RoleAndHeroView review={review} />
-      <GlassPanel className="reviewOverviewPanel reviewOverviewPrimary" tone="solid">
-        <header>
-          <span className="phase6Eyebrow">赛季概览</span>
-          <h2>稳定表现</h2>
-          <p>以完整赛季样本汇总胜负、胜率与高光表现。</p>
-        </header>
-        <div className="reviewOverviewMetrics">
-          <Metric label="对局" value={`${review.summary.totalMatches} 场`} />
-          <Metric label="胜负" value={`${review.summary.wins} 胜 / ${review.summary.losses} 负`} />
-          <Metric label="胜率" value={formatWinRate(review.summary.winRate, 0)} />
-          <Metric label="S 级" value={`${review.phase5Highlights.sGradeCount} 场`} />
-        </div>
-      </GlassPanel>
-      <GlassPanel className="reviewOverviewPanel reviewOverviewSecondary" tone="solid">
-        <header>
-          <span className="phase6Eyebrow">本季摘要</span>
-          <h2>关键表现</h2>
-        </header>
-        <div className="reviewOverviewMetrics compact">
-          <Metric label="最长连胜" value={`${review.streaks.longestWinStreak} 局`} />
-          <Metric label="带飞局" value={`${review.phase5Highlights.carryCount} 场`} />
-          <Metric label="主职责" value={review.roleSummaries[0]?.roleLabel ?? "样本不足"} />
-        </div>
-      </GlassPanel>
       <section className="reviewMapAnalysis">
         <MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} season={season} />
       </section>
@@ -393,27 +369,35 @@ function ReviewOverview({
 }
 
 function RoleAndHeroView({ review }: { review: PersonalSeasonReview }) {
-  const mainHero = review.heroPool.mainHeroes[0];
-
   return (
     <GlassPanel className="phase6RoleReport reviewRoleHeroPanel" tone="solid">
-      <div className="phase6RoleReportHeader">
-        <div>
-          <span className="phase6Eyebrow">职责与英雄</span>
-          <h2>职责段位与英雄池</h2>
-          <p>保留三职责摘要，并用稳定指标说明英雄选择范围。</p>
+      <div className="reviewHeroSummary" aria-label="赛季事实">
+        <div className="reviewHeroAvatars">
+          <span>常用英雄</span>
+          <div className="reviewHeroAvatarList">
+            {review.heroPool.mainHeroes.slice(0, 3).map((hero) => (
+              <HeroAvatar key={hero.hero} heroKey={hero.hero} name={hero.hero} size="md" />
+            ))}
+          </div>
+        </div>
+        <Metric label="赛季对局" value={`${review.summary.totalMatches} 场`} />
+        <Metric label="总胜率" value={formatWinRate(review.summary.winRate, 0)} />
+      </div>
+      <div className="reviewRoleRankGroup">
+        <span className="phase6Eyebrow">预设竞技与开放竞技</span>
+        <div className="phase6RoleRankGrid">
+          {review.roleSummaries.map((role) => (
+            <RoleRankCard key={role.roleType} role={role} />
+          ))}
         </div>
       </div>
-      <div className="phase6RoleRankGrid">
-        {review.roleSummaries.map((role) => (
-          <RoleRankCard key={role.roleType} role={role} />
-        ))}
-      </div>
-      <div className="reviewHeroSummary">
-        <Metric label="英雄池" value={`${review.heroPool.totalHeroes} 名`} />
-        <Metric label="主要英雄" value={mainHero?.hero ?? "样本不足"} />
-        <Metric label="第一英雄占比" value={formatWinRate(review.heroPool.top1Share, 0)} />
-        <Metric label="场均英雄数" value={review.heroPool.avgHeroesPerMatch.toFixed(1)} />
+      <div className="reviewRoleRankGroup">
+        <span className="phase6Eyebrow">角斗竞技</span>
+        <div className="phase6RoleRankGrid reviewStadiumRankGrid">
+          {review.stadiumRoleSummaries.map((role) => (
+            <RoleRankCard key={`stadium-${role.roleType}`} role={role} arena />
+          ))}
+        </div>
       </div>
     </GlassPanel>
   );
@@ -425,14 +409,15 @@ function parseSeasonParam(value: string | null) {
   return Number.isFinite(season) ? season : undefined;
 }
 
-function RoleRankCard({ role }: { role: RoleRankSummary }) {
+function RoleRankCard({ role, arena = false }: { role: RoleRankSummary; arena?: boolean }) {
   const tierLabel = role.rankSubTier > 0 ? String(role.rankSubTier) : "";
+  const rankIcon = arena ? arenaRankAssetUrl(role.rankKey) ?? rankAssetUrl(role.rankKey) : rankAssetUrl(role.rankKey);
 
   return (
     <article className="phase6RoleRankCard">
       <div className="phase6RoleRankName">{role.roleLabel}</div>
       <div className="phase6RoleRankIconWrap">
-        <img className="phase6RoleRankIcon" src={rankAssetUrl(role.rankKey)} alt={`${role.roleLabel} ${role.rankKey}`} />
+        <img className="phase6RoleRankIcon" src={rankIcon} alt={`${role.roleLabel} ${role.rankKey}`} />
         {tierLabel ? <span className="phase6RoleRankTier">{tierLabel}</span> : null}
       </div>
       <div className="phase6RoleRankStats">

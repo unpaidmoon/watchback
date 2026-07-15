@@ -185,6 +185,55 @@ fn seed_current_player_role(
     .unwrap();
 }
 
+fn seed_stadium_competitive_match(
+    db: &OwDatabase,
+    id: &str,
+    hero_guid: &str,
+    result: &str,
+    begin_ts: i64,
+    rank_name: &str,
+    rank_sub_tier: i64,
+    kills: i64,
+    assists: i64,
+    deaths: i64,
+) {
+    let conn = db.connect().unwrap();
+    conn.execute(
+        r#"
+        INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+            hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+            deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+        )
+        VALUES (?1, 22, 'stadium', 'SportFight', 'fight', ?2, 'map', 'Map', 'hero', 'Hero', ?3,
+            2, 1, 0, 0, 0, 0, 0, 0, 0, 600, ?4, '2026-07-14T00:00:00Z')
+        "#,
+        rusqlite::params![id, result, begin_ts, "{}"],
+    )
+    .unwrap();
+    conn.execute(
+        r#"
+        INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+        VALUES (?1, 'fight', ?2, '2026-07-14T00:00:00Z')
+        "#,
+        rusqlite::params![
+            id,
+            serde_json::json!({
+                "payload": { "data": { "totalCount": { "teammateList": [{
+                    "bnetId": 9001,
+                    "heroGuid": hero_guid,
+                    "kill": kills,
+                    "assist": assists,
+                    "death": deaths,
+                    "rankInfo": { "rankName": rank_name, "rankSubTier": rank_sub_tier }
+                }] } } }
+            })
+            .to_string()
+        ],
+    )
+    .unwrap();
+}
+
 #[test]
 fn personal_review_exposes_baseline_exclusions_without_hiding_matches() {
     let temp = tempfile::tempdir().unwrap();
@@ -619,4 +668,64 @@ fn personal_review_keeps_lowercase_sport_open_out_of_role_queue() {
     assert_eq!(tank.matches, 1);
     assert_eq!(tank.wins, 0);
     assert_eq!(tank.rank_key, "diamond");
+}
+
+#[test]
+fn personal_review_exposes_stadium_competitive_role_ranks_separately() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("phase3.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('current', '9001', 'Current', '{}', '2026-07-14T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+
+    seed_stadium_competitive_match(
+        &db,
+        "stadium-tank",
+        "207165582859042823",
+        "win",
+        100,
+        "Master",
+        2,
+        8,
+        2,
+        2,
+    );
+    seed_stadium_competitive_match(
+        &db,
+        "stadium-dps",
+        "207165582859042818",
+        "loss",
+        200,
+        "Diamond",
+        4,
+        12,
+        1,
+        3,
+    );
+
+    let review =
+        get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
+
+    assert_eq!(review.stadium_role_summaries.len(), 3);
+    let tank = review
+        .stadium_role_summaries
+        .iter()
+        .find(|item| item.role_type == "tank")
+        .unwrap();
+    assert_eq!(tank.matches, 1);
+    assert_eq!(tank.wins, 1);
+    assert_eq!(tank.kda, 5.0);
+    assert_eq!(tank.rank_key, "master");
+    assert_eq!(tank.rank_sub_tier, 2);
+    let support = review
+        .stadium_role_summaries
+        .iter()
+        .find(|item| item.role_type == "healer")
+        .unwrap();
+    assert_eq!(support.matches, 0);
+    assert_eq!(support.rank_key, "unranked");
 }

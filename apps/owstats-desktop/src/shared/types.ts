@@ -483,6 +483,7 @@ export type PersonalSeasonReview = {
   summary: ReviewSummary;
   baseline: SeasonBaseline;
   roleSummaries: RoleRankSummary[];
+  stadiumRoleSummaries: RoleRankSummary[];
   phase5Highlights: Phase5ReviewHighlights;
   topConclusions: ReviewConclusion[];
   personalBests: PersonalBest[];

@@ -5,6 +5,7 @@ const configUrl = new URL("../runtime-config/ow-lookups.json", import.meta.url);
 const config = JSON.parse(readFileSync(configUrl, "utf8")) as {
   attrs?: Record<string, { text?: string; type?: string }>;
   heroPerkList?: Record<string, Array<{ id?: string; guid?: string; name?: string; desc?: string }>>;
+  heroRoles?: Record<string, string>;
   perkList?: Array<{ id?: string; guid?: string; name?: string; desc?: string }>;
   heroAttrList?: Array<{ valueGuid?: string; valueText?: string; valueType?: string }>;
 };
@@ -54,11 +55,13 @@ assert.deepEqual(Object.keys(config).sort(), [
   "attrs",
   "heroAttrList",
   "heroPerkList",
+  "heroRoles",
   "heroes",
   "maps",
   "perkList",
 ]);
 assert.equal(config.heroes["207165582859043131"].name, "安娜");
+assert.equal(config.heroRoles?.["207165582859042823"], "tank");
 assert.equal(config.maps["576460752303425122"].name, "漓江塔");
 assert.ok(config.attrs && Object.keys(config.attrs).length > 0, "runtime config should include stat attributes");
 assert.equal(config.attrs?.["603482350067646509"]?.text, "单独消灭");

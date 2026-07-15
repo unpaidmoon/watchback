@@ -24,9 +24,10 @@ assert.match(reviewSource, /<FriendAnalysisModules/);
 assert.match(reviewSource, /<MapAnalysisModules/);
 assert.match(
   reviewSource,
-  /function ReviewOverview[\s\S]*?<RoleAndHeroView review=\{review\}[\s\S]*?<GlassPanel className="reviewOverviewPanel reviewOverviewPrimary"[\s\S]*?<section className="reviewMapAnalysis">[\s\S]*?<MapAnalysisModules/,
-  "概览应按职责与英雄、赛季摘要、地图的顺序组合完整分析",
+  /function ReviewOverview[\s\S]*?<RoleAndHeroView review=\{review\}[\s\S]*?<section className="reviewMapAnalysis">[\s\S]*?<MapAnalysisModules/,
+  "概览应按职责与英雄、地图的顺序组合完整分析",
 );
+assert.doesNotMatch(reviewSource, /reviewOverviewPrimary|reviewOverviewSecondary/);
 assert.match(reviewCss, /\.reviewMapAnalysis\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/, "概览地图分析应横跨宽屏两列");
 assert.doesNotMatch(reviewSource, /<SeasonAnalysisModules analysis=\{analysis\}/);
 assert.match(reviewSource, /<PageHeader/);
