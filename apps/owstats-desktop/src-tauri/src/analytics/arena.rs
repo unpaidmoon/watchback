@@ -103,7 +103,7 @@ fn current_player_bnet_id(conn: &rusqlite::Connection) -> Result<Option<String>>
         FROM match_players p
         JOIN matches m ON m.match_id = p.match_id
         WHERE p.is_current_player = 1 AND TRIM(p.bnet_id) <> ''
-        ORDER BY m.begin_ts DESC, p.updated_at DESC
+        ORDER BY p.updated_at DESC, m.begin_ts DESC
         LIMIT 1
         "#,
         [],
@@ -117,7 +117,7 @@ fn current_player_bnet_id(conn: &rusqlite::Connection) -> Result<Option<String>>
 }
 
 fn hero_names(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
-    let mut stmt = conn.prepare("SELECT guid, name FROM hero_dict")?;
+    let mut stmt = conn.prepare("SELECT guid, TRIM(name) FROM hero_dict WHERE TRIM(name) <> ''")?;
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     rows.collect::<rusqlite::Result<HashMap<_, _>>>()
         .map_err(Into::into)

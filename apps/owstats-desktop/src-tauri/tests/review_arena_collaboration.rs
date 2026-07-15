@@ -85,7 +85,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     .unwrap();
     for (guid, name) in [
         ("synthetic-self-hero", "当前英雄"),
-        ("synthetic-friend-hero", "好友英雄"),
+        ("synthetic-friend-hero", "   "),
     ] {
         conn.execute(
             "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
@@ -95,11 +95,21 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     }
 
     seed_match(&db, "synthetic-normal-friend", 23, "preset", "SportPreset");
-    for (bnet_id, name, hero_guid, is_current_player, is_friend, damage_taken, mitigation) in [
+    for (
+        bnet_id,
+        name,
+        hero_guid,
+        hero_name,
+        is_current_player,
+        is_friend,
+        damage_taken,
+        mitigation,
+    ) in [
         (
             "synthetic-self",
             "当前玩家",
             "synthetic-self-hero",
+            "当前英雄",
             1,
             0,
             0,
@@ -109,6 +119,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
             "20260716",
             "合成好友",
             "synthetic-friend-hero",
+            "未知英雄",
             0,
             1,
             100,
@@ -122,8 +133,8 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
                 is_current_player, is_friend, kill, assist, death, hero_damage, cure,
                 resist_damage, healing_taken, damage_taken, raw_json, updated_at
             ) VALUES (
-                'synthetic-normal-friend', 23, 'teammate', ?1, ?2, ?3, NULL,
-                ?4, ?5, 10, 5, 2, 5000, 1000, ?6, 40, ?7, '{}',
+                'synthetic-normal-friend', 23, 'teammate', ?1, ?2, ?3, ?4,
+                ?5, ?6, 10, 5, 2, 5000, 1000, ?7, 40, ?8, '{}',
                 '2026-07-16T00:00:00Z'
             )
             "#,
@@ -131,6 +142,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
                 bnet_id,
                 name,
                 hero_guid,
+                hero_name,
                 is_current_player,
                 is_friend,
                 mitigation,
@@ -212,7 +224,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
         .unwrap();
     assert_eq!(friend.matches, 5);
     assert_eq!(friend.intimacy_score, 25);
-    assert_eq!(friend.representative_hero_name, "好友英雄");
+    assert_eq!(friend.representative_hero_name, "未知英雄");
 
     let front_pressure = analytics
         .boards
@@ -227,4 +239,89 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     assert_eq!(model_entry.same_team_matches, 5);
     assert_eq!(model_entry.avg_damage_taken, 180.0);
     assert_eq!(model_entry.avg_mitigation, 66.0);
+}
+
+#[test]
+fn arena_identity_fallback_prefers_latest_projection_update() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-identity-fallback.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_match(&db, "synthetic-identity-old", 23, "preset", "SportPreset");
+    seed_match(&db, "synthetic-identity-new", 23, "preset", "SportPreset");
+    seed_match(&db, "synthetic-identity-arena", 23, "stadium", "SportFight");
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE matches SET begin_ts=9000 WHERE match_id='synthetic-identity-old'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE matches SET begin_ts=1000 WHERE match_id='synthetic-identity-new'",
+        [],
+    )
+    .unwrap();
+    for (match_id, bnet_id, updated_at) in [
+        (
+            "synthetic-identity-old",
+            "synthetic-self-old",
+            "2026-07-15T00:00:00Z",
+        ),
+        (
+            "synthetic-identity-new",
+            "synthetic-self-new",
+            "2026-07-16T00:00:00Z",
+        ),
+    ] {
+        conn.execute(
+            r#"
+            INSERT INTO match_players (
+                match_id, season, side, bnet_id, player_name, hero_guid, hero_name,
+                is_current_player, is_friend, raw_json, updated_at
+            ) VALUES (?1, 23, 'teammate', ?2, '当前玩家', 'synthetic-self-hero',
+                '当前英雄', 1, 0, '{}', ?3)
+            "#,
+            params![match_id, bnet_id, updated_at],
+        )
+        .unwrap();
+    }
+    let detail = json!({
+        "payload": {
+            "data": {
+                "roundCountList": [{
+                    "teammateList": [
+                        {
+                            "bnetId": "synthetic-self-new",
+                            "heroGuid": "synthetic-self-hero",
+                            "friendBnetIds": ["synthetic-friend"]
+                        },
+                        {
+                            "bnetId": "synthetic-friend",
+                            "name": "合成好友",
+                            "heroGuid": "synthetic-friend-hero",
+                            "damageTaken": 200,
+                            "resistDamage": 70
+                        }
+                    ]
+                }]
+            }
+        }
+    });
+    conn.execute(
+        "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES ('synthetic-identity-arena', 'fight', ?1, '2026-07-16T00:00:00Z')",
+        [detail.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(23),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(analytics.summary.friend_rows, 1);
 }
