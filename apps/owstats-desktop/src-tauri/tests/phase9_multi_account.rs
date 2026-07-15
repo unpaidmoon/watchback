@@ -11,7 +11,10 @@ use owstats_desktop_lib::account_store::{
 };
 use owstats_desktop_lib::app_paths::SharedAppPaths;
 use owstats_desktop_lib::credential_store::DashenCredentials;
-use owstats_desktop_lib::{list_matches, CredentialStatus, MatchFilters, PlayerProfile};
+use owstats_desktop_lib::{
+    list_matches, AccountManagerStatus, CredentialStatus, MatchFilters, PlayerProfile,
+    RemoveAccountResult,
+};
 use rusqlite::params;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -2254,6 +2257,13 @@ fn registry_rejects_unsupported_version_duplicates_and_missing_active_account() 
                 { "accountId": "../outside", "battleTag": "Synthetic#1000", "createdAt": "a", "lastUsedAt": "b", "credentialState": "ready" }
             ]
         }),
+        json!({
+            "version": 1,
+            "activeAccountId": null,
+            "accounts": [
+                { "accountId": id, "battleTag": "Synthetic#1000", "createdAt": "a", "lastUsedAt": "b", "credentialState": "token=synthetic-secret" }
+            ]
+        }),
     ];
 
     for value in cases {
@@ -2359,5 +2369,483 @@ fn collect_object_keys(value: &serde_json::Value, keys: &mut Vec<String>) {
             }
         }
         _ => {}
+    }
+}
+
+#[test]
+fn switch_updates_active_account_and_recent_use_without_opening_account_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let second = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    for (id, tag) in [(&first, "First#1000"), (&second, "Second#2000")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(first.clone()),
+            accounts: vec![
+                entry(first.clone(), "First#1000"),
+                entry(second.clone(), "Second#2000"),
+            ],
+        })
+        .unwrap();
+
+    let now = "2026-07-16T12:34:56Z";
+    let status = manager.switch_active(&second, now).unwrap();
+    assert_eq!(status.active_account_id.as_deref(), Some(second.as_str()));
+    assert_eq!(
+        manager.registry_snapshot().unwrap().active_account_id,
+        Some(second.clone())
+    );
+    let on_disk = read_registry(&shared.registry()).unwrap();
+    assert_eq!(on_disk.active_account_id, Some(second.clone()));
+    assert_eq!(
+        on_disk
+            .accounts
+            .iter()
+            .find(|entry| entry.account_id == second)
+            .unwrap()
+            .last_used_at,
+        now
+    );
+    assert!(!shared.account(&first).database().exists());
+    assert!(!shared.account(&second).database().exists());
+    assert!(!shared.browser_profile().exists());
+}
+
+#[test]
+fn switch_rejects_manifest_mismatch_without_registry_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let second = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    for (id, tag) in [(&first, "First#1000"), (&second, "Wrong#9999")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    let before = registry_with_active(first.clone(), first, second.clone());
+    manager.replace_registry(before.clone()).unwrap();
+
+    assert_eq!(
+        manager
+            .switch_active(&second, "2026-07-16T12:34:56Z")
+            .unwrap_err()
+            .to_string(),
+        "账号数据不完整，无法切换。"
+    );
+    assert_eq!(manager.registry_snapshot().unwrap(), before);
+    assert_eq!(read_registry(&shared.registry()).unwrap(), before);
+}
+
+#[test]
+fn removing_active_account_deletes_only_it_and_selects_recent_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let second = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let third = AccountId::parse("33333333-3333-4333-8333-333333333333").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let mut entries = Vec::new();
+    for (id, tag, last, bytes) in [
+        (
+            &first,
+            "First#1000",
+            "2026-07-01T00:00:00Z",
+            b"first".as_slice(),
+        ),
+        (
+            &second,
+            "Second#2000",
+            "2026-07-02T00:00:00Z",
+            b"second".as_slice(),
+        ),
+        (
+            &third,
+            "Third#3000",
+            "2026-07-03T00:00:00Z",
+            b"third".as_slice(),
+        ),
+    ] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+        fs::write(paths.database(), bytes).unwrap();
+        let mut item = entry(id.clone(), tag);
+        item.last_used_at = last.to_string();
+        entries.push(item);
+    }
+    manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(first.clone()),
+            accounts: entries,
+        })
+        .unwrap();
+
+    let result = manager
+        .remove_account(&first, "2026-07-16T13:00:00Z")
+        .unwrap();
+    assert!(result.removed);
+    assert!(result.reload_required);
+    assert_eq!(result.active_account_id.as_deref(), Some(third.as_str()));
+    assert!(!shared.account(&first).root().exists());
+    assert_eq!(
+        fs::read(shared.account(&second).database()).unwrap(),
+        b"second"
+    );
+    assert_eq!(
+        fs::read(shared.account(&third).database()).unwrap(),
+        b"third"
+    );
+    let registry = read_registry(&shared.registry()).unwrap();
+    assert_eq!(registry.active_account_id, Some(third));
+    assert_eq!(registry.accounts.len(), 2);
+    assert!(!shared.deletion_journal().exists());
+}
+
+#[test]
+fn remove_unknown_account_keeps_registry_and_safe_results_hide_private_fields() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let unknown = AccountId::parse("99999999-9999-4999-8999-999999999999").unwrap();
+    let before = manager.registry_snapshot().unwrap();
+    assert_eq!(
+        manager
+            .remove_account(&unknown, "2026-07-16T13:00:00Z")
+            .unwrap_err()
+            .to_string(),
+        "账号不存在。"
+    );
+    assert_eq!(manager.registry_snapshot().unwrap(), before);
+
+    let encoded = serde_json::to_string(&json!({
+        "status": AccountManagerStatus { active_account_id: None, accounts: vec![], message: "暂无账号。".into() },
+        "remove": RemoveAccountResult { removed: true, active_account_id: None, message: "账号已退出。".into(), reload_required: true }
+    }))
+    .unwrap()
+    .to_ascii_lowercase();
+    for forbidden in [
+        "path",
+        "roleid",
+        "role_id",
+        "token",
+        "credential",
+        "authorization",
+    ] {
+        assert!(
+            !encoded.contains(forbidden),
+            "public DTO exposed {forbidden}: {encoded}"
+        );
+    }
+}
+
+#[test]
+fn removing_inactive_keeps_active_and_removing_last_clears_active() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let second = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    for (id, tag) in [(&first, "First#1000"), (&second, "Second#2000")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(first.clone()),
+            accounts: vec![
+                entry(first.clone(), "First#1000"),
+                entry(second.clone(), "Second#2000"),
+            ],
+        })
+        .unwrap();
+
+    let inactive = manager
+        .remove_account(&second, "2026-07-16T13:00:00Z")
+        .unwrap();
+    assert_eq!(inactive.active_account_id.as_deref(), Some(first.as_str()));
+    assert!(shared.account(&first).root().is_dir());
+    let last = manager
+        .remove_account(&first, "2026-07-16T13:01:00Z")
+        .unwrap();
+    assert_eq!(last.active_account_id, None);
+    assert_eq!(
+        read_registry(&shared.registry()).unwrap().active_account_id,
+        None
+    );
+}
+
+#[test]
+fn removing_active_skips_corrupt_recent_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let active = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let valid = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let corrupt = AccountId::parse("33333333-3333-4333-8333-333333333333").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    for (id, tag) in [(&active, "Active#1000"), (&valid, "Valid#2000")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    fs::create_dir_all(shared.account(&corrupt).root()).unwrap();
+    fs::write(shared.account(&corrupt).manifest(), b"not-json").unwrap();
+    let mut active_entry = entry(active.clone(), "Active#1000");
+    active_entry.last_used_at = "2026-07-01T00:00:00Z".into();
+    let mut valid_entry = entry(valid.clone(), "Valid#2000");
+    valid_entry.last_used_at = "2026-07-02T00:00:00Z".into();
+    let mut corrupt_entry = entry(corrupt, "Corrupt#3000");
+    corrupt_entry.last_used_at = "2026-07-99T00:00:00Z".into();
+    manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(active.clone()),
+            accounts: vec![active_entry, valid_entry, corrupt_entry],
+        })
+        .unwrap();
+
+    let result = manager
+        .remove_account(&active, "2026-07-16T13:00:00Z")
+        .unwrap();
+    assert_eq!(result.active_account_id.as_deref(), Some(valid.as_str()));
+}
+
+fn write_deletion_journal_fixture(
+    shared: &SharedAppPaths,
+    operation_id: &str,
+    account_id: &AccountId,
+    phase: &str,
+    old_registry: &AccountRegistry,
+    new_registry: &AccountRegistry,
+) {
+    fs::create_dir_all(shared.operations_root()).unwrap();
+    fs::write(
+        shared.deletion_journal(),
+        serde_json::to_vec_pretty(&json!({
+            "version": 1,
+            "operationId": operation_id,
+            "accountId": account_id,
+            "phase": phase,
+            "fallbackAccountId": new_registry.active_account_id,
+            "startedAt": "2026-07-16T13:00:00Z",
+            "oldRegistry": old_registry,
+            "newRegistry": new_registry,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn startup_recovery_rolls_back_quarantine_when_registry_is_old() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let removed = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let fallback = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    for (id, tag) in [(&removed, "Removed#1000"), (&fallback, "Fallback#2000")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    let old_registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(removed.clone()),
+        accounts: vec![
+            entry(removed.clone(), "Removed#1000"),
+            entry(fallback.clone(), "Fallback#2000"),
+        ],
+    };
+    let new_registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(fallback),
+        accounts: vec![old_registry.accounts[1].clone()],
+    };
+    write_registry_atomic(&shared.registry(), &old_registry).unwrap();
+    let operation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let quarantine = shared
+        .operations_root()
+        .join("deletions")
+        .join(operation_id)
+        .join(removed.as_str());
+    fs::create_dir_all(quarantine.parent().unwrap()).unwrap();
+    fs::rename(shared.account(&removed).root(), &quarantine).unwrap();
+    write_deletion_journal_fixture(
+        &shared,
+        operation_id,
+        &removed,
+        "quarantined",
+        &old_registry,
+        &new_registry,
+    );
+
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(manager.registry_snapshot().unwrap(), old_registry);
+    assert!(shared.account(&removed).root().is_dir());
+    assert!(!quarantine.exists());
+    assert!(!shared.deletion_journal().exists());
+}
+
+#[test]
+fn startup_recovery_finishes_delete_when_registry_is_new() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let removed = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let fallback = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    for (id, tag) in [(&removed, "Removed#1000"), (&fallback, "Fallback#2000")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    let old_registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(removed.clone()),
+        accounts: vec![
+            entry(removed.clone(), "Removed#1000"),
+            entry(fallback.clone(), "Fallback#2000"),
+        ],
+    };
+    let new_registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(fallback),
+        accounts: vec![old_registry.accounts[1].clone()],
+    };
+    write_registry_atomic(&shared.registry(), &new_registry).unwrap();
+    let operation_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let quarantine = shared
+        .operations_root()
+        .join("deletions")
+        .join(operation_id)
+        .join(removed.as_str());
+    fs::create_dir_all(quarantine.parent().unwrap()).unwrap();
+    fs::rename(shared.account(&removed).root(), &quarantine).unwrap();
+    write_deletion_journal_fixture(
+        &shared,
+        operation_id,
+        &removed,
+        "quarantined",
+        &old_registry,
+        &new_registry,
+    );
+
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    assert_eq!(manager.registry_snapshot().unwrap(), new_registry);
+    assert!(!shared.account(&removed).root().exists());
+    assert!(!quarantine.exists());
+    assert!(!shared.deletion_journal().exists());
+}
+
+#[test]
+fn remove_rejects_nested_link_without_touching_external_sentinel() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let paths = shared.account(&account_id);
+    fs::create_dir_all(paths.root()).unwrap();
+    write_manifest_atomic(
+        &paths.manifest(),
+        &manifest(account_id.clone(), "Safe#1000"),
+    )
+    .unwrap();
+    let sentinel = outside.path().join("sentinel");
+    fs::write(&sentinel, b"external-unchanged").unwrap();
+    if !create_directory_symlink(outside.path(), &paths.root().join("nested-link")) {
+        return;
+    }
+    let registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(account_id.clone()),
+        accounts: vec![entry(account_id.clone(), "Safe#1000")],
+    };
+    manager.replace_registry(registry.clone()).unwrap();
+
+    assert_eq!(
+        manager
+            .remove_account(&account_id, "2026-07-16T13:00:00Z")
+            .unwrap_err()
+            .to_string(),
+        "账号数据不完整，无法退出。"
+    );
+    assert_eq!(fs::read(&sentinel).unwrap(), b"external-unchanged");
+    assert_eq!(manager.registry_snapshot().unwrap(), registry);
+}
+
+#[test]
+fn switch_and_add_account_share_one_lifecycle_mutex() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let second = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let manager = Arc::new(AccountContextManager::load(shared.clone()).unwrap());
+    for (id, tag) in [(&first, "First#1000"), (&second, "Second#2000")] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
+    manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(first.clone()),
+            accounts: vec![
+                entry(first, "First#1000"),
+                entry(second.clone(), "Second#2000"),
+            ],
+        })
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(3));
+    let switcher = {
+        let manager = Arc::clone(&manager);
+        let barrier = Arc::clone(&barrier);
+        let second = second.clone();
+        thread::spawn(move || {
+            barrier.wait();
+            manager
+                .switch_active(&second, "2026-07-16T13:00:00Z")
+                .unwrap();
+        })
+    };
+    let adder = {
+        let manager = Arc::clone(&manager);
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            barrier.wait();
+            publish_add_account(
+                &manager,
+                synthetic_capture(303303, "Third#3000", "synthetic-third-secret"),
+            )
+            .unwrap();
+        })
+    };
+    barrier.wait();
+    switcher.join().unwrap();
+    adder.join().unwrap();
+    let registry = manager.registry_snapshot().unwrap();
+    assert_eq!(registry.accounts.len(), 3);
+    assert_eq!(registry.active_account_id, Some(second));
+    assert_eq!(read_registry(&shared.registry()).unwrap(), registry);
+}
+
+#[test]
+fn account_management_commands_hold_shared_operation_permit() {
+    let source = include_str!("../src/commands.rs");
+    for command in ["switch_account", "remove_account"] {
+        let function = command_source(source, command);
+        assert!(function.contains("try_acquire_account_operation()"));
+        assert!(function.contains("AccountId::parse"));
+    }
+    let lib = include_str!("../src/lib.rs");
+    for command in ["list_accounts", "switch_account", "remove_account"] {
+        assert!(lib.contains(&format!("commands::{command}")));
     }
 }

@@ -126,13 +126,19 @@ pub fn write_manifest_atomic(path: &Path, manifest: &AccountManifest) -> Result<
     write_json_atomic(path, &bytes)
 }
 
-fn validate_registry(registry: &AccountRegistry) -> Result<()> {
+pub(crate) fn validate_registry(registry: &AccountRegistry) -> Result<()> {
     if registry.version != ACCOUNT_STORE_VERSION {
         bail!("unsupported account registry version")
     }
 
     let mut ids = HashSet::with_capacity(registry.accounts.len());
     for account in &registry.accounts {
+        if !matches!(
+            account.credential_state.as_str(),
+            "ready" | "stale" | "incomplete" | "missing"
+        ) {
+            bail!("unsupported account credential state")
+        }
         if !ids.insert(account.account_id.clone()) {
             bail!("duplicate account id in registry")
         }

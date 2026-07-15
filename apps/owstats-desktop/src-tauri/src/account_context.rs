@@ -1,6 +1,6 @@
 use crate::account_store::{read_registry, write_registry_atomic, AccountId, AccountRegistry};
 use crate::app_paths::{AccountPaths, SharedAppPaths};
-use crate::models::AccountSummary;
+use crate::models::{AccountManagerStatus, AccountSummary, RemoveAccountResult};
 use anyhow::{anyhow, Context, Result};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -25,6 +25,8 @@ impl AccountContextManager {
     pub fn load(shared: SharedAppPaths) -> Result<Self> {
         crate::account_login::recover_pending_logins(&shared)
             .map_err(|_| anyhow!("账号登录恢复失败，请重试。"))?;
+        crate::account_removal::recover_pending_removal(&shared)
+            .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
         let eligibility_failed =
             crate::account_migration::prepare_legacy_eligibility(&shared).is_err();
         let recovery_failed = eligibility_failed
@@ -69,6 +71,70 @@ impl AccountContextManager {
                 last_used_at: account.last_used_at,
             })
             .collect())
+    }
+
+    pub fn status(&self) -> Result<AccountManagerStatus> {
+        let registry = self.registry_snapshot()?;
+        let active_account_id = registry.active_account_id.as_ref();
+        let accounts = registry
+            .accounts
+            .iter()
+            .map(|account| AccountSummary {
+                is_active: active_account_id == Some(&account.account_id),
+                account_id: account.account_id.as_str().to_string(),
+                battle_tag: account.battle_tag.clone(),
+                credential_state: account.credential_state.clone(),
+                created_at: account.created_at.clone(),
+                last_used_at: account.last_used_at.clone(),
+            })
+            .collect::<Vec<_>>();
+        let message = if accounts.is_empty() {
+            "暂无账号，请添加账号。"
+        } else {
+            "账号列表已就绪。"
+        };
+        Ok(AccountManagerStatus {
+            active_account_id: registry
+                .active_account_id
+                .map(|account_id| account_id.as_str().to_string()),
+            accounts,
+            message: message.to_string(),
+        })
+    }
+
+    pub fn switch_active(&self, account_id: &AccountId, now: &str) -> Result<AccountManagerStatus> {
+        let _mutation = self.lock_login_publication()?;
+        let mut registry = self.registry_snapshot()?;
+        crate::account_removal::validate_switch_target(&self.shared, &registry, account_id)?;
+        let target = registry
+            .accounts
+            .iter_mut()
+            .find(|entry| &entry.account_id == account_id)
+            .ok_or_else(|| anyhow!("账号不存在。"))?;
+        target.last_used_at = now.to_string();
+        registry.active_account_id = Some(account_id.clone());
+        self.replace_registry(registry)?;
+        self.status()
+    }
+
+    pub fn remove_account(&self, account_id: &AccountId, now: &str) -> Result<RemoveAccountResult> {
+        let _mutation = self.lock_login_publication()?;
+        let registry = self.registry_snapshot()?;
+        let updated =
+            crate::account_removal::remove_account(&self.shared, &registry, account_id, now)?;
+        {
+            let mut current = self
+                .registry
+                .write()
+                .map_err(|_| anyhow!("账号状态暂不可用，请重试。"))?;
+            *current = updated.clone();
+        }
+        Ok(RemoveAccountResult {
+            removed: true,
+            active_account_id: updated.active_account_id.map(|id| id.as_str().to_string()),
+            message: "账号已退出，本地账号数据已进入安全清理流程。".to_string(),
+            reload_required: true,
+        })
     }
 
     pub fn registry_snapshot(&self) -> Result<AccountRegistry> {

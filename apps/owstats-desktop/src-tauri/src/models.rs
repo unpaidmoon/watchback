@@ -766,6 +766,15 @@ pub struct AccountManagerStatus {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RemoveAccountResult {
+    pub removed: bool,
+    pub active_account_id: Option<String>,
+    pub message: String,
+    pub reload_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountLoginResult {
     pub kind: String,
     pub account_id: Option<String>,

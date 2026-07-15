@@ -306,6 +306,45 @@ pub async fn relogin_account(
 }
 
 #[tauri::command]
+pub fn list_accounts(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<crate::AccountManagerStatus, String> {
+    accounts.status().map_err(to_message)
+}
+
+#[tauri::command]
+pub fn switch_account(
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    account_id: String,
+) -> Result<crate::AccountManagerStatus, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    let account_id = crate::account_store::AccountId::parse(&account_id)
+        .map_err(|_| "账号标识无效。".to_string())?;
+    accounts
+        .switch_active(&account_id, &chrono::Utc::now().to_rfc3339())
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn remove_account(
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    account_id: String,
+) -> Result<crate::RemoveAccountResult, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    let account_id = crate::account_store::AccountId::parse(&account_id)
+        .map_err(|_| "账号标识无效。".to_string())?;
+    accounts
+        .remove_account(&account_id, &chrono::Utc::now().to_rfc3339())
+        .map_err(to_message)
+}
+
+#[tauri::command]
 pub fn cancel_dashen_login(app: AppHandle) -> Result<CredentialLoginCancelResult, String> {
     crate::credentials::cancel_dashen_login(app).map_err(to_message)
 }

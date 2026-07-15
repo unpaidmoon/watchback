@@ -1,6 +1,7 @@
 pub mod account_context;
 pub mod account_login;
 pub mod account_migration;
+pub mod account_removal;
 pub mod account_store;
 mod analytics;
 pub mod app_paths;
@@ -86,6 +87,9 @@ pub fn run() {
             commands::start_dashen_login,
             commands::add_account,
             commands::relogin_account,
+            commands::list_accounts,
+            commands::switch_account,
+            commands::remove_account,
             commands::cancel_dashen_login,
             commands::get_player_target_status,
             commands::get_login_target_status,
