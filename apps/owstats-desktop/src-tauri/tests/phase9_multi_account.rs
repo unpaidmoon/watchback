@@ -351,6 +351,26 @@ fn add_account_never_publishes_through_linked_accounts_root() {
 }
 
 #[test]
+fn login_recovery_never_follows_a_linked_operations_parent() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let operation_id = "11111111-1111-4111-8111-111111111111";
+    let external_operation = outside.path().join("pending-logins").join(operation_id);
+    fs::create_dir_all(&external_operation).unwrap();
+    let sentinel = external_operation.join("sentinel");
+    fs::write(&sentinel, b"external-must-stay-unchanged").unwrap();
+    if !create_directory_symlink(outside.path(), &shared.operations_root()) {
+        return;
+    }
+
+    let error = AccountContextManager::load(shared).err().unwrap();
+
+    assert_eq!(error.to_string(), "账号登录恢复失败，请重试。");
+    assert_eq!(fs::read(sentinel).unwrap(), b"external-must-stay-unchanged");
+}
+
+#[test]
 fn add_account_registry_write_failure_rolls_back_existing_account() {
     let temp = tempfile::tempdir().unwrap();
     let shared = SharedAppPaths::from_app_data_dir(temp.path());
@@ -560,6 +580,26 @@ fn interrupted_existing_login_fixture(
     fs::write(operation.join("old-manifest.json"), old_manifest).unwrap();
     fs::write(operation.join("old-credentials.json"), old_credentials).unwrap();
     fs::write(operation.join("old-registry.json"), old_registry_bytes).unwrap();
+    let intended_registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(account_id.clone()),
+        accounts: vec![entry(account_id.clone(), "New#1011")],
+    };
+    write_registry_atomic(
+        &operation.join("intended-registry.json"),
+        &intended_registry,
+    )
+    .unwrap();
+    let staged = operation.join("account").join(account_id.as_str());
+    fs::create_dir_all(&staged).unwrap();
+    let mut new_manifest = manifest(account_id.clone(), "New#1011");
+    new_manifest.role_id = 101101;
+    write_manifest_atomic(&staged.join("account.json"), &new_manifest).unwrap();
+    owstats_desktop_lib::credential_store::save_credentials_atomic(
+        &staged.join("credentials.json"),
+        &synthetic_capture(101101, "New#1011", "new-secret").credentials,
+    )
+    .unwrap();
     if matches!(
         phase,
         "credentialsPublished" | "manifestPublished" | "registryCommitted"
@@ -571,20 +611,10 @@ fn interrupted_existing_login_fixture(
         .unwrap();
     }
     if matches!(phase, "manifestPublished" | "registryCommitted") {
-        let mut new_manifest = manifest(account_id.clone(), "New#1011");
-        new_manifest.role_id = 101101;
         write_manifest_atomic(&shared.account(&account_id).manifest(), &new_manifest).unwrap();
     }
     if registry_is_new {
-        write_registry_atomic(
-            &shared.registry(),
-            &AccountRegistry {
-                version: 1,
-                active_account_id: Some(account_id.clone()),
-                accounts: vec![entry(account_id.clone(), "New#1011")],
-            },
-        )
-        .unwrap();
+        write_registry_atomic(&shared.registry(), &intended_registry).unwrap();
     }
     (temp, shared, account_id, operation)
 }

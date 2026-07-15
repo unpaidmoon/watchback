@@ -20,6 +20,7 @@ const OLD_MANIFEST_FILE: &str = "old-manifest.json";
 const OLD_CREDENTIALS_FILE: &str = "old-credentials.json";
 const OLD_CREDENTIALS_MISSING_FILE: &str = "old-credentials-missing";
 const OLD_REGISTRY_FILE: &str = "old-registry.json";
+const INTENDED_REGISTRY_FILE: &str = "intended-registry.json";
 
 #[derive(Debug, Clone)]
 pub struct LoginCapture {
@@ -73,6 +74,7 @@ impl PendingLogin {
         let pending_root = manager.shared_paths().pending_logins();
         ensure_safe_pending_parent(&pending_root)?;
         fs::create_dir_all(&pending_root)?;
+        ensure_safe_pending_parent(&pending_root)?;
         ensure_not_link_or_reparse(&pending_root)?;
         let operation_id = AccountId::new();
         let root = pending_root.join(operation_id.as_str());
@@ -165,6 +167,10 @@ trait RecoveryFault {
     fn before_cleanup_pending(&self, _operation_id: &AccountId) -> Result<()> {
         Ok(())
     }
+
+    fn after_restore_old_credentials(&self, _account_id: &AccountId) -> Result<()> {
+        Ok(())
+    }
 }
 
 struct NoRecoveryFault;
@@ -196,6 +202,7 @@ fn recover_pending_logins_with(
     fault: &impl RecoveryFault,
 ) -> Result<()> {
     let pending_root = shared.pending_logins();
+    ensure_safe_pending_parent(&pending_root)?;
     if !path_entry_exists(&pending_root)? {
         return Ok(());
     }
@@ -295,28 +302,21 @@ fn recover_existing_login(
     registry: &crate::account_store::AccountRegistry,
     fault: &impl RecoveryFault,
 ) -> Result<()> {
-    if registry.accounts.iter().any(|entry| {
-        entry.account_id == journal.account_id && entry.battle_tag == journal.battle_tag
-    }) {
-        validate_formal_account(shared, &journal.account_id, &journal.battle_tag)?;
+    let old_registry = read_operation_registry(operation_root, OLD_REGISTRY_FILE)
+        .context("missing previous account registry")?;
+    let intended_registry = read_operation_registry(operation_root, INTENDED_REGISTRY_FILE)
+        .context("missing intended account registry")?;
+    if registry == &intended_registry {
+        validate_formal_account_matches_staged(shared, operation_root, &journal.account_id)?;
         fault.before_cleanup_pending(&journal.operation_id)?;
         return remove_pending_operation(operation_root, &shared.pending_logins());
     }
-
-    let old_registry_path = operation_root.join(OLD_REGISTRY_FILE);
-    ensure_not_link_or_reparse(&old_registry_path).context("missing previous account registry")?;
-    let old_registry = crate::account_store::read_registry(&old_registry_path)
-        .context("missing previous account registry")?;
     if registry != &old_registry {
         bail!("account registry is neither previous nor committed state")
     }
     let paths = shared.account(&journal.account_id);
     ensure_safe_accounts_root_path(shared)?;
     ensure_not_link_or_reparse(paths.root())?;
-    let old_manifest_path = operation_root.join(OLD_MANIFEST_FILE);
-    ensure_not_link_or_reparse(&old_manifest_path)?;
-    let old_manifest = fs::read(old_manifest_path)?;
-    write_bytes_atomic(&paths.manifest(), &old_manifest)?;
     let old_credentials_path = operation_root.join(OLD_CREDENTIALS_FILE);
     let missing_marker = operation_root.join(OLD_CREDENTIALS_MISSING_FILE);
     if path_entry_exists(&old_credentials_path)? {
@@ -328,8 +328,44 @@ fn recover_existing_login(
     } else {
         bail!("previous credential backup state is missing")
     }
+    fault.after_restore_old_credentials(&journal.account_id)?;
+    let old_manifest_path = operation_root.join(OLD_MANIFEST_FILE);
+    ensure_not_link_or_reparse(&old_manifest_path)?;
+    let old_manifest = fs::read(old_manifest_path)?;
+    write_bytes_atomic(&paths.manifest(), &old_manifest)?;
     fault.before_cleanup_pending(&journal.operation_id)?;
     remove_pending_operation(operation_root, &shared.pending_logins())
+}
+
+fn read_operation_registry(
+    operation_root: &Path,
+    file_name: &str,
+) -> Result<crate::account_store::AccountRegistry> {
+    let path = operation_root.join(file_name);
+    ensure_not_link_or_reparse(&path)?;
+    crate::account_store::read_registry(&path)
+}
+
+fn validate_formal_account_matches_staged(
+    shared: &crate::app_paths::SharedAppPaths,
+    operation_root: &Path,
+    account_id: &AccountId,
+) -> Result<()> {
+    ensure_safe_accounts_root_path(shared)?;
+    let formal = shared.account(account_id);
+    ensure_not_link_or_reparse(formal.root())?;
+    let staged_root = operation_root.join("account").join(account_id.as_str());
+    ensure_not_link_or_reparse(&staged_root)?;
+    let formal_manifest = read_manifest(&formal.manifest(), account_id)?;
+    let staged_manifest = read_manifest(&staged_root.join("account.json"), account_id)?;
+    let formal_credentials: DashenCredentials =
+        serde_json::from_slice(&fs::read(formal.credentials())?)?;
+    let staged_credentials: DashenCredentials =
+        serde_json::from_slice(&fs::read(staged_root.join("credentials.json"))?)?;
+    if formal_manifest != staged_manifest || formal_credentials != staged_credentials {
+        bail!("formal account does not match intended staged account")
+    }
+    validate_formal_account(shared, account_id, &staged_manifest.battle_tag)
 }
 
 fn read_optional_registry(
@@ -629,21 +665,23 @@ fn update_existing(
     fault: &impl PublicationFault,
 ) -> Result<AccountLoginResult> {
     let paths = manager.shared_paths().account(account_id);
-    let old_manifest = match read_manifest(&paths.manifest(), account_id) {
-        Ok(manifest) => manifest,
+    let staged_root = pending.account_root(account_id);
+    let staged_credentials = staged_root.join("credentials.json");
+    let staged_manifest = staged_root.join("account.json");
+    let staged_credentials_bytes = match fs::read(&staged_credentials) {
+        Ok(bytes) => bytes,
         Err(error) => return fail_before_commit(pending, error),
     };
-    let now = Utc::now().to_rfc3339();
-    let new_manifest = AccountManifest {
-        version: 1,
-        account_id: account_id.clone(),
-        role_id: capture.credentials.role_id,
-        battle_tag: capture.battle_tag.clone(),
-        created_at: old_manifest.created_at,
-        updated_at: now.clone(),
+    let staged_manifest_bytes = match fs::read(&staged_manifest) {
+        Ok(bytes) => bytes,
+        Err(error) => return fail_before_commit(pending, error),
+    };
+    let updated_registry = match read_operation_registry(&pending.root, INTENDED_REGISTRY_FILE) {
+        Ok(registry) => registry,
+        Err(error) => return fail_before_commit(pending, error),
     };
 
-    if let Err(error) = save_credentials_atomic(&paths.credentials(), &capture.credentials) {
+    if let Err(error) = write_bytes_atomic(&paths.credentials(), &staged_credentials_bytes) {
         return recover_failed_publication(manager, pending, error);
     }
     if let Err(error) = fault.after(PublicationFaultPoint::ExistingCredentialsPublished) {
@@ -654,7 +692,7 @@ fn update_existing(
         pending.preserve();
         return Err(error);
     }
-    if let Err(error) = write_manifest_atomic(&paths.manifest(), &new_manifest) {
+    if let Err(error) = write_bytes_atomic(&paths.manifest(), &staged_manifest_bytes) {
         return recover_failed_publication(manager, pending, error);
     }
     if let Err(error) = fault.after(PublicationFaultPoint::ExistingManifestPublished) {
@@ -665,24 +703,6 @@ fn update_existing(
         pending.preserve();
         return Err(error);
     }
-    let mut updated_registry = registry.clone();
-    let entry = match updated_registry
-        .accounts
-        .iter_mut()
-        .find(|entry| &entry.account_id == account_id)
-    {
-        Some(entry) => entry,
-        None => {
-            return recover_failed_publication(
-                manager,
-                pending,
-                anyhow!("account summary is absent"),
-            )
-        }
-    };
-    entry.battle_tag = capture.battle_tag.clone();
-    entry.credential_state = "ready".to_string();
-    entry.last_used_at = now;
     if let Err(error) = manager.replace_registry(updated_registry) {
         return recover_failed_publication(manager, pending, error);
     }
@@ -716,7 +736,7 @@ fn update_existing(
 fn prepare_existing_pending(
     manager: &AccountContextManager,
     pending: &mut PendingLogin,
-    _registry: &crate::account_store::AccountRegistry,
+    registry: &crate::account_store::AccountRegistry,
     account_id: &AccountId,
     capture: &LoginCapture,
     kind: LoginOperationKind,
@@ -741,6 +761,23 @@ fn prepare_existing_pending(
     write_bytes_atomic(
         &pending.root.join(OLD_REGISTRY_FILE),
         &fs::read(manager.shared_paths().registry())?,
+    )?;
+    let staged_manifest = read_manifest(
+        &pending.account_root(account_id).join("account.json"),
+        account_id,
+    )?;
+    let mut intended_registry = registry.clone();
+    let entry = intended_registry
+        .accounts
+        .iter_mut()
+        .find(|entry| &entry.account_id == account_id)
+        .context("account summary is absent")?;
+    entry.battle_tag = capture.battle_tag.clone();
+    entry.credential_state = "ready".to_string();
+    entry.last_used_at = staged_manifest.updated_at;
+    crate::account_store::write_registry_atomic(
+        &pending.root.join(INTENDED_REGISTRY_FILE),
+        &intended_registry,
     )?;
     pending.initialize(kind, account_id, &capture.battle_tag)
 }
@@ -977,15 +1014,28 @@ fn read_optional_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
 
 fn ensure_safe_pending_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        if path_entry_exists(parent)? {
-            ensure_not_link_or_reparse(parent)?;
-        } else {
-            fs::create_dir_all(parent)?;
-            ensure_not_link_or_reparse(parent)?;
-        }
+        ensure_existing_directory_ancestors_safe(parent)?;
     }
     if path_entry_exists(path)? {
         ensure_not_link_or_reparse(path)?;
+    }
+    Ok(())
+}
+
+fn ensure_existing_directory_ancestors_safe(path: &Path) -> Result<()> {
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) {
+                    bail!("unsafe account operation path")
+                }
+                if !metadata.is_dir() {
+                    bail!("account operation ancestor is not a directory")
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
     }
     Ok(())
 }
@@ -1086,6 +1136,14 @@ mod tests {
     impl RecoveryFault for FailPublishedDelete {
         fn before_remove_published_account(&self, _account_id: &AccountId) -> Result<()> {
             bail!("injected Windows-style delete failure")
+        }
+    }
+
+    struct FailAfterCredentialRollback;
+
+    impl RecoveryFault for FailAfterCredentialRollback {
+        fn after_restore_old_credentials(&self, _account_id: &AccountId) -> Result<()> {
+            bail!("injected recovery interruption")
         }
     }
 
@@ -1212,6 +1270,137 @@ mod tests {
             assert_eq!(credentials.token, expected_token);
             assert!(!shared.pending_logins().exists());
         }
+    }
+
+    #[test]
+    fn unchanged_battle_tag_relogin_crashes_use_registry_snapshots_not_summary_fields() {
+        for point in [
+            PublicationFaultPoint::ExistingCredentialsPublished,
+            PublicationFaultPoint::ExistingManifestPublished,
+            PublicationFaultPoint::ExistingRegistryCommitted,
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+            let manager = AccountContextManager::load(shared.clone()).unwrap();
+            let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+            install_existing(&manager, &account_id);
+            assert!(publish_relogin_account_inner_with_fault(
+                &manager,
+                &account_id,
+                capture("Old#1011", "new-secret"),
+                &CrashAfter(point),
+            )
+            .is_err());
+            let operation = fs::read_dir(shared.pending_logins())
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            assert!(operation.join("old-registry.json").is_file());
+            assert!(operation.join("intended-registry.json").is_file());
+            drop(manager);
+
+            let restarted = AccountContextManager::load(shared.clone()).unwrap();
+            let registry = restarted.registry_snapshot().unwrap();
+            assert_eq!(registry.accounts[0].battle_tag, "Old#1011");
+            let credentials: DashenCredentials = serde_json::from_slice(
+                &fs::read(shared.account(&account_id).credentials()).unwrap(),
+            )
+            .unwrap();
+            let expected_token = if point == PublicationFaultPoint::ExistingRegistryCommitted {
+                "new-secret"
+            } else {
+                "old-secret"
+            };
+            assert_eq!(credentials.token, expected_token);
+            assert!(!shared.pending_logins().exists());
+        }
+    }
+
+    #[test]
+    fn interrupted_existing_rollback_retries_from_old_registry_fact() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        assert!(publish_relogin_account_inner_with_fault(
+            &manager,
+            &account_id,
+            capture("New#1011", "new-secret"),
+            &CrashAfter(PublicationFaultPoint::ExistingManifestPublished),
+        )
+        .is_err());
+        drop(manager);
+
+        assert!(recover_pending_logins_with(&shared, &FailAfterCredentialRollback).is_err());
+        assert_eq!(
+            serde_json::from_slice::<DashenCredentials>(
+                &fs::read(shared.account(&account_id).credentials()).unwrap()
+            )
+            .unwrap()
+            .token,
+            "old-secret"
+        );
+        assert_eq!(
+            read_manifest(&shared.account(&account_id).manifest(), &account_id)
+                .unwrap()
+                .battle_tag,
+            "New#1011"
+        );
+        assert!(shared.pending_logins().is_dir());
+
+        let restarted = AccountContextManager::load(shared.clone()).unwrap();
+        assert_eq!(
+            restarted.registry_snapshot().unwrap().accounts[0].battle_tag,
+            "Old#1011"
+        );
+        assert_eq!(
+            read_manifest(&shared.account(&account_id).manifest(), &account_id)
+                .unwrap()
+                .battle_tag,
+            "Old#1011"
+        );
+        assert_eq!(
+            serde_json::from_slice::<DashenCredentials>(
+                &fs::read(shared.account(&account_id).credentials()).unwrap()
+            )
+            .unwrap()
+            .token,
+            "old-secret"
+        );
+        assert!(!shared.pending_logins().exists());
+    }
+
+    #[test]
+    fn intended_registry_requires_exact_staged_manifest_and_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        assert!(publish_relogin_account_inner_with_fault(
+            &manager,
+            &account_id,
+            capture("Old#1011", "new-secret"),
+            &CrashAfter(PublicationFaultPoint::ExistingRegistryCommitted),
+        )
+        .is_err());
+        drop(manager);
+        save_credentials_atomic(
+            &shared.account(&account_id).credentials(),
+            &capture("Old#1011", "tampered-secret").credentials,
+        )
+        .unwrap();
+
+        let error = AccountContextManager::load(shared.clone()).err().unwrap();
+
+        assert_eq!(error.to_string(), "账号登录恢复失败，请重试。");
+        assert!(shared.pending_logins().is_dir());
+        let rendered = format!("{error:#}").to_ascii_lowercase();
+        assert!(!rendered.contains("tampered-secret"));
+        assert!(!rendered.contains("new-secret"));
     }
 
     #[test]
