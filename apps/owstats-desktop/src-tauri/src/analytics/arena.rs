@@ -1,4 +1,4 @@
-use super::FriendMatchRow;
+use super::{FriendMatchRow, LineupRow};
 use crate::db::OwDatabase;
 use crate::models::FriendAnalyticsFilters;
 use anyhow::Result;
@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 pub(super) struct ArenaAnalyticsRows {
     pub(super) friend_rows: Vec<FriendMatchRow>,
+    pub(super) lineup_rows: Vec<LineupRow>,
 }
 
 struct ArenaMatchSource {
@@ -26,6 +27,7 @@ pub(super) fn arena_analytics_rows(
     let Some(current_bnet_id) = current_player_bnet_id(&conn)? else {
         return Ok(ArenaAnalyticsRows {
             friend_rows: Vec::new(),
+            lineup_rows: Vec::new(),
         });
     };
     let hero_names = hero_names(&conn)?;
@@ -64,19 +66,19 @@ pub(super) fn arena_analytics_rows(
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut friend_rows = Vec::new();
+    let mut lineup_rows = Vec::new();
     for source in sources {
         let Ok(detail) = serde_json::from_str::<Value>(&source.raw_detail_json) else {
             continue;
         };
-        friend_rows.extend(friend_rows_for_match(
-            &source,
-            &detail,
-            &current_bnet_id,
-            &hero_names,
-            filters,
-        ));
+        let rows = rows_for_match(&source, &detail, &current_bnet_id, &hero_names, filters);
+        friend_rows.extend(rows.friend_rows);
+        lineup_rows.extend(rows.lineup_rows);
     }
-    Ok(ArenaAnalyticsRows { friend_rows })
+    Ok(ArenaAnalyticsRows {
+        friend_rows,
+        lineup_rows,
+    })
 }
 
 fn current_player_bnet_id(conn: &rusqlite::Connection) -> Result<Option<String>> {
@@ -123,31 +125,37 @@ fn hero_names(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
         .map_err(Into::into)
 }
 
-fn friend_rows_for_match(
+#[derive(Default)]
+struct ArenaMatchRows {
+    friend_rows: Vec<FriendMatchRow>,
+    lineup_rows: Vec<LineupRow>,
+}
+
+fn rows_for_match(
     source: &ArenaMatchSource,
     detail: &Value,
     current_bnet_id: &str,
     hero_names: &HashMap<String, String>,
     filters: &FriendAnalyticsFilters,
-) -> Vec<FriendMatchRow> {
+) -> ArenaMatchRows {
     let Some(data) = detail.pointer("/payload/data") else {
-        return Vec::new();
+        return ArenaMatchRows::default();
     };
     let Some(round) = last_valid_round(data, current_bnet_id) else {
-        return Vec::new();
+        return ArenaMatchRows::default();
     };
     let Some(teammates) = round.get("teammateList").and_then(Value::as_array) else {
-        return Vec::new();
+        return ArenaMatchRows::default();
     };
     let Some(current) = teammates
         .iter()
         .find(|player| scalar_field(player, "bnetId").as_deref() == Some(current_bnet_id))
     else {
-        return Vec::new();
+        return ArenaMatchRows::default();
     };
     let friend_ids = scalar_set(current.get("friendBnetIds"));
     if friend_ids.is_empty() {
-        return Vec::new();
+        return ArenaMatchRows::default();
     }
     let recognized = teammates
         .iter()
@@ -155,7 +163,7 @@ fn friend_rows_for_match(
         .filter(|bnet_id| friend_ids.contains(bnet_id) && bnet_id != current_bnet_id)
         .collect::<HashSet<_>>();
     if recognized.is_empty() {
-        return Vec::new();
+        return ArenaMatchRows::default();
     }
     let group_size = 1 + recognized.len() as i64;
     let name_map = data
@@ -168,8 +176,24 @@ fn friend_rows_for_match(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let current_hero_guid = scalar_field(current, "heroGuid").unwrap_or_default();
+    let current_hero_name = hero_names
+        .get(&current_hero_guid)
+        .cloned()
+        .unwrap_or_else(|| "未知英雄".to_string());
+    let mut lineup_rows = vec![LineupRow {
+        match_id: source.match_id.clone(),
+        result: source.result.clone(),
+        begin_ts: source.begin_ts,
+        bnet_id: current_bnet_id.to_string(),
+        name: safe_player_name(current, current_bnet_id, &name_map, "当前玩家"),
+        hero_guid: current_hero_guid,
+        hero_name: current_hero_name,
+        is_current_player: true,
+        is_friend: false,
+    }];
     let mut emitted = HashSet::new();
-    teammates
+    let friend_rows = teammates
         .iter()
         .filter_map(|player| {
             let bnet_id = scalar_field(player, "bnetId")?;
@@ -184,9 +208,21 @@ fn friend_rows_for_match(
             if hero_filter.is_some_and(|value| value != hero_guid && value != hero_name) {
                 return None;
             }
+            let name = safe_player_name(player, &bnet_id, &name_map, "未知好友");
+            lineup_rows.push(LineupRow {
+                match_id: source.match_id.clone(),
+                result: source.result.clone(),
+                begin_ts: source.begin_ts,
+                bnet_id: bnet_id.clone(),
+                name: name.clone(),
+                hero_guid: hero_guid.clone(),
+                hero_name: hero_name.clone(),
+                is_current_player: false,
+                is_friend: true,
+            });
             Some(FriendMatchRow {
                 bnet_id: bnet_id.clone(),
-                name: safe_player_name(player, &bnet_id, &name_map, "未知好友"),
+                name,
                 match_id: source.match_id.clone(),
                 result: source.result.clone(),
                 begin_ts: source.begin_ts,
@@ -204,7 +240,11 @@ fn friend_rows_for_match(
                 group_size,
             })
         })
-        .collect()
+        .collect();
+    ArenaMatchRows {
+        friend_rows,
+        lineup_rows,
+    }
 }
 
 fn last_valid_round<'a>(data: &'a Value, current_bnet_id: &str) -> Option<&'a Value> {

@@ -83,7 +83,10 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
         [],
     )
     .unwrap();
-    for (guid, name) in [("synthetic-self-hero", "当前英雄")] {
+    for (guid, name) in [
+        ("synthetic-self-hero", "当前英雄"),
+        ("synthetic-friend-hero", "好友英雄"),
+    ] {
         conn.execute(
             "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
             params![guid, name],
@@ -116,7 +119,7 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
             "20260716",
             "可信好友",
             "synthetic-friend-hero",
-            "可信英雄",
+            "好友英雄",
             0,
             1,
             100,
@@ -155,6 +158,13 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     {
         let match_id = format!("synthetic-arena-{index}");
         seed_match(&db, &match_id, 23, "stadium", mode);
+        if index % 2 == 1 {
+            conn.execute(
+                "UPDATE matches SET result='loss' WHERE match_id=?1",
+                [&match_id],
+            )
+            .unwrap();
+        }
         let friend_id = if index % 2 == 0 {
             json!("20260716")
         } else {
@@ -221,7 +231,30 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
     assert_eq!(friend.name, "可信好友");
     assert_eq!(friend.matches, 5);
     assert_eq!(friend.intimacy_score, 25);
-    assert_eq!(friend.representative_hero_name, "可信英雄");
+    assert_eq!(friend.representative_hero_name, "好友英雄");
+
+    let lineup = analytics
+        .lineup_combinations
+        .iter()
+        .find(|item| item.matches == 5)
+        .unwrap();
+    assert_eq!(lineup.members.len(), 2);
+    assert_eq!(lineup.wins, 3);
+    assert_eq!(lineup.win_rate, 0.6);
+    let current = lineup
+        .members
+        .iter()
+        .find(|member| member.is_current_player)
+        .unwrap();
+    assert_eq!(current.bnet_id.as_deref(), Some("synthetic-self"));
+    assert_eq!(current.hero_name, "当前英雄");
+    let friend_member = lineup
+        .members
+        .iter()
+        .find(|member| !member.is_current_player)
+        .unwrap();
+    assert_eq!(friend_member.bnet_id.as_deref(), Some("20260716"));
+    assert_eq!(friend_member.hero_name, "好友英雄");
 
     let front_pressure = analytics
         .boards

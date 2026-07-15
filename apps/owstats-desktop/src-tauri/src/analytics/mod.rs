@@ -101,7 +101,8 @@ pub fn get_friend_analytics(
         rebuild_match_players_from_existing_details(db)?;
         rows = friend_rows(db, &filters, None)?;
     }
-    rows.extend(arena_analytics_rows(db, &filters)?.friend_rows);
+    let arena_rows = arena_analytics_rows(db, &filters)?;
+    rows.extend(arena_rows.friend_rows);
     let aggregates = aggregate_rows(&rows);
     let intimacy_map = compute_intimacy_scores(&rows);
     let eligible: Vec<FriendAggregate> = aggregates
@@ -123,7 +124,7 @@ pub fn get_friend_analytics(
         },
         boards,
         common_friend_heroes: common_friend_heroes(&rows, &intimacy_map),
-        lineup_combinations: lineup_combinations(db, &filters)?,
+        lineup_combinations: lineup_combinations(db, &filters, arena_rows.lineup_rows)?,
     })
 }
 
@@ -503,7 +504,7 @@ fn common_friend_heroes(
 }
 
 #[derive(Debug, Clone)]
-struct LineupRow {
+pub(super) struct LineupRow {
     match_id: String,
     result: String,
     begin_ts: i64,
@@ -518,8 +519,10 @@ struct LineupRow {
 fn lineup_combinations(
     db: &OwDatabase,
     filters: &FriendAnalyticsFilters,
+    arena_rows: Vec<LineupRow>,
 ) -> Result<Vec<LineupCombination>> {
-    let rows = lineup_rows(db, filters)?;
+    let mut rows = lineup_rows(db, filters)?;
+    rows.extend(arena_rows);
     let mut by_match = HashMap::<String, Vec<LineupRow>>::new();
     for row in rows {
         by_match.entry(row.match_id.clone()).or_default().push(row);
