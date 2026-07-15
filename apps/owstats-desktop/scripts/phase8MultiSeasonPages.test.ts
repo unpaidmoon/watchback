@@ -41,12 +41,22 @@ assert.equal(shouldRequestReviewSeason(23, 23), false, "review should reuse the 
 assert.equal(shouldRequestReviewSeason(22, 23), true, "review should request after changing to a different season");
 assert.match(reviewSource, /nextParams\.set\("season", String\(backendSeason\)\)/, "a discovered review season should be written to the URL");
 assert.match(reviewSource, /setParams\(nextParams, \{ replace: true \}\)/, "discovered review season should replace the incomplete URL");
-assert.match(reviewSource, /backendSeason !== selectedSeason/, "a backend season fallback should synchronize review state and URL");
+assert.match(
+  reviewSource,
+  /if \(typeof backendSeason === "number" && backendSeason > 0 && backendSeason !== selectedSeason\) \{\s*setSelectedSeason\(backendSeason\);\s*const nextParams = new URLSearchParams\(params\);\s*nextParams\.set\("season", String\(backendSeason\)\);\s*nextParams\.set\("view", view\);\s*setParams\(nextParams, \{ replace: true \}\);\s*\}/s,
+  "a backend season fallback should synchronize review state, season URL, and view URL in the same success branch",
+);
+assert.match(
+  reviewSource,
+  /loadedReviewSeasonRef\.current = typeof backendSeason[\s\S]*?if \(typeof backendSeason[\s\S]*?setSelectedSeason\(backendSeason\)/,
+  "a backend season fallback should mark the backend season loaded before updating selectedSeason",
+);
 assert.equal(parseReviewSeasonParam("15"), 15, "review page should accept an older locally available URL season");
 assert.equal(parseReviewSeasonParam("20"), 20, "review page should accept a positive URL season");
 assert.equal(parseReviewSeasonParam("0"), undefined, "review page should reject a zero URL season");
 assert.equal(parseReviewSeasonParam("-1"), undefined, "review page should reject a negative URL season");
 assert.equal(parseReviewSeasonParam("15.5"), undefined, "review page should reject a fractional URL season");
+assert.equal(parseReviewSeasonParam("abc"), undefined, "review page should reject a non-numeric URL season");
 
 const coalescedReview = {} as PersonalSeasonReview;
 let coalescedReviewLoads = 0;
