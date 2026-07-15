@@ -6,6 +6,7 @@ import { isCurrentDashboardRequest, normalizeLoginTargetName } from "../src/page
 const root = process.cwd();
 const onboarding = readFileSync(join(root, "src/pages/OnboardingPage.tsx"), "utf8");
 const seasonHealth = readFileSync(join(root, "src/features/command-center/SeasonHealthPanel.tsx"), "utf8");
+const seasonWorkbench = readFileSync(join(root, "src/features/command-center/SeasonSyncWorkbench.tsx"), "utf8");
 const api = readFileSync(join(root, "src/shared/api.ts"), "utf8");
 const types = readFileSync(join(root, "src/shared/types.ts"), "utf8");
 const commandCenterStyles = readFileSync(join(root, "src/styles/features/command-center.css"), "utf8");
@@ -49,15 +50,15 @@ for (const [wrapper, command] of [
 }
 assert.match(api, /clear_player_target/, "product API exposes target clearing");
 assert.match(onboarding, /当前目标玩家/, "command center shows the bound target player");
-assert.match(onboarding, /const COMMAND_CENTER_SEASONS = \[21, 22, 23\] as const/, "command center exposes the fixed supported seasons");
-assert.match(onboarding, /aria-label="选择同步赛季"/, "command center exposes an accessible season segment group");
+assert.doesNotMatch(onboarding, /COMMAND_CENTER_SEASONS/, "command center removes the fixed season array");
+assert.match(onboarding, /status\?\.syncableSeasons/, "command center consumes backend syncable seasons");
+assert.match(onboarding, /<SeasonSyncWorkbench/, "command center renders the dynamic sync workbench");
+assert.match(seasonWorkbench, /aria-label="选择同步赛季"/, "command center exposes an accessible season select");
 assert.doesNotMatch(onboarding, /aria-label="赛季号"/, "command center no longer exposes a free-form season number input");
 assert.match(onboarding, /syncTargetStrip/, "command center uses a compact target identity strip");
-assert.match(onboarding, /syncSeasonWorkbench/, "command center groups season controls into one workbench");
-assert.match(onboarding, /syncSeasonPicker/, "command center uses a season picker");
+assert.doesNotMatch(onboarding, /commandCenterSeasonSegments/, "fixed season segments are removed");
 assert.match(onboarding, /syncSecondaryActions/, "command center separates secondary actions");
 assert.doesNotMatch(onboarding, /同步全部/, "command center must not add sync-all");
-assert.doesNotMatch(onboarding, /FIXED_COMMAND_CENTER_SEASONS/, "command center uses the supported-season segment constant instead of the retired fixed-list name");
 assert.doesNotMatch(onboarding, /aria-label="BattleTag"|placeholder="BattleTag|setBattleTag|bindPlayerTarget|runBindTarget/, "command center has no manual BattleTag input path");
 for (const label of ["切换到此账号", "保留原目标", "重新绑定", "重新识别"]) {
   assert.match(onboarding, new RegExp(label), `command center exposes ${label}`);
@@ -66,8 +67,8 @@ assert.match(onboarding, /const showDetectedLogin = Boolean\(/, "target comparis
 assert.match(onboarding, /targetStatus\?\.currentBnet &&[\s\S]*?targetStatus\.detectedBnet &&[\s\S]*?normalizeLoginTargetName/, "target comparison checks normalized current and detected accounts");
 assert.match(onboarding, /\{showDetectedLogin && \([\s\S]*?当前目标[\s\S]*?检测到的登录账号/, "kept mismatches continue to show both account names");
 assert.doesNotMatch(onboarding, /state === "switchRequired" && \([\s\S]{0,80}?syncTargetComparison/, "account comparison is not limited to switch confirmation");
-assert.match(onboarding, /credentialReady=\{credentialReady\}[\s\S]*?targetSyncAllowed=\{Boolean\(targetStatus\?\.syncAllowed\)\}[\s\S]*?accountOperationBusy=\{accountOperationBusy\}/, "season card receives separate credential, target and operation gates");
-assert.match(seasonHealth, /!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| isSyncBlocked \|\| isSyncing/, "sync eligibility combines all independent gates");
+assert.match(onboarding, /credentialReady=\{credentialReady\}[\s\S]*?targetSyncAllowed=\{Boolean\(targetStatus\?\.syncAllowed\)\}[\s\S]*?accountOperationBusy=\{accountOperationBusy\}/, "season workbench receives separate credential, target and operation gates");
+assert.match(seasonWorkbench, /!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null/, "sync eligibility combines all independent gates");
 assert.match(onboarding, /role=\{error \? "alert" : "status"\}/, "recoverable messages expose an accessible role");
 assert.match(onboarding, /aria-live=\{error \? "assertive" : "polite"\}/, "recoverable messages are announced accessibly");
 assert.match(commandCenterStyles, /\.syncTargetDecision\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?gap:/, "target decisions wrap without horizontal overflow");
