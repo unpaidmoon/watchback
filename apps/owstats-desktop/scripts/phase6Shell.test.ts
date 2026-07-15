@@ -39,6 +39,10 @@ const styles = [
 ].join("\n");
 const commandCenterStyles = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
 const pageShellStyles = readFileSync(new URL("../src/styles/page-shell.css", import.meta.url), "utf8");
+assertEqual(/\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*minmax\(220px, 1fr\) minmax\(0, 2fr\)/.test(commandCenterStyles), true, "sync controls and ledger use the confirmed 1:2 layout");
+assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "ledger rows meet the interaction target");
+assertEqual(/\.syncedSeasonCoverageTrack > span\s*\{[\s\S]*?background:\s*var\(--data-primary\)/.test(commandCenterStyles), true, "coverage uses the approved data color");
+assertEqual(/@media \(max-width: 920px\)[\s\S]*?\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*1fr/.test(commandCenterStyles), true, "narrow layout stacks control above ledger");
 assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
 assertEqual(/\.commandCenterSyncPanel,[\s\S]*?\.commandCenterAccountPanel[\s\S]*?background:\s*var\(--glass-primary\);/.test(commandCenterStyles), true, "main panels use the primary glass surface");
 assertEqual(/@media \(max-width: 1440px\)[\s\S]*?\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "1440px folds metrics into two columns");
@@ -50,12 +54,11 @@ assertEqual(/\.commandCenterMetricsRow > span > strong\s*\{[\s\S]*?color:\s*var\
 assertEqual(/\.commandCenterMetricsRow > span\.(?:good|warn) > strong/.test(commandCenterStyles), false, "metric values do not use green or yellow text emphasis");
 assertEqual(/\.commandCenterSectionHeading h2,[\s\S]*?font-weight:\s*400;/.test(commandCenterStyles), true, "command center section titles stay regular weight");
 assertEqual(/\.phase6CommandCenter \.phase6Eyebrow\s*\{[\s\S]*?color:\s*var\(--text-secondary\);/.test(commandCenterStyles), true, "command center eyebrow text does not use purple");
-assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusStats > span\.(?:good|warn) strong\s*\{[\s\S]*?color:\s*var\(--text-primary\);/.test(commandCenterStyles), true, "season facts do not use green or yellow text");
+assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?color:\s*var\(--text-primary\);/.test(commandCenterStyles), true, "season ledger facts keep neutral text");
 assertEqual(/\.phase6CommandCenter \.phase6DataHealthGrid span\s*\{[\s\S]*?background:\s*transparent;/.test(commandCenterStyles), true, "health rows remove colored pills");
-assertEqual(/\.phase6CommandCenter \.syncTargetStrip,[\s\S]*?background:\s*rgba\(250, 251, 247, 0\.38\);/.test(commandCenterStyles), true, "target strip removes the opaque white inner card");
+assertEqual(/\.phase6CommandCenter \.syncTargetStrip\s*\{[\s\S]*?background:\s*rgba\(250, 251, 247, 0\.38\);/.test(commandCenterStyles), true, "target strip removes the opaque white inner card");
 assertEqual(/\.phase6CommandCenter \.phase6DataCoverageCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "coverage card is flattened into the account surface");
-assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;/.test(commandCenterStyles), true, "season status is flattened into the sync surface");
-assertEqual(/\.phase6CommandCenter \.phase8SeasonStatusStats > span\s*\{[\s\S]*?border-radius:\s*0;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "season facts use dividers instead of floating cards");
+assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--glass-border\);/.test(commandCenterStyles), true, "season ledger rows use dividers instead of floating cards");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
@@ -82,21 +85,6 @@ assertEqual(
   /\.phase6RankingWorkspace\s*\{\s*max-width:\s*var\(--phase6-content-max\);\s*margin-inline:\s*auto;/.test(styles),
   true,
   "ranking page is horizontally centered inside the wide workspace",
-);
-assertEqual(
-  /\.phase8SeasonStatusStats\s*\{\s*display: grid;\s*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\);/.test(styles),
-  true,
-  "command center data facts use one compact six-column row on wide screens",
-);
-assertEqual(
-  /@media \(max-width: 920px\)\s*\{[\s\S]*?\.phase8SeasonStatusStats\s*\{\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/.test(styles),
-  true,
-  "command center data facts fall back to three columns on narrow screens",
-);
-assertEqual(
-  /\.syncSeasonWorkbench \.phase8SeasonStatusStats,\s*\.syncSeasonWorkbench \.phase8SeasonStatusHeader,\s*\.syncSeasonWorkbench \.phase8SeasonCoverage,\s*\.syncSeasonWorkbench \.phase8SeasonSyncFooter\s*\{\s*grid-column: 1 \/ -1;/.test(styles),
-  true,
-  "command center data facts span the workbench width instead of its narrow left column",
 );
 assertEqual(
   formatCompactTimestamp("2026-07-12T02:56:30Z"),
