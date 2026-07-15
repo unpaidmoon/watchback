@@ -44,8 +44,7 @@ type DashboardSnapshot = {
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
-const DASHBOARD_SEASON = 22;
-const dashboardCache = new Map<number, DashboardSnapshot>();
+let dashboardCache: DashboardSnapshot | null = null;
 
 export function normalizeLoginTargetName(value: string) {
   return value.trim().replace(/＃/g, "#").toLowerCase();
@@ -125,7 +124,7 @@ export function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    const cached = dashboardCache.get(DASHBOARD_SEASON);
+    const cached = dashboardCache;
     if (cached) {
       applyDashboardSnapshot(cached);
     }
@@ -147,7 +146,7 @@ export function OnboardingPage() {
         return;
       }
       const snapshot = { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
-      dashboardCache.set(DASHBOARD_SEASON, snapshot);
+      dashboardCache = snapshot;
       applyDashboardSnapshot(snapshot);
     } catch (err) {
       if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
@@ -180,7 +179,7 @@ export function OnboardingPage() {
   }
 
   function invalidateDashboardCache() {
-    dashboardCache.delete(DASHBOARD_SEASON);
+    dashboardCache = null;
     dashboardRequestGenerationRef.current += 1;
   }
 

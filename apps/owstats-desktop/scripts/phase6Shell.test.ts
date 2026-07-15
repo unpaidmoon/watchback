@@ -223,6 +223,7 @@ assertEqual(onboardingSource.includes("phase6SettingsPanel"), false, "separate s
 assertEqual(onboardingSource.includes("phase6CommandLayout"), false, "command center no longer uses the three-card layout");
 assertEqual(onboardingSource.includes('label="角色ID"'), false, "account banner does not repeat role id in facts");
 assertEqual(onboardingSource.includes("dashboardCache"), true, "command center keeps dashboard data in module cache");
+assertEqual(onboardingSource.includes("DASHBOARD_SEASON"), false, "command center cache has no fixed-season key");
 assertEqual(onboardingSource.includes("applyDashboardSnapshot"), true, "command center can render cached dashboard data before refresh");
 assertEqual(onboardingSource.includes("phase6ThemeSelector"), false, "command center settings removes theme selector controls");
 assertEqual(onboardingSource.includes("phase6CompactSettingsActions"), false, "settings account actions move into the launcher grid");
