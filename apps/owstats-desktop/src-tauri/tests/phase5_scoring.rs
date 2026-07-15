@@ -515,7 +515,7 @@ fn friend_common_heroes_and_lineup_combinations_follow_phase5_rules() {
     assert_eq!(analytics.common_friend_heroes[0].bnet_id, "friend-a");
     assert_eq!(
         analytics.common_friend_heroes[0].representative_hero_name,
-        "ana"
+        "未知英雄"
     );
     assert_eq!(analytics.common_friend_heroes[0].matches, 5);
     assert_eq!(analytics.lineup_combinations.len(), 1);

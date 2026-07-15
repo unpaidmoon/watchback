@@ -402,3 +402,91 @@ fn arena_private_id_shaped_names_use_unknown_friend_fallback() {
         assert!(!private_names.contains(&visible_name));
     }
 }
+
+#[test]
+fn raw_hero_guid_never_becomes_representative_hero_name() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("synthetic-hero-guid-fallback.sqlite3"));
+    db.initialize().unwrap();
+    seed_match(&db, "synthetic-guid-normal", 23, "preset", "SportPreset");
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('synthetic-self', 'synthetic-self', '当前玩家', '{}', '2026-07-16T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    for (bnet_id, is_current_player, is_friend, hero_guid, hero_name) in [
+        ("synthetic-self", 1, 0, "synthetic-self-hero", "当前英雄"),
+        (
+            "synthetic-guid-friend",
+            0,
+            1,
+            "synthetic-raw-hero-guid",
+            "synthetic-raw-hero-guid",
+        ),
+    ] {
+        conn.execute(
+            r#"
+            INSERT INTO match_players (
+                match_id, season, side, bnet_id, player_name, hero_guid, hero_name,
+                is_current_player, is_friend, raw_json, updated_at
+            ) VALUES ('synthetic-guid-normal', 23, 'teammate', ?1, '可信好友', ?2,
+                ?3, ?4, ?5, '{}', '2026-07-16T00:00:00Z')
+            "#,
+            params![bnet_id, hero_guid, hero_name, is_current_player, is_friend],
+        )
+        .unwrap();
+    }
+    for index in 0..2 {
+        let match_id = format!("synthetic-guid-arena-{index}");
+        seed_match(&db, &match_id, 23, "stadium", "SportFight");
+        let detail = json!({
+            "payload": {
+                "data": {
+                    "roundCountList": [{
+                        "teammateList": [
+                            {
+                                "bnetId": "synthetic-self",
+                                "heroGuid": "synthetic-self-hero",
+                                "friendBnetIds": ["synthetic-guid-friend"]
+                            },
+                            {
+                                "bnetId": "synthetic-guid-friend",
+                                "name": "可信好友",
+                                "heroGuid": "synthetic-raw-hero-guid"
+                            }
+                        ]
+                    }]
+                }
+            }
+        });
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at) VALUES (?1, 'fight', ?2, '2026-07-16T00:00:00Z')",
+            params![match_id, detail.to_string()],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let analytics = get_friend_analytics(
+        &db,
+        FriendAnalyticsFilters {
+            season: Some(23),
+            ..FriendAnalyticsFilters::default()
+        },
+    )
+    .unwrap();
+    let friend = analytics
+        .common_friend_heroes
+        .iter()
+        .find(|item| item.bnet_id == "synthetic-guid-friend")
+        .unwrap();
+    assert_eq!(friend.representative_hero_name, "未知英雄");
+    assert_ne!(
+        friend.representative_hero_name,
+        friend.representative_hero_guid
+    );
+    assert!(!friend
+        .representative_hero_name
+        .contains("synthetic-raw-hero-guid"));
+}

@@ -812,12 +812,6 @@ fn display_name_quality(value: &str, identity: &str, fallback: &str) -> u8 {
         && !looks_like_private_id(value);
     if trusted {
         2
-    } else if fallback == "未知英雄"
-        && value == identity
-        && !value.is_empty()
-        && !looks_like_private_id(value)
-    {
-        1
     } else {
         0
     }
