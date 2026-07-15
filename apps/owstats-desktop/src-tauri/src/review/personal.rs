@@ -67,7 +67,8 @@ pub(super) fn get_personal_season_review_impl(
     request: PersonalReviewRequest,
 ) -> Result<PersonalSeasonReview> {
     db.initialize()?;
-    let season = selected_season(db, request.season)?;
+    let available_seasons = available_review_seasons(db)?;
+    let season = selected_season(&available_seasons, request.season);
     let rows = review_rows(db, season)?;
     let threshold = short_match_threshold(&rows);
     let baseline_rows = rows
@@ -88,6 +89,7 @@ pub(super) fn get_personal_season_review_impl(
     let stadium_role_summaries = stadium_role_summaries(db, season)?;
 
     Ok(PersonalSeasonReview {
+        available_seasons,
         summary: ReviewSummary {
             season,
             total_matches: total_aggregate.matches,
@@ -112,19 +114,19 @@ pub(super) fn get_personal_season_review_impl(
     })
 }
 
-pub(super) fn selected_season(db: &OwDatabase, requested: Option<i64>) -> Result<Option<i64>> {
-    if requested.is_some() {
-        return Ok(requested);
-    }
+pub(super) fn available_review_seasons(db: &OwDatabase) -> Result<Vec<i64>> {
     let conn = db.connect()?;
-    let season = conn
-        .query_row(
-            "SELECT season FROM matches WHERE bucket='preset' ORDER BY season DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(season)
+    let mut stmt = conn.prepare("SELECT DISTINCT season FROM matches ORDER BY season DESC")?;
+    let seasons = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(seasons)
+}
+
+pub(super) fn selected_season(available_seasons: &[i64], requested: Option<i64>) -> Option<i64> {
+    requested
+        .filter(|season| available_seasons.contains(season))
+        .or_else(|| available_seasons.first().copied())
 }
 
 pub(super) fn review_rows(db: &OwDatabase, season: Option<i64>) -> Result<Vec<ReviewMatch>> {
@@ -579,18 +581,4 @@ pub(super) fn ratio(value: i64, total: i64) -> f64 {
 
 pub(super) fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
-}
-
-trait OptionalRow<T> {
-    fn optional(self) -> Result<Option<T>>;
-}
-
-impl<T> OptionalRow<T> for rusqlite::Result<T> {
-    fn optional(self) -> Result<Option<T>> {
-        match self {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(error) => Err(error).context("query failed"),
-        }
-    }
 }

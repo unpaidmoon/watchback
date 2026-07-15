@@ -559,6 +559,7 @@ pub struct OnboardingStatusRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonalSeasonReview {
+    pub available_seasons: Vec<i64>,
     pub summary: ReviewSummary,
     pub baseline: SeasonBaseline,
     pub role_summaries: Vec<RoleRankSummary>,
