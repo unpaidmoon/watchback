@@ -19,6 +19,7 @@ enum RemovalFaultPoint {
     JournalAfterRegistryUpdated,
     JournalRollingBack,
     RollbackRename,
+    CommitNewAfterRollbackFailure,
     AfterRollbackRename,
     AfterOldRegistryWrite,
     AfterQuarantined,
@@ -46,6 +47,8 @@ pub(crate) enum TestRemovalFault {
     BeforeAnyDelete,
     AfterFirstDeleteMutation,
     JournalAfterRegistryUpdated,
+    RollbackRestoreCommitsRemoval,
+    RollbackRestoreAndRemovalCommit,
 }
 
 #[cfg(test)]
@@ -54,16 +57,26 @@ struct SingleTestFault(TestRemovalFault);
 #[cfg(test)]
 impl RemovalFault for SingleTestFault {
     fn after(&self, point: RemovalFaultPoint) -> Result<()> {
-        let selected = match self.0 {
-            TestRemovalFault::BeforeAnyDelete => RemovalFaultPoint::BeforeAnyDelete,
+        let should_fail = match self.0 {
+            TestRemovalFault::BeforeAnyDelete => point == RemovalFaultPoint::BeforeAnyDelete,
             TestRemovalFault::AfterFirstDeleteMutation => {
-                RemovalFaultPoint::AfterFirstDeleteMutation
+                point == RemovalFaultPoint::AfterFirstDeleteMutation
             }
             TestRemovalFault::JournalAfterRegistryUpdated => {
-                RemovalFaultPoint::JournalAfterRegistryUpdated
+                point == RemovalFaultPoint::JournalAfterRegistryUpdated
             }
+            TestRemovalFault::RollbackRestoreCommitsRemoval => matches!(
+                point,
+                RemovalFaultPoint::JournalAfterQuarantine | RemovalFaultPoint::RollbackRename
+            ),
+            TestRemovalFault::RollbackRestoreAndRemovalCommit => matches!(
+                point,
+                RemovalFaultPoint::JournalAfterQuarantine
+                    | RemovalFaultPoint::RollbackRename
+                    | RemovalFaultPoint::CommitNewAfterRollbackFailure
+            ),
         };
-        if point == selected {
+        if should_fail {
             bail!("synthetic removal fault")
         }
         Ok(())
@@ -76,6 +89,7 @@ enum DeletionPhase {
     Prepared,
     Quarantined,
     RegistryUpdated,
+    RestoreFailed,
     RollingBack,
     Complete,
 }
@@ -194,23 +208,29 @@ fn remove_account_with_fault(
         if fault.after(RemovalFaultPoint::RollbackRename).is_err()
             || fs::rename(&quarantine, &original).is_err()
         {
-            return Err(anyhow!("账号退出恢复失败，请重试。"));
+            return commit_removal_when_restore_failed(shared, &journal, fault);
         }
         let _ = cleanup_operation(shared, &journal, fault);
         return Err(anyhow!("账号退出失败，账号未更改。"));
     }
     if let Err(error) = fault.after(RemovalFaultPoint::AfterQuarantined) {
-        rollback_before_registry(shared, &journal, &original, &quarantine, fault)?;
-        return Err(error);
+        return match rollback_before_registry(shared, &journal, &original, &quarantine, fault)? {
+            PreRegistryRollback::Restored => Err(error),
+            PreRegistryRollback::RemovalCommitted(outcome) => Ok(outcome),
+        };
     }
 
     if let Err(error) = fault.after(RemovalFaultPoint::BeforeRegistryWrite) {
-        rollback_before_registry(shared, &journal, &original, &quarantine, fault)?;
-        return Err(error);
+        return match rollback_before_registry(shared, &journal, &original, &quarantine, fault)? {
+            PreRegistryRollback::Restored => Err(error),
+            PreRegistryRollback::RemovalCommitted(outcome) => Ok(outcome),
+        };
     }
     if let Err(error) = write_registry_atomic(&shared.registry(), &new_registry) {
-        rollback_before_registry(shared, &journal, &original, &quarantine, fault)?;
-        return Err(error).context("无法保存账号索引，账号未退出。");
+        return match rollback_before_registry(shared, &journal, &original, &quarantine, fault)? {
+            PreRegistryRollback::Restored => Err(error).context("无法保存账号索引，账号未退出。"),
+            PreRegistryRollback::RemovalCommitted(outcome) => Ok(outcome),
+        };
     }
     journal.phase = DeletionPhase::RegistryUpdated;
     if fault
@@ -299,20 +319,50 @@ enum RollbackDisposition {
     PendingRemoval,
 }
 
+enum PreRegistryRollback {
+    Restored,
+    RemovalCommitted(RemovalOutcome),
+}
+
 fn rollback_before_registry(
     shared: &SharedAppPaths,
     journal: &DeletionJournal,
     original: &Path,
     quarantine: &Path,
     fault: &impl RemovalFault,
-) -> Result<()> {
+) -> Result<PreRegistryRollback> {
     if fault.after(RemovalFaultPoint::RollbackRename).is_err()
         || fs::rename(quarantine, original).is_err()
     {
-        bail!("账号退出恢复失败，请重试。")
+        return commit_removal_when_restore_failed(shared, journal, fault)
+            .map(PreRegistryRollback::RemovalCommitted);
     }
     cleanup_operation(shared, journal, fault)?;
-    Ok(())
+    Ok(PreRegistryRollback::Restored)
+}
+
+fn commit_removal_when_restore_failed(
+    shared: &SharedAppPaths,
+    journal: &DeletionJournal,
+    fault: &impl RemovalFault,
+) -> Result<RemovalOutcome> {
+    let mut restore_failed = journal.clone();
+    restore_failed.phase = DeletionPhase::RestoreFailed;
+    let _ = write_journal(shared, &restore_failed);
+    if fault
+        .after(RemovalFaultPoint::CommitNewAfterRollbackFailure)
+        .is_err()
+        || write_registry_atomic(&shared.registry(), &journal.new_registry).is_err()
+    {
+        bail!("账号删除恢复尚未完成，请重启应用后重试。")
+    }
+    let mut committed = journal.clone();
+    committed.phase = DeletionPhase::RegistryUpdated;
+    let _ = write_journal(shared, &committed);
+    Ok(RemovalOutcome {
+        registry: journal.new_registry.clone(),
+        completion: RemovalCompletion::RemovedPendingCleanup,
+    })
 }
 
 fn rollback_after_registry(
@@ -442,6 +492,16 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
         quarantine_exists,
         journal.phase,
     ) {
+        (true, false, false, true, DeletionPhase::RestoreFailed) => {
+            write_registry_atomic(&shared.registry(), &journal.new_registry)?;
+            ensure_safe_tree(&quarantine)?;
+            delete_tree_tracked(&quarantine, &NoRemovalFault)
+                .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
+            let mut complete = journal.clone();
+            complete.phase = DeletionPhase::Complete;
+            write_journal(shared, &complete)?;
+            cleanup_operation(shared, &complete, &NoRemovalFault)
+        }
         (
             true,
             false,
@@ -464,7 +524,16 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
             write_registry_atomic(&shared.registry(), &journal.old_registry)?;
             cleanup_operation(shared, &journal, &NoRemovalFault)
         }
-        (false, true, false, true, DeletionPhase::Quarantined | DeletionPhase::RegistryUpdated) => {
+        (
+            false,
+            true,
+            false,
+            true,
+            DeletionPhase::Prepared
+            | DeletionPhase::Quarantined
+            | DeletionPhase::RestoreFailed
+            | DeletionPhase::RegistryUpdated,
+        ) => {
             ensure_safe_tree(&quarantine)?;
             delete_tree_tracked(&quarantine, &NoRemovalFault)
                 .map_err(|_| anyhow!("账号退出恢复失败，请重试。"))?;
@@ -478,7 +547,11 @@ pub(crate) fn recover_pending_removal(shared: &SharedAppPaths) -> Result<()> {
             true,
             false,
             false,
-            DeletionPhase::Quarantined | DeletionPhase::RegistryUpdated | DeletionPhase::Complete,
+            DeletionPhase::Prepared
+            | DeletionPhase::Quarantined
+            | DeletionPhase::RestoreFailed
+            | DeletionPhase::RegistryUpdated
+            | DeletionPhase::Complete,
         ) => {
             let mut complete = journal.clone();
             complete.phase = DeletionPhase::Complete;
@@ -528,6 +601,27 @@ pub(crate) fn validate_switch_target(
         bail!("账号数据不完整，无法切换。")
     }
     Ok(())
+}
+
+pub(crate) fn deletion_recovery_required(
+    shared: &SharedAppPaths,
+    registry: &AccountRegistry,
+) -> bool {
+    if !matches!(fs::symlink_metadata(shared.deletion_journal()), Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() && !is_windows_reparse(&metadata))
+    {
+        return false;
+    }
+    registry.accounts.iter().any(|entry| {
+        let root = shared.account(&entry.account_id);
+        match fs::symlink_metadata(root.root()) {
+            Ok(metadata) => {
+                !metadata.is_dir()
+                    || metadata.file_type().is_symlink()
+                    || is_windows_reparse(&metadata)
+            }
+            Err(_) => true,
+        }
+    })
 }
 
 fn stored_account_is_complete(
@@ -832,9 +926,9 @@ mod tests {
     }
 
     #[test]
-    fn journal_failure_after_quarantine_and_rollback_rename_failure_preserves_recovery_state() {
+    fn journal_failure_after_quarantine_and_rollback_rename_failure_commits_removal() {
         let (_temp, shared, id, registry) = fixture();
-        let error = remove_account_with_fault(
+        let outcome = remove_account_with_fault(
             &shared,
             &registry,
             &id,
@@ -844,14 +938,18 @@ mod tests {
                 RemovalFaultPoint::RollbackRename,
             ]),
         )
-        .unwrap_err();
-        assert_eq!(error.to_string(), "账号退出恢复失败，请重试。");
-        assert_eq!(read_registry(&shared.registry()).unwrap(), registry);
+        .unwrap();
+        assert_eq!(outcome.completion, RemovalCompletion::RemovedPendingCleanup);
+        assert_eq!(read_registry(&shared.registry()).unwrap(), outcome.registry);
+        assert!(outcome.registry.accounts.is_empty());
         assert!(shared.deletion_journal().is_file());
         assert!(!shared.account(&id).root().exists());
         let journal: DeletionJournal =
             serde_json::from_slice(&fs::read(shared.deletion_journal()).unwrap()).unwrap();
-        assert_eq!(journal.phase, DeletionPhase::Prepared);
+        assert!(matches!(
+            journal.phase,
+            DeletionPhase::Prepared | DeletionPhase::RestoreFailed | DeletionPhase::RegistryUpdated
+        ));
         let quarantine = quarantine_path(&shared, &journal.operation_id, &id).unwrap();
         assert_eq!(
             fs::read(quarantine.join("owstats.sqlite3")).unwrap(),
@@ -859,10 +957,7 @@ mod tests {
         );
 
         recover_pending_removal(&shared).unwrap();
-        assert_eq!(
-            fs::read(shared.account(&id).database()).unwrap(),
-            b"synthetic-db"
-        );
+        assert!(!shared.account(&id).root().exists());
         assert!(!shared.deletion_journal().exists());
     }
 

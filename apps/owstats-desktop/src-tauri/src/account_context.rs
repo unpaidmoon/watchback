@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 const NO_ACTIVE_ACCOUNT_MESSAGE: &str = "尚未添加可用账号，请先在指挥台添加账号。";
 pub(crate) const ACCOUNT_DELETION_RECOVERY_ERROR: &str = "账号退出恢复失败，请重试。";
+const ACCOUNT_DELETION_FAIL_CLOSED_ERROR: &str = "账号删除恢复尚未完成，请重启应用后重试。";
 
 #[derive(Clone)]
 pub struct AccountContextManager {
@@ -14,6 +15,7 @@ pub struct AccountContextManager {
     recovery_failed: Arc<RwLock<bool>>,
     migration_lock: Arc<Mutex<()>>,
     login_lock: Arc<Mutex<()>>,
+    deletion_recovery_required: Arc<RwLock<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,10 +47,12 @@ impl AccountContextManager {
             recovery_failed: Arc::new(RwLock::new(recovery_failed)),
             migration_lock: Arc::new(Mutex::new(())),
             login_lock: Arc::new(Mutex::new(())),
+            deletion_recovery_required: Arc::new(RwLock::new(false)),
         })
     }
 
     pub fn active_snapshot(&self) -> Result<AccountContextSnapshot> {
+        self.ensure_deletion_ready()?;
         let registry = self.registry_snapshot()?;
         let account_id = registry
             .active_account_id
@@ -58,6 +62,7 @@ impl AccountContextManager {
     }
 
     pub fn list_accounts(&self) -> Result<Vec<AccountSummary>> {
+        self.ensure_deletion_ready()?;
         let registry = self.registry_snapshot()?;
         let active_account_id = registry.active_account_id.as_ref();
         Ok(registry
@@ -75,6 +80,7 @@ impl AccountContextManager {
     }
 
     pub fn status(&self) -> Result<AccountManagerStatus> {
+        self.ensure_deletion_ready()?;
         let registry = self.registry_snapshot()?;
         let active_account_id = registry.active_account_id.as_ref();
         let accounts = registry
@@ -163,6 +169,15 @@ impl AccountContextManager {
                 .map_err(|_| anyhow!("账号状态暂不可用，请重试。"))?;
             *current = disk_registry.clone();
         }
+        let fail_closed =
+            crate::account_removal::deletion_recovery_required(&self.shared, &disk_registry);
+        {
+            let mut required = self
+                .deletion_recovery_required
+                .write()
+                .map_err(|_| anyhow!(ACCOUNT_DELETION_FAIL_CLOSED_ERROR))?;
+            *required = fail_closed;
+        }
         let outcome = removal?;
         if outcome.registry != disk_registry {
             return Err(anyhow!("账号状态恢复失败，请重试。"));
@@ -193,6 +208,17 @@ impl AccountContextManager {
             .read()
             .map(|registry| registry.clone())
             .map_err(|_| anyhow!("账号状态暂不可用，请重试。"))
+    }
+
+    fn ensure_deletion_ready(&self) -> Result<()> {
+        let required = self
+            .deletion_recovery_required
+            .read()
+            .map_err(|_| anyhow!(ACCOUNT_DELETION_FAIL_CLOSED_ERROR))?;
+        if *required {
+            return Err(anyhow!(ACCOUNT_DELETION_FAIL_CLOSED_ERROR));
+        }
+        Ok(())
     }
 
     pub fn replace_registry(&self, registry: AccountRegistry) -> Result<()> {
@@ -235,6 +261,11 @@ impl AccountContextManager {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(anyhow!(ACCOUNT_DELETION_RECOVERY_ERROR)),
         }
+        let mut required = self
+            .deletion_recovery_required
+            .write()
+            .map_err(|_| anyhow!(ACCOUNT_DELETION_FAIL_CLOSED_ERROR))?;
+        *required = false;
         Ok(())
     }
 
@@ -374,5 +405,45 @@ mod tests {
                 !expected_removed
             );
         }
+    }
+
+    #[test]
+    fn failed_restore_and_failed_removal_commit_fail_closed_until_recovery() {
+        let (_temp, manager, id) = manager_fixture();
+        assert!(manager
+            .remove_account_with_test_fault(&id, TestRemovalFault::RollbackRestoreAndRemovalCommit,)
+            .is_err());
+        let expected = "账号删除恢复尚未完成，请重启应用后重试。";
+        assert_eq!(manager.active_snapshot().unwrap_err().to_string(), expected);
+        assert_eq!(manager.status().unwrap_err().to_string(), expected);
+        assert_eq!(manager.list_accounts().unwrap_err().to_string(), expected);
+        assert!(manager.shared.deletion_journal().is_file());
+        assert!(!manager.shared.account(&id).root().exists());
+
+        let restarted = AccountContextManager::load(manager.shared.clone()).unwrap();
+        assert!(restarted.registry_snapshot().unwrap().accounts.is_empty());
+        assert!(restarted.list_accounts().unwrap().is_empty());
+        assert!(!manager.shared.deletion_journal().exists());
+    }
+
+    #[test]
+    fn failed_restore_commits_new_registry_and_syncs_manager_as_pending_removal() {
+        let (_temp, manager, id) = manager_fixture();
+        let result = manager
+            .remove_account_with_test_fault(&id, TestRemovalFault::RollbackRestoreCommitsRemoval)
+            .unwrap();
+        assert!(result.removed);
+        assert!(result.reload_required);
+        assert!(result.message.contains("重启后继续清理"));
+        let memory = manager.registry_snapshot().unwrap();
+        let disk = read_registry(&manager.shared.registry()).unwrap();
+        assert_eq!(memory, disk);
+        assert!(memory.accounts.is_empty());
+        assert!(!manager.shared.account(&id).root().exists());
+        assert!(manager.shared.deletion_journal().is_file());
+
+        let restarted = AccountContextManager::load(manager.shared.clone()).unwrap();
+        assert!(restarted.registry_snapshot().unwrap().accounts.is_empty());
+        assert!(!manager.shared.deletion_journal().exists());
     }
 }
