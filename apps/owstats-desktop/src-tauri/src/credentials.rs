@@ -96,10 +96,7 @@ impl LoginCaptureIdentity {
         battle_tag: BattleTagExtraction,
     ) {
         self.credential_role_id = credential_role_id;
-        let paired_role_id = match paired_role_id {
-            RoleIdExtraction::Found(role_id) => Some(role_id),
-            RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
-        };
+        let paired_role_id = pairing_role_id(self.credential_role_id.as_deref(), paired_role_id);
         self.paired_identity.observe(paired_role_id, battle_tag);
     }
 
@@ -127,16 +124,14 @@ impl LoginCaptureIdentity {
 
     pub fn confirm_pending_pair(
         &mut self,
+        credential_role_id: Option<String>,
         paired_role_id: RoleIdExtraction,
         battle_tag: BattleTagExtraction,
     ) {
         if self.paired_status() != PairedIdentityStatus::Pending {
             return;
         }
-        let paired_role_id = match paired_role_id {
-            RoleIdExtraction::Found(role_id) => Some(role_id),
-            RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
-        };
+        let paired_role_id = pairing_role_id(credential_role_id.as_deref(), paired_role_id);
         self.paired_identity.observe(paired_role_id, battle_tag);
         if !matches!(self.paired_status(), PairedIdentityStatus::Confirmed { .. }) {
             self.paired_identity
@@ -147,6 +142,19 @@ impl LoginCaptureIdentity {
     pub fn detected_battle_tag(&self, credential_role_id: &str) -> Option<&str> {
         self.confirmed_pair()
             .and_then(|(role_id, battle_tag)| (role_id == credential_role_id).then_some(battle_tag))
+    }
+}
+
+fn pairing_role_id(
+    credential_role_id: Option<&str>,
+    paired_role_id: RoleIdExtraction,
+) -> Option<String> {
+    match paired_role_id {
+        RoleIdExtraction::Conflict => None,
+        RoleIdExtraction::Found(role_id) => credential_role_id
+            .is_none_or(|credential_role_id| credential_role_id == role_id)
+            .then_some(role_id),
+        RoleIdExtraction::Missing => credential_role_id.map(str::to_string),
     }
 }
 
@@ -252,10 +260,15 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             if identity.paired_status() == PairedIdentityStatus::Pending {
                 let confirmation = collect_login_identity(&mut page).await;
                 match confirmation {
-                    Some((_, paired_role_id, battle_tag)) => {
-                        identity.confirm_pending_pair(paired_role_id, battle_tag);
+                    Some((credential_role_id, paired_role_id, battle_tag)) => {
+                        identity.confirm_pending_pair(
+                            credential_role_id,
+                            paired_role_id,
+                            battle_tag,
+                        );
                     }
                     None => identity.confirm_pending_pair(
+                        None,
                         RoleIdExtraction::Missing,
                         BattleTagExtraction::Missing,
                     ),
@@ -367,10 +380,8 @@ async fn collect_login_identity(
     let (battle_tag_candidates, battle_tag_truncated) =
         candidate_group(collected.get("battleTagCandidates")?)?;
     let role_candidates = collected.get("roleCandidates")?;
-    let (current_candidates, current_truncated) =
-        candidate_group(role_candidates.get("current")?)?;
-    let (storage_candidates, storage_truncated) =
-        candidate_group(role_candidates.get("storage")?)?;
+    let (current_candidates, current_truncated) = candidate_group(role_candidates.get("current")?)?;
+    let (storage_candidates, storage_truncated) = candidate_group(role_candidates.get("storage")?)?;
     let (resource_candidates, resource_truncated) =
         candidate_group(role_candidates.get("resources")?)?;
     let credential_candidates = current_candidates

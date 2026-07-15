@@ -139,10 +139,7 @@ fn battletag_extraction_reads_only_the_first_token_after_the_colon() {
 fn battletag_candidates_accept_split_dom_values_and_deduplicate() {
     assert_eq!(
         extract_battle_tag_candidates(
-            &[
-                "风偏偏呢#5479".to_string(),
-                " 风偏偏呢#5479 ".to_string(),
-            ],
+            &["风偏偏呢#5479".to_string(), " 风偏偏呢#5479 ".to_string(),],
             false,
         ),
         BattleTagExtraction::Found("风偏偏呢#5479".to_string())
@@ -314,6 +311,43 @@ fn login_capture_keeps_storage_credential_role_when_battletag_is_missing() {
 }
 
 #[test]
+fn login_capture_pairs_stable_battletag_with_unique_credential_role() {
+    let mut identity = LoginCaptureIdentity::default();
+
+    for _ in 0..2 {
+        identity.observe(
+            Some("101101".to_string()),
+            RoleIdExtraction::Missing,
+            BattleTagExtraction::Found("First#1111".to_string()),
+        );
+    }
+
+    assert_eq!(
+        identity.paired_status(),
+        PairedIdentityStatus::Confirmed {
+            role_id: "101101".to_string(),
+            battle_tag: "First#1111".to_string(),
+        }
+    );
+    assert_eq!(identity.detected_battle_tag("101101"), Some("First#1111"));
+}
+
+#[test]
+fn login_capture_rejects_credential_and_page_role_mismatch() {
+    let mut identity = LoginCaptureIdentity::default();
+
+    identity.observe(
+        Some("101101".to_string()),
+        RoleIdExtraction::Found("202202".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    assert_eq!(identity.credential_role_id(), Some("101101"));
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
+    assert_eq!(identity.detected_battle_tag("101101"), None);
+}
+
+#[test]
 fn login_capture_keeps_resource_credential_role_when_battletag_conflicts() {
     let current = vec!["https://ds.163.com/".to_string()];
     let resources = vec!["https://api.example/?role_id=202202".to_string()];
@@ -344,6 +378,7 @@ fn login_capture_confirms_pending_pair_before_immediate_token_success() {
     assert_eq!(identity.paired_status(), PairedIdentityStatus::Pending);
 
     identity.confirm_pending_pair(
+        Some("101101".to_string()),
         RoleIdExtraction::Found("101101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
@@ -369,6 +404,7 @@ fn login_capture_confirms_pending_pair_before_signature_lock() {
 
     assert_eq!(identity.paired_status(), PairedIdentityStatus::Pending);
     identity.confirm_pending_pair(
+        Some("101101".to_string()),
         RoleIdExtraction::Found("101101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
@@ -392,6 +428,7 @@ fn login_capture_drops_changed_pending_pair_without_losing_credential_role() {
     );
 
     identity.confirm_pending_pair(
+        Some("202202".to_string()),
         RoleIdExtraction::Found("202202".to_string()),
         BattleTagExtraction::Found("Second#2222".to_string()),
     );
@@ -419,7 +456,7 @@ fn login_capture_drops_failed_or_conflicting_confirmation_without_losing_credent
             BattleTagExtraction::Found("First#1111".to_string()),
         );
 
-        identity.confirm_pending_pair(paired_role_id, battle_tag);
+        identity.confirm_pending_pair(Some("101101".to_string()), paired_role_id, battle_tag);
 
         assert_eq!(identity.credential_role_id(), Some("101101"));
         assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
