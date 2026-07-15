@@ -6,6 +6,8 @@ use std::io::Write;
 use std::path::Path;
 use uuid::Uuid;
 
+pub use crate::models::AccountSummary;
+
 const ACCOUNT_STORE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

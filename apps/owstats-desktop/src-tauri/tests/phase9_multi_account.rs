@@ -1,3 +1,4 @@
+use owstats_desktop_lib::account_context::AccountContextManager;
 use owstats_desktop_lib::account_store::{
     read_manifest, read_registry, write_manifest_atomic, write_registry_atomic, AccountId,
     AccountManifest, AccountRegistry, AccountRegistryEntry,
@@ -5,6 +6,8 @@ use owstats_desktop_lib::account_store::{
 use owstats_desktop_lib::app_paths::SharedAppPaths;
 use serde_json::json;
 use std::fs;
+use std::sync::Arc;
+use std::thread;
 
 fn entry(account_id: AccountId, battle_tag: &str) -> AccountRegistryEntry {
     AccountRegistryEntry {
@@ -25,6 +28,98 @@ fn manifest(account_id: AccountId, battle_tag: &str) -> AccountManifest {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-02T00:00:00Z".to_string(),
     }
+}
+
+#[test]
+fn active_context_resolves_one_complete_account_without_exposing_role_id() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
+    let account_entry = entry(account_id.clone(), "Synthetic#1000");
+    let registry = AccountRegistry {
+        version: 1,
+        active_account_id: Some(account_id.clone()),
+        accounts: vec![account_entry],
+    };
+    write_registry_atomic(&shared.registry(), &registry).unwrap();
+    write_manifest_atomic(
+        &shared.account(&account_id).manifest(),
+        &manifest(account_id.clone(), "Synthetic#1000"),
+    )
+    .unwrap();
+
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let snapshot = manager.active_snapshot().unwrap();
+    assert_eq!(snapshot.account_id(), &account_id);
+    assert_eq!(
+        snapshot.paths().database(),
+        shared.account(&account_id).database()
+    );
+
+    let encoded = serde_json::to_string(&manager.list_accounts().unwrap()).unwrap();
+    assert!(encoded.contains("Synthetic#1000"));
+    for forbidden in [
+        "roleId",
+        "role_id",
+        "10001",
+        "token",
+        "customerToken",
+        "cookie",
+        "authorization",
+        "credential\"",
+    ] {
+        assert!(
+            !encoded
+                .to_ascii_lowercase()
+                .contains(&forbidden.to_ascii_lowercase()),
+            "account summary exposed forbidden value or key {forbidden:?}: {encoded}"
+        );
+    }
+}
+
+#[test]
+fn missing_active_account_returns_a_chinese_product_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = AccountContextManager::load(SharedAppPaths::from_app_data_dir(temp.path()))
+        .expect("an absent registry should load as an empty account manager");
+
+    assert_eq!(
+        manager.active_snapshot().unwrap_err().to_string(),
+        "尚未添加可用账号，请先在指挥台添加账号。"
+    );
+}
+
+#[test]
+fn replace_registry_persists_before_updating_memory_and_supports_concurrent_readers() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = Arc::new(AccountContextManager::load(shared.clone()).unwrap());
+    let account_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
+    let valid = AccountRegistry {
+        version: 1,
+        active_account_id: Some(account_id.clone()),
+        accounts: vec![entry(account_id, "Synthetic#1000")],
+    };
+    manager.replace_registry(valid.clone()).unwrap();
+    assert_eq!(read_registry(&shared.registry()).unwrap(), valid);
+
+    let mut readers = Vec::new();
+    for _ in 0..4 {
+        let manager = Arc::clone(&manager);
+        readers.push(thread::spawn(move || manager.registry_snapshot().unwrap()));
+    }
+    for reader in readers {
+        assert_eq!(reader.join().unwrap(), valid);
+    }
+
+    let invalid = AccountRegistry {
+        version: 2,
+        active_account_id: None,
+        accounts: Vec::new(),
+    };
+    assert!(manager.replace_registry(invalid).is_err());
+    assert_eq!(manager.registry_snapshot().unwrap(), valid);
+    assert_eq!(read_registry(&shared.registry()).unwrap(), valid);
 }
 
 #[test]

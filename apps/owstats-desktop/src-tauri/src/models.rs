@@ -745,6 +745,25 @@ pub struct CredentialStatus {
     pub saved_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSummary {
+    pub account_id: String,
+    pub battle_tag: String,
+    pub is_active: bool,
+    pub credential_state: String,
+    pub created_at: String,
+    pub last_used_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountManagerStatus {
+    pub active_account_id: Option<String>,
+    pub accounts: Vec<AccountSummary>,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialLoginResult {

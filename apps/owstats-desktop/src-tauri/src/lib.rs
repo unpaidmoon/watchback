@@ -1,3 +1,4 @@
+pub mod account_context;
 pub mod account_store;
 mod analytics;
 pub mod app_paths;
@@ -46,8 +47,21 @@ pub use sync::{
 };
 
 pub fn run() {
+    use tauri::Manager;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| anyhow::anyhow!("无法定位应用数据目录: {error}"))?;
+            let shared = app_paths::SharedAppPaths::from_app_data_dir(app_data_dir);
+            let account_context = account_context::AccountContextManager::load(shared)
+                .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
+            app.manage(account_context);
+            Ok(())
+        })
         .manage(sync_coordinator::SyncCoordinator::default())
         .manage(login_target::LoginTargetCoordinator::default())
         .invoke_handler(tauri::generate_handler![
