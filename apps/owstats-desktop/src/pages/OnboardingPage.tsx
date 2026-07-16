@@ -336,7 +336,7 @@ export function OnboardingPage() {
     setSyncError(null);
     setSyncProgress(null);
     try {
-      const summary = await syncSeason(season);
+      const summary = await syncSeason(season, "fullFetch");
       clearMatchesPageCache();
       await loadDashboard();
       setSyncNotice(formatSyncNotice(season, summary));

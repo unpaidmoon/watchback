@@ -5,6 +5,7 @@ import type { SyncSummary } from "../src/shared/types.ts";
 
 const baseSummary: SyncSummary = {
   season: 23,
+  mode: "fullFetch",
   phase: "completed",
   processed: 120,
   total: 120,
@@ -32,9 +33,13 @@ const baseSummary: SyncSummary = {
         existingCompleteMatches: 120,
         earliestBeginTs: 1_700_000_000_000,
         latestBeginTs: 1_700_100_000_000,
+        stopReason: null,
+        watermarkReached: false,
       },
     ],
+    quickScanLimited: false,
   },
+  quickScanLimited: false,
   importedMatches: 120,
   importedDetails: 120,
   skippedDuplicates: 0,
@@ -78,9 +83,27 @@ for (const testCase of cases) {
 }
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
+const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
+const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
+
+assert.match(
+  typesSource,
+  /export type SyncMode = "quickUpdate" \| "fullFetch";/,
+  "shared types expose the explicit season sync modes",
+);
+assert.match(
+  apiSource,
+  /export function syncSeason\(season: number, mode: SyncMode\)/,
+  "syncSeason requires an explicit sync mode",
+);
+assert.match(
+  apiSource,
+  /invoke<SyncSummary>\("sync_season", \{ request: \{ season, mode \} \}\)/,
+  "syncSeason forwards season and mode in the invoke request",
+);
 assert.match(
   onboardingSource,
-  /const summary = await syncSeason\(season\);\s*clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
+  /const summary = await syncSeason\(season, "fullFetch"\);\s*clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
   "successful sync preserves sync, cache clear, dashboard reload order",
 );
 assert.match(

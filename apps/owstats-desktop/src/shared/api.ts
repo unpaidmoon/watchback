@@ -31,6 +31,7 @@ import type {
   RankingResponse,
   RemoveAccountResult,
   SeasonAnalysis,
+  SyncMode,
   SyncSummary,
   UpdateCheckResult,
   UserSettings,
@@ -89,8 +90,8 @@ export function getFriendDetails(bnetId: string, filters: FriendAnalyticsFilters
   return invoke<FriendDetail>("get_friend_details", { bnetId, filters });
 }
 
-export function syncSeason(season: number) {
-  return invoke<SyncSummary>("sync_season", { request: { season } });
+export function syncSeason(season: number, mode: SyncMode) {
+  return invoke<SyncSummary>("sync_season", { request: { season, mode } });
 }
 
 export function getOnboardingStatus(season?: number) {

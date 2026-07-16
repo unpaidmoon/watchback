@@ -387,8 +387,11 @@ export type FriendDetail = {
   recentMatches: FriendRecentMatch[];
 };
 
+export type SyncMode = "quickUpdate" | "fullFetch";
+
 export type SyncRequest = {
   season: number;
+  mode: SyncMode;
 };
 
 export type SyncPageDiagnostic = {
@@ -402,6 +405,8 @@ export type SyncPageDiagnostic = {
   existingCompleteMatches: number;
   earliestBeginTs: number | null;
   latestBeginTs: number | null;
+  stopReason: string | null;
+  watermarkReached: boolean;
 };
 
 export type SyncDiagnostics = {
@@ -409,10 +414,12 @@ export type SyncDiagnostics = {
   detailDurationMs: number;
   persistDurationMs: number;
   pages: SyncPageDiagnostic[];
+  quickScanLimited: boolean;
 };
 
 export type SyncSummary = {
   season: number;
+  mode: SyncMode;
   phase: string;
   processed: number;
   total: number;
@@ -425,6 +432,7 @@ export type SyncSummary = {
   databaseMatches: number;
   databaseDetails: number;
   diagnostics: SyncDiagnostics;
+  quickScanLimited: boolean;
   importedMatches: number;
   importedDetails: number;
   skippedDuplicates: number;

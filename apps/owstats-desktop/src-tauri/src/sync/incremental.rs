@@ -148,6 +148,8 @@ pub fn build_page_diagnostics(
                 existing_complete_matches,
                 earliest_begin_ts: begin_timestamps.first().copied(),
                 latest_begin_ts: begin_timestamps.last().copied(),
+                stop_reason: None,
+                watermark_reached: false,
             }
         })
         .collect::<Vec<_>>();

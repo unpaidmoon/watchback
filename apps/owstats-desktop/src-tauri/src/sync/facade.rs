@@ -384,6 +384,7 @@ async fn sync_incremental_season_with_request(
         detail_duration_ms: fetch.detail_duration_ms,
         persist_duration_ms: persist_started.elapsed().as_millis() as u64,
         pages: page_diagnostics,
+        quick_scan_limited: false,
     };
     progress(SyncProgress {
         season,
