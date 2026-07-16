@@ -60,13 +60,42 @@ export type CredentialStatus = {
   state: string;
   message: string;
   exposesSecret: boolean;
-  roleId?: number | null;
   savedAt: string | null;
 };
 
-export type CredentialLoginResult = {
-  status: CredentialStatus;
-  target: LoginTargetStatus;
+export type AccountSummary = {
+  accountId: string;
+  battleTag: string;
+  isActive: boolean;
+  credentialState: "ready" | "stale" | "incomplete" | "missing" | string;
+  createdAt: string;
+  lastUsedAt: string;
+};
+
+export type AccountManagerStatus = {
+  activeAccountId: string | null;
+  accounts: AccountSummary[];
+  message: string;
+};
+
+export type AccountLoginResult = {
+  kind:
+    | "newAccountAdded"
+    | "existingAccountUpdated"
+    | "differentExistingAccount"
+    | "differentNewAccount"
+    | string;
+  accountId: string | null;
+  battleTag: string | null;
+  message: string;
+  shouldOfferSwitch: boolean;
+};
+
+export type RemoveAccountResult = {
+  removed: boolean;
+  activeAccountId: string | null;
+  message: string;
+  reloadRequired: boolean;
 };
 
 export type LoginTargetStatus = {
@@ -92,7 +121,6 @@ export type ClearPlayerTargetResult = {
 };
 
 export type PlayerProfile = {
-  roleId: number | null;
   playerId: string | null;
   avatarUrl: string | null;
   endorsementLevel: number | null;
@@ -103,11 +131,6 @@ export type PlayerProfile = {
 
 export type UserSettings = {
   theme: "system" | "light" | "dark";
-};
-
-export type LogoutResult = {
-  credentialCleared: boolean;
-  message: string;
 };
 
 export type UpdateCheckResult = {
@@ -558,6 +581,8 @@ export type SeasonAnalysis = {
 
 export type OnboardingStatus = {
   selectedSeason: number | null;
+  currentSeason: number;
+  syncableSeasons: number[];
   availableSeasons: number[];
   canEnterReview: boolean;
   credentialStatus: CredentialStatus;

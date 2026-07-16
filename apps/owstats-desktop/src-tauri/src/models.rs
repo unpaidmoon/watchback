@@ -726,6 +726,8 @@ pub struct MapReview {
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingStatus {
     pub selected_season: Option<i64>,
+    pub current_season: i64,
+    pub syncable_seasons: Vec<i64>,
     pub available_seasons: Vec<i64>,
     pub can_enter_review: bool,
     pub credential_status: CredentialStatus,
@@ -740,16 +742,47 @@ pub struct CredentialStatus {
     pub state: String,
     pub message: String,
     pub exposes_secret: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub role_id: Option<i64>,
     pub saved_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CredentialLoginResult {
-    pub status: CredentialStatus,
-    pub target: LoginTargetStatus,
+pub struct AccountSummary {
+    pub account_id: String,
+    pub battle_tag: String,
+    pub is_active: bool,
+    pub credential_state: String,
+    pub created_at: String,
+    pub last_used_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountManagerStatus {
+    pub active_account_id: Option<String>,
+    pub accounts: Vec<AccountSummary>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveAccountResult {
+    pub removed: bool,
+    pub active_account_id: Option<String>,
+    pub message: String,
+    pub reload_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountLoginResult {
+    pub kind: String,
+    pub account_id: Option<String>,
+    pub battle_tag: Option<String>,
+    pub message: String,
+    pub should_offer_switch: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -759,16 +792,10 @@ pub struct CredentialLoginCancelResult {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct LogoutResult {
-    pub credential_cleared: bool,
-    pub message: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerProfile {
+    #[serde(skip_serializing)]
     pub role_id: Option<i64>,
     pub player_id: Option<String>,
     pub avatar_url: Option<String>,

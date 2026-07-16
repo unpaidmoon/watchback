@@ -1,25 +1,24 @@
+use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::browser_session::{
     choose_debug_port, find_windows_browsers, launch_browser, open_or_find_page,
     wait_for_debug_endpoint, CdpPage,
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
-    BattleTagExtraction, RoleIdExtraction,
+    extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
+    is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
 };
-use crate::login_flow::{LoginPhase, LoginProgress};
+use crate::login_flow::LoginPhase;
 use crate::models::{CredentialLoginCancelResult, CredentialStatus};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 pub use crate::browser_session::{select_browser, BrowserCandidate};
 pub use crate::credential_store::{
-    clear_credentials_for_path, credential_status_for_path,
-    redact_sensitive_text as redacted_login_error, save_credentials_atomic, DashenCredentials,
+    credential_status_for_path, redact_sensitive_text as redacted_login_error, DashenCredentials,
 };
 
 const LOGIN_URL: &str =
@@ -96,10 +95,7 @@ impl LoginCaptureIdentity {
         battle_tag: BattleTagExtraction,
     ) {
         self.credential_role_id = credential_role_id;
-        let paired_role_id = match paired_role_id {
-            RoleIdExtraction::Found(role_id) => Some(role_id),
-            RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
-        };
+        let paired_role_id = pairing_role_id(self.credential_role_id.as_deref(), paired_role_id);
         self.paired_identity.observe(paired_role_id, battle_tag);
     }
 
@@ -127,16 +123,14 @@ impl LoginCaptureIdentity {
 
     pub fn confirm_pending_pair(
         &mut self,
+        credential_role_id: Option<String>,
         paired_role_id: RoleIdExtraction,
         battle_tag: BattleTagExtraction,
     ) {
         if self.paired_status() != PairedIdentityStatus::Pending {
             return;
         }
-        let paired_role_id = match paired_role_id {
-            RoleIdExtraction::Found(role_id) => Some(role_id),
-            RoleIdExtraction::Missing | RoleIdExtraction::Conflict => None,
-        };
+        let paired_role_id = pairing_role_id(credential_role_id.as_deref(), paired_role_id);
         self.paired_identity.observe(paired_role_id, battle_tag);
         if !matches!(self.paired_status(), PairedIdentityStatus::Confirmed { .. }) {
             self.paired_identity
@@ -150,25 +144,45 @@ impl LoginCaptureIdentity {
     }
 }
 
+fn pairing_role_id(
+    credential_role_id: Option<&str>,
+    paired_role_id: RoleIdExtraction,
+) -> Option<String> {
+    match paired_role_id {
+        RoleIdExtraction::Conflict => None,
+        RoleIdExtraction::Found(role_id) => credential_role_id
+            .is_none_or(|credential_role_id| credential_role_id == role_id)
+            .then_some(role_id),
+        RoleIdExtraction::Missing => credential_role_id.map(str::to_string),
+    }
+}
+
 pub(crate) struct BrowserLoginOutcome {
     pub(crate) credentials: DashenCredentials,
-    #[allow(dead_code)]
-    pub(crate) detected_battle_tag: Option<String>,
+    pub(crate) detected_battle_tag: String,
 }
 
-pub fn credential_path(app: &AppHandle) -> Result<PathBuf> {
-    Ok(crate::app_paths::AppPaths::from_app(app)?.credentials())
+pub fn get_credential_status_for_account(paths: &AccountPaths) -> Result<CredentialStatus> {
+    credential_status_for_path(&paths.credentials())
 }
 
-pub fn get_credential_status(app: &AppHandle) -> Result<CredentialStatus> {
-    credential_status_for_path(&credential_path(app)?)
+pub fn read_saved_credentials_for_account(paths: &AccountPaths) -> Result<DashenCredentials> {
+    crate::credential_store::read_credentials(&paths.credentials())
 }
 
-pub fn clear_credentials(app: &AppHandle) -> Result<bool> {
-    clear_credentials_for_path(&credential_path(app)?)
+pub fn read_optional_saved_credentials_for_account(
+    paths: &AccountPaths,
+) -> Result<Option<DashenCredentials>> {
+    if !paths.credentials().exists() {
+        return Ok(None);
+    }
+    read_saved_credentials_for_account(paths).map(Some)
 }
 
-pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<BrowserLoginOutcome> {
+pub(crate) async fn capture_dashen_login(
+    app: AppHandle,
+    shared_paths: &SharedAppPaths,
+) -> Result<BrowserLoginOutcome> {
     LOGIN_CANCELLED.store(false, Ordering::SeqCst);
 
     emit_login_progress(
@@ -178,7 +192,7 @@ pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<Browser
     );
     let browser = select_browser(find_windows_browsers())?;
     let port = choose_debug_port(std::process::id());
-    let profile_dir = crate::app_paths::AppPaths::from_app(&app)?.browser_profile();
+    let profile_dir = shared_paths.browser_profile();
 
     emit_login_progress(&app, LoginPhase::OpeningBrowser, "正在打开网易大神登录页。");
     launch_browser(&browser, LOGIN_URL, port, &profile_dir)
@@ -191,13 +205,35 @@ pub(crate) async fn start_dashen_login_capture(app: AppHandle) -> Result<Browser
         "请在浏览器中完成登录，应用会自动识别登录状态。",
     );
 
-    let outcome = fetch_credentials_from_browser(&app, port).await?;
-    emit_login_progress(&app, LoginPhase::Saving, "正在保存本地登录凭证。");
-    let path = credential_path(&app)?;
-    save_credentials_atomic(&path, &outcome.credentials)?;
-    emit_login_progress(&app, LoginPhase::Ready, "已保存登录凭证，可以开始同步。");
+    capture_dashen_login_with(|| fetch_credentials_from_browser(&app, port)).await
+}
 
+pub(crate) async fn capture_dashen_login_with<F, Fut>(runner: F) -> Result<BrowserLoginOutcome>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<BrowserLoginOutcome>>,
+{
+    let outcome = runner()
+        .await
+        .map_err(|error| anyhow!(redacted_login_error(&error.to_string())))?;
+    if outcome.credentials.role_id <= 0 || outcome.credentials.token.trim().is_empty() {
+        return Err(anyhow!("登录凭证不完整，请重新登录。"));
+    }
+    let battle_tag = outcome.detected_battle_tag.trim();
+    let valid_battle_tag = battle_tag.split_once('#').is_some_and(|(name, suffix)| {
+        !name.is_empty()
+            && !suffix.is_empty()
+            && !suffix.contains('#')
+            && suffix.chars().all(|character| character.is_ascii_digit())
+    });
+    if !valid_battle_tag {
+        return Err(anyhow!("未能稳定识别 BattleTag，请重新登录。"));
+    }
     Ok(outcome)
+}
+
+pub(crate) fn login_cancelled() -> bool {
+    LOGIN_CANCELLED.load(Ordering::SeqCst)
 }
 
 pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResult> {
@@ -209,10 +245,8 @@ pub fn cancel_dashen_login(_app: AppHandle) -> Result<CredentialLoginCancelResul
 }
 
 pub fn emit_login_progress(app: &AppHandle, phase: LoginPhase, message: &str) {
-    let _ = app.emit(
-        "credential-login-progress",
-        LoginProgress::new(phase, message),
-    );
+    use crate::login_flow::LoginProgressReporter;
+    app.report(phase, message);
 }
 
 pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials {
@@ -236,7 +270,6 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
 
     while Instant::now() < deadline {
         if LOGIN_CANCELLED.load(Ordering::SeqCst) {
-            emit_login_progress(app, LoginPhase::Cancelled, "已取消登录等待。");
             return Err(anyhow!("已取消登录等待。"));
         }
 
@@ -252,10 +285,15 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             if identity.paired_status() == PairedIdentityStatus::Pending {
                 let confirmation = collect_login_identity(&mut page).await;
                 match confirmation {
-                    Some((_, paired_role_id, battle_tag)) => {
-                        identity.confirm_pending_pair(paired_role_id, battle_tag);
+                    Some((credential_role_id, paired_role_id, battle_tag)) => {
+                        identity.confirm_pending_pair(
+                            credential_role_id,
+                            paired_role_id,
+                            battle_tag,
+                        );
                     }
                     None => identity.confirm_pending_pair(
+                        None,
                         RoleIdExtraction::Missing,
                         BattleTagExtraction::Missing,
                     ),
@@ -300,10 +338,19 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                     paired_identity.and_then(|(paired_role_id, battle_tag)| {
                         (paired_role_id == role_id).then_some(battle_tag)
                     });
-                return Ok(BrowserLoginOutcome {
-                    credentials,
-                    detected_battle_tag,
-                });
+                if let Some(detected_battle_tag) = detected_battle_tag {
+                    return Ok(BrowserLoginOutcome {
+                        credentials,
+                        detected_battle_tag,
+                    });
+                }
+                emit_login_progress(
+                    app,
+                    LoginPhase::WaitingForLogin,
+                    "已取得同步凭证，正在稳定识别 BattleTag。",
+                );
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
             }
 
             if is_signature_helper_missing(&result) {
@@ -347,7 +394,6 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
         }
     }
 
-    emit_login_progress(app, LoginPhase::Failed, "登录超时，未能完成凭证换取。");
     if locked_credential_role_id.is_some() || identity.credential_role_id().is_some() {
         Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
     } else {
@@ -364,14 +410,13 @@ async fn collect_login_identity(
         .evaluate(&build_collect_candidates_script(), false)
         .await
         .ok()?;
-    let page_text = collected.get("pageText")?.as_str()?;
+    let (battle_tag_candidates, battle_tag_truncated) =
+        candidate_group(collected.get("battleTagCandidates")?)?;
     let role_candidates = collected.get("roleCandidates")?;
-    let (current_candidates, current_truncated) =
-        role_candidate_group(role_candidates.get("current")?)?;
-    let (storage_candidates, storage_truncated) =
-        role_candidate_group(role_candidates.get("storage")?)?;
+    let (current_candidates, current_truncated) = candidate_group(role_candidates.get("current")?)?;
+    let (storage_candidates, storage_truncated) = candidate_group(role_candidates.get("storage")?)?;
     let (resource_candidates, resource_truncated) =
-        role_candidate_group(role_candidates.get("resources")?)?;
+        candidate_group(role_candidates.get("resources")?)?;
     let credential_candidates = current_candidates
         .iter()
         .chain(&storage_candidates)
@@ -386,11 +431,11 @@ async fn collect_login_identity(
             &resource_candidates,
             current_truncated || storage_truncated || resource_truncated,
         ),
-        extract_battle_tag(page_text),
+        extract_battle_tag_candidates(&battle_tag_candidates, battle_tag_truncated),
     ))
 }
 
-fn role_candidate_group(value: &serde_json::Value) -> Option<(Vec<String>, bool)> {
+fn candidate_group(value: &serde_json::Value) -> Option<(Vec<String>, bool)> {
     Some((
         string_candidates(value.get("values")?)?,
         value.get("truncated")?.as_bool()?,
@@ -405,4 +450,60 @@ fn string_candidates(value: &serde_json::Value) -> Option<Vec<String>> {
             .filter_map(|value| value.as_str().map(str::to_string))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn injectable_capture_runner_never_writes_a_final_credential_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let sentinel = temp.path().join("final-credentials.json");
+        std::fs::write(&sentinel, b"unchanged").unwrap();
+        let outcome = BrowserLoginOutcome {
+            credentials: DashenCredentials {
+                role_id: 101101,
+                token: "synthetic-secret".to_string(),
+                customer_token: None,
+                dts: None,
+                server: 1,
+                saved_at: "2026-07-16T00:00:00Z".to_string(),
+            },
+            detected_battle_tag: "Synthetic#1011".to_string(),
+        };
+
+        let captured = capture_dashen_login_with(|| async { Ok(outcome) })
+            .await
+            .unwrap();
+        assert_eq!(captured.detected_battle_tag, "Synthetic#1011");
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+
+        let cancelled = capture_dashen_login_with(|| async {
+            Err(anyhow::anyhow!("cancelled token=synthetic-secret"))
+        })
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(!cancelled.contains("synthetic-secret"));
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+
+        let invalid = capture_dashen_login_with(|| async {
+            Ok(BrowserLoginOutcome {
+                credentials: DashenCredentials {
+                    role_id: 0,
+                    token: String::new(),
+                    customer_token: None,
+                    dts: None,
+                    server: 1,
+                    saved_at: "2026-07-16T00:00:00Z".to_string(),
+                },
+                detected_battle_tag: "unstable".to_string(),
+            })
+        })
+        .await;
+        assert!(invalid.is_err());
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+    }
 }

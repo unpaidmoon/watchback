@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn get_player_profile_for_path(path: &Path, role_id: Option<i64>) -> Result<PlayerProfile> {
     let mut profile = read_json::<PlayerProfile>(path)?.unwrap_or(PlayerProfile {
         role_id,
-        player_id: role_id.map(|id| format!("角色 {id}")),
+        player_id: None,
         avatar_url: None,
         endorsement_level: None,
         play_time_hours: None,
@@ -24,9 +24,7 @@ pub fn get_player_profile_for_path(path: &Path, role_id: Option<i64>) -> Result<
     if profile.role_id.is_none() {
         profile.role_id = role_id;
     }
-    if profile.player_id.is_none() {
-        profile.player_id = profile.role_id.map(|id| format!("角色 {id}"));
-    }
+    profile.player_id = safe_player_id(profile.player_id, profile.role_id);
     Ok(profile)
 }
 
@@ -191,9 +189,12 @@ fn profile_from_raw(
             .and_then(|value| value.parse::<i64>().ok())
             .or_else(|| json_i64(raw, "bnetId"))
     });
-    let player_id = json_string(raw, "name")
-        .or(display_name)
-        .or(bnet_id.clone());
+    let player_id = safe_player_id(
+        json_string(raw, "name")
+            .or(display_name)
+            .or(bnet_id.clone()),
+        role_id,
+    );
 
     PlayerProfile {
         role_id,
@@ -207,6 +208,23 @@ fn profile_from_raw(
         title: json_string(raw, "title"),
         refreshed_at,
     }
+}
+
+fn safe_player_id(candidate: Option<String>, role_id: Option<i64>) -> Option<String> {
+    candidate.and_then(|candidate| {
+        let candidate = candidate.trim();
+        if candidate.is_empty() {
+            return None;
+        }
+        let exposes_role_id = role_id.is_some_and(|role_id| {
+            candidate.parse::<i64>().ok() == Some(role_id)
+                || candidate
+                    .strip_prefix("角色")
+                    .and_then(|value| value.trim().parse::<i64>().ok())
+                    == Some(role_id)
+        });
+        (!exposes_role_id).then(|| candidate.to_string())
+    })
 }
 
 pub fn get_user_settings_for_path(path: &Path) -> Result<UserSettings> {
@@ -280,6 +298,45 @@ fn json_f64(value: &Value, key: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_profile_never_serializes_role_id_as_player_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let role_id = 42424242;
+
+        let profile =
+            get_player_profile_for_path(&temp.path().join("missing.json"), Some(role_id)).unwrap();
+        let json = serde_json::to_string(&profile).unwrap();
+
+        assert_eq!(profile.role_id, Some(role_id));
+        assert_eq!(profile.player_id, None);
+        assert!(!json.contains(&role_id.to_string()));
+        assert!(!json.contains(&format!("角色 {role_id}")));
+    }
+
+    #[test]
+    fn numeric_bnet_without_safe_display_name_is_not_a_public_player_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let role_id = 43434343;
+        let db = OwDatabase::new(temp.path().join("owstats.db"));
+        db.initialize().unwrap();
+        db.connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES (?1, ?1, NULL, '{}', '2026-01-01T00:00:00Z')",
+                [role_id.to_string()],
+            )
+            .unwrap();
+
+        let profile =
+            get_player_profile(&db, &temp.path().join("missing.json"), Some(role_id)).unwrap();
+        let json = serde_json::to_string(&profile).unwrap();
+
+        assert_eq!(profile.role_id, Some(role_id));
+        assert_eq!(profile.player_id, None);
+        assert!(!json.contains(&role_id.to_string()));
+        assert!(!json.contains(&format!("角色 {role_id}")));
+    }
 
     #[test]
     fn settings_default_to_system_theme_when_missing() {

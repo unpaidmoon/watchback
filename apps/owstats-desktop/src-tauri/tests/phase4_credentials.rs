@@ -1,6 +1,7 @@
+use owstats_desktop_lib::credential_store::save_credentials_atomic;
 use owstats_desktop_lib::credentials::{
-    credential_status_for_path, redacted_login_error, save_credentials_atomic, select_browser,
-    BrowserCandidate, DashenCredentials,
+    credential_status_for_path, redacted_login_error, select_browser, BrowserCandidate,
+    DashenCredentials,
 };
 
 #[test]

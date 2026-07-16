@@ -6,12 +6,14 @@ import { isCurrentDashboardRequest, normalizeLoginTargetName } from "../src/page
 const root = process.cwd();
 const onboarding = readFileSync(join(root, "src/pages/OnboardingPage.tsx"), "utf8");
 const seasonHealth = readFileSync(join(root, "src/features/command-center/SeasonHealthPanel.tsx"), "utf8");
+const seasonWorkbench = readFileSync(join(root, "src/features/command-center/SeasonSyncWorkbench.tsx"), "utf8");
 const api = readFileSync(join(root, "src/shared/api.ts"), "utf8");
 const types = readFileSync(join(root, "src/shared/types.ts"), "utf8");
 const commandCenterStyles = readFileSync(join(root, "src/styles/features/command-center.css"), "utf8");
 const commands = readFileSync(join(root, "src-tauri/src/commands.rs"), "utf8");
 const lib = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
 const models = readFileSync(join(root, "src-tauri/src/models.rs"), "utf8");
+const commandCenterBackend = readFileSync(join(root, "src-tauri/src/review/command_center.rs"), "utf8");
 
 function commandBody(source: string, commandName: string) {
   const declaration = new RegExp(`pub (?:async )?fn ${commandName}\\b`).exec(source);
@@ -49,15 +51,18 @@ for (const [wrapper, command] of [
 }
 assert.match(api, /clear_player_target/, "product API exposes target clearing");
 assert.match(onboarding, /当前目标玩家/, "command center shows the bound target player");
-assert.match(onboarding, /const COMMAND_CENTER_SEASONS = \[21, 22, 23\] as const/, "command center exposes the fixed supported seasons");
-assert.match(onboarding, /aria-label="选择同步赛季"/, "command center exposes an accessible season segment group");
+assert.doesNotMatch(onboarding, /COMMAND_CENTER_SEASONS/, "command center removes the fixed season array");
+assert.match(onboarding, /status\?\.syncableSeasons/, "command center consumes backend syncable seasons");
+assert.match(onboarding, /<SeasonSyncWorkbench/, "command center renders the dynamic sync workbench");
+assert.match(seasonWorkbench, /aria-label="选择同步赛季"/, "command center exposes an accessible season select");
+assert.match(models, /pub struct OnboardingStatus\s*\{[\s\S]*?pub current_season: i64,[\s\S]*?pub syncable_seasons: Vec<i64>,/, "backend DTO exposes the dynamic season catalog");
+assert.match(commandCenterBackend, /MIN_SYNC_SEASON: i64 = 15;[\s\S]*?CURRENT_SEASON: i64 = 23;/, "backend catalog includes every supported season from S15");
+assert.match(commandCenterBackend, /current_season: CURRENT_SEASON,[\s\S]*?syncable_seasons: syncable_seasons\(\),/, "backend returns the dynamic season catalog");
 assert.doesNotMatch(onboarding, /aria-label="赛季号"/, "command center no longer exposes a free-form season number input");
 assert.match(onboarding, /syncTargetStrip/, "command center uses a compact target identity strip");
-assert.match(onboarding, /syncSeasonWorkbench/, "command center groups season controls into one workbench");
-assert.match(onboarding, /syncSeasonPicker/, "command center uses a season picker");
+assert.doesNotMatch(onboarding, /commandCenterSeasonSegments/, "fixed season segments are removed");
 assert.match(onboarding, /syncSecondaryActions/, "command center separates secondary actions");
 assert.doesNotMatch(onboarding, /同步全部/, "command center must not add sync-all");
-assert.doesNotMatch(onboarding, /FIXED_COMMAND_CENTER_SEASONS/, "command center uses the supported-season segment constant instead of the retired fixed-list name");
 assert.doesNotMatch(onboarding, /aria-label="BattleTag"|placeholder="BattleTag|setBattleTag|bindPlayerTarget|runBindTarget/, "command center has no manual BattleTag input path");
 for (const label of ["切换到此账号", "保留原目标", "重新绑定", "重新识别"]) {
   assert.match(onboarding, new RegExp(label), `command center exposes ${label}`);
@@ -67,7 +72,7 @@ assert.match(onboarding, /targetStatus\?\.currentBnet &&[\s\S]*?targetStatus\.de
 assert.match(onboarding, /\{showDetectedLogin && \([\s\S]*?当前目标[\s\S]*?检测到的登录账号/, "kept mismatches continue to show both account names");
 assert.doesNotMatch(onboarding, /state === "switchRequired" && \([\s\S]{0,80}?syncTargetComparison/, "account comparison is not limited to switch confirmation");
 assert.match(onboarding, /credentialReady=\{credentialReady\}[\s\S]*?targetSyncAllowed=\{Boolean\(targetStatus\?\.syncAllowed\)\}[\s\S]*?accountOperationBusy=\{accountOperationBusy\}/, "season card receives separate credential, target and operation gates");
-assert.match(seasonHealth, /!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| isSyncBlocked \|\| isSyncing/, "sync eligibility combines all independent gates");
+assert.match(seasonWorkbench, /!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null/, "sync eligibility combines all independent gates in the dynamic workbench");
 assert.match(onboarding, /role=\{error \? "alert" : "status"\}/, "recoverable messages expose an accessible role");
 assert.match(onboarding, /aria-live=\{error \? "assertive" : "polite"\}/, "recoverable messages are announced accessibly");
 assert.match(commandCenterStyles, /\.syncTargetDecision\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?gap:/, "target decisions wrap without horizontal overflow");
@@ -78,10 +83,17 @@ assert.match(types, /type LoginTargetStatus\s*=\s*\{[\s\S]*?state:\s*"ready"\s*\
 for (const field of ["detectedBnet", "currentBnet", "message", "syncAllowed", "canConfirmSwitch", "canRetry"]) {
   assert.match(types, new RegExp(`${field}\\??:`), `login target status exposes ${field}`);
 }
-assert.match(types, /type CredentialLoginResult\s*=\s*\{[\s\S]*?status:\s*CredentialStatus;[\s\S]*?target:\s*LoginTargetStatus;/, "login result returns credential and target status together");
+assert.doesNotMatch(types, /type CredentialLoginResult\b/, "obsolete single-account login result is removed");
+assert.doesNotMatch(models, /struct CredentialLoginResult\b/, "obsolete backend single-account login result is removed");
 assert.match(types, /type ClearPlayerTargetResult\s*=\s*\{[\s\S]*?cleared:\s*boolean;[\s\S]*?target:\s*LoginTargetStatus;/, "clear result returns the replacement login target status");
-assert.match(types, /type CredentialStatus\s*=\s*\{[\s\S]*?roleId\?:\s*number\s*\|\s*null;/, "optional Rust roleId serialization is optional in TypeScript");
-assert.match(models, /struct CredentialStatus\s*\{[\s\S]*?skip_serializing_if\s*=\s*"Option::is_none"[\s\S]*?role_id:\s*Option<i64>/, "credential roleId may be omitted by Rust serialization");
+assert.doesNotMatch(types, /type CredentialStatus\s*=\s*\{[^}]*roleId/s, "public credential status does not expose roleId");
+assert.doesNotMatch(types, /type PlayerProfile\s*=\s*\{[^}]*roleId/s, "public player profile does not expose roleId");
+const credentialStatusBody = models.match(/pub struct CredentialStatus\s*\{([^}]*)\}/s)?.[1];
+const playerProfileBody = models.match(/pub struct PlayerProfile\s*\{([^}]*)\}/s)?.[1];
+assert.ok(credentialStatusBody, "Rust CredentialStatus struct exists");
+assert.ok(playerProfileBody, "Rust PlayerProfile struct exists");
+assert.match(credentialStatusBody, /#\[serde\(skip_serializing\)\]\s*pub role_id:\s*Option<i64>/, "credential roleId is never serialized to the frontend");
+assert.match(playerProfileBody, /#\[serde\(skip_serializing\)\]\s*pub role_id:\s*Option<i64>/, "player profile roleId is never serialized to the frontend");
 
 assert.equal(normalizeLoginTargetName(" Alice＃1234 "), "alice#1234", "frontend target normalization matches backend hash and case handling");
 assert.notEqual(
@@ -106,11 +118,8 @@ for (const command of [
   assert.match(lib, new RegExp(`commands::${command}\\b`), `handler registers safe command ${command}`);
 }
 assert.match(lib, /manage\(login_target::LoginTargetCoordinator::default\(\)\)/, "login target coordinator is managed state");
-assert.match(
-  commands,
-  /start_dashen_login[\s\S]*?coordinator\.clear\(\)[\s\S]*?start_dashen_login_capture[\s\S]*?reconcile_detected_target[\s\S]*?CredentialLoginResult/,
-  "new login clears the old round and reconciles detected target",
-);
+assert.match(commands, /add_account[\s\S]*?capture_and_publish_add/, "add account uses the staged capture-and-publish flow");
+assert.match(commands, /relogin_account[\s\S]*?capture_and_publish_relogin/, "relogin uses the staged capture-and-publish flow");
 assert.match(
   commands,
   /sync_season[\s\S]*?ensure_sync_target_ready[\s\S]*?sync_season_with_credentials_and_target_paths_output_dir_base_url/,
@@ -118,16 +127,16 @@ assert.match(
 );
 
 for (const [commandName, firstSideEffect] of [
-  ["logout", "login_target_coordinator.clear()"],
-  ["start_dashen_login", "login_target_coordinator.clear()"],
-  ["confirm_login_target_switch", "read_saved_credentials(&app)"],
-  ["keep_current_player_target", "login_target_coordinator.keep_current()"],
-  ["retry_login_target_binding", "read_saved_credentials(&app)"],
-  ["clear_player_target", "player_target_path(&app)"],
+  ["add_account", "capture_and_publish_add"],
+  ["relogin_account", "capture_and_publish_relogin"],
+  ["confirm_login_target_switch", "active_account(&accounts)"],
+  ["keep_current_player_target", "active_account(&accounts)"],
+  ["retry_login_target_binding", "active_account(&accounts)"],
+  ["clear_player_target", "active_account(&accounts)"],
 ] as const) {
   assertAcquiresBefore(commandName, "try_acquire_account_operation()", firstSideEffect);
 }
-assertAcquiresBefore("sync_season", "try_acquire_sync()", "app_paths(&app)");
+assertAcquiresBefore("sync_season", "try_acquire_account_operation()", "active_account(&accounts)");
 assert.doesNotMatch(
   commandBody(commands, "cancel_dashen_login"),
   /try_acquire_(?:account_operation|sync)/,

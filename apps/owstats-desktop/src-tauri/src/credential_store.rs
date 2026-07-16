@@ -3,6 +3,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::Path;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -17,7 +18,7 @@ pub struct DashenCredentials {
 }
 
 pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
-    if !path.exists() {
+    if !path_entry_exists(path)? {
         return Ok(CredentialStatus {
             state: "missing".to_string(),
             message: "尚未保存网易大神登录凭证。".to_string(),
@@ -26,6 +27,7 @@ pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
             saved_at: None,
         });
     }
+    ensure_regular_file_or_missing(path)?;
     let text = std::fs::read_to_string(path)?;
     let json: serde_json::Value = serde_json::from_str(&text)?;
     let role_id = json
@@ -59,57 +61,78 @@ pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
 }
 
 pub fn save_credentials_atomic(path: &Path, credentials: &DashenCredentials) -> Result<()> {
+    ensure_regular_file_or_missing(path)?;
     if let Some(parent) = path.parent() {
+        if path_entry_exists(parent)? {
+            ensure_directory(parent)?;
+        }
         std::fs::create_dir_all(parent)?;
+        ensure_directory(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = parent.join(format!(".credentials.{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
         let mut file = std::fs::File::create(&tmp)?;
         let text = serde_json::to_string_pretty(credentials)?;
         file.write_all(text.as_bytes())?;
         file.flush()?;
         file.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(tmp, path)?;
+    result
+}
+
+pub fn read_credentials(path: &Path) -> Result<DashenCredentials> {
+    ensure_regular_file_or_missing(path)?;
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
+fn path_entry_exists(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn ensure_regular_file_or_missing(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata)
+            if !metadata.file_type().is_symlink()
+                && !is_windows_reparse(&metadata)
+                && metadata.is_file() =>
+        {
+            Ok(())
+        }
+        Ok(_) => anyhow::bail!("unsafe credential file"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn ensure_directory(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || is_windows_reparse(&metadata) || !metadata.is_dir() {
+        anyhow::bail!("unsafe credential directory")
+    }
     Ok(())
 }
 
-pub fn clear_credentials_for_path(path: &Path) -> Result<bool> {
-    if path.exists() {
-        std::fs::remove_file(path)?;
-        return Ok(true);
-    }
+#[cfg(windows)]
+fn is_windows_reparse(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x0400 != 0
+}
 
-    Ok(false)
+#[cfg(not(windows))]
+fn is_windows_reparse(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 pub fn redact_sensitive_text(message: &str) -> String {
     crate::redaction::redact_sensitive_text(message)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clear_credentials_removes_saved_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(".dashen_credentials.json");
-        let credentials = DashenCredentials {
-            role_id: 5479,
-            token: "token-secret".to_string(),
-            customer_token: Some("customer-secret".to_string()),
-            dts: Some("2026".to_string()),
-            server: 1,
-            saved_at: "2026-07-01T00:00:00Z".to_string(),
-        };
-        save_credentials_atomic(&path, &credentials).unwrap();
-
-        clear_credentials_for_path(&path).unwrap();
-
-        assert!(!path.exists());
-        let status = credential_status_for_path(&path).unwrap();
-        assert_eq!(status.state, "missing");
-        assert_eq!(status.role_id, None);
-    }
 }

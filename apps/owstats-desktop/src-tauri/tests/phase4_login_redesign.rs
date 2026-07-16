@@ -7,10 +7,45 @@ use owstats_desktop_lib::credentials::{
 };
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
-    extract_battle_tag, extract_login_role_id, extract_role_id, is_signature_helper_missing,
-    BattleTagExtraction, RoleIdExtraction,
+    extract_battle_tag, extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
+    is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
 };
 use owstats_desktop_lib::login_flow::{LoginPhase, LoginProgress};
+
+#[test]
+fn browser_capture_is_separate_from_final_credential_persistence() {
+    let source = include_str!("../src/credentials.rs");
+    let start = source
+        .find("pub(crate) async fn capture_dashen_login(")
+        .expect("capture_dashen_login should exist");
+    let body = &source[start
+        ..source[start..]
+            .find("\npub fn cancel_dashen_login")
+            .map(|offset| start + offset)
+            .unwrap()];
+    for forbidden in [
+        "credential_path",
+        "credentials()",
+        "save_credentials_atomic",
+        "legacy_credentials",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "capture function persisted final credentials through {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn product_login_handlers_only_expose_staged_account_flows() {
+    let source = include_str!("../src/commands.rs");
+    assert!(!source.contains("pub async fn start_dashen_login("));
+    assert!(!source.contains("pub fn logout("));
+    assert!(source.contains("pub async fn add_account("));
+    assert!(source.contains("capture_and_publish_add"));
+    assert!(source.contains("pub async fn relogin_account("));
+    assert!(source.contains("capture_and_publish_relogin"));
+}
 
 #[test]
 fn login_progress_never_exposes_sensitive_values() {
@@ -136,6 +171,39 @@ fn battletag_extraction_reads_only_the_first_token_after_the_colon() {
 }
 
 #[test]
+fn battletag_candidates_accept_split_dom_values_and_deduplicate() {
+    assert_eq!(
+        extract_battle_tag_candidates(
+            &["Tester#5479".to_string(), " Tester#5479 ".to_string(),],
+            false,
+        ),
+        BattleTagExtraction::Found("Tester#5479".to_string())
+    );
+}
+
+#[test]
+fn battletag_candidates_reject_conflicts_truncation_and_invalid_values() {
+    assert_eq!(
+        extract_battle_tag_candidates(
+            &["First#1111".to_string(), "Second#2222".to_string()],
+            false,
+        ),
+        BattleTagExtraction::Conflict
+    );
+    assert_eq!(
+        extract_battle_tag_candidates(&["First#1111".to_string()], true),
+        BattleTagExtraction::Conflict
+    );
+    assert_eq!(
+        extract_battle_tag_candidates(
+            &["MissingHash".to_string(), "Invalid#12A".to_string()],
+            false,
+        ),
+        BattleTagExtraction::Missing
+    );
+}
+
+#[test]
 fn token_script_builds_signed_request_without_embedding_existing_secret() {
     let script = build_get_report_token_script("123456", 1);
 
@@ -152,6 +220,13 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     let script = build_collect_candidates_script();
 
     assert!(script.contains("pageText:"));
+    assert!(script.contains("battleTagCandidates:"));
+    assert!(script.contains("MAX_BATTLETAG_CANDIDATES"));
+    assert!(script.contains("createTreeWalker"));
+    assert!(script.contains("NodeFilter.SHOW_TEXT"));
+    assert!(script.contains("战网昵称"));
+    assert!(script.contains("(?![0-9A-Za-z#])"));
+    assert!(script.contains("iframe.contentDocument"));
     assert!(script.contains("roleCandidates:"));
     assert!(script.contains("current:"));
     assert!(script.contains("storage:"));
@@ -165,6 +240,7 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     assert!(script.contains("performance.getEntriesByType"));
     assert!(script.contains("localStorage"));
     assert!(script.contains("sessionStorage"));
+    assert!(!script.contains("outerHTML"));
 }
 
 #[test]
@@ -271,6 +347,43 @@ fn login_capture_keeps_storage_credential_role_when_battletag_is_missing() {
 }
 
 #[test]
+fn login_capture_pairs_stable_battletag_with_unique_credential_role() {
+    let mut identity = LoginCaptureIdentity::default();
+
+    for _ in 0..2 {
+        identity.observe(
+            Some("101101".to_string()),
+            RoleIdExtraction::Missing,
+            BattleTagExtraction::Found("First#1111".to_string()),
+        );
+    }
+
+    assert_eq!(
+        identity.paired_status(),
+        PairedIdentityStatus::Confirmed {
+            role_id: "101101".to_string(),
+            battle_tag: "First#1111".to_string(),
+        }
+    );
+    assert_eq!(identity.detected_battle_tag("101101"), Some("First#1111"));
+}
+
+#[test]
+fn login_capture_rejects_credential_and_page_role_mismatch() {
+    let mut identity = LoginCaptureIdentity::default();
+
+    identity.observe(
+        Some("101101".to_string()),
+        RoleIdExtraction::Found("202202".to_string()),
+        BattleTagExtraction::Found("First#1111".to_string()),
+    );
+
+    assert_eq!(identity.credential_role_id(), Some("101101"));
+    assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);
+    assert_eq!(identity.detected_battle_tag("101101"), None);
+}
+
+#[test]
 fn login_capture_keeps_resource_credential_role_when_battletag_conflicts() {
     let current = vec!["https://ds.163.com/".to_string()];
     let resources = vec!["https://api.example/?role_id=202202".to_string()];
@@ -301,6 +414,7 @@ fn login_capture_confirms_pending_pair_before_immediate_token_success() {
     assert_eq!(identity.paired_status(), PairedIdentityStatus::Pending);
 
     identity.confirm_pending_pair(
+        Some("101101".to_string()),
         RoleIdExtraction::Found("101101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
@@ -326,6 +440,7 @@ fn login_capture_confirms_pending_pair_before_signature_lock() {
 
     assert_eq!(identity.paired_status(), PairedIdentityStatus::Pending);
     identity.confirm_pending_pair(
+        Some("101101".to_string()),
         RoleIdExtraction::Found("101101".to_string()),
         BattleTagExtraction::Found("First#1111".to_string()),
     );
@@ -349,6 +464,7 @@ fn login_capture_drops_changed_pending_pair_without_losing_credential_role() {
     );
 
     identity.confirm_pending_pair(
+        Some("202202".to_string()),
         RoleIdExtraction::Found("202202".to_string()),
         BattleTagExtraction::Found("Second#2222".to_string()),
     );
@@ -376,7 +492,7 @@ fn login_capture_drops_failed_or_conflicting_confirmation_without_losing_credent
             BattleTagExtraction::Found("First#1111".to_string()),
         );
 
-        identity.confirm_pending_pair(paired_role_id, battle_tag);
+        identity.confirm_pending_pair(Some("101101".to_string()), paired_role_id, battle_tag);
 
         assert_eq!(identity.credential_role_id(), Some("101101"));
         assert_eq!(identity.paired_status(), PairedIdentityStatus::Unavailable);

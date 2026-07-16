@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AccountLoginResult,
+  AccountManagerStatus,
   CareerMmrBuildStatus,
   CareerMmrHistory,
   CareerMmrHistoryRequest,
@@ -9,7 +11,6 @@ import type {
   CareerMmrSeasonBreakdown,
   CareerRole,
   FilterOptions,
-  CredentialLoginResult,
   CredentialStatus,
   FriendAnalytics,
   FriendAnalyticsFilters,
@@ -26,12 +27,25 @@ import type {
   ClearPlayerTargetResult,
   PlayerSearchOption,
   RankingResponse,
+  RemoveAccountResult,
   SeasonAnalysis,
   SyncSummary,
-  LogoutResult,
   UpdateCheckResult,
   UserSettings,
 } from "./types";
+
+export const listAccounts = () => invoke<AccountManagerStatus>("list_accounts");
+
+export const addAccount = () => invoke<AccountLoginResult>("add_account");
+
+export const switchAccount = (accountId: string) =>
+  invoke<AccountManagerStatus>("switch_account", { accountId });
+
+export const reloginAccount = (accountId: string) =>
+  invoke<AccountLoginResult>("relogin_account", { accountId });
+
+export const removeAccount = (accountId: string) =>
+  invoke<RemoveAccountResult>("remove_account", { accountId });
 
 export function getOverview() {
   return invoke<Overview>("get_overview");
@@ -93,16 +107,8 @@ export function saveUserSettings(settings: UserSettings) {
   return invoke<UserSettings>("save_user_settings", { settings });
 }
 
-export function logout() {
-  return invoke<LogoutResult>("logout");
-}
-
 export function checkAppUpdate() {
   return invoke<UpdateCheckResult>("check_app_update");
-}
-
-export function startDashenLogin() {
-  return invoke<CredentialLoginResult>("start_dashen_login");
 }
 
 export function cancelDashenLogin() {

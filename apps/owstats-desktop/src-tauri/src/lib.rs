@@ -1,3 +1,8 @@
+pub mod account_context;
+pub mod account_login;
+pub mod account_migration;
+pub mod account_removal;
+pub mod account_store;
 mod analytics;
 pub mod app_paths;
 pub mod browser_session;
@@ -45,8 +50,21 @@ pub use sync::{
 };
 
 pub fn run() {
+    use tauri::Manager;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| anyhow::anyhow!("无法定位应用数据目录: {error}"))?;
+            let shared = app_paths::SharedAppPaths::from_app_data_dir(app_data_dir);
+            let account_context = account_context::AccountContextManager::load(shared)
+                .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
+            app.manage(account_context);
+            Ok(())
+        })
         .manage(sync_coordinator::SyncCoordinator::default())
         .manage(login_target::LoginTargetCoordinator::default())
         .invoke_handler(tauri::generate_handler![
@@ -64,9 +82,12 @@ pub fn run() {
             commands::get_player_profile,
             commands::get_user_settings,
             commands::save_user_settings,
-            commands::logout,
             commands::check_app_update,
-            commands::start_dashen_login,
+            commands::add_account,
+            commands::relogin_account,
+            commands::list_accounts,
+            commands::switch_account,
+            commands::remove_account,
             commands::cancel_dashen_login,
             commands::get_player_target_status,
             commands::get_login_target_status,

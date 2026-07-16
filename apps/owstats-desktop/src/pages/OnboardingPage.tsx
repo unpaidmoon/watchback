@@ -7,45 +7,48 @@ import {
   FileText,
   FolderOpen,
   Github,
-  LogIn,
-  LogOut,
-
   UserRound,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
+  addAccount,
   cancelDashenLogin,
   checkAppUpdate,
   confirmLoginTargetSwitch,
   getOnboardingStatus,
   getPlayerProfile,
   getLoginTargetStatus,
+  listAccounts,
   clearPlayerTarget,
   keepCurrentPlayerTarget,
-  logout,
+  reloginAccount,
+  removeAccount,
   retryLoginTargetBinding,
-  startDashenLogin,
+  switchAccount,
   syncSeason,
 } from "../shared/api";
-import { DataFact, formatTimestamp, SeasonStatusCard } from "../features/command-center/SeasonHealthPanel";
+import { AccountManager } from "../features/command-center/AccountManager";
+import {
+  loadDashboardRequest,
+  runAddAccountOperation,
+  runReloginAccountOperation,
+  runRemoveAccountOperation,
+  runSwitchAccountOperation,
+} from "../features/command-center/accountOperationIsolation";
+import type { BusyAccountAction, DashboardSnapshot } from "../features/command-center/accountOperationIsolation";
+import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
+import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
+import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
-import type { CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
-
-type DashboardSnapshot = {
-  status: OnboardingStatus;
-  profile: PlayerProfile;
-  targetStatus: LoginTargetStatus;
-};
+import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
-const DASHBOARD_SEASON = 22;
-const COMMAND_CENTER_SEASONS = [21, 22, 23] as const;
-const dashboardCache = new Map<number, DashboardSnapshot>();
+let dashboardCache: DashboardSnapshot | null = null;
 
 export function normalizeLoginTargetName(value: string) {
   return value.trim().replace(/＃/g, "#").toLowerCase();
@@ -57,15 +60,18 @@ export function isCurrentDashboardRequest(requestGeneration: number, currentGene
 
 export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [accountStatus, setAccountStatus] = useState<AccountManagerStatus | null>(null);
+  const [accountContextInvalidated, setAccountContextInvalidated] = useState(false);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [targetStatus, setTargetStatus] = useState<LoginTargetStatus | null>(null);
-  const [seasonInput, setSeasonInput] = useState("23");
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
-  const [loggingIn, setLoggingIn] = useState(false);
+  const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,41 +129,74 @@ export function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    const cached = dashboardCache.get(DASHBOARD_SEASON);
-    if (cached) {
-      applyDashboardSnapshot(cached);
-    }
     void loadDashboard();
   }, []);
 
-  async function loadDashboard() {
+  async function loadDashboard(rethrow = false) {
     const requestGeneration = ++dashboardRequestGenerationRef.current;
     if (mountedRef.current) {
       setError(null);
     }
     try {
-      const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all([
-        getOnboardingStatus(),
-        getPlayerProfile(),
-        getLoginTargetStatus(),
-      ]);
-      if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
+      const result = await loadDashboardRequest({
+        requestGeneration,
+        isCurrent: (generation) => isCurrentDashboardRequest(
+          generation,
+          dashboardRequestGenerationRef.current,
+          mountedRef.current,
+        ),
+        cachedSnapshot: dashboardCache,
+        listAccounts,
+        loadAccountScope: async () => {
+          const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all([
+            getOnboardingStatus(),
+            getPlayerProfile(),
+            getLoginTargetStatus(),
+          ]);
+          return { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
+        },
+        onAccountStatus: (nextAccountStatus, reusableCache) => {
+          setAccountStatus(nextAccountStatus);
+          if (reusableCache) {
+            applyDashboardSnapshot(reusableCache);
+          } else {
+            dashboardCache = null;
+            setStatus(null);
+            setProfile(null);
+            setTargetStatus(null);
+          }
+        },
+      });
+      if (result.kind === "stale") {
         return;
       }
-      const snapshot = { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
-      dashboardCache.set(DASHBOARD_SEASON, snapshot);
-      applyDashboardSnapshot(snapshot);
+      dashboardCache = result.snapshot;
+      applyDashboardSnapshot(result.snapshot);
     } catch (err) {
       if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
-        setError(productErrorMessage(err));
+        if (!rethrow) {
+          setError(productErrorMessage(err));
+        }
+      }
+      if (rethrow) {
+        throw err;
       }
     }
   }
 
   function applyDashboardSnapshot(snapshot: DashboardSnapshot) {
+    setAccountContextInvalidated(false);
+    setAccountStatus(snapshot.accountStatus);
     setStatus(snapshot.status);
     setProfile(snapshot.profile);
     setTargetStatus(snapshot.targetStatus);
+    setSelectedSeason((current) => snapshot.status
+      ? resolveCommandCenterSeason(
+          current ?? snapshot.status.currentSeason,
+          snapshot.status.syncableSeasons,
+          snapshot.status.currentSeason,
+        )
+      : null);
   }
 
   function acquireOperationLock() {
@@ -173,7 +212,7 @@ export function OnboardingPage() {
   }
 
   function invalidateDashboardCache() {
-    dashboardCache.delete(DASHBOARD_SEASON);
+    dashboardCache = null;
     dashboardRequestGenerationRef.current += 1;
   }
 
@@ -185,33 +224,79 @@ export function OnboardingPage() {
     return true;
   }
 
-  async function runLogin() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setLoggingIn(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await startDashenLogin();
-      if (mountedRef.current) {
-        setStatus((current) => (current ? { ...current, credentialStatus: result.status } : current));
-        setTargetStatus(result.target);
-        setNotice(result.target.message);
-      }
-      await loadDashboard();
-    } catch (err) {
-      const loginError = `登录或识别失败：${productErrorMessage(err)}。请重新识别。`;
-      await loadDashboard();
-      if (mountedRef.current) {
-        setError(loginError);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoggingIn(false);
-      }
-      releaseOperationLock();
-    }
+  function failClosedAccountContext() {
+    invalidateDashboardCache();
+    setAccountContextInvalidated(true);
+    setStatus(null);
+    setProfile(null);
+    setTargetStatus(null);
+    setSelectedSeason(null);
+    setSyncProgress(null);
+    setSyncError(null);
+    setSyncNotice(null);
+    setSyncingSeason(null);
+    setAccountStatus((current) => current ? {
+      ...current,
+      activeAccountId: null,
+      accounts: current.accounts.map((account) => ({ ...account, isActive: false })),
+      message: "正在重新加载账号状态。",
+    } : current);
+  }
+
+  function accountOperationLifecycle() {
+    return {
+      begin: beginAccountOperation,
+      release: releaseOperationLock,
+      setBusy: (action: BusyAccountAction | null) => {
+        if (mountedRef.current) {
+          if (action?.kind === "add" || action?.kind === "relogin") {
+            setLoginProgress(null);
+          }
+          setBusyAccountAction(action);
+        }
+      },
+      setNotice: (message: string | null) => {
+        if (mountedRef.current) setNotice(message);
+      },
+      setError: (message: string | null) => {
+        if (mountedRef.current) setError(message);
+      },
+      formatError: productErrorMessage,
+      refreshAccounts: loadDashboard,
+      clearCache: clearAccountScopedFrontendCaches,
+      failClosed: failClosedAccountContext,
+      refreshAfterMutation: () => loadDashboard(true),
+    };
+  }
+
+  function runAddAccount() {
+    return runAddAccountOperation({
+      ...accountOperationLifecycle(),
+      invoke: addAccount,
+    });
+  }
+
+  function runReloginAccount(account: AccountSummary) {
+    return runReloginAccountOperation(account, {
+      ...accountOperationLifecycle(),
+      invoke: () => reloginAccount(account.accountId),
+    });
+  }
+
+  function runSwitchAccount(account: AccountSummary) {
+    return runSwitchAccountOperation(account, {
+      ...accountOperationLifecycle(),
+      invoke: () => switchAccount(account.accountId),
+      reload: () => window.location.reload(),
+    });
+  }
+
+  function runRemoveAccount(account: AccountSummary) {
+    return runRemoveAccountOperation(account, {
+      ...accountOperationLifecycle(),
+      invoke: () => removeAccount(account.accountId),
+      reload: () => window.location.reload(),
+    });
   }
 
   async function cancelLogin() {
@@ -240,25 +325,33 @@ export function OnboardingPage() {
 
   async function runSeasonSync(season: number) {
     if (!acquireOperationLock()) {
-      setError("当前正在处理账号操作，请完成后再同步。");
+      setSyncError("当前正在处理账号操作，请完成后再同步。");
       return;
     }
     dashboardRequestGenerationRef.current += 1;
     setSyncingSeason(season);
     setNotice(null);
     setError(null);
+    setSyncNotice(null);
+    setSyncError(null);
     setSyncProgress(null);
     try {
       const summary = await syncSeason(season);
       clearMatchesPageCache();
       await loadDashboard();
-      setNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
+      setSyncNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
     } catch (err) {
-      setError(productErrorMessage(err));
+      setSyncError(productErrorMessage(err));
     } finally {
       setSyncingSeason(null);
       releaseOperationLock();
     }
+  }
+
+  function selectSyncSeason(season: number) {
+    setSyncError(null);
+    setSyncNotice(null);
+    setSelectedSeason(season);
   }
 
   async function runConfirmTargetSwitch() {
@@ -361,32 +454,6 @@ export function OnboardingPage() {
     }
   }
 
-  async function runLogout() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setLoggingOut(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await logout();
-      if (mountedRef.current) {
-        setNotice(result.message);
-        setLoginProgress(null);
-        await loadDashboard();
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`退出登录失败：${productErrorMessage(err)}。请重试。`);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoggingOut(false);
-      }
-      releaseOperationLock();
-    }
-  }
-
   async function runUpdateCheck() {
     setCheckingUpdate(true);
     setNotice(null);
@@ -402,37 +469,24 @@ export function OnboardingPage() {
   }
 
   const credentialReady = status?.credentialStatus.state === "ready";
-  const accountOperationBusy = loggingIn || loggingOut || targetAction !== null;
+  const accountOperationBusy = busyAccountAction !== null || targetAction !== null;
+  const activeAccount = accountStatus?.accounts.find((account) => account.isActive) ?? null;
   const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
   const primaryTargetState = targetStatus && ["switchRequired", "bindFailed", "unidentified", "verificationRequired", "mismatchKept"].includes(targetStatus.state)
     ? targetStatus.state
     : null;
-  const hasTargetPrimaryAction = primaryTargetState !== null;
   const showDetectedLogin = Boolean(
     targetStatus?.currentBnet &&
     targetStatus.detectedBnet &&
     normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
   );
   const warnings = status?.health.warnings ?? [];
-  const displayName = profile?.playerId ?? (status?.credentialStatus.roleId ? `角色 ${status.credentialStatus.roleId}` : "未登录玩家");
+  const displayName = activeAccount?.battleTag ?? "未登录玩家";
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
   const canUseData = Boolean(status?.canEnterReview);
   const presetMatches = status?.localData.presetMatches ?? 0;
   const detailMatches = status?.localData.detailMatches ?? 0;
   const coveragePercent = presetMatches > 0 ? Math.min(100, Math.round((detailMatches / presetMatches) * 100)) : 0;
-  const selectedSeason = Number.parseInt(seasonInput, 10);
-  const seasonStatuses = Number.isSafeInteger(selectedSeason) && selectedSeason > 0
-    ? [status?.seasonStatuses.find((item) => item.season === selectedSeason) ?? {
-        season: selectedSeason,
-        matchCount: 0,
-        detailCount: 0,
-        normalMatchCount: 0,
-        arenaMatchCount: 0,
-        failedDetailCount: 0,
-        lastSyncedOrImportedAt: null,
-        coveragePercent: 0,
-      }]
-    : [];
 
   useEffect(() => {
     if (!primaryTargetState) {
@@ -463,9 +517,6 @@ export function OnboardingPage() {
               <Download size={18} />
               {checkingUpdate ? "检查中" : "检查更新"}
             </button>
-            <button className="primaryButton" type="button" onClick={() => runSeasonSync(selectedSeason)} disabled={!Number.isSafeInteger(selectedSeason) || selectedSeason <= 0 || !credentialReady || !targetStatus?.syncAllowed || accountOperationBusy || syncingSeason !== null}>
-              {syncingSeason === selectedSeason ? "同步中…" : `同步 S${seasonInput}`}
-            </button>
           </>
         )}
       />
@@ -480,15 +531,20 @@ export function OnboardingPage() {
         </div>
       )}
 
-      <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
+      {!accountContextInvalidated && accountStatus?.activeAccountId ? <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
         <DataFact label="登录状态" value={credentialReady ? "已登录" : "待登录"} tone={credentialReady ? "good" : "warn"} />
         <DataFact label="本地对局" value={`${presetMatches} 场`} tone={presetMatches > 0 ? "good" : "warn"} />
         <DataFact label="覆盖率" value={`${coveragePercent}%`} tone={coveragePercent >= 80 ? "good" : "warn"} />
         <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
-      </div>
+      </div> : null}
 
       <QaRegion id="CMD-PROFILE" className="phase6QaBlockRegion">
-        <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
+        {accountStatus === null || accountContextInvalidated ? (
+          <div className="seasonSyncWorkbenchLoading" role="status">
+            {accountContextInvalidated ? "账号状态已更新，正在重新加载…" : "正在加载账号信息…"}
+          </div>
+        ) : accountStatus.activeAccountId ? <>
+          <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
           <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
             <div className="commandCenterSectionHeading">
               <div>
@@ -526,8 +582,8 @@ export function OnboardingPage() {
                       {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
                     </button>
                   ) : targetStatus && ["unidentified", "verificationRequired", "mismatchKept", "bindFailed"].includes(targetStatus.state) ? (
-                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
-                      {loggingIn ? "识别中…" : "重新识别"}
+                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={() => activeAccount && runReloginAccount(activeAccount)} disabled={!activeAccount || accountOperationBusy || syncingSeason !== null}>
+                      {busyAccountAction?.kind === "relogin" ? "识别中…" : "重新识别"}
                     </button>
                   ) : null}
                   <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}>
@@ -535,31 +591,25 @@ export function OnboardingPage() {
                   </button>
                 </div>
               </section>
-              <section className="syncSeasonWorkbench" aria-label="赛季同步">
-                <div className="syncSeasonPicker">
-                  <span className="phase6Eyebrow">赛季同步</span>
-                  <div className="commandCenterSeasonSegments" role="group" aria-label="选择同步赛季">
-                    {COMMAND_CENTER_SEASONS.map((season) => (
-                      <button key={season} className={season === selectedSeason ? "active" : ""} type="button" aria-pressed={season === selectedSeason} onClick={() => setSeasonInput(String(season))}>{`S${season}`}</button>
-                    ))}
-                  </div>
-                  <p>已有赛季：{status?.availableSeasons.length ? status.availableSeasons.map((season) => `S${season}`).join(" · ") : "暂无"}</p>
-                </div>
-                <div className="phase8SeasonStatusGrid" aria-label="赛季本地数据状态">
-                  {seasonStatuses.map((seasonStatus) => (
-                    <SeasonStatusCard
-                      key={seasonStatus.season}
-                      seasonStatus={seasonStatus}
-                      credentialReady={credentialReady}
-                      targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
-                      accountOperationBusy={accountOperationBusy}
-                      syncingSeason={syncingSeason}
-                      progress={syncProgress?.season === seasonStatus.season ? syncProgress : null}
-                      onSync={() => runSeasonSync(seasonStatus.season)}
-                    />
-                  ))}
-                </div>
-              </section>
+              {status && selectedSeason !== null ? (
+                <SeasonSyncWorkbench
+                  selectedSeason={selectedSeason}
+                  currentSeason={status.currentSeason}
+                  syncableSeasons={status?.syncableSeasons ?? []}
+                  seasonStatuses={status.seasonStatuses}
+                  credentialReady={credentialReady}
+                  targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
+                  accountOperationBusy={accountOperationBusy}
+                  syncingSeason={syncingSeason}
+                  progress={syncProgress}
+                  syncError={syncError}
+                  syncNotice={syncNotice}
+                  onSelectSeason={selectSyncSeason}
+                  onSync={runSeasonSync}
+                />
+              ) : (
+                <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>
+              )}
           </section>
 
           <aside className="commandCenterAccountPanel" aria-labelledby="command-center-account-title">
@@ -590,20 +640,6 @@ export function OnboardingPage() {
               <HealthItem label={presetMatches > 0 ? "本地赛季有数据" : "本地赛季等待数据"} ok={presetMatches > 0} />
               <HealthItem label="没有待处理失败" ok={!warnings.length} />
             </div>
-            <div className="commandCenterAccountActions">
-                {!hasTargetPrimaryAction && (
-                  <button className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
-                    <LogIn size={18} />
-                    {loggingIn ? "登录识别中…" : credentialReady ? "重新登录" : "登录网易大神"}
-                  </button>
-                )}
-                {loggingIn && (
-                  <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
-                    <X size={18} />
-                    {cancellingLogin ? "取消中…" : "取消"}
-                  </button>
-                )}
-            </div>
           </aside>
         </div>
 
@@ -616,14 +652,32 @@ export function OnboardingPage() {
                 <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => setNotice("Github地址入口后续提供")} />
           </div>
         </section>
+        </> : (
+          <section className="commandCenterAccountEmpty" id="local-data" tabIndex={-1} aria-labelledby="command-center-empty-title">
+            <h2 id="command-center-empty-title">尚未添加账号</h2>
+            <p>添加账号后即可同步和查看本地数据。</p>
+          </section>
+        )}
 
-        <section className="commandCenterDangerZone" aria-label="账号危险操作">
-          <div><strong>退出当前账号</strong><p>退出后会清除本地登录凭证，但不会删除已经导入的赛季数据。</p></div>
-          <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}>
-            <LogOut size={18} />
-            {loggingOut ? "退出中…" : "退出登录"}
-          </button>
-        </section>
+        {accountStatus ? <div className="accountManagerPanel">
+          {(busyAccountAction?.kind === "add" || busyAccountAction?.kind === "relogin") && (
+            <div className="accountManagerLoginProgress" role="status" aria-live="polite">
+              <span>{loginProgress?.message ?? "正在等待浏览器登录…"}</span>
+              <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
+                <X size={18} />
+                {cancellingLogin ? "取消中…" : "取消"}
+              </button>
+            </div>
+          )}
+          <AccountManager
+            accounts={accountStatus?.accounts ?? []}
+            busyAction={busyAccountAction}
+            onAdd={runAddAccount}
+            onSwitch={runSwitchAccount}
+            onRelogin={runReloginAccount}
+            onRemove={runRemoveAccount}
+          />
+        </div> : null}
       </QaRegion>
     </section>
   );
