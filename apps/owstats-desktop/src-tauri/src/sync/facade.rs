@@ -298,10 +298,9 @@ async fn sync_incremental_season_with_request(
         season,
         phase: format!(
             "正在获取详情 {} / {}",
-            fetch.details_requested.saturating_sub(fetch.failed_details),
-            fetch.details_requested
+            fetch.details_requested, fetch.details_requested
         ),
-        processed: fetch.details_requested.saturating_sub(fetch.failed_details),
+        processed: fetch.details_requested,
         total: fetch.details_requested,
         current_match_id: None,
         failed_details: fetch.failed_details,

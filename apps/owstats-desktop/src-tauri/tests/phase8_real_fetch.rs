@@ -562,6 +562,7 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
 
     let server = spawn_full_season_server();
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    let mut progresses = Vec::new();
 
     let summary =
         owstats_desktop_lib::sync_season_with_current_account_credentials_path_output_dir_base_url(
@@ -570,7 +571,7 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
             &app_data.join(".dashen_credentials.json"),
             23,
             &format!("{}/customer", server.base_url),
-            |_| {},
+            |progress| progresses.push(progress),
         )
         .await
         .unwrap();
@@ -578,6 +579,15 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
     let raw_path = season_dir.join("local_s23_full_season.json");
     assert!(raw_path.exists());
     assert_eq!(summary.imported_matches, 3);
+    let detail_progress = progresses
+        .iter()
+        .find(|progress| progress.phase.starts_with("正在获取详情"))
+        .expect("missing completed detail progress");
+    assert_eq!(detail_progress.processed, 3);
+    assert_eq!(detail_progress.total, 3);
+    assert_eq!(detail_progress.failed_details, 1);
+    assert!(detail_progress.phase.contains("3 / 3"));
+    assert!(!detail_progress.phase.contains("2 / 3"));
 }
 
 #[tokio::test]
