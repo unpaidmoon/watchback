@@ -554,12 +554,15 @@ async fn fetch_quick_history_for_mode(
     let mut final_reason = "page_limit".to_string();
     let mut limited = false;
     let empty_match_ids = HashSet::new();
+    let mut remaining_pages = QUICK_UPDATE_MAX_PAGES_PER_MODE;
 
     for (candidate_index, request_season) in season_candidates.iter().enumerate() {
         let mut candidate_entries = Vec::new();
         let mut reason = "page_limit";
-        let mut candidate_limited = true;
-        for page in 1..=QUICK_UPDATE_MAX_PAGES_PER_MODE {
+        let mut stopped = false;
+        let mut page = 1;
+        while remaining_pages > 0 {
+            remaining_pages -= 1;
             let payload = if fight {
                 client
                     .fight_query_match_list(customer_token, mode, page, *request_season)
@@ -592,25 +595,31 @@ async fn fetch_quick_history_for_mode(
             match decision {
                 crate::sync::QuickPageDecision::Empty => {
                     reason = "empty";
-                    candidate_limited = false;
+                    stopped = true;
                     break;
                 }
                 crate::sync::QuickPageDecision::WatermarkReached => {
                     reason = "watermark_reached";
-                    candidate_limited = false;
+                    stopped = true;
                     break;
                 }
                 crate::sync::QuickPageDecision::Continue
                 | crate::sync::QuickPageDecision::Unsafe => {}
             }
+            page += 1;
         }
         let has_fallback = candidate_index + 1 < season_candidates.len();
-        if candidate_entries.is_empty() && has_fallback {
+        if !stopped && remaining_pages == 0 {
+            final_entries = candidate_entries;
+            final_reason = "page_limit".to_string();
+            limited = true;
+            break;
+        }
+        if candidate_entries.is_empty() && has_fallback && remaining_pages > 0 {
             continue;
         }
         final_entries = candidate_entries;
         final_reason = reason.to_string();
-        limited = candidate_limited;
         break;
     }
 

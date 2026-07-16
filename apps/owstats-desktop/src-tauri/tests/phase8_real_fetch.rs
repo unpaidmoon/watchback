@@ -748,6 +748,120 @@ async fn quick_fetch_stops_on_legal_empty_pages_and_preserves_current_season_fal
 }
 
 #[tokio::test]
+async fn quick_fetch_uses_canonical_watermark_from_imported_normal_mode() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("quick.sqlite3"));
+    owstats_desktop_lib::import_payload_value_embedded(
+        &db,
+        &serde_json::json!({
+            "season": 22,
+            "matches": {
+                "entries": [{
+                    "matchId": "known-sport",
+                    "gameMode": "sport",
+                    "instanceType": "IT_RANKED",
+                    "matchRet": 1,
+                    "beginTs": 1700000000
+                }],
+                "details": [{
+                    "match_id": "known-sport",
+                    "match_kind": "normal",
+                    "payload": {
+                        "code": 0,
+                        "data": {
+                            "gameTimeSec": 60,
+                            "totalCount": {"teammateList": [], "enemyList": []}
+                        }
+                    }
+                }],
+                "detail_errors": []
+            }
+        }),
+    )
+    .unwrap();
+    let stored_mode: String = db
+        .connect()
+        .unwrap()
+        .query_row(
+            "SELECT game_mode FROM matches WHERE match_id='known-sport'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_mode, "SportPreset");
+    let inventory = owstats_desktop_lib::load_season_sync_inventory(&db, 22).unwrap();
+    let server = spawn_quick_scan_server(QuickScanScenario::Known);
+    let mut request = quick_request(
+        &server,
+        DashenCredentials {
+            role_id: 123,
+            token: "synthetic-account-token".to_string(),
+            dts: Some(2026),
+            server: 1,
+        },
+        22,
+    );
+    request.include_fight = false;
+
+    let fetch = fetch_quick_season_with_base_url(request, &inventory)
+        .await
+        .unwrap();
+
+    assert_eq!(quick_list_pages(&server)["sport"], vec![1]);
+    assert_eq!(
+        fetch.quick_scan_stop_reasons["normal:sport"],
+        "watermark_reached"
+    );
+}
+
+#[tokio::test]
+async fn quick_fetch_shares_five_page_budget_across_current_season_candidates() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let server = spawn_quick_scan_server(QuickScanScenario::CurrentUnsafeSport);
+    let fetch = fetch_quick_season_with_base_url(
+        quick_request(
+            &server,
+            DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            23,
+        ),
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap();
+
+    let requests = server.requests.lock().unwrap();
+    let sport_requests = requests
+        .iter()
+        .filter(|request| {
+            request_path(&request.first_line).is_some_and(|path| path.ends_with("/queryMatchList"))
+                && request_query_param(&request.first_line, "gameMode") == Some("sport")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sport_requests
+            .iter()
+            .map(|request| request_query_param(&request.first_line, "page").unwrap())
+            .collect::<Vec<_>>(),
+        vec!["1", "2", "3", "4", "5"]
+    );
+    assert!(sport_requests
+        .iter()
+        .all(|request| !request.first_line.contains("season=23")));
+    assert!(fetch.quick_scan_limited);
+    assert_eq!(fetch.quick_scan_stop_reasons["normal:sport"], "page_limit");
+}
+
+#[tokio::test]
 async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_season_directory() {
     let temp = tempfile::tempdir().unwrap();
     let app_data = temp.path().join("app-data");
@@ -1628,6 +1742,7 @@ enum QuickScanScenario {
     UnsafeSportDelayed,
     Empty,
     CurrentFallback,
+    CurrentUnsafeSport,
 }
 
 struct QuickScanServer {
@@ -1784,6 +1899,9 @@ fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> Strin
             && request_query_param(request_line, "season").is_none())
     {
         return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::CurrentUnsafeSport) && mode == "sport" {
+        return r#"{"code":0,"data":{"matchList":[{"unexpected":"shape"}]}}"#.to_string();
     }
     if matches!(scenario, QuickScanScenario::UnsafeSportDelayed) && mode == "sport" {
         return r#"{"code":0,"data":{"matchList":[{"unexpected":"shape"}]}}"#.to_string();

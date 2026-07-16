@@ -72,8 +72,10 @@ fn inventory_tracks_latest_watermark_and_ids_per_mode() {
     for (match_id, match_kind, game_mode, begin_ts) in [
         ("normal-old", "normal", "SportPreset", 10),
         ("normal-new", "normal", "SportPreset", 30),
+        ("normal-open", "normal", "SportOpen", 40),
         ("fight", "fight", "QuickFight", 20),
         ("no-watermark", "normal", "LeisurePreset", 0),
+        ("leisure-6v6", "normal", "Leisure6v6", 50),
         ("empty-mode", "normal", "", 100),
     ] {
         conn.execute(
@@ -99,7 +101,7 @@ fn inventory_tracks_latest_watermark_and_ids_per_mode() {
     let inventory = load_season_sync_inventory(&db, 23).unwrap();
     let normal = inventory
         .modes
-        .get(&SeasonModeKey::new("normal", "SportPreset"))
+        .get(&SeasonModeKey::new("normal", "sport"))
         .unwrap();
     let fight = inventory
         .modes
@@ -107,22 +109,29 @@ fn inventory_tracks_latest_watermark_and_ids_per_mode() {
         .unwrap();
     let no_watermark = inventory
         .modes
-        .get(&SeasonModeKey::new("normal", "LeisurePreset"))
+        .get(&SeasonModeKey::new("normal", "leisure"))
         .unwrap();
 
     assert_eq!(
         normal.match_ids,
-        HashSet::from(["normal-old".to_string(), "normal-new".to_string()])
+        HashSet::from([
+            "normal-old".to_string(),
+            "normal-new".to_string(),
+            "normal-open".to_string(),
+        ])
     );
     assert_eq!(normal.detail_ids, HashSet::from(["normal-new".to_string()]));
-    assert_eq!(normal.latest_begin_ts, Some(30));
+    assert_eq!(normal.latest_begin_ts, Some(40));
     assert_eq!(fight.match_ids, HashSet::from(["fight".to_string()]));
     assert_eq!(fight.latest_begin_ts, Some(20));
     assert_eq!(
         no_watermark.match_ids,
-        HashSet::from(["no-watermark".to_string()])
+        HashSet::from(["no-watermark".to_string(), "leisure-6v6".to_string()])
     );
-    assert_eq!(no_watermark.latest_begin_ts, None);
+    assert_eq!(no_watermark.latest_begin_ts, Some(50));
+    assert!(!inventory
+        .modes
+        .contains_key(&SeasonModeKey::new("normal", "SportPreset")));
     assert!(!inventory
         .modes
         .contains_key(&SeasonModeKey::new("normal", "")));

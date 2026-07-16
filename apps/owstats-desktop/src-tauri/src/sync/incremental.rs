@@ -23,18 +23,17 @@ impl SeasonModeKey {
 
 fn normalized_season_mode_key(match_kind: &str, game_mode: &str) -> Option<SeasonModeKey> {
     let game_mode = game_mode.trim();
-    let normalized_kind = if super::FIGHT_MODES.contains(&game_mode) {
-        "fight"
-    } else if super::NORMAL_MODES.contains(&game_mode) {
-        "normal"
-    } else {
-        return None;
+    let (normalized_kind, canonical_mode) = match game_mode {
+        "sport" | "SportPreset" | "SportOpen" => ("normal", "sport"),
+        "leisure" | "LeisurePreset" | "Leisure6v6" => ("normal", "leisure"),
+        mode if super::FIGHT_MODES.contains(&mode) => ("fight", mode),
+        _ => return None,
     };
     let explicit_kind = match_kind.trim();
     if !explicit_kind.is_empty() && explicit_kind != normalized_kind {
         return None;
     }
-    Some(SeasonModeKey::new(normalized_kind, game_mode))
+    Some(SeasonModeKey::new(normalized_kind, canonical_mode))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
