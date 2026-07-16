@@ -315,7 +315,11 @@ async fn sync_account_season_with_request(
     let season = request.season;
     progress(SyncProgress {
         season,
-        phase: "正在检查本地数据".to_string(),
+        phase: match mode {
+            crate::models::SyncMode::QuickUpdate => "正在检查本地水位",
+            crate::models::SyncMode::FullFetch => "正在准备全量抓取",
+        }
+        .to_string(),
         processed: 0,
         total: 0,
         current_match_id: None,
@@ -338,7 +342,11 @@ async fn sync_account_season_with_request(
     }
     progress(SyncProgress {
         season,
-        phase: "正在获取赛季对局列表".to_string(),
+        phase: match mode {
+            crate::models::SyncMode::QuickUpdate => "正在快速检查最新对局",
+            crate::models::SyncMode::FullFetch => "正在扫描完整赛季列表",
+        }
+        .to_string(),
         processed: 0,
         total: 0,
         current_match_id: None,
@@ -365,18 +373,6 @@ async fn sync_account_season_with_request(
         .cloned()
         .unwrap_or_default();
     let selection = select_detail_entries(&entries, &inventory);
-    progress(SyncProgress {
-        season,
-        phase: format!(
-            "发现 {} 场新对局，{} 场缺少详情",
-            selection.new_matches, selection.missing_details
-        ),
-        processed: 0,
-        total: fetch.details_requested,
-        current_match_id: None,
-        failed_details: fetch.failed_details,
-        latest_errors: Vec::new(),
-    });
     let details = fetch
         .payload
         .pointer("/matches/details")
@@ -385,7 +381,11 @@ async fn sync_account_season_with_request(
         .unwrap_or_default();
     progress(SyncProgress {
         season,
-        phase: "正在获取详情".to_string(),
+        phase: match mode {
+            crate::models::SyncMode::QuickUpdate => "正在获取最新对局详情",
+            crate::models::SyncMode::FullFetch => "正在重新获取全部详情",
+        }
+        .to_string(),
         processed: fetch.details_requested,
         total: fetch.details_requested,
         current_match_id: None,
@@ -446,8 +446,8 @@ async fn sync_account_season_with_request(
     progress(SyncProgress {
         season,
         phase: "正在更新本地数据库".to_string(),
-        processed: fetch.details_requested.saturating_sub(fetch.failed_details),
-        total: fetch.details_requested,
+        processed: 0,
+        total: 0,
         current_match_id: None,
         failed_details: detail_errors.len(),
         latest_errors: Vec::new(),
@@ -466,12 +466,17 @@ async fn sync_account_season_with_request(
         repaired_details,
         page_diagnostics,
         &fetch,
+        &mut progress,
     )?;
     progress(SyncProgress {
         season,
-        phase: "同步完成".to_string(),
-        processed: summary.processed,
-        total: summary.total,
+        phase: match mode {
+            crate::models::SyncMode::QuickUpdate => "更新完成",
+            crate::models::SyncMode::FullFetch => "全量抓取完成",
+        }
+        .to_string(),
+        processed: 0,
+        total: 0,
         current_match_id: None,
         failed_details: summary.failed_details,
         latest_errors: summary.latest_errors.clone(),
@@ -494,8 +499,10 @@ fn finalize_fetched_season(
     repaired_details: usize,
     page_diagnostics: Vec<crate::models::SyncPageDiagnostic>,
     fetch: &crate::season_fetch::FullSeasonFetch,
+    progress: &mut impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
     let persist_started = std::time::Instant::now();
+    let failed_details = detail_errors.len();
     let mut summary = persist::sync_import_incremental_parts(
         db,
         season,
@@ -507,6 +514,17 @@ fn finalize_fetched_season(
     )?;
     let (database_matches, database_details) =
         query_season_database_totals_after_commit(db, season)?;
+    if mode == crate::models::SyncMode::FullFetch {
+        progress(SyncProgress {
+            season,
+            phase: "正在重建完整快照".to_string(),
+            processed: 0,
+            total: 0,
+            current_match_id: None,
+            failed_details,
+            latest_errors: Vec::new(),
+        });
+    }
     let complete_payload = rebuild_complete_season_payload(db, season, cached_player)
         .map_err(committed_snapshot_update_error)?;
     write_season_payload(season_output_dir, season, &complete_payload)

@@ -1129,9 +1129,9 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
     assert_eq!(summary.imported_matches, 3);
     let detail_progress = progresses
         .iter()
-        .find(|progress| progress.phase == "正在获取详情")
+        .find(|progress| progress.phase == "正在重新获取全部详情")
         .expect("missing completed detail progress");
-    assert_eq!(detail_progress.phase, "正在获取详情");
+    assert_eq!(detail_progress.phase, "正在重新获取全部详情");
     assert_eq!(detail_progress.processed, 3);
     assert_eq!(detail_progress.total, 3);
     assert_eq!(detail_progress.failed_details, 1);
@@ -1198,12 +1198,12 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     assert_eq!(
         phases,
         vec![
-            "正在检查本地数据",
-            "正在获取赛季对局列表",
-            "发现 3 场新对局，0 场缺少详情",
-            "正在获取详情",
+            "正在准备全量抓取",
+            "正在扫描完整赛季列表",
+            "正在重新获取全部详情",
             "正在更新本地数据库",
-            "同步完成",
+            "正在重建完整快照",
+            "全量抓取完成",
         ]
     );
     let first_requests = server.requests.lock().unwrap().clone();
@@ -1219,6 +1219,7 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     );
     server.requests.lock().unwrap().clear();
 
+    let mut quick_progresses = Vec::new();
     let second = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
@@ -1227,7 +1228,7 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
         23,
         SyncMode::QuickUpdate,
         &format!("{}/customer", server.base_url),
-        |_| {},
+        |progress| quick_progresses.push(progress),
     )
     .await
     .unwrap();
@@ -1245,6 +1246,25 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     assert_eq!(second.details_requested, 0);
     assert_eq!(second.database_matches, 3);
     assert_eq!(second.database_details, 3);
+    assert_eq!(
+        quick_progresses
+            .iter()
+            .map(|progress| progress.phase.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "正在检查本地水位",
+            "正在快速检查最新对局",
+            "正在获取最新对局详情",
+            "正在更新本地数据库",
+            "更新完成",
+        ]
+    );
+    let quick_detail_progress = quick_progresses
+        .iter()
+        .find(|progress| progress.phase == "正在获取最新对局详情")
+        .unwrap();
+    assert_eq!(quick_detail_progress.processed, 0);
+    assert_eq!(quick_detail_progress.total, 0);
     let second_requests = server.requests.lock().unwrap().clone();
     assert!(
         second_requests

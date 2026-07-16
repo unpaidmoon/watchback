@@ -57,23 +57,54 @@ const baseSummary: SyncSummary = {
 
 const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
   {
-    name: "no changes",
+    name: "full fetch completion takes precedence over unchanged quick copy",
     summary: baseSummary,
-    expected: "S23 已是最新数据，共校验 120 场对局，无需重新获取详情。",
+    expected: "S23 全量抓取完成：当前赛季共 120 场。",
   },
   {
-    name: "new matches and repaired details",
-    summary: { ...baseSummary, newMatches: 4, missingDetails: 2, detailsRequested: 6, repairedDetails: 2, databaseMatches: 124 },
-    expected: "S23 更新完成：新增 4 场，补全 2 场详情，当前赛季共 124 场。",
+    name: "quick update with no changes",
+    summary: { ...baseSummary, mode: "quickUpdate" },
+    expected: "S23 已检查最新对局，没有发现更新。",
+  },
+  {
+    name: "quick update success",
+    summary: { ...baseSummary, mode: "quickUpdate", newMatches: 4, missingDetails: 2, detailsRequested: 6, repairedDetails: 2, databaseMatches: 124 },
+    expected: "S23 快速更新完成：新增 4 场，补全 2 场详情，当前赛季共 124 场。",
+  },
+  {
+    name: "limited quick update does not claim latest even when details fail",
+    summary: {
+      ...baseSummary,
+      mode: "quickUpdate",
+      quickScanLimited: true,
+      diagnostics: { ...baseSummary.diagnostics, quickScanLimited: true },
+      newMatches: 3,
+      detailsRequested: 3,
+      failedDetails: 2,
+      databaseMatches: 123,
+    },
+    expected: "S23 已更新扫描范围内的数据；快速更新已达到扫描范围，如需完整校验请使用全量抓取。",
+  },
+  {
+    name: "unsafe quick update uses the range-limited copy",
+    summary: {
+      ...baseSummary,
+      mode: "quickUpdate",
+      diagnostics: {
+        ...baseSummary.diagnostics,
+        pages: [{ ...baseSummary.diagnostics.pages[0], stopReason: "unsafe_response" }],
+      },
+    },
+    expected: "S23 已更新扫描范围内的数据；快速更新已达到扫描范围，如需完整校验请使用全量抓取。",
   },
   {
     name: "new match detail failures",
-    summary: { ...baseSummary, newMatches: 3, detailsRequested: 3, failedDetails: 2, databaseMatches: 123 },
+    summary: { ...baseSummary, mode: "quickUpdate", newMatches: 3, detailsRequested: 3, failedDetails: 2, databaseMatches: 123 },
     expected: "S23 对局列表已更新：新增 3 场，补全 0 场详情，2 场详情获取失败，可再次同步重试；当前赛季共 123 场。",
   },
   {
     name: "old missing detail repair failure",
-    summary: { ...baseSummary, missingDetails: 2, detailsRequested: 2, repairedDetails: 1, failedDetails: 1 },
+    summary: { ...baseSummary, mode: "quickUpdate", missingDetails: 2, detailsRequested: 2, repairedDetails: 1, failedDetails: 1 },
     expected: "S23 对局列表已更新：新增 0 场，补全 1 场详情，1 场详情获取失败，可再次同步重试；当前赛季共 120 场。",
   },
 ];

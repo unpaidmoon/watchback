@@ -67,15 +67,24 @@ export function readableSyncProgress(progress: SyncProgress | null): string {
 }
 
 export function formatSyncNotice(season: number, summary: SyncSummary): string {
+  const quickScanUnsafe = summary.diagnostics.pages.some((page) => page.stopReason === "unsafe_response");
+  if (summary.mode === "quickUpdate" && (summary.quickScanLimited || quickScanUnsafe)) {
+    return `S${season} 已更新扫描范围内的数据；快速更新已达到扫描范围，如需完整校验请使用全量抓取。`;
+  }
+
   if (summary.failedDetails > 0) {
     return `S${season} 对局列表已更新：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，${summary.failedDetails} 场详情获取失败，可再次同步重试；当前赛季共 ${summary.databaseMatches} 场。`;
   }
 
-  if (summary.newMatches === 0 && summary.missingDetails === 0) {
-    return `S${season} 已是最新数据，共校验 ${summary.listEntriesSeen} 场对局，无需重新获取详情。`;
+  if (summary.mode === "fullFetch") {
+    return `S${season} 全量抓取完成：当前赛季共 ${summary.databaseMatches} 场。`;
   }
 
-  return `S${season} 更新完成：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，当前赛季共 ${summary.databaseMatches} 场。`;
+  if (summary.newMatches === 0 && summary.missingDetails === 0) {
+    return `S${season} 已检查最新对局，没有发现更新。`;
+  }
+
+  return `S${season} 快速更新完成：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，当前赛季共 ${summary.databaseMatches} 场。`;
 }
 
 export function commandCenterMetrics(status: OnboardingStatus | null): CommandMetric[] {
