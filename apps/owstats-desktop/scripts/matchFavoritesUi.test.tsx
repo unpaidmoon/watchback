@@ -24,6 +24,7 @@ const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", i
 const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
+const matchesCss = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 
 assert.match(guardSource, /register/);
 assert.match(guardSource, /guardNavigation/);
@@ -273,6 +274,55 @@ assert.match(favoriteEditor, /class="matchFavoriteNoteField"/);
 assert.match(favoriteEditor, /class="matchFavoriteActions"/);
 assert.match(favoriteEditor, /class="secondaryButton"/);
 assert.match(favoriteEditor, /class="primaryButton"/);
+
+const unicodeNote = "复".repeat(500);
+const unicodeEditor = renderToStaticMarkup(
+  createElement(MatchFavoriteEditor, {
+    controller: {
+      ...favoriteController,
+      savedNote: unicodeNote,
+      draftNote: unicodeNote,
+      count: 500,
+      canSave: true,
+      saved: true,
+      error: "匿名保存错误，请稍后重试。",
+    },
+  }),
+);
+assert.match(unicodeEditor, new RegExp(`>${unicodeNote}</textarea>`), "500 Unicode characters should render without truncation");
+assert.match(unicodeEditor, />500\/500</);
+assert.match(unicodeEditor, /role="status">已保存</);
+assert.match(unicodeEditor, /class="matchFavoriteError" role="alert">匿名保存错误，请稍后重试。/);
+assert.doesNotMatch(unicodeEditor, /is-over-limit/);
+
+const overLimitEditor = renderToStaticMarkup(
+  createElement(MatchFavoriteEditor, {
+    controller: {
+      ...favoriteController,
+      draftNote: `${unicodeNote}复`,
+      count: 501,
+      canSave: false,
+    },
+  }),
+);
+assert.match(overLimitEditor, /class="is-over-limit">501\/500</);
+assert.match(overLimitEditor, /<button[^>]*class="primaryButton" disabled=""/);
+
+assert.match(matchesCss, /\.matchFavoriteEditor\s*\{/);
+assert.match(matchesCss, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+assert.match(matchesCss, /\.matchFavoriteEditor\.is-empty\s*\{[^}]*justify-content:\s*flex-end/s);
+assert.match(matchesCss, /\.matchFavoriteActions\s*\{[^}]*display:\s*grid/s);
+assert.match(matchesCss, /\.matchFavoriteError,\s*\.matchFavoriteNoteField \.is-over-limit\s*\{[^}]*color:\s*var\(--status-danger\)/s);
+assert.match(matchesCss, /\.matchFavoriteEditor button\s*\{[^}]*min-height:\s*44px/s);
+assert.match(
+  matchesCss,
+  /\.matchFavoriteEditor \.primaryButton\s*\{(?=[^}]*background:\s*var\(--action-primary\))(?=[^}]*color:\s*var\(--action-on-primary\))[^}]*\}/s,
+);
+assert.match(
+  matchesCss,
+  /\.matchFavoriteEditor \.secondaryButton\s*\{(?=[^}]*background:\s*var\(--surface-control\))(?=[^}]*color:\s*var\(--text-primary\))[^}]*\}/s,
+);
+assert.match(matchesCss, /\.matchFavoriteNoteField textarea:disabled\s*\{[^}]*cursor:\s*not-allowed/s);
 
 const editorSource = readFileSync(
   new URL("../src/features/matches/MatchFavoriteEditor.tsx", import.meta.url),

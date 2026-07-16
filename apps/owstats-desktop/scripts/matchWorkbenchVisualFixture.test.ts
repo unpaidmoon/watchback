@@ -28,12 +28,39 @@ assert.match(
 );
 
 const wideNormal = renderMatchWorkbenchFixture("wide-normal");
+const wideNormalBody = wideNormal.slice(wideNormal.indexOf("<body"));
 assert.match(wideNormal, /预设快速模式长名称示例/);
 assert.match(wideNormal, /1\.6w\/2,410\/1\.2w/);
+assert.match(wideNormal, /第二波团战站位值得复盘，注意先处理侧翼。/);
+assert.ok(
+  wideNormalBody.lastIndexOf("matchTeamTable") < wideNormalBody.indexOf("matchFavoriteEditor"),
+  "normal detail favorite editor should render after both detail tables",
+);
+assert.match(
+  renderMatchWorkbenchFixture("wide-arena"),
+  /aria-label="角斗对局详情"[\s\S]*class="matchFavoriteEditor is-favorite"/,
+  "arena summary should render the deterministic favorite editor",
+);
+assert.match(
+  renderMatchWorkbenchFixture("wide-arena"),
+  /回合-1/,
+  "arena fixture should retain a round selector for verifying that round views omit the editor",
+);
+assert.match(
+  renderMatchWorkbenchFixture("narrow-detail"),
+  /data-horizontal-overflow-contract="none"/,
+  "narrow detail fixture should explicitly opt into the no-horizontal-overflow contract",
+);
+assert.doesNotMatch(
+  wideNormalBody,
+  /(?:BattleTag|displayName|accountId|playerId|真实备注|真实对局)/i,
+  "visual fixture should contain synthetic labels and notes only",
+);
 
 const firstCard = extractMatchCard(wideNormal, 1);
 assert.match(firstCard, /(?:title|aria-label)="伤害最高"/);
 assert.match(firstCard, /(?:title|aria-label)="治疗最高"/);
+assert.match(firstCard, /class="matchListFavoriteMark"/);
 
 assert.equal(firstCard.match(/phase6AwardMedal/g)?.length, 4, "the widest anonymous card should render four awards");
 

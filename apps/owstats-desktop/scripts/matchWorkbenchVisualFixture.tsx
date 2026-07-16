@@ -53,17 +53,18 @@ const options: FilterOptions = {
 
 const players = Array.from({ length: 12 }, (_, index) => createPlayer(index));
 const matches = Array.from({ length: 7 }, (_, index) => createMatch(index));
+const anonymousFavoriteNote = "第二波团战站位值得复盘，注意先处理侧翼。";
 const anonymousNormalDetail = createNormalDetail();
 const anonymousArenaDetail = createArenaDetail();
 const favoriteController: MatchFavoriteController = {
-  savedNote: "",
-  draftNote: "",
-  isFavorite: false,
+  savedNote: anonymousFavoriteNote,
+  draftNote: anonymousFavoriteNote,
+  isFavorite: true,
   busy: false,
   error: null,
   saved: false,
   dirty: false,
-  count: 0,
+  count: anonymousFavoriteNote.length,
   canSave: false,
   edit: () => undefined,
   favoriteMatch: async () => undefined,
@@ -79,7 +80,8 @@ export function renderMatchWorkbenchFixture(state: MatchWorkbenchFixtureState): 
   const markup = inlineLocalAssets(renderToStaticMarkup(
     <FixtureApp state={state} detail={detail} detailOpen={detailOpen} />,
   ));
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>${fixtureStyles}\n${fixtureOnlyStyles}</style></head><body data-fixture-state="${state}">${markup}</body></html>`;
+  const overflowContract = state === "narrow-detail" ? ' data-horizontal-overflow-contract="none"' : "";
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>${fixtureStyles}\n${fixtureOnlyStyles}</style></head><body data-fixture-state="${state}"${overflowContract}>${markup}</body></html>`;
 }
 
 function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtureState; detail: MatchDetailView; detailOpen: boolean }) {
@@ -135,7 +137,7 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
               loading={false}
               error={null}
               matchId={detail.matchId}
-              favoriteController={favoriteController}
+              favoriteController={favoriteControllerForState(state)}
               onBack={() => undefined}
             />
           </section>
@@ -187,6 +189,20 @@ function createMatch(index: number): MatchSummary {
       { code: "mitigation", label: "抵挡最高", tone: "gold" },
     ] : [],
     isFavorite: index === 0,
+  };
+}
+
+function favoriteControllerForState(state: MatchWorkbenchFixtureState): MatchFavoriteController {
+  if (state !== "narrow-detail") return favoriteController;
+  const note = "复".repeat(500);
+  return {
+    ...favoriteController,
+    savedNote: note,
+    draftNote: note,
+    saved: true,
+    error: "匿名保存错误，请稍后重试。",
+    count: note.length,
+    canSave: true,
   };
 }
 
@@ -247,7 +263,7 @@ function createNormalDetail(): MatchDetailView {
     evaluation: { grade: "S", primaryTag: "尽力局", evidenceTags: ["伤害最高"], confidence: 0.9 },
     teamAwards: [{ code: "damage", label: "伤害最高", tone: "gold" }],
     sameRoleComparison: null,
-    favorite: null,
+    favorite: { note: anonymousFavoriteNote },
     rawJson: null,
   };
 }

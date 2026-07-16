@@ -33,6 +33,32 @@ const compactDesktopStyles = sliceMediaBlock(matchStyleSource, "@media (min-widt
 const twoRowCardStyles = sliceMediaBlock(matchStyleSource, "@media (min-width: 641px) and (max-width: 1400px) {");
 const narrowHandsetStyles = sliceMediaBlock(matchStyleSource, "@media (max-width: 400px) {");
 
+assert.match(
+  matchStyleSource,
+  /\.matchFavoriteEditor\s*\{(?=[^}]*display:\s*grid)(?=[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto)(?=[^}]*align-items:\s*end)(?=[^}]*border-top:\s*1px solid var\(--border-subtle\))[^}]*\}/s,
+  "favorite editor should use the approved flat two-column detail layout",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchFavoriteNoteField textarea\s*\{(?=[^}]*min-height:\s*88px)(?=[^}]*resize:\s*vertical)(?=[^}]*border:\s*1px solid var\(--glass-border\))(?=[^}]*border-radius:\s*var\(--radius-control\))(?=[^}]*background:\s*var\(--surface-control\))[^}]*\}/s,
+  "favorite note should follow the existing control tokens and remain vertically resizable",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchListFavoriteMark\s*\{(?=[^}]*position:\s*absolute)(?=[^}]*top:\s*var\(--space-1\))(?=[^}]*right:\s*var\(--space-2\))(?=[^}]*display:\s*inline-flex)(?=[^}]*color:\s*var\(--text-primary\))[^}]*\}/s,
+  "favorite marker should use the card positioning context without becoming interactive",
+);
+assert.match(
+  matchStyleSource,
+  /\.advancedMatchFilters\.phase6FilterRowSecondary\s*\{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s,
+  "wide advanced filters should expose all six fields in one row",
+);
+assert.match(
+  matchStyleSource,
+  /@media \(max-width:\s*1099px\)\s*\{[\s\S]*?\.matchFavoriteEditor\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*\}[\s\S]*?\.matchFavoriteActions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  "narrow detail should stack the editor and keep two equal action columns",
+);
+
 assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesPage should render the combined match workbench layout");
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
 assert.equal(matchesPageSource.includes("<MetricCard"), false, "MatchesPage should remove the metric card strip above the workbench");
