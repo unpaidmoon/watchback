@@ -37,18 +37,14 @@ fn browser_capture_is_separate_from_final_credential_persistence() {
 }
 
 #[test]
-fn legacy_login_handler_never_writes_credentials_outside_staged_relogin_publish() {
+fn product_login_handlers_only_expose_staged_account_flows() {
     let source = include_str!("../src/commands.rs");
-    let start = source.find("pub async fn start_dashen_login(").unwrap();
-    let body = &source[start
-        ..source[start..]
-            .find("\n#[tauri::command]")
-            .map(|offset| start + offset)
-            .unwrap()];
-
-    assert!(!body.contains("save_credentials_atomic"));
-    assert!(body.contains("capture_and_publish_relogin"));
-    assert!(body.contains("read_saved_credentials_for_account"));
+    assert!(!source.contains("pub async fn start_dashen_login("));
+    assert!(!source.contains("pub fn logout("));
+    assert!(source.contains("pub async fn add_account("));
+    assert!(source.contains("capture_and_publish_add"));
+    assert!(source.contains("pub async fn relogin_account("));
+    assert!(source.contains("capture_and_publish_relogin"));
 }
 
 #[test]

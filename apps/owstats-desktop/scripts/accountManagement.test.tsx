@@ -7,33 +7,42 @@ import { AccountManager, AccountRemovalDialog } from "../src/features/command-ce
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const commandCenterStyles = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
 const tauriLibSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const tauriCommandsSource = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
+const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
+const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
+const modelsSource = readFileSync(new URL("../src-tauri/src/models.rs", import.meta.url), "utf8");
+const isolationSource = readFileSync(new URL("../src/features/command-center/accountOperationIsolation.ts", import.meta.url), "utf8");
 
-assert.match(onboardingSource, /listAccounts\(\)/);
+assert.match(onboardingSource, /listAccounts,/);
 assert.match(onboardingSource, /<AccountManager/);
 assert.match(onboardingSource, /window\.location\.reload\(\)/);
 assert.match(onboardingSource, /dashboardCache = null/);
 assert.match(onboardingSource, /添加账号后即可同步和查看本地数据/);
 assert.ok(
-  onboardingSource.indexOf("const nextAccountStatus = await listAccounts()") <
-    onboardingSource.indexOf("const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all"),
+  isolationSource.indexOf("const accountStatus = await options.listAccounts()") <
+    isolationSource.indexOf("const scopedDashboard = await options.loadAccountScope()"),
   "账户列表必须先于账户域命令加载",
 );
 assert.match(
-  onboardingSource,
-  /if \(!nextAccountStatus\.activeAccountId\) \{[\s\S]*?status: null,[\s\S]*?profile: null,[\s\S]*?targetStatus: null,[\s\S]*?return;/,
+  isolationSource,
+  /if \(!accountStatus\.activeAccountId\) \{[\s\S]*?status: null,[\s\S]*?profile: null,[\s\S]*?targetStatus: null/,
   "没有活动账号时不得继续调用账户域命令",
 );
 assert.match(
-  onboardingSource,
-  /dashboardCache\.accountStatus\.activeAccountId === nextAccountStatus\.activeAccountId/,
+  isolationSource,
+  /cachedSnapshot\?\.accountStatus\.activeAccountId === accountStatus\.activeAccountId/,
   "仪表盘缓存必须绑定活动账号",
 );
-assert.match(onboardingSource, /async function runSwitchAccount[\s\S]*?dashboardCache = null;[\s\S]*?window\.location\.reload\(\)/);
-assert.match(onboardingSource, /result\.removed && result\.reloadRequired[\s\S]*?dashboardCache = null;[\s\S]*?window\.location\.reload\(\)/);
+assert.match(isolationSource, /runSwitchAccountOperation[\s\S]*?clearCache\(\);[\s\S]*?reload\(\)/);
+assert.match(isolationSource, /result\.removed && result\.reloadRequired[\s\S]*?clearCache\(\);[\s\S]*?reload\(\)/);
 assert.doesNotMatch(onboardingSource, /runLogout/);
 assert.doesNotMatch(onboardingSource, />退出登录</);
 assert.doesNotMatch(tauriLibSource, /commands::logout\b/);
 assert.doesNotMatch(tauriLibSource, /commands::start_dashen_login\b/);
+assert.doesNotMatch(tauriCommandsSource, /pub (?:async )?fn (?:logout|start_dashen_login)\b/);
+assert.doesNotMatch(apiSource, /export function (?:logout|startDashenLogin)\b/);
+assert.doesNotMatch(typesSource, /type (?:LogoutResult|CredentialLoginResult)\b/);
+assert.doesNotMatch(modelsSource, /struct (?:LogoutResult|CredentialLoginResult)\b/);
 assert.match(tauriLibSource, /commands::cancel_dashen_login\b/);
 assert.match(commandCenterStyles, /\.phase6CommandCenter \.accountManagerPanel\s*\{[\s\S]*?background:\s*var\(--glass-secondary\);[\s\S]*?box-shadow:\s*none;/);
 assert.match(commandCenterStyles, /@media \(max-width: 900px\)[\s\S]*?\.phase6CommandCenter \.accountManagerRow[\s\S]*?grid-template-columns:\s*1fr/);

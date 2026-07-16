@@ -11,7 +11,6 @@ import type {
   CareerMmrSeasonBreakdown,
   CareerRole,
   FilterOptions,
-  CredentialLoginResult,
   CredentialStatus,
   FriendAnalytics,
   FriendAnalyticsFilters,
@@ -31,7 +30,6 @@ import type {
   RemoveAccountResult,
   SeasonAnalysis,
   SyncSummary,
-  LogoutResult,
   UpdateCheckResult,
   UserSettings,
 } from "./types";
@@ -109,16 +107,8 @@ export function saveUserSettings(settings: UserSettings) {
   return invoke<UserSettings>("save_user_settings", { settings });
 }
 
-export function logout() {
-  return invoke<LogoutResult>("logout");
-}
-
 export function checkAppUpdate() {
   return invoke<UpdateCheckResult>("check_app_update");
-}
-
-export function startDashenLogin() {
-  return invoke<CredentialLoginResult>("start_dashen_login");
 }
 
 export function cancelDashenLogin() {

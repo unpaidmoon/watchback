@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { AccountSummary } from "../../shared/types";
+import { applyRemovalDecision } from "./accountOperationIsolation";
 
 export type AccountManagerProps = {
   accounts: AccountSummary[];
@@ -143,7 +144,7 @@ export function AccountManager({
       return;
     }
 
-    onRemove(pendingRemoval);
+    applyRemovalDecision("confirm", pendingRemoval, onRemove);
     setPendingRemoval(null);
   }
 
@@ -208,7 +209,10 @@ export function AccountManager({
           account={pendingRemoval}
           busy={isBusy}
           fallbackFocusRef={managerHeadingRef}
-          onCancel={() => setPendingRemoval(null)}
+          onCancel={() => {
+            applyRemovalDecision("cancel", pendingRemoval, onRemove);
+            setPendingRemoval(null);
+          }}
           onConfirm={confirmRemoval}
         />
       ) : null}

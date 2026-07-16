@@ -9,7 +9,6 @@ use owstats_desktop_lib::player_target::{
     clear_player_target_for_path, read_player_target_for_path, save_player_target_for_path,
     target_matches_login_role, PlayerTarget,
 };
-use owstats_desktop_lib::{CredentialLoginResult, CredentialStatus, LoginTargetStatus};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -143,37 +142,6 @@ fn public_status_json_contains_no_role_or_token_fields() {
 
     assert!(json.contains("\"detectedBnet\":\"Visible#1000\""));
     assert!(json.contains("\"syncAllowed\":true"));
-    for forbidden in ["roleId", "role_id", "token", "customerToken"] {
-        assert!(!json
-            .to_ascii_lowercase()
-            .contains(&forbidden.to_ascii_lowercase()));
-    }
-}
-
-#[test]
-fn login_result_exposes_credential_and_target_status_without_secrets() {
-    let result = CredentialLoginResult {
-        status: CredentialStatus {
-            state: "ready".to_string(),
-            message: "已登录".to_string(),
-            exposes_secret: false,
-            role_id: None,
-            saved_at: None,
-        },
-        target: LoginTargetStatus {
-            state: "ready".to_string(),
-            detected_bnet: Some("Current#1000".to_string()),
-            current_bnet: Some("Current#1000".to_string()),
-            message: "已绑定".to_string(),
-            sync_allowed: true,
-            can_confirm_switch: false,
-            can_retry: false,
-        },
-    };
-
-    let json = serde_json::to_string(&result).unwrap();
-
-    assert!(json.contains("\"target\""));
     for forbidden in ["roleId", "role_id", "token", "customerToken"] {
         assert!(!json
             .to_ascii_lowercase()

@@ -5,12 +5,12 @@ use crate::{
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_base_url, AccountLoginResult,
-    ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialLoginResult, CredentialStatus,
-    FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary,
-    LoginTargetStatus, LogoutResult, MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus,
-    OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview, PlayerProfile,
-    PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest,
-    SyncSummary, UpdateCheckResult, UserSettings,
+    ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus, FilterOptions,
+    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LoginTargetStatus,
+    MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
+    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
+    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
+    UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -165,29 +165,6 @@ pub fn save_user_settings(
 }
 
 #[tauri::command]
-pub fn logout(
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<LogoutResult, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    let account = active_account(&accounts)?;
-    login_target_coordinator.clear(account.account_id());
-    let cleared =
-        crate::credentials::clear_credentials_for_account(account.paths()).map_err(to_message)?;
-    Ok(LogoutResult {
-        credential_cleared: cleared,
-        message: if cleared {
-            "已退出登录，本地凭证已清除。".to_string()
-        } else {
-            "当前没有可清除的本地凭证。".to_string()
-        },
-    })
-}
-
-#[tauri::command]
 pub fn check_app_update(
     accounts: State<'_, AccountContextManager>,
 ) -> Result<UpdateCheckResult, String> {
@@ -195,57 +172,6 @@ pub fn check_app_update(
     Ok(crate::settings::check_app_update_result(env!(
         "CARGO_PKG_VERSION"
     )))
-}
-
-#[tauri::command]
-pub async fn start_dashen_login(
-    app: AppHandle,
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<CredentialLoginResult, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    accounts.prepare_login_capture().map_err(to_message)?;
-    let account = active_account(&accounts)?;
-    let shared = accounts.shared_paths().clone();
-    let capture_app = app.clone();
-    let published = crate::account_login::capture_and_publish_relogin(
-        &accounts,
-        account.account_id(),
-        &app,
-        move || async move {
-            let outcome = crate::credentials::capture_dashen_login(capture_app, &shared).await?;
-            Ok(crate::account_login::LoginCapture {
-                credentials: outcome.credentials,
-                battle_tag: outcome.detected_battle_tag,
-            })
-        },
-        crate::credentials::login_cancelled,
-    )
-    .await
-    .map_err(to_message)?;
-    if published.kind != "existingAccountUpdated" {
-        return Err("登录账号与当前账号不一致，当前账号未更改。".to_string());
-    }
-    let saved_credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
-        .map_err(to_message)?;
-    login_target_coordinator.clear(account.account_id());
-    let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    let target = crate::login_target::reconcile_detected_target(
-        login_target_coordinator.inner(),
-        account.account_id(),
-        &saved_credentials,
-        published.battle_tag.as_deref(),
-        &target_path,
-        DASHEN_ROOT_BASE,
-    )
-    .await;
-    let mut status = crate::credentials::get_credential_status_for_account(account.paths())
-        .map_err(to_message)?;
-    status.role_id = None;
-    Ok(CredentialLoginResult { status, target })
 }
 
 #[tauri::command]

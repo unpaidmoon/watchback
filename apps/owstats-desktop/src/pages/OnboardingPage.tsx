@@ -29,6 +29,14 @@ import {
   syncSeason,
 } from "../shared/api";
 import { AccountManager } from "../features/command-center/AccountManager";
+import {
+  loadDashboardRequest,
+  runAddAccountOperation,
+  runReloginAccountOperation,
+  runRemoveAccountOperation,
+  runSwitchAccountOperation,
+} from "../features/command-center/accountOperationIsolation";
+import type { BusyAccountAction, DashboardSnapshot } from "../features/command-center/accountOperationIsolation";
 import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
@@ -36,13 +44,6 @@ import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "..
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
-
-type DashboardSnapshot = {
-  accountStatus: AccountManagerStatus;
-  status: OnboardingStatus | null;
-  profile: PlayerProfile | null;
-  targetStatus: LoginTargetStatus | null;
-};
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
@@ -67,7 +68,7 @@ export function OnboardingPage() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
-  const [busyAccountAction, setBusyAccountAction] = useState<{ kind: "add" | "switch" | "relogin" | "remove"; accountId?: string } | null>(null);
+  const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -135,46 +136,40 @@ export function OnboardingPage() {
       setError(null);
     }
     try {
-      const nextAccountStatus = await listAccounts();
-      if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
+      const result = await loadDashboardRequest({
+        requestGeneration,
+        isCurrent: (generation) => isCurrentDashboardRequest(
+          generation,
+          dashboardRequestGenerationRef.current,
+          mountedRef.current,
+        ),
+        cachedSnapshot: dashboardCache,
+        listAccounts,
+        loadAccountScope: async () => {
+          const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all([
+            getOnboardingStatus(),
+            getPlayerProfile(),
+            getLoginTargetStatus(),
+          ]);
+          return { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
+        },
+        onAccountStatus: (nextAccountStatus, reusableCache) => {
+          setAccountStatus(nextAccountStatus);
+          if (reusableCache) {
+            applyDashboardSnapshot(reusableCache);
+          } else {
+            dashboardCache = null;
+            setStatus(null);
+            setProfile(null);
+            setTargetStatus(null);
+          }
+        },
+      });
+      if (result.kind === "stale") {
         return;
       }
-      setAccountStatus(nextAccountStatus);
-      if (dashboardCache && dashboardCache.accountStatus.activeAccountId === nextAccountStatus.activeAccountId) {
-        applyDashboardSnapshot({ ...dashboardCache, accountStatus: nextAccountStatus });
-      } else {
-        dashboardCache = null;
-        setStatus(null);
-        setProfile(null);
-        setTargetStatus(null);
-      }
-      if (!nextAccountStatus.activeAccountId) {
-        const snapshot: DashboardSnapshot = {
-          accountStatus: nextAccountStatus,
-          status: null,
-          profile: null,
-          targetStatus: null,
-        };
-        dashboardCache = snapshot;
-        applyDashboardSnapshot(snapshot);
-        return;
-      }
-      const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all([
-        getOnboardingStatus(),
-        getPlayerProfile(),
-        getLoginTargetStatus(),
-      ]);
-      if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
-        return;
-      }
-      const snapshot: DashboardSnapshot = {
-        accountStatus: nextAccountStatus,
-        status: nextStatus,
-        profile: nextProfile,
-        targetStatus: nextTargetStatus,
-      };
-      dashboardCache = snapshot;
-      applyDashboardSnapshot(snapshot);
+      dashboardCache = result.snapshot;
+      applyDashboardSnapshot(result.snapshot);
     } catch (err) {
       if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
         setError(productErrorMessage(err));
@@ -221,114 +216,58 @@ export function OnboardingPage() {
     return true;
   }
 
-  async function runAddAccount() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setBusyAccountAction({ kind: "add" });
-    setLoginProgress(null);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await addAccount();
-      await loadDashboard();
-      if (mountedRef.current) {
-        setNotice(result.message);
-      }
-    } catch (err) {
-      const loginError = `添加账号失败：${productErrorMessage(err)}。请重试。`;
-      await loadDashboard();
-      if (mountedRef.current) {
-        setError(loginError);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setBusyAccountAction(null);
-      }
-      releaseOperationLock();
-    }
-  }
-
-  async function runReloginAccount(account: AccountSummary) {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setBusyAccountAction({ kind: "relogin", accountId: account.accountId });
-    setLoginProgress(null);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await reloginAccount(account.accountId);
-      await loadDashboard();
-      if (mountedRef.current) {
-        setNotice(result.message);
-      }
-    } catch (err) {
-      const loginError = `重新登录失败：${productErrorMessage(err)}。请重试。`;
-      await loadDashboard();
-      if (mountedRef.current) {
-        setError(loginError);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setBusyAccountAction(null);
-      }
-      releaseOperationLock();
-    }
-  }
-
-  async function runSwitchAccount(account: AccountSummary) {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setBusyAccountAction({ kind: "switch", accountId: account.accountId });
-    setNotice(null);
-    setError(null);
-    try {
-      await switchAccount(account.accountId);
-      dashboardCache = null;
-      window.location.reload();
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`切换账号失败：${productErrorMessage(err)}。请重试。`);
-        setBusyAccountAction(null);
-      }
-      releaseOperationLock();
-    }
-  }
-
-  async function runRemoveAccount(account: AccountSummary) {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setBusyAccountAction({ kind: "remove", accountId: account.accountId });
-    setNotice(null);
-    setError(null);
-    let reloadStarted = false;
-    try {
-      const result = await removeAccount(account.accountId);
-      if (result.removed && result.reloadRequired) {
-        dashboardCache = null;
-        window.location.reload();
-        reloadStarted = true;
-        return;
-      }
-      await loadDashboard();
-      if (mountedRef.current) {
-        setNotice(result.message);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`退出账号失败：${productErrorMessage(err)}。请重试。`);
-      }
-    } finally {
-      if (!reloadStarted) {
+  function accountOperationLifecycle() {
+    return {
+      begin: beginAccountOperation,
+      release: releaseOperationLock,
+      setBusy: (action: BusyAccountAction | null) => {
         if (mountedRef.current) {
-          setBusyAccountAction(null);
+          if (action?.kind === "add" || action?.kind === "relogin") {
+            setLoginProgress(null);
+          }
+          setBusyAccountAction(action);
         }
-        releaseOperationLock();
-      }
-    }
+      },
+      setNotice: (message: string | null) => {
+        if (mountedRef.current) setNotice(message);
+      },
+      setError: (message: string | null) => {
+        if (mountedRef.current) setError(message);
+      },
+      formatError: productErrorMessage,
+      refreshAccounts: loadDashboard,
+      clearCache: invalidateDashboardCache,
+    };
+  }
+
+  function runAddAccount() {
+    return runAddAccountOperation({
+      ...accountOperationLifecycle(),
+      invoke: addAccount,
+    });
+  }
+
+  function runReloginAccount(account: AccountSummary) {
+    return runReloginAccountOperation(account, {
+      ...accountOperationLifecycle(),
+      invoke: () => reloginAccount(account.accountId),
+    });
+  }
+
+  function runSwitchAccount(account: AccountSummary) {
+    return runSwitchAccountOperation(account, {
+      ...accountOperationLifecycle(),
+      invoke: () => switchAccount(account.accountId),
+      reload: () => window.location.reload(),
+    });
+  }
+
+  function runRemoveAccount(account: AccountSummary) {
+    return runRemoveAccountOperation(account, {
+      ...accountOperationLifecycle(),
+      invoke: () => removeAccount(account.accountId),
+      reload: () => window.location.reload(),
+    });
   }
 
   async function cancelLogin() {

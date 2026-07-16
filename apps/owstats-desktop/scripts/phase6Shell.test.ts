@@ -31,6 +31,7 @@ const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx",
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const seasonHealthSource = readFileSync(new URL("../src/features/command-center/SeasonHealthPanel.tsx", import.meta.url), "utf8");
 const seasonWorkbenchSource = readFileSync(new URL("../src/features/command-center/SeasonSyncWorkbench.tsx", import.meta.url), "utf8");
+const accountIsolationSource = readFileSync(new URL("../src/features/command-center/accountOperationIsolation.ts", import.meta.url), "utf8");
 const commandCenterSource = `${onboardingSource}\n${seasonHealthSource}\n${seasonWorkbenchSource}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const styles = [
@@ -150,7 +151,7 @@ assertEqual(onboardingSource.includes("mountedRef"), true, "dashboard responses 
 assertEqual(onboardingSource.includes("primaryTargetActionRef"), true, "target recovery exposes a focus destination");
 assertEqual(onboardingSource.includes("previousPrimaryTargetStateRef"), true, "target recovery focus is not stolen on same-state rerenders");
 assertEqual(
-  /async function runAddAccount\(\)[\s\S]*?catch \(err\) \{[\s\S]*?await loadDashboard\(\);[\s\S]*?setError\(loginError\)/.test(onboardingSource),
+  /runAddAccountOperation[\s\S]*?await dependencies\.refreshAccounts\(\);[\s\S]*?dependencies\.setNotice\(result\.message\)/.test(accountIsolationSource),
   true,
   "account login refresh completes before the final recoverable error is shown",
 );

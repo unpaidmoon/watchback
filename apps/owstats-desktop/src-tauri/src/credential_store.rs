@@ -91,16 +91,6 @@ pub fn read_credentials(path: &Path) -> Result<DashenCredentials> {
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
 
-pub fn clear_credentials_for_path(path: &Path) -> Result<bool> {
-    if path_entry_exists(path)? {
-        ensure_regular_file_or_missing(path)?;
-        std::fs::remove_file(path)?;
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
 fn path_entry_exists(path: &Path) -> Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -145,31 +135,4 @@ fn is_windows_reparse(_metadata: &std::fs::Metadata) -> bool {
 
 pub fn redact_sensitive_text(message: &str) -> String {
     crate::redaction::redact_sensitive_text(message)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clear_credentials_removes_saved_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(".dashen_credentials.json");
-        let credentials = DashenCredentials {
-            role_id: 5479,
-            token: "token-secret".to_string(),
-            customer_token: Some("customer-secret".to_string()),
-            dts: Some("2026".to_string()),
-            server: 1,
-            saved_at: "2026-07-01T00:00:00Z".to_string(),
-        };
-        save_credentials_atomic(&path, &credentials).unwrap();
-
-        clear_credentials_for_path(&path).unwrap();
-
-        assert!(!path.exists());
-        let status = credential_status_for_path(&path).unwrap();
-        assert_eq!(status.state, "missing");
-        assert_eq!(status.role_id, None);
-    }
 }

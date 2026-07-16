@@ -18,8 +18,7 @@ use tauri::AppHandle;
 
 pub use crate::browser_session::{select_browser, BrowserCandidate};
 pub use crate::credential_store::{
-    clear_credentials_for_path, credential_status_for_path,
-    redact_sensitive_text as redacted_login_error, DashenCredentials,
+    credential_status_for_path, redact_sensitive_text as redacted_login_error, DashenCredentials,
 };
 
 const LOGIN_URL: &str =
@@ -178,10 +177,6 @@ pub fn read_optional_saved_credentials_for_account(
         return Ok(None);
     }
     read_saved_credentials_for_account(paths).map(Some)
-}
-
-pub fn clear_credentials_for_account(paths: &AccountPaths) -> Result<bool> {
-    clear_credentials_for_path(&paths.credentials())
 }
 
 pub(crate) async fn capture_dashen_login(

@@ -79,7 +79,8 @@ assert.match(types, /type LoginTargetStatus\s*=\s*\{[\s\S]*?state:\s*"ready"\s*\
 for (const field of ["detectedBnet", "currentBnet", "message", "syncAllowed", "canConfirmSwitch", "canRetry"]) {
   assert.match(types, new RegExp(`${field}\\??:`), `login target status exposes ${field}`);
 }
-assert.match(types, /type CredentialLoginResult\s*=\s*\{[\s\S]*?status:\s*CredentialStatus;[\s\S]*?target:\s*LoginTargetStatus;/, "login result returns credential and target status together");
+assert.doesNotMatch(types, /type CredentialLoginResult\b/, "obsolete single-account login result is removed");
+assert.doesNotMatch(models, /struct CredentialLoginResult\b/, "obsolete backend single-account login result is removed");
 assert.match(types, /type ClearPlayerTargetResult\s*=\s*\{[\s\S]*?cleared:\s*boolean;[\s\S]*?target:\s*LoginTargetStatus;/, "clear result returns the replacement login target status");
 assert.doesNotMatch(types, /type CredentialStatus\s*=\s*\{[^}]*roleId/s, "public credential status does not expose roleId");
 assert.doesNotMatch(types, /type PlayerProfile\s*=\s*\{[^}]*roleId/s, "public player profile does not expose roleId");

@@ -1960,8 +1960,6 @@ fn account_mutating_commands_acquire_permit_before_resolving_snapshot() {
     let source = include_str!("../src/commands.rs");
     for command in [
         "refresh_match_evaluations",
-        "logout",
-        "start_dashen_login",
         "confirm_login_target_switch",
         "keep_current_player_target",
         "retry_login_target_binding",

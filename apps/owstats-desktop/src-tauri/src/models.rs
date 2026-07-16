@@ -785,22 +785,8 @@ pub struct AccountLoginResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CredentialLoginResult {
-    pub status: CredentialStatus,
-    pub target: LoginTargetStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct CredentialLoginCancelResult {
     pub cancelled: bool,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct LogoutResult {
-    pub credential_cleared: bool,
     pub message: String,
 }
 

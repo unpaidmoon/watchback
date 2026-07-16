@@ -98,11 +98,6 @@ export type RemoveAccountResult = {
   reloadRequired: boolean;
 };
 
-export type CredentialLoginResult = {
-  status: CredentialStatus;
-  target: LoginTargetStatus;
-};
-
 export type LoginTargetStatus = {
   state: "ready" | "switchRequired" | "mismatchKept" | "bindFailed" | "unidentified" | "verificationRequired" | string;
   detectedBnet: string | null;
@@ -136,11 +131,6 @@ export type PlayerProfile = {
 
 export type UserSettings = {
   theme: "system" | "light" | "dark";
-};
-
-export type LogoutResult = {
-  credentialCleared: boolean;
-  message: string;
 };
 
 export type UpdateCheckResult = {
