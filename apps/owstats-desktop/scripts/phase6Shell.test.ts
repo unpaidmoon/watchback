@@ -6,7 +6,7 @@ import {
   productErrorMessage,
   readableSyncProgress,
 } from "../src/shared/phase6Shell.ts";
-import { checkAppUpdate, getPlayerProfile, getUserSettings, logout, saveUserSettings } from "../src/shared/api.ts";
+import { checkAppUpdate, getPlayerProfile, getUserSettings, listAccounts, saveUserSettings } from "../src/shared/api.ts";
 import { formatCompactTimestamp, seasonSyncGateCopy } from "../src/features/command-center/SeasonHealthPanel.tsx";
 import { resolveCommandCenterSeason } from "../src/features/command-center/SeasonSyncWorkbench.tsx";
 import type { OnboardingStatus, SyncProgress } from "../src/shared/types.ts";
@@ -25,7 +25,7 @@ assertEqual(typeof getPlayerProfile, "function", "player profile API wrapper exi
 assertEqual(typeof getUserSettings, "function", "user settings API wrapper exists");
 assertEqual(typeof saveUserSettings, "function", "save settings API wrapper exists");
 assertEqual(typeof checkAppUpdate, "function", "update check API wrapper exists");
-assertEqual(typeof logout, "function", "logout API wrapper exists");
+assertEqual(typeof listAccounts, "function", "account manager API wrapper exists");
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
@@ -48,7 +48,7 @@ assertEqual(/\.commandCenterSyncPanel,[\s\S]*?\.commandCenterAccountPanel[\s\S]*
 assertEqual(/@media \(max-width: 1440px\)[\s\S]*?\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "1440px folds metrics into two columns");
 assertEqual(/\.commandCenterAccountPanel \.phase6ProfileAvatar\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*56px;/.test(commandCenterStyles), true, "account identity uses a compact neutral avatar");
 assertEqual(/\.commandCenterTools \.phase6SettingsLauncherGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "tools use four columns on wide screens");
-assertEqual(/\.commandCenterDangerZone\s*\{[\s\S]*?background:\s*rgba\(248, 231, 229, 0\.34\);/.test(commandCenterStyles), true, "logout stays a light danger treatment");
+assertEqual(/\.phase6CommandCenter \.accountManagerPanel\s*\{[\s\S]*?background:\s*var\(--glass-secondary\);/.test(commandCenterStyles), true, "account manager uses the approved secondary glass surface");
 assertEqual(/\.pageHeader h1\s*\{[\s\S]*?font-weight:\s*700;/.test(pageShellStyles), true, "page titles use the only bold text tier");
 assertEqual(/\.commandCenterMetricsRow > span > strong\s*\{[\s\S]*?color:\s*var\(--text-primary\);[\s\S]*?font-weight:\s*400;/.test(commandCenterStyles), true, "metric values stay neutral and regular weight");
 assertEqual(/\.commandCenterMetricsRow > span\.(?:good|warn) > strong/.test(commandCenterStyles), false, "metric values do not use green or yellow text emphasis");
@@ -113,7 +113,8 @@ assertEqual(onboardingSource.includes("commandCenterMainGrid"), true, "command c
 assertEqual(onboardingSource.includes("commandCenterSyncPanel"), true, "season sync is the primary two-thirds panel");
 assertEqual(onboardingSource.includes("commandCenterAccountPanel"), true, "account and health use the narrow side panel");
 assertEqual(onboardingSource.includes("commandCenterTools"), true, "secondary tools are grouped at the bottom");
-assertEqual(onboardingSource.includes("commandCenterDangerZone"), true, "logout is separated as a dangerous operation");
+assertEqual(onboardingSource.includes("<AccountManager"), true, "account manager replaces the legacy logout danger zone");
+assertEqual(onboardingSource.includes("commandCenterDangerZone"), false, "legacy logout danger zone is removed");
 assertEqual(onboardingSource.includes('id="local-data"'), true, "local data shell link has a focusable destination");
 assertEqual(onboardingSource.includes("常用英雄"), false, "common heroes move out of the command center first screen");
 assertEqual(onboardingSource.includes("成就展示"), false, "achievements move out of the command center first screen");
@@ -126,7 +127,7 @@ assertEqual(onboardingSource.includes("COMMAND_CENTER_SEASONS"), false, "command
 assertEqual(onboardingSource.includes("selectedSeason"), true, "command center keeps page-local season selection");
 assertEqual(onboardingSource.includes("BattleTag"), false, "command center never exposes BattleTag input or manual binding copy");
 assertEqual(onboardingSource.includes('aria-label="BattleTag"'), false, "command center removes the BattleTag input");
-assertEqual(onboardingSource.includes("battleTag"), false, "command center removes BattleTag input state");
+assertEqual(onboardingSource.includes("activeAccount?.battleTag"), true, "command center uses the active account BattleTag as its safe identity surface");
 assertEqual(onboardingSource.includes("runBindTarget"), false, "command center removes manual target binding");
 assertEqual(onboardingSource.includes("切换到此账号"), true, "account mismatch offers an explicit switch action");
 assertEqual(onboardingSource.includes("保留原目标"), true, "account mismatch offers an explicit keep action");
@@ -141,7 +142,7 @@ assertEqual(
   true,
   "season sync button combines credential, target, account-operation and sync gates",
 );
-assertEqual(onboardingSource.includes("const accountOperationBusy = loggingIn || loggingOut || targetAction !== null"), true, "account actions share one busy gate");
+assertEqual(onboardingSource.includes("const accountOperationBusy = busyAccountAction !== null || targetAction !== null"), true, "account actions share one busy gate");
 assertEqual(seasonWorkbenchSource.includes("seasonSyncGateCopy("), true, "account actions use the shared season gate copy without changing credential semantics");
 assertEqual(onboardingSource.includes("accountOperationLockRef"), true, "account handlers have a synchronous re-entry guard");
 assertEqual(onboardingSource.includes("dashboardRequestGenerationRef"), true, "dashboard refreshes invalidate stale responses");
@@ -149,12 +150,12 @@ assertEqual(onboardingSource.includes("mountedRef"), true, "dashboard responses 
 assertEqual(onboardingSource.includes("primaryTargetActionRef"), true, "target recovery exposes a focus destination");
 assertEqual(onboardingSource.includes("previousPrimaryTargetStateRef"), true, "target recovery focus is not stolen on same-state rerenders");
 assertEqual(
-  /catch \(err\) \{[\s\S]*?const loginError = `登录或识别失败[\s\S]*?await loadDashboard\(\);[\s\S]*?setError\(loginError\)/.test(onboardingSource),
+  /async function runAddAccount\(\)[\s\S]*?catch \(err\) \{[\s\S]*?await loadDashboard\(\);[\s\S]*?setError\(loginError\)/.test(onboardingSource),
   true,
-  "login refresh completes before the final recoverable error is shown",
+  "account login refresh completes before the final recoverable error is shown",
 );
 assertEqual(/async function runClearTarget\(\)[\s\S]*?setNotice\(result\.target\.message\)/.test(onboardingSource), true, "clear action uses the backend recovery message");
-assertEqual(onboardingSource.includes("{!hasTargetPrimaryAction && ("), true, "target recovery does not duplicate the bottom login CTA");
+assertEqual(onboardingSource.includes("hasTargetPrimaryAction"), false, "account manager removes the duplicate bottom login CTA gate");
 assertEqual(onboardingSource.includes("let disposed = false"), true, "late event subscriptions are disposed safely");
 assertEqual(onboardingSource.includes("if (disposed)"), true, "late event listeners immediately unlisten after cleanup");
 assertEqual(onboardingSource.includes("function acquireOperationLock()"), true, "account and season actions share one synchronous lock");
@@ -175,8 +176,7 @@ assertEqual(
 );
 assertEqual(onboardingSource.includes("disabled={accountOperationBusy || syncingSeason !== null || !targetStatus.canConfirmSwitch}"), true, "switch confirmation is disabled during season sync");
 assertEqual(onboardingSource.includes("disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}"), true, "clear is disabled during season sync");
-assertEqual(onboardingSource.includes("disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}"), true, "logout is disabled during season sync");
-assertEqual((onboardingSource.match(/accountOperationBusy \|\| syncingSeason !== null/g) ?? []).length >= 6, true, "all account action buttons are disabled during season sync");
+assertEqual((onboardingSource.match(/accountOperationBusy \|\| syncingSeason !== null/g) ?? []).length >= 5, true, "all account and target actions are disabled during season sync");
 assertEqual(onboardingSource.includes("function invalidateDashboardCache()"), true, "account changes invalidate the cached dashboard snapshot");
 assertEqual(
   /function beginAccountOperation\(\)[\s\S]*?invalidateDashboardCache\(\)/.test(onboardingSource),
@@ -228,8 +228,8 @@ assertEqual(onboardingSource.includes("applyDashboardSnapshot"), true, "command 
 assertEqual(onboardingSource.includes("phase6ThemeSelector"), false, "command center settings removes theme selector controls");
 assertEqual(onboardingSource.includes("phase6CompactSettingsActions"), false, "settings account actions move into the launcher grid");
 assertEqual(onboardingSource.includes("StatusBadge tone={credentialTone(status?.credentialStatus.state)}"), false, "profile card removes the right-side login status capsule");
-assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.indexOf("onClick={runLogin}"), true, "header update action appears before account actions");
-assertEqual(onboardingSource.indexOf("onClick={runLogin}") < onboardingSource.indexOf("onClick={runLogout}"), true, "dangerous logout remains after account actions");
+assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.lastIndexOf("<AccountManager"), true, "header update action appears before account management");
+assertEqual(onboardingSource.indexOf("commandCenterTools") < onboardingSource.lastIndexOf("<AccountManager"), true, "account management appears after the existing command-center content");
 assertEqual(onboardingSource.includes("phase6NextActions"), false, "command center does not duplicate capsule navigation with next-step entries");
 assertEqual(onboardingSource.includes("CommandEntry"), false, "command center removes duplicated next-step entry component");
 assertEqual(rankingSource.includes("<PageHeader"), true, "ranking page uses the shared lightweight page header");
@@ -253,7 +253,6 @@ const status: OnboardingStatus = {
     state: "ready",
     message: "当前登录账号可用",
     exposesSecret: false,
-    roleId: 123,
     savedAt: "2026-06-28T05:40:00Z",
   },
   localData: {

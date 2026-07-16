@@ -7,39 +7,41 @@ import {
   FileText,
   FolderOpen,
   Github,
-  LogIn,
-  LogOut,
-
   UserRound,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
+  addAccount,
   cancelDashenLogin,
   checkAppUpdate,
   confirmLoginTargetSwitch,
   getOnboardingStatus,
   getPlayerProfile,
   getLoginTargetStatus,
+  listAccounts,
   clearPlayerTarget,
   keepCurrentPlayerTarget,
-  logout,
+  reloginAccount,
+  removeAccount,
   retryLoginTargetBinding,
-  startDashenLogin,
+  switchAccount,
   syncSeason,
 } from "../shared/api";
+import { AccountManager } from "../features/command-center/AccountManager";
 import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
-import type { CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
+import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
 
 type DashboardSnapshot = {
-  status: OnboardingStatus;
-  profile: PlayerProfile;
-  targetStatus: LoginTargetStatus;
+  accountStatus: AccountManagerStatus;
+  status: OnboardingStatus | null;
+  profile: PlayerProfile | null;
+  targetStatus: LoginTargetStatus | null;
 };
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
@@ -56,6 +58,7 @@ export function isCurrentDashboardRequest(requestGeneration: number, currentGene
 
 export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [accountStatus, setAccountStatus] = useState<AccountManagerStatus | null>(null);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [targetStatus, setTargetStatus] = useState<LoginTargetStatus | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
@@ -64,9 +67,8 @@ export function OnboardingPage() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
-  const [loggingIn, setLoggingIn] = useState(false);
+  const [busyAccountAction, setBusyAccountAction] = useState<{ kind: "add" | "switch" | "relogin" | "remove"; accountId?: string } | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -124,10 +126,6 @@ export function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    const cached = dashboardCache;
-    if (cached) {
-      applyDashboardSnapshot(cached);
-    }
     void loadDashboard();
   }, []);
 
@@ -137,6 +135,30 @@ export function OnboardingPage() {
       setError(null);
     }
     try {
+      const nextAccountStatus = await listAccounts();
+      if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
+        return;
+      }
+      setAccountStatus(nextAccountStatus);
+      if (dashboardCache && dashboardCache.accountStatus.activeAccountId === nextAccountStatus.activeAccountId) {
+        applyDashboardSnapshot({ ...dashboardCache, accountStatus: nextAccountStatus });
+      } else {
+        dashboardCache = null;
+        setStatus(null);
+        setProfile(null);
+        setTargetStatus(null);
+      }
+      if (!nextAccountStatus.activeAccountId) {
+        const snapshot: DashboardSnapshot = {
+          accountStatus: nextAccountStatus,
+          status: null,
+          profile: null,
+          targetStatus: null,
+        };
+        dashboardCache = snapshot;
+        applyDashboardSnapshot(snapshot);
+        return;
+      }
       const [nextStatus, nextProfile, nextTargetStatus] = await Promise.all([
         getOnboardingStatus(),
         getPlayerProfile(),
@@ -145,7 +167,12 @@ export function OnboardingPage() {
       if (!isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
         return;
       }
-      const snapshot = { status: nextStatus, profile: nextProfile, targetStatus: nextTargetStatus };
+      const snapshot: DashboardSnapshot = {
+        accountStatus: nextAccountStatus,
+        status: nextStatus,
+        profile: nextProfile,
+        targetStatus: nextTargetStatus,
+      };
       dashboardCache = snapshot;
       applyDashboardSnapshot(snapshot);
     } catch (err) {
@@ -156,14 +183,17 @@ export function OnboardingPage() {
   }
 
   function applyDashboardSnapshot(snapshot: DashboardSnapshot) {
+    setAccountStatus(snapshot.accountStatus);
     setStatus(snapshot.status);
     setProfile(snapshot.profile);
     setTargetStatus(snapshot.targetStatus);
-    setSelectedSeason((current) => resolveCommandCenterSeason(
-      current ?? snapshot.status.currentSeason,
-      snapshot.status.syncableSeasons,
-      snapshot.status.currentSeason,
-    ));
+    setSelectedSeason((current) => snapshot.status
+      ? resolveCommandCenterSeason(
+          current ?? snapshot.status.currentSeason,
+          snapshot.status.syncableSeasons,
+          snapshot.status.currentSeason,
+        )
+      : null);
   }
 
   function acquireOperationLock() {
@@ -191,32 +221,113 @@ export function OnboardingPage() {
     return true;
   }
 
-  async function runLogin() {
+  async function runAddAccount() {
     if (!beginAccountOperation()) {
       return;
     }
-    setLoggingIn(true);
+    setBusyAccountAction({ kind: "add" });
+    setLoginProgress(null);
     setNotice(null);
     setError(null);
     try {
-      const result = await startDashenLogin();
-      if (mountedRef.current) {
-        setStatus((current) => (current ? { ...current, credentialStatus: result.status } : current));
-        setTargetStatus(result.target);
-        setNotice(result.target.message);
-      }
+      const result = await addAccount();
       await loadDashboard();
+      if (mountedRef.current) {
+        setNotice(result.message);
+      }
     } catch (err) {
-      const loginError = `登录或识别失败：${productErrorMessage(err)}。请重新识别。`;
+      const loginError = `添加账号失败：${productErrorMessage(err)}。请重试。`;
       await loadDashboard();
       if (mountedRef.current) {
         setError(loginError);
       }
     } finally {
       if (mountedRef.current) {
-        setLoggingIn(false);
+        setBusyAccountAction(null);
       }
       releaseOperationLock();
+    }
+  }
+
+  async function runReloginAccount(account: AccountSummary) {
+    if (!beginAccountOperation()) {
+      return;
+    }
+    setBusyAccountAction({ kind: "relogin", accountId: account.accountId });
+    setLoginProgress(null);
+    setNotice(null);
+    setError(null);
+    try {
+      const result = await reloginAccount(account.accountId);
+      await loadDashboard();
+      if (mountedRef.current) {
+        setNotice(result.message);
+      }
+    } catch (err) {
+      const loginError = `重新登录失败：${productErrorMessage(err)}。请重试。`;
+      await loadDashboard();
+      if (mountedRef.current) {
+        setError(loginError);
+      }
+    } finally {
+      if (mountedRef.current) {
+        setBusyAccountAction(null);
+      }
+      releaseOperationLock();
+    }
+  }
+
+  async function runSwitchAccount(account: AccountSummary) {
+    if (!beginAccountOperation()) {
+      return;
+    }
+    setBusyAccountAction({ kind: "switch", accountId: account.accountId });
+    setNotice(null);
+    setError(null);
+    try {
+      await switchAccount(account.accountId);
+      dashboardCache = null;
+      window.location.reload();
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(`切换账号失败：${productErrorMessage(err)}。请重试。`);
+        setBusyAccountAction(null);
+      }
+      releaseOperationLock();
+    }
+  }
+
+  async function runRemoveAccount(account: AccountSummary) {
+    if (!beginAccountOperation()) {
+      return;
+    }
+    setBusyAccountAction({ kind: "remove", accountId: account.accountId });
+    setNotice(null);
+    setError(null);
+    let reloadStarted = false;
+    try {
+      const result = await removeAccount(account.accountId);
+      if (result.removed && result.reloadRequired) {
+        dashboardCache = null;
+        window.location.reload();
+        reloadStarted = true;
+        return;
+      }
+      await loadDashboard();
+      if (mountedRef.current) {
+        setNotice(result.message);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(`退出账号失败：${productErrorMessage(err)}。请重试。`);
+      }
+    } finally {
+      if (!reloadStarted) {
+        if (mountedRef.current) {
+          setBusyAccountAction(null);
+        }
+        releaseOperationLock();
+      }
     }
   }
 
@@ -375,32 +486,6 @@ export function OnboardingPage() {
     }
   }
 
-  async function runLogout() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setLoggingOut(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await logout();
-      if (mountedRef.current) {
-        setNotice(result.message);
-        setLoginProgress(null);
-        await loadDashboard();
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`退出登录失败：${productErrorMessage(err)}。请重试。`);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoggingOut(false);
-      }
-      releaseOperationLock();
-    }
-  }
-
   async function runUpdateCheck() {
     setCheckingUpdate(true);
     setNotice(null);
@@ -416,19 +501,19 @@ export function OnboardingPage() {
   }
 
   const credentialReady = status?.credentialStatus.state === "ready";
-  const accountOperationBusy = loggingIn || loggingOut || targetAction !== null;
+  const accountOperationBusy = busyAccountAction !== null || targetAction !== null;
+  const activeAccount = accountStatus?.accounts.find((account) => account.isActive) ?? null;
   const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
   const primaryTargetState = targetStatus && ["switchRequired", "bindFailed", "unidentified", "verificationRequired", "mismatchKept"].includes(targetStatus.state)
     ? targetStatus.state
     : null;
-  const hasTargetPrimaryAction = primaryTargetState !== null;
   const showDetectedLogin = Boolean(
     targetStatus?.currentBnet &&
     targetStatus.detectedBnet &&
     normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
   );
   const warnings = status?.health.warnings ?? [];
-  const displayName = profile?.playerId ?? "未登录玩家";
+  const displayName = activeAccount?.battleTag ?? "未登录玩家";
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
   const canUseData = Boolean(status?.canEnterReview);
   const presetMatches = status?.localData.presetMatches ?? 0;
@@ -478,15 +563,18 @@ export function OnboardingPage() {
         </div>
       )}
 
-      <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
+      {accountStatus?.activeAccountId ? <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
         <DataFact label="登录状态" value={credentialReady ? "已登录" : "待登录"} tone={credentialReady ? "good" : "warn"} />
         <DataFact label="本地对局" value={`${presetMatches} 场`} tone={presetMatches > 0 ? "good" : "warn"} />
         <DataFact label="覆盖率" value={`${coveragePercent}%`} tone={coveragePercent >= 80 ? "good" : "warn"} />
         <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
-      </div>
+      </div> : null}
 
       <QaRegion id="CMD-PROFILE" className="phase6QaBlockRegion">
-        <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
+        {accountStatus === null ? (
+          <div className="seasonSyncWorkbenchLoading" role="status">正在加载账号信息…</div>
+        ) : accountStatus.activeAccountId ? <>
+          <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
           <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
             <div className="commandCenterSectionHeading">
               <div>
@@ -524,8 +612,8 @@ export function OnboardingPage() {
                       {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
                     </button>
                   ) : targetStatus && ["unidentified", "verificationRequired", "mismatchKept", "bindFailed"].includes(targetStatus.state) ? (
-                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
-                      {loggingIn ? "识别中…" : "重新识别"}
+                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={() => activeAccount && runReloginAccount(activeAccount)} disabled={!activeAccount || accountOperationBusy || syncingSeason !== null}>
+                      {busyAccountAction?.kind === "relogin" ? "识别中…" : "重新识别"}
                     </button>
                   ) : null}
                   <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}>
@@ -582,20 +670,6 @@ export function OnboardingPage() {
               <HealthItem label={presetMatches > 0 ? "本地赛季有数据" : "本地赛季等待数据"} ok={presetMatches > 0} />
               <HealthItem label="没有待处理失败" ok={!warnings.length} />
             </div>
-            <div className="commandCenterAccountActions">
-                {!hasTargetPrimaryAction && (
-                  <button className="primaryButton" type="button" onClick={runLogin} disabled={accountOperationBusy || syncingSeason !== null}>
-                    <LogIn size={18} />
-                    {loggingIn ? "登录识别中…" : credentialReady ? "重新登录" : "登录网易大神"}
-                  </button>
-                )}
-                {loggingIn && (
-                  <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
-                    <X size={18} />
-                    {cancellingLogin ? "取消中…" : "取消"}
-                  </button>
-                )}
-            </div>
           </aside>
         </div>
 
@@ -608,14 +682,32 @@ export function OnboardingPage() {
                 <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => setNotice("Github地址入口后续提供")} />
           </div>
         </section>
+        </> : (
+          <section className="commandCenterAccountEmpty" id="local-data" tabIndex={-1} aria-labelledby="command-center-empty-title">
+            <h2 id="command-center-empty-title">尚未添加账号</h2>
+            <p>添加账号后即可同步和查看本地数据。</p>
+          </section>
+        )}
 
-        <section className="commandCenterDangerZone" aria-label="账号危险操作">
-          <div><strong>退出当前账号</strong><p>退出后会清除本地登录凭证，但不会删除已经导入的赛季数据。</p></div>
-          <button className="dangerButton" type="button" onClick={runLogout} disabled={!credentialReady || accountOperationBusy || syncingSeason !== null}>
-            <LogOut size={18} />
-            {loggingOut ? "退出中…" : "退出登录"}
-          </button>
-        </section>
+        {accountStatus ? <div className="accountManagerPanel">
+          {(busyAccountAction?.kind === "add" || busyAccountAction?.kind === "relogin") && (
+            <div className="accountManagerLoginProgress" role="status" aria-live="polite">
+              <span>{loginProgress?.message ?? "正在等待浏览器登录…"}</span>
+              <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
+                <X size={18} />
+                {cancellingLogin ? "取消中…" : "取消"}
+              </button>
+            </div>
+          )}
+          <AccountManager
+            accounts={accountStatus?.accounts ?? []}
+            busyAction={busyAccountAction}
+            onAdd={runAddAccount}
+            onSwitch={runSwitchAccount}
+            onRelogin={runReloginAccount}
+            onRemove={runRemoveAccount}
+          />
+        </div> : null}
       </QaRegion>
     </section>
   );

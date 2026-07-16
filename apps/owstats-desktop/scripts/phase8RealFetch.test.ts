@@ -113,11 +113,8 @@ for (const command of [
   assert.match(lib, new RegExp(`commands::${command}\\b`), `handler registers safe command ${command}`);
 }
 assert.match(lib, /manage\(login_target::LoginTargetCoordinator::default\(\)\)/, "login target coordinator is managed state");
-assert.match(
-  commands,
-  /start_dashen_login[\s\S]*?coordinator\.clear\(\)[\s\S]*?start_dashen_login_capture[\s\S]*?reconcile_detected_target[\s\S]*?CredentialLoginResult/,
-  "new login clears the old round and reconciles detected target",
-);
+assert.match(commands, /add_account[\s\S]*?capture_and_publish_add/, "add account uses the staged capture-and-publish flow");
+assert.match(commands, /relogin_account[\s\S]*?capture_and_publish_relogin/, "relogin uses the staged capture-and-publish flow");
 assert.match(
   commands,
   /sync_season[\s\S]*?ensure_sync_target_ready[\s\S]*?sync_season_with_credentials_and_target_paths_output_dir_base_url/,
@@ -125,16 +122,16 @@ assert.match(
 );
 
 for (const [commandName, firstSideEffect] of [
-  ["logout", "login_target_coordinator.clear()"],
-  ["start_dashen_login", "login_target_coordinator.clear()"],
-  ["confirm_login_target_switch", "read_saved_credentials(&app)"],
-  ["keep_current_player_target", "login_target_coordinator.keep_current()"],
-  ["retry_login_target_binding", "read_saved_credentials(&app)"],
-  ["clear_player_target", "player_target_path(&app)"],
+  ["add_account", "capture_and_publish_add"],
+  ["relogin_account", "capture_and_publish_relogin"],
+  ["confirm_login_target_switch", "active_account(&accounts)"],
+  ["keep_current_player_target", "active_account(&accounts)"],
+  ["retry_login_target_binding", "active_account(&accounts)"],
+  ["clear_player_target", "active_account(&accounts)"],
 ] as const) {
   assertAcquiresBefore(commandName, "try_acquire_account_operation()", firstSideEffect);
 }
-assertAcquiresBefore("sync_season", "try_acquire_sync()", "app_paths(&app)");
+assertAcquiresBefore("sync_season", "try_acquire_account_operation()", "active_account(&accounts)");
 assert.doesNotMatch(
   commandBody(commands, "cancel_dashen_login"),
   /try_acquire_(?:account_operation|sync)/,
