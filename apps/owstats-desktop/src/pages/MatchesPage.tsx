@@ -110,9 +110,7 @@ export function MatchesPage() {
       }
       if (selectedFavoriteMatchId === null) return;
       setMatches((current) => {
-        const next = updateMatchFavoriteState(current, selectedFavoriteMatchId, favorite !== null);
-        updateMatchesPageCache({ matches: next });
-        return next;
+        return updateMatchFavoriteState(current, selectedFavoriteMatchId, favorite !== null);
       });
     },
     [],

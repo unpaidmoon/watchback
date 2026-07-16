@@ -704,10 +704,19 @@ assert.match(
   /if \(selectedFavoriteMatchId === null\) return;\s*setMatches/,
   "a persistence result that finishes after selection clears must not update an unrelated list row",
 );
+const favoriteStateUpdaterBody = favoritePersistedSource.match(
+  /setMatches\(\(current\) => \{([\s\S]*?)\}\);/,
+)?.[1] ?? "";
+assert.notEqual(favoriteStateUpdaterBody, "", "favorite reconciliation should update list state through a functional updater");
+assert.equal(
+  favoriteStateUpdaterBody.includes("updateMatchesPageCache"),
+  false,
+  "the React state updater must not perform cache side effects",
+);
 assert.match(
-  favoritePersistedSource,
-  /setMatches\(\(current\) => \{\s*const next = updateMatchFavoriteState\(current, selectedFavoriteMatchId, favorite !== null\);\s*updateMatchesPageCache\(\{ matches: next \}\);\s*return next;\s*\}\);/,
-  "other favorite mutations update the matching list row and merge it into the cache",
+  favoriteStateUpdaterBody,
+  /return updateMatchFavoriteState\(current, selectedFavoriteMatchId, favorite !== null\);/,
+  "the favorite state updater should only return the immutable helper result",
 );
 assert.equal(
   favoritePersistedSource.includes("favorite.note"),
@@ -852,6 +861,18 @@ assert.equal(
   true,
   "cache snapshots are only written for the list loaded under current filters",
 );
+const matchesCacheSyncStart = matchesPageSource.indexOf(
+  "if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;",
+);
+const matchesCacheSyncEnd = matchesPageSource.indexOf("\n  useEffect(", matchesCacheSyncStart);
+const matchesCacheSyncEffect = matchesPageSource.slice(matchesCacheSyncStart, matchesCacheSyncEnd);
+assert.notEqual(matchesCacheSyncStart, -1, "MatchesPage should keep one guarded post-commit cache sync effect");
+assert.equal(
+  matchesCacheSyncEffect.includes("updateMatchesPageCache({"),
+  true,
+  "the guarded post-commit effect should own cache synchronization",
+);
+assert.match(matchesCacheSyncEffect, /\bmatches,\s*/, "the post-commit cache sync effect should persist committed match rows");
 assert.doesNotMatch(
   matchesPageSource,
   /updateMatchesPageCache\(\{\s*filters\s*\}\)/,
