@@ -207,6 +207,35 @@ fn inventory_retains_global_id_but_rejects_unknown_mode_without_match_kind() {
 }
 
 #[test]
+fn inventory_rejects_unknown_modes_and_explicit_kind_conflicts() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("unknown-explicit", "MysteryMode", 30),
+                entry("fight-conflict", "QuickFight", 40),
+            ],
+            vec![
+                normal_detail("unknown-explicit", 10, "unknown-player"),
+                normal_detail("fight-conflict", 10, "conflict-player"),
+            ],
+            vec![],
+        ),
+        HashSet::from(["unknown-explicit".to_string(), "fight-conflict".to_string()]),
+    )
+    .unwrap();
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+
+    assert!(inventory.match_ids.contains("unknown-explicit"));
+    assert!(inventory.match_ids.contains("fight-conflict"));
+    assert!(inventory.modes.is_empty());
+}
+
+#[test]
 fn inventory_treats_only_valid_wrapped_details_as_complete() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
@@ -334,15 +363,41 @@ fn detail_selector_returns_only_new_or_missing_details() {
 
 #[test]
 fn quick_page_stops_when_all_ids_are_known_at_or_below_watermark() {
-    let entries = vec![
+    let payload = match_list_payload(vec![
         json!({"matchId": "known-a", "beginTs": 30}),
         json!({"matchId": "known-b", "beginTs": 20}),
-    ];
+    ]);
     let known = HashSet::from(["known-a".to_string(), "known-b".to_string()]);
 
     assert_eq!(
-        classify_quick_page(&entries, &known, Some(30)),
+        classify_quick_page(&payload, &known, Some(30)),
         QuickPageDecision::WatermarkReached
+    );
+}
+
+#[test]
+fn quick_page_compares_millisecond_protocol_time_with_second_watermark() {
+    let known = HashSet::from(["known".to_string()]);
+
+    assert_eq!(
+        classify_quick_page(
+            &match_list_payload(vec![
+                json!({"matchId": "known", "beginTs": 1_700_000_000_000_i64})
+            ]),
+            &known,
+            Some(1_700_000_000)
+        ),
+        QuickPageDecision::WatermarkReached
+    );
+    assert_eq!(
+        classify_quick_page(
+            &match_list_payload(vec![
+                json!({"matchId": "known", "beginTs": 1_700_000_001_000_i64})
+            ]),
+            &known,
+            Some(1_700_000_000)
+        ),
+        QuickPageDecision::Continue
     );
 }
 
@@ -352,7 +407,7 @@ fn quick_page_continues_for_unknown_old_id_or_newer_timestamp() {
 
     assert_eq!(
         classify_quick_page(
-            &[json!({"matchId": "unknown", "beginTs": 10})],
+            &match_list_payload(vec![json!({"matchId": "unknown", "beginTs": 10})]),
             &known,
             Some(30)
         ),
@@ -360,7 +415,7 @@ fn quick_page_continues_for_unknown_old_id_or_newer_timestamp() {
     );
     assert_eq!(
         classify_quick_page(
-            &[json!({"matchId": "known", "beginTs": 31})],
+            &match_list_payload(vec![json!({"matchId": "known", "beginTs": 31})]),
             &known,
             Some(30)
         ),
@@ -383,25 +438,35 @@ fn quick_page_is_unsafe_when_any_raw_entry_lacks_identity_or_positive_time() {
         ],
     ] {
         assert_eq!(
-            classify_quick_page(&entries, &known, Some(30)),
+            classify_quick_page(&match_list_payload(entries), &known, Some(30)),
             QuickPageDecision::Unsafe
         );
     }
 }
 
 #[test]
-fn quick_page_empty_precedes_watermark_checks() {
+fn quick_page_recognized_empty_container_precedes_watermark_checks() {
     assert_eq!(
-        classify_quick_page(&[], &HashSet::new(), None),
+        classify_quick_page(&json!({"data": {"matchList": []}}), &HashSet::new(), None),
         QuickPageDecision::Empty
     );
+}
+
+#[test]
+fn quick_page_unrecognized_or_error_shell_is_unsafe() {
+    for payload in [json!({"code": 0, "data": {}}), json!({"error": "failed"})] {
+        assert_eq!(
+            classify_quick_page(&payload, &HashSet::new(), None),
+            QuickPageDecision::Unsafe
+        );
+    }
 }
 
 #[test]
 fn quick_page_without_watermark_is_unsafe() {
     assert_eq!(
         classify_quick_page(
-            &[json!({"matchId": "known", "beginTs": 10})],
+            &match_list_payload(vec![json!({"matchId": "known", "beginTs": 10})]),
             &HashSet::from(["known".to_string()]),
             None
         ),
@@ -537,6 +602,10 @@ fn entry(match_id: &str, game_mode: &str, begin_ts: i64) -> serde_json::Value {
         "matchRet": 1,
         "beginTs": begin_ts
     })
+}
+
+fn match_list_payload(entries: Vec<serde_json::Value>) -> serde_json::Value {
+    json!({"data": {"matchList": entries}})
 }
 
 fn normal_detail(match_id: &str, duration: i64, player_id: &str) -> serde_json::Value {

@@ -399,6 +399,10 @@ pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
 }
 
 pub(crate) fn extract_raw_match_entries(payload: &Value) -> Vec<Value> {
+    extract_raw_match_entries_if_recognized(payload).unwrap_or_default()
+}
+
+pub(crate) fn extract_raw_match_entries_if_recognized(payload: &Value) -> Option<Vec<Value>> {
     let mut candidates = Vec::new();
     collect_match_entry_candidates(payload, &mut candidates);
     candidates
@@ -406,8 +410,7 @@ pub(crate) fn extract_raw_match_entries(payload: &Value) -> Vec<Value> {
         .copied()
         .find(|entries| match_objects(entries).is_some())
         .or_else(|| candidates.first().copied())
-        .unwrap_or_default()
-        .to_vec()
+        .map(<[Value]>::to_vec)
 }
 
 fn collect_match_entry_candidates<'a>(container: &'a Value, candidates: &mut Vec<&'a [Value]>) {

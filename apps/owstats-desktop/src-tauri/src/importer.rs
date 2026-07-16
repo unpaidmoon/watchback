@@ -948,7 +948,7 @@ pub(crate) fn int_field(value: &Value, key: &str) -> i64 {
         .unwrap_or(0)
 }
 
-fn normalize_timestamp(value: i64) -> i64 {
+pub(crate) fn normalize_timestamp(value: i64) -> i64 {
     if value > 10_000_000_000 {
         value / 1000
     } else {

@@ -23,16 +23,17 @@ impl SeasonModeKey {
 
 fn normalized_season_mode_key(match_kind: &str, game_mode: &str) -> Option<SeasonModeKey> {
     let game_mode = game_mode.trim();
-    if game_mode.is_empty() {
+    let normalized_kind = if super::FIGHT_MODES.contains(&game_mode) {
+        "fight"
+    } else if super::NORMAL_MODES.contains(&game_mode) {
+        "normal"
+    } else {
+        return None;
+    };
+    let explicit_kind = match_kind.trim();
+    if !explicit_kind.is_empty() && explicit_kind != normalized_kind {
         return None;
     }
-    let normalized_kind = match match_kind.trim() {
-        "normal" => Some("normal"),
-        "fight" => Some("fight"),
-        _ if super::FIGHT_MODES.contains(&game_mode) => Some("fight"),
-        _ if super::NORMAL_MODES.contains(&game_mode) => Some("normal"),
-        _ => None,
-    }?;
     Some(SeasonModeKey::new(normalized_kind, game_mode))
 }
 
@@ -118,10 +119,15 @@ pub fn load_season_sync_inventory(db: &OwDatabase, season: i64) -> Result<Season
 }
 
 pub fn classify_quick_page(
-    raw_entries: &[Value],
+    raw_payload: &Value,
     known_match_ids: &HashSet<String>,
     watermark: Option<i64>,
 ) -> QuickPageDecision {
+    let Some(raw_entries) =
+        crate::season_fetch::extract_raw_match_entries_if_recognized(raw_payload)
+    else {
+        return QuickPageDecision::Unsafe;
+    };
     if raw_entries.is_empty() {
         return QuickPageDecision::Empty;
     }
@@ -129,7 +135,7 @@ pub fn classify_quick_page(
         return QuickPageDecision::Unsafe;
     };
     let mut should_continue = false;
-    for entry in raw_entries {
+    for entry in &raw_entries {
         let Some(match_id) = entry
             .get("matchId")
             .and_then(Value::as_str)
@@ -144,6 +150,7 @@ pub fn classify_quick_page(
         else {
             return QuickPageDecision::Unsafe;
         };
+        let begin_ts = crate::importer::normalize_timestamp(begin_ts);
         should_continue |= !known_match_ids.contains(match_id) || begin_ts > watermark;
     }
     if should_continue {
