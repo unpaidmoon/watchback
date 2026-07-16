@@ -21,7 +21,11 @@ fn normalize_incremental_detail_outcomes(
     let mut invalid_ids = HashSet::new();
     for detail in details {
         let match_id = string_field(&detail, "match_id");
-        if crate::importer::is_valid_match_detail(&detail) {
+        if crate::importer::is_valid_match_detail(&detail)
+            && match_id
+                .as_ref()
+                .is_some_and(|id| attempted_detail_ids.contains(id))
+        {
             if let Some(match_id) = match_id {
                 success_ids.insert(match_id);
             }
@@ -206,6 +210,26 @@ mod tests {
         })
     }
 
+    fn indexed_detail(match_id: &str, player_id: &str) -> Value {
+        json!({
+            "match_id": match_id,
+            "match_kind": "normal",
+            "payload": {
+                "code": 0,
+                "data": {
+                    "totalCount": {
+                        "teammateList": [{
+                            "bnetId": player_id,
+                            "name": player_id,
+                            "heroGuid": "hero"
+                        }],
+                        "enemyList": []
+                    }
+                }
+            }
+        })
+    }
+
     fn seed_old_error(db: &OwDatabase, match_id: &str) {
         import_payload_value_embedded(
             db,
@@ -344,5 +368,99 @@ mod tests {
         assert_eq!(season_errors_count, 0);
         assert_eq!(summary.failed_details, 0);
         assert!(summary.latest_errors.is_empty());
+    }
+
+    #[test]
+    fn incremental_persist_ignores_valid_detail_for_unattempted_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+        import_payload_value_embedded(
+            &db,
+            &json!({
+                "season": 23,
+                "matches": {
+                    "entries": [entry("attempted-a"), entry("unattempted-b")],
+                    "details": [indexed_detail("unattempted-b", "b-old")],
+                    "detail_errors": [{
+                        "match_id": "attempted-a",
+                        "error_type": "DetailFetchError",
+                        "message": "旧错误"
+                    }]
+                }
+            }),
+        )
+        .unwrap();
+
+        let summary = sync_import_incremental_parts(
+            &db,
+            23,
+            &Value::Null,
+            vec![],
+            vec![indexed_detail("unattempted-b", "b-new")],
+            vec![],
+            HashSet::from(["attempted-a".to_string()]),
+        )
+        .unwrap();
+
+        let conn = db.connect().unwrap();
+        let raw_detail: String = conn
+            .query_row(
+                "SELECT raw_detail_json FROM match_details WHERE match_id='unattempted-b'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let indexed_players = {
+            let mut statement = conn
+                .prepare(
+                    "SELECT bnet_id FROM match_players
+                     WHERE match_id='unattempted-b' ORDER BY bnet_id",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
+        };
+        let error_message: String = conn
+            .query_row(
+                "SELECT message FROM sync_errors WHERE season=23 AND match_id='attempted-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(raw_detail.contains("b-old"));
+        assert!(!raw_detail.contains("b-new"));
+        assert_eq!(indexed_players, vec!["b-old"]);
+        assert_eq!(error_message, INVALID_DETAIL_MESSAGE);
+        assert_eq!(summary.failed_details, 1);
+        assert_eq!(summary.imported_details, 0);
+    }
+
+    #[test]
+    fn incremental_persist_ignores_details_when_nothing_was_attempted() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+
+        let summary = sync_import_incremental_parts(
+            &db,
+            23,
+            &Value::Null,
+            vec![],
+            vec![valid_detail("unattempted-new")],
+            vec![],
+            HashSet::new(),
+        )
+        .unwrap();
+
+        let conn = db.connect().unwrap();
+        let details_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM match_details", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(details_count, 0);
+        assert_eq!(summary.imported_details, 0);
+        assert_eq!(summary.failed_details, 0);
     }
 }
