@@ -58,6 +58,16 @@ assert.match(
   /@media \(max-width:\s*1099px\)\s*\{[\s\S]*?\.matchFavoriteEditor\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*\}[\s\S]*?\.matchFavoriteActions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   "narrow detail should stack the editor and keep two equal action columns",
 );
+assert.match(
+  matchStyleSource,
+  /@media \(max-width:\s*1099px\)\s*\{[\s\S]*?\.matchDetailBackButton\s*\{(?=[^}]*position:\s*static)(?=[^}]*min-height:\s*44px)[^}]*\}/s,
+  "narrow back control should remain in normal flow instead of overlaying detail content",
+);
+assert.doesNotMatch(
+  matchStyleSource,
+  /@media \(max-width:\s*520px\)\s*\{[\s\S]*?\.matchFavoriteActions\s*\{[^}]*grid-template-columns/s,
+  "favorite actions should retain two equal columns at every width below 1099px",
+);
 
 assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesPage should render the combined match workbench layout");
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
