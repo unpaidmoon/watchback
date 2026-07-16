@@ -132,6 +132,7 @@ pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<M
         evaluation: match_evaluation_summary(&conn, match_id)?,
         team_awards,
         same_role_comparison: same_role_comparison(&conn, match_id)?,
+        favorite: favorite_for_match(&conn, match_id)?,
         raw_json,
     })
 }
@@ -374,6 +375,9 @@ pub(super) fn append_filters(
     if let Some(to) = non_empty(&filters.date_to).and_then(|date| begin_bound(&date, true)) {
         sql.push_str(" AND m.begin_ts <= ?");
         owned.push(Box::new(to));
+    }
+    if filters.favorite_only == Some(true) {
+        sql.push_str(" AND f.match_id IS NOT NULL");
     }
 }
 

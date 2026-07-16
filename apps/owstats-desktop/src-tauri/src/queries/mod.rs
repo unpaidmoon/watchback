@@ -1,5 +1,6 @@
 use crate::db::OwDatabase;
 use crate::importer::{int_field, rebuild_match_players_from_existing_details, string_field};
+use crate::match_favorites::favorite_for_match;
 use crate::models::{
     ArenaDetailSlice, ArenaMatchDetail, ComparisonMetrics, FilterOption, FilterOptions, HeroStat,
     MatchDetailView, MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary,

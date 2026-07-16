@@ -1,6 +1,7 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
-    delete_match_favorite, get_match_favorite, save_match_favorite, OwDatabase,
+    delete_match_favorite, get_match_detail, get_match_favorite, list_matches, save_match_favorite,
+    MatchFilters, OwDatabase,
 };
 use rusqlite::params;
 
@@ -12,7 +13,19 @@ fn database(filename: &str) -> Result<(tempfile::TempDir, OwDatabase)> {
 }
 
 fn seed_match(db: &OwDatabase, match_id: &str) -> Result<()> {
-    db.connect()?.execute(
+    seed_match_record(db, match_id, 23, "normal", "SportPreset", 100)
+}
+
+fn seed_match_record(
+    db: &OwDatabase,
+    match_id: &str,
+    season: i64,
+    match_kind: &str,
+    game_mode: &str,
+    begin_ts: i64,
+) -> Result<()> {
+    let conn = db.connect()?;
+    conn.execute(
         r#"
         INSERT INTO matches (
             match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
@@ -21,13 +34,81 @@ fn seed_match(db: &OwDatabase, match_id: &str) -> Result<()> {
             updated_at
         )
         VALUES (
-            ?1, 23, 'career', 'SportPreset', 'normal', 'win', 'test-map', '测试地图',
-            'test-hero', '测试英雄', 100, 2, 1, 10, 5, 2, 5000, 1000, 500, 0, 600,
+            ?1, ?2, 'preset', ?3, ?4, 'win', 'test-map', '测试地图',
+            'test-hero', '测试英雄', ?5, 2, 1, 10, 5, 2, 5000, 1000, 500, 0, 600,
             '{}', '2026-07-16T00:00:00Z'
         )
         "#,
-        params![match_id],
+        params![match_id, season, game_mode, match_kind, begin_ts],
     )?;
+    conn.execute(
+        r#"
+        INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+        VALUES (
+            ?1, ?2,
+            '{"payload":{"data":{"teammateList":[],"enemyList":[],"roundCountList":[]}}}',
+            '2026-07-16T00:00:00Z'
+        )
+        "#,
+        params![match_id, match_kind],
+    )?;
+    Ok(())
+}
+
+#[test]
+fn projects_favorite_state_filters_with_and_and_keeps_note_out_of_raw_json() -> Result<()> {
+    let (_temp, db) = database("query.sqlite3")?;
+    seed_match_record(&db, "normal-favorite", 23, "normal", "SportPreset", 300)?;
+    seed_match_record(&db, "normal-plain", 23, "normal", "SportPreset", 200)?;
+    seed_match_record(&db, "arena-favorite", 22, "fight", "LeisureFight", 100)?;
+    save_match_favorite(&db, "normal-favorite", "本地私密备注")?;
+    save_match_favorite(&db, "arena-favorite", "")?;
+
+    let default_rows = list_matches(&db, MatchFilters::default())?;
+    assert!(default_rows
+        .iter()
+        .find(|row| row.match_id == "normal-favorite")
+        .is_some_and(|row| row.is_favorite));
+    assert!(default_rows
+        .iter()
+        .find(|row| row.match_id == "normal-plain")
+        .is_some_and(|row| !row.is_favorite));
+
+    let favorite_rows = list_matches(
+        &db,
+        MatchFilters {
+            favorite_only: Some(true),
+            ..MatchFilters::default()
+        },
+    )?;
+    assert_eq!(
+        favorite_rows
+            .iter()
+            .map(|row| row.match_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["normal-favorite", "arena-favorite"]
+    );
+
+    let season_favorite_rows = list_matches(
+        &db,
+        MatchFilters {
+            season: Some(23),
+            favorite_only: Some(true),
+            ..MatchFilters::default()
+        },
+    )?;
+    assert_eq!(season_favorite_rows.len(), 1);
+    assert_eq!(season_favorite_rows[0].match_id, "normal-favorite");
+
+    let detail = get_match_detail(&db, "normal-favorite")?;
+    assert_eq!(
+        detail
+            .favorite
+            .as_ref()
+            .map(|favorite| favorite.note.as_str()),
+        Some("本地私密备注")
+    );
+    assert!(!detail.raw_json.to_string().contains("本地私密备注"));
     Ok(())
 }
 

@@ -13,10 +13,12 @@ pub(super) fn list_matches_impl(
             m.match_id, m.season, m.bucket, m.game_mode, m.result, m.map_guid, COALESCE(m.map_name, ''),
             m.hero_guid, COALESCE(m.hero_name, ''), m.begin_ts, m.team_score, m.opponent_score,
             m.kills, m.assists, m.deaths, m.damage, m.healing, m.mitigation, m.duration_sec,
-            e.grade, e.primary_tag, e.evidence_tags_json, e.confidence, m.match_kind, d.raw_detail_json
+            e.grade, e.primary_tag, e.evidence_tags_json, e.confidence, m.match_kind, d.raw_detail_json,
+            CASE WHEN f.match_id IS NULL THEN 0 ELSE 1 END
         FROM matches m
         LEFT JOIN match_evaluations e ON e.match_id = m.match_id
         LEFT JOIN match_details d ON d.match_id = m.match_id
+        LEFT JOIN match_favorites f ON f.match_id = m.match_id
         WHERE (m.bucket = 'preset' OR m.match_kind = 'fight' OR m.game_mode IN ('LeisureFight', 'SportFight'))
         "#,
     );
@@ -114,6 +116,7 @@ pub(super) fn list_matches_impl(
                 .as_ref()
                 .and_then(|projection| projection.duration_sec)
                 .unwrap_or(row.get(18)?),
+            is_favorite: row.get(25)?,
             evaluation: evaluation_from_row(row, 19)?,
             team_awards: Vec::new(),
         })

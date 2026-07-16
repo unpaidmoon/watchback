@@ -160,6 +160,7 @@ pub struct MatchFilters {
     pub player_name: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
+    pub favorite_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -219,6 +220,7 @@ pub struct MatchSummary {
     pub healing: i64,
     pub mitigation: i64,
     pub duration_sec: i64,
+    pub is_favorite: bool,
     pub evaluation: Option<MatchEvaluationSummary>,
     pub team_awards: Vec<MatchPerformanceAward>,
 }
@@ -294,6 +296,7 @@ pub struct MatchDetailView {
     pub evaluation: Option<MatchEvaluationSummary>,
     pub team_awards: Vec<MatchPerformanceAward>,
     pub same_role_comparison: Option<SameRoleComparison>,
+    pub favorite: Option<MatchFavoriteView>,
     pub raw_json: Value,
 }
 

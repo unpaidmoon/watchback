@@ -9,6 +9,13 @@ pub fn get_match_favorite(
 ) -> Result<Option<MatchFavoriteView>> {
     database.initialize()?;
     let connection = database.connect()?;
+    favorite_for_match(&connection, match_id)
+}
+
+pub(crate) fn favorite_for_match(
+    connection: &rusqlite::Connection,
+    match_id: &str,
+) -> Result<Option<MatchFavoriteView>> {
     connection
         .query_row(
             "SELECT note FROM match_favorites WHERE match_id = ?1",
