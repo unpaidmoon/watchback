@@ -4,6 +4,7 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
+import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import { MatchDetailReport } from "../src/pages/MatchDetailPage";
 import type { MatchDetailView, PlayerRow } from "../src/shared/types";
 
@@ -584,8 +585,26 @@ const normalDetail: MatchDetailView = {
   rawJson: null,
 };
 
+const favoriteController: MatchFavoriteController = {
+  savedNote: "",
+  draftNote: "",
+  isFavorite: false,
+  busy: false,
+  error: null,
+  saved: false,
+  dirty: false,
+  count: 0,
+  canSave: false,
+  edit: () => undefined,
+  favoriteMatch: async () => undefined,
+  saveNote: async () => undefined,
+  unfavoriteMatch: async () => undefined,
+  confirmDiscard: () => true,
+};
+
 const navigationProps = {
   onRetry: () => undefined,
+  favoriteController,
 };
 
 const detailLoadingMarkup = renderToStaticMarkup(
@@ -620,6 +639,10 @@ assert.match(normalMarkup, /aria-label="普通对局详情"/);
 assert.doesNotMatch(normalMarkup, />本人表现</);
 assert.match(normalMarkup, />队友数据</);
 assert.match(normalMarkup, />对手数据</);
+assert.ok(
+  normalMarkup.indexOf("matchDetailTeamComparison") < normalMarkup.indexOf("matchFavoriteEditor"),
+  "compact normal favorite editor should be the last item after team comparison",
+);
 
 const standaloneNormalMarkup = renderToStaticMarkup(
   createElement(MatchDetailReport, {
@@ -631,6 +654,7 @@ const standaloneNormalMarkup = renderToStaticMarkup(
     loading: false,
     error: null,
     matchId: normalDetail.matchId,
+    favoriteController,
   }),
 );
 assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
@@ -638,6 +662,10 @@ assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should 
 assert.doesNotMatch(standaloneNormalMarkup, />对局表现</, "standalone normal detail should remove the personal summary eyebrow");
 assert.doesNotMatch(standaloneNormalMarkup, />评分与同队奖牌</, "standalone normal detail should remove the personal summary title");
 assert.doesNotMatch(standaloneNormalMarkup, /phase6PerformanceBadges/, "standalone normal detail should not render performance badges");
+assert.ok(
+  standaloneNormalMarkup.indexOf("detailContent") < standaloneNormalMarkup.indexOf("matchFavoriteEditor"),
+  "standalone normal favorite editor should render after detail content",
+);
 
 for (const [result, resultLabel, englishLabel] of [
   ["loss", "失败", "DEFEAT"],
@@ -649,6 +677,7 @@ for (const [result, resultLabel, englishLabel] of [
       loading: false,
       error: null,
       matchId: `anonymous-${result}`,
+      favoriteController,
     }),
   );
   assert.match(standaloneMarkup, new RegExp(`>${englishLabel}<`), `standalone ${result} detail should render ${englishLabel}`);
@@ -660,6 +689,7 @@ const standaloneUnknownMarkup = renderToStaticMarkup(
     loading: false,
     error: null,
     matchId: "anonymous-unknown",
+    favoriteController,
   }),
 );
 assert.match(standaloneUnknownMarkup, />UNKNOWN</, "unknown result should not be announced as a draw");
@@ -712,6 +742,24 @@ assert.match(arenaMarkup, /<button[^>]*><span>角斗汇总<\/span><\/button>/, "
 assert.match(arenaMarkup, /<button[^>]*><span>回合-1<\/span><strong>1 - 0<\/strong><\/button>/, "arena detail should keep the round switch and label");
 assert.match(arenaMarkup, />队友数据</, "arena detail should keep the teammate table");
 assert.match(arenaMarkup, />对手数据</, "arena detail should keep the enemy table");
+assert.ok(
+  arenaMarkup.indexOf("matchDetailTeamComparison") < arenaMarkup.indexOf("matchFavoriteEditor"),
+  "compact arena summary favorite editor should render after team content",
+);
+
+const standaloneArenaMarkup = renderToStaticMarkup(
+  createElement(MatchDetailReport, {
+    detail: arenaDetail,
+    loading: false,
+    error: null,
+    matchId: arenaDetail.matchId,
+    favoriteController,
+  }),
+);
+assert.ok(
+  standaloneArenaMarkup.indexOf("detailContent") < standaloneArenaMarkup.indexOf("matchFavoriteEditor"),
+  "standalone arena summary favorite editor should render after selected summary content",
+);
 
 type TestElement = React.ReactElement<Record<string, unknown>>;
 
@@ -790,6 +838,14 @@ const roundSwitch = findReactElement(
 );
 (roundSwitch.props.onClick as () => void)();
 const selectedRoundTree = renderArenaWithTestHooks();
+assert.throws(
+  () => findReactElement(
+    selectedRoundTree,
+    (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+    "selected arena round must not render the favorite editor",
+  ),
+  /selected arena round must not render the favorite editor/,
+);
 const selectedRoundHeader = findReactElement(
   selectedRoundTree,
   (element) => typeof element.type === "function" && element.type.name === "MatchDetailHeader",

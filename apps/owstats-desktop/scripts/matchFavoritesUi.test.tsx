@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MatchFavoriteEditor } from "../src/features/matches/MatchFavoriteEditor";
@@ -10,6 +10,35 @@ const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "u
 const models = readFileSync(new URL("../src-tauri/src/models.rs", import.meta.url), "utf8");
 const api = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
 const types = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
+const guardUrl = new URL("../src/shared/UnsavedChangesGuard.tsx", import.meta.url);
+assert.equal(existsSync(guardUrl), true, "the shared unsaved-changes guard must exist");
+const guardSource = readFileSync(guardUrl, "utf8");
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
+const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
+
+assert.match(guardSource, /register/);
+assert.match(guardSource, /guardNavigation/);
+assert.match(guardSource, /beforeunload/);
+assert.match(guardSource, /event\.preventDefault\(\)/);
+assert.match(guardSource, /event\.returnValue\s*=\s*""/);
+assert.doesNotMatch(guardSource, /useBlocker/);
+assert.match(mainSource, /<HashRouter>[\s\S]*<UnsavedChangesProvider>[\s\S]*<App\s*\/>[\s\S]*<\/UnsavedChangesProvider>[\s\S]*<\/HashRouter>/);
+assert.match(appSource, /useUnsavedChangesGuard/);
+assert.match(appSource, /onClick=\{guardNavigation\}/);
+assert.match(matchesPageSource, /useMatchFavoriteEditor/);
+assert.match(matchesPageSource, /register\(favoriteController\.dirty\s*\?\s*\{/);
+assert.match(matchesPageSource, /favoriteController\.confirmDiscard\(\)/);
+assert.match(detailPageSource, /useMatchFavoriteEditor/);
+assert.match(detailPageSource, /register\(favoriteController\.dirty\s*\?\s*\{/);
+assert.match(detailPageSource, /favoriteController\.confirmDiscard\(\)/);
+assert.match(compactDetailSource, /favoriteController:\s*MatchFavoriteController/);
+assert.match(detailPaneSource, /favoriteController/);
+assert.doesNotMatch(compactDetailSource, /useMatchFavoriteEditor\s*\(/);
+assert.doesNotMatch(detailPaneSource, /useMatchFavoriteEditor\s*\(/);
 
 const saveCommandPattern =
   /#\[tauri::command\]\s*pub fn save_match_favorite\s*\(\s*accounts\s*:\s*State\s*<\s*'_\s*,\s*AccountContextManager\s*>\s*,\s*request\s*:\s*MatchFavoriteRequest\s*,?\s*\)\s*->\s*Result\s*<\s*MatchFavoriteView\s*,\s*String\s*>\s*\{/;

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchDetailPane } from "../features/matches/MatchDetailPane";
+import { useMatchFavoriteEditor } from "../features/matches/useMatchFavoriteEditor";
 import { MatchListPane } from "../features/matches/MatchListPane";
 import {
   activeMatchFilterChips,
@@ -32,6 +33,7 @@ import {
 } from "../shared/matchesPageCache";
 import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { QaRegion } from "../shared/QaFeedbackLayer";
+import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
@@ -87,6 +89,34 @@ export function MatchesPage() {
   const [error, setError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const hasVisibleFilters = activeMatchFilterChips(filters, options).length > 0;
+  const { register } = useUnsavedChangesGuard();
+  const handleFavoritePersisted = useCallback(
+    (favorite: MatchDetailView["favorite"]) => {
+      setSelectedDetail((current) =>
+        current?.matchId === selectedMatchIdRef.current
+          ? { ...current, favorite }
+          : current,
+      );
+    },
+    [],
+  );
+  const favoriteController = useMatchFavoriteEditor(
+    selectedDetail?.matchId ?? selectedMatchId,
+    selectedDetail?.favorite,
+    handleFavoritePersisted,
+  );
+
+  useEffect(() => {
+    register(favoriteController.dirty ? {
+      isDirty: true,
+      confirmDiscard: favoriteController.confirmDiscard,
+    } : null);
+    return () => register(null);
+  }, [
+    favoriteController.confirmDiscard,
+    favoriteController.dirty,
+    register,
+  ]);
 
   useEffect(() => () => {
     pageDataRequestIdRef.current += 1;
@@ -401,6 +431,12 @@ export function MatchesPage() {
   }
 
   function selectMatch(matchId: string) {
+    if (
+      matchId !== selectedMatchIdRef.current &&
+      !favoriteController.confirmDiscard()
+    ) {
+      return;
+    }
     rememberScroll();
     setSelectedMatchIdSafely(matchId);
     setMobileDetailOpen(true);
@@ -458,8 +494,12 @@ export function MatchesPage() {
           loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
           error={detailStateMatchId === selectedMatchId ? detailError : null}
           matchId={selectedMatchId}
+          favoriteController={favoriteController}
           onRetry={() => setDetailRetryKey((value) => value + 1)}
-          onBack={() => setMobileDetailOpen(false)}
+          onBack={() => {
+            if (!favoriteController.confirmDiscard()) return;
+            setMobileDetailOpen(false);
+          }}
         />
       </section>
     </div>

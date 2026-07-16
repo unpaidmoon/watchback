@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowLeft } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMatchDetails } from "../shared/api";
 import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
@@ -10,6 +10,12 @@ import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../share
 import { productErrorMessage } from "../shared/phase6Shell";
 import type { ArenaDetailSlice, MatchDetailView, PlayerRow } from "../shared/types";
 import { MatchDetailHeader } from "../features/matches/MatchDetailHeader";
+import { MatchFavoriteEditor } from "../features/matches/MatchFavoriteEditor";
+import {
+  useMatchFavoriteEditor,
+  type MatchFavoriteController,
+} from "../features/matches/useMatchFavoriteEditor";
+import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
 
 export function MatchDetailPage() {
   const { matchId } = useParams();
@@ -17,6 +23,32 @@ export function MatchDetailPage() {
   const [detail, setDetail] = useState<MatchDetailView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { register } = useUnsavedChangesGuard();
+  const handleFavoritePersisted = useCallback(
+    (favorite: MatchDetailView["favorite"]) => {
+      setDetail((current) =>
+        current ? { ...current, favorite } : current,
+      );
+    },
+    [],
+  );
+  const favoriteController = useMatchFavoriteEditor(
+    detail?.matchId ?? matchId,
+    detail?.favorite,
+    handleFavoritePersisted,
+  );
+
+  useEffect(() => {
+    register(favoriteController.dirty ? {
+      isDirty: true,
+      confirmDiscard: favoriteController.confirmDiscard,
+    } : null);
+    return () => register(null);
+  }, [
+    favoriteController.confirmDiscard,
+    favoriteController.dirty,
+    register,
+  ]);
 
   useEffect(() => {
     if (!matchId) return;
@@ -41,7 +73,11 @@ export function MatchDetailPage() {
       loading={loading}
       error={error}
       matchId={matchId}
-      onBack={() => navigate("/matches")}
+      favoriteController={favoriteController}
+      onBack={() => {
+        if (!favoriteController.confirmDiscard()) return;
+        navigate("/matches");
+      }}
     />
   );
 }
@@ -53,15 +89,27 @@ type MatchDetailReportProps = {
   matchId?: string | null;
   onBack?: () => void;
   embedded?: boolean;
+  favoriteController: MatchFavoriteController;
 };
 
-export function MatchDetailReport({ detail, loading, error, matchId, onBack, embedded = false }: MatchDetailReportProps) {
+export function MatchDetailReport({ detail, loading, error, matchId, onBack, embedded = false, favoriteController }: MatchDetailReportProps) {
   const [selectedArenaKey, setSelectedArenaKey] = useState("summary");
   const arenaDetail = detail?.arenaDetail ?? null;
 
   useEffect(() => {
     setSelectedArenaKey("summary");
   }, [detail?.matchId]);
+
+  function selectArenaSlice(nextKey: string) {
+    if (
+      selectedArenaKey === "summary" &&
+      nextKey !== "summary" &&
+      !favoriteController.confirmDiscard()
+    ) {
+      return;
+    }
+    setSelectedArenaKey(nextKey);
+  }
 
   if (detail && arenaDetail) {
     const selectedArena =
@@ -74,7 +122,7 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
           summary={arenaDetail.summary}
           rounds={arenaDetail.rounds}
           selectedKey={selectedArena.key}
-          onSelect={setSelectedArenaKey}
+          onSelect={selectArenaSlice}
         />
         <header className={`detailHero phase6DetailHero phase7ArenaHero ${selectedArena.result ?? detail.result ?? "pending"}`}>
           {onBack && (
@@ -132,6 +180,9 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
             <PlayerTable title="对手" players={selectedArena.enemies} tone="enemy" />
           </div>
         </div>
+        {selectedArena.key === "summary" && (
+          <MatchFavoriteEditor controller={favoriteController} />
+        )}
       </section>
     );
   }
@@ -195,6 +246,7 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
           </div>
         </div>
       )}
+      {detail && <MatchFavoriteEditor controller={favoriteController} />}
     </section>
   );
 }
