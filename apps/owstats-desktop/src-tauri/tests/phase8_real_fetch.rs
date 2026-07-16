@@ -1368,6 +1368,11 @@ async fn unchanged_quick_update_uses_one_list_request_per_canonical_mode_and_no_
     assert!(!summary.quick_scan_limited);
     assert_eq!(summary.details_requested, 0);
     let pages = quick_list_pages(&server);
+    assert_eq!(
+        pages.len(),
+        5,
+        "quick update must not request unknown modes"
+    );
     for mode in [
         "sport",
         "leisure",
@@ -1381,6 +1386,17 @@ async fn unchanged_quick_update_uses_one_list_request_per_canonical_mode_and_no_
             "unchanged quick update must request exactly page one for {mode}"
         );
     }
+    assert_eq!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchList"))
+            .count(),
+        5,
+        "unchanged quick update must make exactly five list requests"
+    );
     assert_eq!(
         server
             .requests
