@@ -581,13 +581,16 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
     assert_eq!(summary.imported_matches, 3);
     let detail_progress = progresses
         .iter()
-        .find(|progress| progress.phase.starts_with("正在获取详情"))
+        .find(|progress| progress.phase == "正在获取详情")
         .expect("missing completed detail progress");
+    assert_eq!(detail_progress.phase, "正在获取详情");
     assert_eq!(detail_progress.processed, 3);
     assert_eq!(detail_progress.total, 3);
     assert_eq!(detail_progress.failed_details, 1);
-    assert!(detail_progress.phase.contains("3 / 3"));
-    assert!(!detail_progress.phase.contains("2 / 3"));
+    assert!(progresses
+        .iter()
+        .filter(|progress| progress.total > 0)
+        .all(|progress| !progress.phase.contains('/')));
 }
 
 #[tokio::test]
@@ -647,7 +650,7 @@ async fn desktop_sync_defaults_to_incremental_details() {
             "正在检查本地数据",
             "正在获取赛季对局列表",
             "发现 3 场新对局，0 场缺少详情",
-            "正在获取详情 3 / 3",
+            "正在获取详情",
             "正在更新本地数据库",
             "同步完成",
         ]

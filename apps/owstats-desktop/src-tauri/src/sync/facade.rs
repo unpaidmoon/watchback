@@ -296,10 +296,7 @@ async fn sync_incremental_season_with_request(
         .unwrap_or_default();
     progress(SyncProgress {
         season,
-        phase: format!(
-            "正在获取详情 {} / {}",
-            fetch.details_requested, fetch.details_requested
-        ),
+        phase: "正在获取详情".to_string(),
         processed: fetch.details_requested,
         total: fetch.details_requested,
         current_match_id: None,

@@ -1,35 +1,83 @@
-import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { formatSyncNotice } from "../src/shared/phase6Shell.ts";
+import type { SyncSummary } from "../src/shared/types.ts";
 
-const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
-const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
+const baseSummary: SyncSummary = {
+  season: 23,
+  phase: "completed",
+  processed: 120,
+  total: 120,
+  currentMatchId: null,
+  listEntriesSeen: 120,
+  newMatches: 0,
+  missingDetails: 0,
+  detailsRequested: 0,
+  repairedDetails: 0,
+  databaseMatches: 120,
+  databaseDetails: 120,
+  diagnostics: {
+    listDurationMs: 110,
+    detailDurationMs: 220,
+    persistDurationMs: 30,
+    pages: [
+      {
+        matchKind: "normal",
+        gameMode: "SportPreset",
+        page: 1,
+        entries: 120,
+        uniqueValidEntries: 120,
+        newMatches: 0,
+        missingDetails: 0,
+        existingCompleteMatches: 120,
+        earliestBeginTs: 1_700_000_000_000,
+        latestBeginTs: 1_700_100_000_000,
+      },
+    ],
+  },
+  importedMatches: 120,
+  importedDetails: 120,
+  skippedDuplicates: 0,
+  failedDetails: 0,
+  latestErrors: [],
+  importSummary: {
+    season: 23,
+    matchesSeen: 120,
+    detailsSeen: 120,
+    presetMatches: 100,
+    stadiumMatches: 20,
+    importedAt: "2026-07-16T00:00:00Z",
+  },
+};
 
-assert.match(
-  typesSource,
-  /export type SyncPageDiagnostic = \{\s*matchKind: string;\s*gameMode: string;\s*page: number;\s*entries: number;\s*uniqueValidEntries: number;\s*newMatches: number;\s*missingDetails: number;\s*existingCompleteMatches: number;\s*earliestBeginTs: number \| null;\s*latestBeginTs: number \| null;\s*\};/s,
-  "SyncPageDiagnostic mirrors the Rust camelCase protocol",
-);
-assert.match(
-  typesSource,
-  /export type SyncDiagnostics = \{\s*listDurationMs: number;\s*detailDurationMs: number;\s*persistDurationMs: number;\s*pages: SyncPageDiagnostic\[\];\s*\};/s,
-  "SyncDiagnostics mirrors the Rust camelCase protocol",
-);
+const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
+  {
+    name: "no changes",
+    summary: baseSummary,
+    expected: "S23 已是最新数据，共校验 120 场对局，无需重新获取详情。",
+  },
+  {
+    name: "new matches and repaired details",
+    summary: { ...baseSummary, newMatches: 4, missingDetails: 2, detailsRequested: 6, repairedDetails: 2, databaseMatches: 124 },
+    expected: "S23 更新完成：新增 4 场，补全 2 场详情，当前赛季共 124 场。",
+  },
+  {
+    name: "new match detail failures",
+    summary: { ...baseSummary, newMatches: 3, detailsRequested: 3, failedDetails: 2, databaseMatches: 123 },
+    expected: "S23 对局列表已更新：新增 3 场，补全 0 场详情，2 场详情获取失败，可再次同步重试；当前赛季共 123 场。",
+  },
+  {
+    name: "old missing detail repair failure",
+    summary: { ...baseSummary, missingDetails: 2, detailsRequested: 2, repairedDetails: 1, failedDetails: 1 },
+    expected: "S23 对局列表已更新：新增 0 场，补全 1 场详情，1 场详情获取失败，可再次同步重试；当前赛季共 120 场。",
+  },
+];
 
-for (const field of [
-  "listEntriesSeen",
-  "newMatches",
-  "missingDetails",
-  "detailsRequested",
-  "repairedDetails",
-  "databaseMatches",
-  "databaseDetails",
-] as const) {
-  assert.match(typesSource, new RegExp(`${field}: number;`), `SyncSummary exposes ${field}`);
+for (const testCase of cases) {
+  assert.equal(formatSyncNotice(23, testCase.summary), testCase.expected, testCase.name);
 }
-assert.match(typesSource, /diagnostics: SyncDiagnostics;/, "SyncSummary exposes diagnostics");
-assert.match(typesSource, /importedMatches: number;/, "SyncSummary keeps importedMatches for compatibility");
-assert.match(typesSource, /importedDetails: number;/, "SyncSummary keeps importedDetails for compatibility");
 
+const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 assert.match(
   onboardingSource,
   /const summary = await syncSeason\(season\);\s*clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
@@ -37,13 +85,6 @@ assert.match(
 );
 assert.match(
   onboardingSource,
-  /summary\.newMatches === 0 && summary\.missingDetails === 0[\s\S]*?`S\$\{season\} 已是最新数据，共校验 \$\{summary\.listEntriesSeen\} 场对局，无需重新获取详情。`/,
-  "already-current notice reports the verified list count",
+  /setSyncNotice\(formatSyncNotice\(season, summary\)\);/,
+  "Onboarding delegates incremental result copy to formatSyncNotice",
 );
-assert.match(
-  onboardingSource,
-  /`S\$\{season\} 更新完成：新增 \$\{summary\.newMatches\} 场，补全 \$\{summary\.repairedDetails\} 场详情，当前赛季共 \$\{summary\.databaseMatches\} 场。/,
-  "incremental notice reports new, repaired, and database match counts",
-);
-assert.doesNotMatch(onboardingSource, /summary\.importedMatches/, "incremental UI does not report importedMatches");
-assert.doesNotMatch(onboardingSource, /本次导入/, "incremental UI does not claim a full import");

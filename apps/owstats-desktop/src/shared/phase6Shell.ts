@@ -1,4 +1,4 @@
-import type { OnboardingStatus, SyncProgress } from "./types";
+import type { OnboardingStatus, SyncProgress, SyncSummary } from "./types";
 
 export type StatusTone = "neutral" | "good" | "warn" | "bad";
 
@@ -64,6 +64,18 @@ export function readableSyncProgress(progress: SyncProgress | null): string {
   }
 
   return `${progress.phase}：${progress.processed}/${progress.total}，失败详情 ${progress.failedDetails}`;
+}
+
+export function formatSyncNotice(season: number, summary: SyncSummary): string {
+  if (summary.failedDetails > 0) {
+    return `S${season} 对局列表已更新：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，${summary.failedDetails} 场详情获取失败，可再次同步重试；当前赛季共 ${summary.databaseMatches} 场。`;
+  }
+
+  if (summary.newMatches === 0 && summary.missingDetails === 0) {
+    return `S${season} 已是最新数据，共校验 ${summary.listEntriesSeen} 场对局，无需重新获取详情。`;
+  }
+
+  return `S${season} 更新完成：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，当前赛季共 ${summary.databaseMatches} 场。`;
 }
 
 export function commandCenterMetrics(status: OnboardingStatus | null): CommandMetric[] {

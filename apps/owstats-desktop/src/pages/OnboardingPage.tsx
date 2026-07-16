@@ -40,7 +40,7 @@ import type { BusyAccountAction, DashboardSnapshot } from "../features/command-c
 import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
-import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
+import { formatSyncNotice, hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
@@ -339,11 +339,7 @@ export function OnboardingPage() {
       const summary = await syncSeason(season);
       clearMatchesPageCache();
       await loadDashboard();
-      setSyncNotice(
-        summary.newMatches === 0 && summary.missingDetails === 0
-          ? `S${season} 已是最新数据，共校验 ${summary.listEntriesSeen} 场对局，无需重新获取详情。`
-          : `S${season} 更新完成：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，当前赛季共 ${summary.databaseMatches} 场。`,
-      );
+      setSyncNotice(formatSyncNotice(season, summary));
     } catch (err) {
       setSyncError(productErrorMessage(err));
     } finally {
