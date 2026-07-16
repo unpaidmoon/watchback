@@ -466,6 +466,71 @@ async fn full_season_fetch_tries_current_season_without_season_param_first() {
 }
 
 #[tokio::test]
+async fn incremental_fetch_scans_past_known_pages_and_requests_only_missing_details() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::{
+        fetch_season_increment_with_base_url, FullSeasonRequest,
+    };
+    use std::collections::HashSet;
+
+    let server = spawn_incremental_season_server();
+    let known_detail_ids = HashSet::from(["synthetic-known".to_string()]);
+
+    let fetch = fetch_season_increment_with_base_url(
+        FullSeasonRequest {
+            credentials: DashenCredentials {
+                role_id: 123,
+                token: "account-auth-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            customer_token: "player-customer-token".to_string(),
+            input_bnet: "Tester#12345".to_string(),
+            resolved_bnet: Some("Tester#12345".to_string()),
+            season: 22,
+            customer_base_url: format!("{}/customer", server.base_url),
+            pages_per_batch: 1,
+            detail_concurrency: 2,
+            include_fight: false,
+        },
+        &known_detail_ids,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(fetch.entries, 2);
+    assert_eq!(fetch.details_requested, 1);
+    assert_eq!(fetch.details, 1);
+    assert_eq!(
+        fetch.payload["matches"]["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let requests = server.requests.lock().unwrap();
+    assert!(requests.iter().any(|request| {
+        request.first_line.contains("/customer/queryMatchList")
+            && request.first_line.contains("gameMode=sport")
+            && request.first_line.contains("page=2")
+    }));
+    assert!(requests.iter().any(|request| {
+        request.first_line.contains("/customer/queryMatchList")
+            && request.first_line.contains("gameMode=sport")
+            && request.first_line.contains("page=3")
+    }));
+    assert!(requests.iter().any(|request| {
+        request.first_line.contains("/customer/queryMatchInfo")
+            && request.first_line.contains("matchId=synthetic-new")
+    }));
+    assert!(!requests.iter().any(|request| {
+        request.first_line.contains("/customer/queryMatchInfo")
+            && request.first_line.contains("matchId=synthetic-known")
+    }));
+}
+
+#[tokio::test]
 async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_season_directory() {
     let temp = tempfile::tempdir().unwrap();
     let app_data = temp.path().join("app-data");
@@ -793,6 +858,79 @@ fn full_season_response(request_line: &str) -> (&'static str, &'static str) {
         );
     }
     ("200 OK", r#"{"code":0,"data":{"matchList":[]}}"#)
+}
+
+fn spawn_incremental_season_server() -> RecordingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming().take(64) {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let captured = captured.clone();
+            thread::spawn(move || {
+                let mut buffer = [0_u8; 8192];
+                let Ok(read) = stream.read(&mut buffer) else {
+                    return;
+                };
+                if read == 0 {
+                    return;
+                }
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let mut lines = request.lines();
+                let first_line = lines.next().unwrap_or_default().to_string();
+                let headers = lines
+                    .take_while(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                captured.lock().unwrap().push(RecordedRequest {
+                    first_line: first_line.clone(),
+                    headers,
+                    body: String::new(),
+                });
+                let body = incremental_season_response(&first_line);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+        }
+    });
+    RecordingServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
+}
+
+fn incremental_season_response(request_line: &str) -> &'static str {
+    if request_line.contains("/customer/queryCard") {
+        return r#"{"code":0,"data":{"bnetId":"Tester#12345"}}"#;
+    }
+    if request_line.contains("/customer/queryCountInfo") {
+        return r#"{"code":0,"data":{"total":2}}"#;
+    }
+    if request_line.contains("/customer/queryMatchList")
+        && request_line.contains("gameMode=sport")
+        && request_line.contains("page=1")
+    {
+        return r#"{"code":0,"data":{"matchList":[{"matchId":"synthetic-known","beginTs":1700000000000}]}}"#;
+    }
+    if request_line.contains("/customer/queryMatchList")
+        && request_line.contains("gameMode=sport")
+        && request_line.contains("page=2")
+    {
+        return r#"{"code":0,"data":{"matchList":[{"matchId":"synthetic-new","beginTs":1699999900000}]}}"#;
+    }
+    if request_line.contains("/customer/queryMatchInfo")
+        && request_line.contains("matchId=synthetic-new")
+    {
+        return r#"{"code":0,"data":{"matchRet":1}}"#;
+    }
+    r#"{"code":0,"data":{"matchList":[]}}"#
 }
 
 fn spawn_delayed_detail_server() -> DelayedDetailServer {
