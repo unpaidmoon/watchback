@@ -73,7 +73,7 @@ export function formatSyncNotice(season: number, summary: SyncSummary): string {
   }
 
   if (summary.failedDetails > 0) {
-    return `S${season} 对局列表已更新：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，${summary.failedDetails} 场详情获取失败，可再次同步重试；当前赛季共 ${summary.databaseMatches} 场。`;
+    return `S${season} 对局列表已更新，${summary.failedDetails} 场详情获取失败，可再次操作重试。`;
   }
 
   if (summary.mode === "fullFetch") {
@@ -84,7 +84,7 @@ export function formatSyncNotice(season: number, summary: SyncSummary): string {
     return `S${season} 已检查最新对局，没有发现更新。`;
   }
 
-  return `S${season} 快速更新完成：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，当前赛季共 ${summary.databaseMatches} 场。`;
+  return `S${season} 更新完成：新增 ${summary.newMatches} 场，当前赛季共 ${summary.databaseMatches} 场。`;
 }
 
 export function commandCenterMetrics(status: OnboardingStatus | null): CommandMetric[] {

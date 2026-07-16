@@ -69,7 +69,7 @@ const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
   {
     name: "quick update success",
     summary: { ...baseSummary, mode: "quickUpdate", newMatches: 4, missingDetails: 2, detailsRequested: 6, repairedDetails: 2, databaseMatches: 124 },
-    expected: "S23 快速更新完成：新增 4 场，补全 2 场详情，当前赛季共 124 场。",
+    expected: "S23 更新完成：新增 4 场，当前赛季共 124 场。",
   },
   {
     name: "limited quick update does not claim latest even when details fail",
@@ -100,12 +100,12 @@ const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
   {
     name: "new match detail failures",
     summary: { ...baseSummary, mode: "quickUpdate", newMatches: 3, detailsRequested: 3, failedDetails: 2, databaseMatches: 123 },
-    expected: "S23 对局列表已更新：新增 3 场，补全 0 场详情，2 场详情获取失败，可再次同步重试；当前赛季共 123 场。",
+    expected: "S23 对局列表已更新，2 场详情获取失败，可再次操作重试。",
   },
   {
     name: "old missing detail repair failure",
     summary: { ...baseSummary, mode: "quickUpdate", missingDetails: 2, detailsRequested: 2, repairedDetails: 1, failedDetails: 1 },
-    expected: "S23 对局列表已更新：新增 0 场，补全 1 场详情，1 场详情获取失败，可再次同步重试；当前赛季共 120 场。",
+    expected: "S23 对局列表已更新，1 场详情获取失败，可再次操作重试。",
   },
 ];
 
