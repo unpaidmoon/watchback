@@ -234,9 +234,13 @@
   background: color-mix(in srgb, var(--data-secondary) 7%, transparent);
 }
 
-.syncedSeasonSelect {
+.syncedSeasonSelectCell {
   grid-column: 1 / 5;
   min-width: 0;
+}
+
+.syncedSeasonSelect {
+  width: 100%;
   min-height: 44px;
   display: grid;
   grid-template-columns: minmax(64px, 0.55fr) minmax(150px, 1.5fr) minmax(88px, 0.75fr) minmax(112px, 0.9fr);
@@ -249,6 +253,10 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.syncedSeasonUpdateCell {
+  grid-column: 5;
 }
 
 .syncedSeasonUpdateButton {

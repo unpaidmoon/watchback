@@ -124,32 +124,36 @@ export function SeasonSyncWorkbench({
                   className={`syncedSeasonLedgerRow${selectedSeason === seasonStatus.season ? " selected" : ""}${rowSyncing ? " syncing" : ""}`}
                   role="row"
                 >
-                  <button
-                    className="syncedSeasonSelect"
-                    type="button"
-                    aria-label={`选择 S${seasonStatus.season}`}
-                    aria-pressed={selectedSeason === seasonStatus.season}
-                    onClick={() => onSelectSeason(seasonStatus.season)}
-                  >
-                    <span className="syncedSeasonName" role="cell">{`S${seasonStatus.season}`}{rowSyncing ? <small>同步中</small> : null}</span>
-                    <span className="syncedSeasonCoverage" role="cell">
-                      <span className="syncedSeasonCoverageTrack" aria-hidden="true">
-                        <span style={{ width: `${seasonStatus.coveragePercent}%` }} />
+                  <div className="syncedSeasonSelectCell" role="cell" aria-colspan={4}>
+                    <button
+                      className="syncedSeasonSelect"
+                      type="button"
+                      aria-label={`选择 S${seasonStatus.season}`}
+                      aria-pressed={selectedSeason === seasonStatus.season}
+                      onClick={() => onSelectSeason(seasonStatus.season)}
+                    >
+                      <span className="syncedSeasonName">{`S${seasonStatus.season}`}{rowSyncing ? <small>同步中</small> : null}</span>
+                      <span className="syncedSeasonCoverage">
+                        <span className="syncedSeasonCoverageTrack" aria-hidden="true">
+                          <span style={{ width: `${seasonStatus.coveragePercent}%` }} />
+                        </span>
+                        <span>{seasonStatus.coveragePercent}%</span>
                       </span>
-                      <span>{seasonStatus.coveragePercent}%</span>
-                    </span>
-                    <span role="cell">{seasonStatus.matchCount} 场</span>
-                    <span role="cell">{formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)}</span>
-                  </button>
-                  <button
-                    className="ghostButton syncedSeasonUpdateButton"
-                    type="button"
-                    aria-label={`更新 S${seasonStatus.season}`}
-                    onClick={() => onQuickUpdate(seasonStatus.season)}
-                    disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
-                  >
-                    {rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : "更新"}
-                  </button>
+                      <span>{seasonStatus.matchCount} 场</span>
+                      <span>{formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)}</span>
+                    </button>
+                  </div>
+                  <div className="syncedSeasonUpdateCell" role="cell">
+                    <button
+                      className="ghostButton syncedSeasonUpdateButton"
+                      type="button"
+                      aria-label={`更新 S${seasonStatus.season}`}
+                      onClick={() => onQuickUpdate(seasonStatus.season)}
+                      disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
+                    >
+                      {rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : "更新"}
+                    </button>
+                  </div>
                 </div>
               );
             })}

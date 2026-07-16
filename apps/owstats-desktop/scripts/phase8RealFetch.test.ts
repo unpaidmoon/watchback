@@ -62,6 +62,9 @@ assert.match(seasonWorkbench, />\s*\{rowSyncing && syncingMode === "quickUpdate"
 assert.match(seasonWorkbench, /onClick=\{\(\) => onQuickUpdate\(seasonStatus\.season\)\}/, "row update acts on that row season");
 assert.doesNotMatch(seasonWorkbench, /onQuickUpdate\(seasonStatus\.season\)[\s\S]{0,120}onSelectSeason|onSelectSeason[\s\S]{0,120}onQuickUpdate\(seasonStatus\.season\)/, "row update does not change the left selection");
 assert.doesNotMatch(seasonWorkbench, /<button[^>]*className=.*syncedSeasonLedgerRow[\s\S]*?<button/, "season rows must not nest buttons");
+assert.match(seasonWorkbench, /<div className="syncedSeasonSelectCell" role="cell" aria-colspan=\{4\}>\s*<button\s+className="syncedSeasonSelect"/, "the row owns a four-column cell before the season selection button");
+assert.match(seasonWorkbench, /<div className="syncedSeasonUpdateCell" role="cell">\s*<button\s+className="ghostButton syncedSeasonUpdateButton"/, "the row owns an operation cell before the update button");
+assert.doesNotMatch(seasonWorkbench, /<button\s+className="syncedSeasonSelect"(?:(?!<\/button>)[\s\S])*role="cell"/, "native buttons must not own ARIA table cells");
 assert.match(models, /pub struct OnboardingStatus\s*\{[\s\S]*?pub current_season: i64,[\s\S]*?pub syncable_seasons: Vec<i64>,/, "backend DTO exposes the dynamic season catalog");
 assert.match(commandCenterBackend, /MIN_SYNC_SEASON: i64 = 15;[\s\S]*?CURRENT_SEASON: i64 = 23;/, "backend catalog includes every supported season from S15");
 assert.match(commandCenterBackend, /current_season: CURRENT_SEASON,[\s\S]*?syncable_seasons: syncable_seasons\(\),/, "backend returns the dynamic season catalog");
