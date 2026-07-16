@@ -444,6 +444,31 @@ assert.equal(styleSource.includes(".phase6PlayerInsightCard"), false, "styles sh
 
 assert.equal(teamTableSource.includes("phase6CompactPerkStrip"), true, "shared player rows should render perk icons under the player id");
 assert.equal(teamTableSource.includes("phase6PerkTooltip"), true, "perk icons should expose a visible hover tooltip with descriptions");
+assert.match(
+  matchStyleSource,
+  /\.matchTeamTable \.phase6PerkTooltip\s*\{[^}]*background:\s*var\(--surface-primary\)/s,
+  "match detail perk icons should sit on the existing white primary surface",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchTeamTable \.phase6CompactPerkIcon\s*\{[^}]*background:\s*transparent[^}]*filter:\s*brightness\(0\)[^}]*opacity:\s*0\.46/s,
+  "match detail perk glyphs should become light gray while remaining legible on the white backing",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchTeamTable \.phase6PerkTooltipPanel\s*\{[^}]*left:\s*0[^}]*max-width:\s*min\(300px,\s*60vw\)[^}]*overflow-wrap:\s*anywhere[^}]*transform:\s*translate\(0,\s*6px\)/s,
+  "match detail perk tooltips should open rightward and wrap long copy inside the pane",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchTeamTable \.phase6PerkTooltip:hover \.phase6PerkTooltipPanel,\s*\.matchTeamTable \.phase6PerkTooltip:focus-within \.phase6PerkTooltipPanel\s*\{[^}]*transform:\s*translate\(0,\s*0\)/s,
+  "visible match detail perk tooltips should keep their left edge anchored",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchTeamTable \.phase6CompactPlayerRow \.phase6PerkTooltipPanel strong\s*\{[^}]*color:\s*var\(--action-on-primary\)/s,
+  "match detail perk tooltip titles should stay light on the dark panel",
+);
 assert.equal(teamTableSource.includes("player.damageTaken"), true, "shared player rows should render damage taken");
 assert.equal(teamTableSource.includes("player.healingTaken"), true, "shared player rows should render healing taken");
 assert.equal(teamTableSource.includes("player.finalHits"), true, "shared player rows should render final hits");
