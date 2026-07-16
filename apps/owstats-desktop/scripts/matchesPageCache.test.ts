@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { filtersFromParams, validateFilters } from "../src/features/matches/matchFilters.ts";
+import * as matchesPageCacheModule from "../src/shared/matchesPageCache.ts";
 import {
   canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
@@ -21,6 +22,17 @@ import {
   updateMatchesPageCache,
 } from "../src/shared/matchesPageCache.ts";
 import type { FilterOptions, MatchFilters, MatchSummary, Overview } from "../src/shared/types.ts";
+
+const updateMatchFavoriteState = (
+  matchesPageCacheModule as unknown as {
+    updateMatchFavoriteState: <T extends { matchId: string; isFavorite: boolean }>(
+      matches: T[],
+      matchId: string,
+      isFavorite: boolean,
+    ) => T[];
+  }
+).updateMatchFavoriteState;
+assert.equal(typeof updateMatchFavoriteState, "function", "match favorite updates should expose an immutable list helper");
 
 function createDeferred() {
   let resolve!: () => void;
@@ -60,6 +72,26 @@ assert.equal(
   "first-match",
   "a loaded list falls back to its first row when selection is missing",
 );
+
+const favoriteRows = [
+  { matchId: "target", isFavorite: false, label: "目标" },
+  { matchId: "other", isFavorite: true, label: "其它" },
+];
+const favoritedRows = updateMatchFavoriteState(favoriteRows, "target", true);
+assert.notEqual(favoritedRows, favoriteRows, "favorite updates always return a new array");
+assert.notEqual(favoritedRows[0], favoriteRows[0], "a changed target row is cloned");
+assert.deepEqual(favoritedRows[0], { matchId: "target", isFavorite: true, label: "目标" });
+assert.equal(favoritedRows[1], favoriteRows[1], "non-target rows preserve their references");
+
+const unchangedFavoriteRows = updateMatchFavoriteState(favoritedRows, "target", true);
+assert.notEqual(unchangedFavoriteRows, favoritedRows, "same-value updates still return a new array");
+assert.equal(unchangedFavoriteRows[0], favoritedRows[0], "a same-value target preserves its reference");
+assert.equal(unchangedFavoriteRows[1], favoritedRows[1], "same-value updates preserve non-target references");
+
+const missingFavoriteRows = updateMatchFavoriteState(favoriteRows, "missing", false);
+assert.notEqual(missingFavoriteRows, favoriteRows, "missing-id updates still return a new array");
+assert.equal(missingFavoriteRows[0], favoriteRows[0], "missing-id updates preserve the first row");
+assert.equal(missingFavoriteRows[1], favoriteRows[1], "missing-id updates preserve the second row");
 
 assert.equal(isLatestMatchRequest(1, 2), false, "an older match-list request cannot apply after a newer request starts");
 assert.equal(isLatestMatchRequest(2, 2), true, "the latest match-list request may apply its result");
@@ -304,8 +336,35 @@ const matches = [
     durationSec: 60,
     evaluation: null,
     teamAwards: [],
+    isFavorite: false,
   },
 ] satisfies MatchSummary[];
+
+clearMatchesPageCache();
+updateMatchesPageCache({
+  filters: { season: 22 },
+  matches,
+  selectedMatchId: "m1",
+  loadedFilterKey: matchFiltersKey({ season: 22 }),
+  scrollTop: 420,
+  scrollAnchor: { matchId: "m1", offsetTop: 12 },
+  hasLoaded: true,
+});
+const favoriteCacheRows = updateMatchFavoriteState(matches, "m1", true);
+updateMatchesPageCache({ matches: favoriteCacheRows });
+assert.equal(getMatchesPageCache()?.matches[0]?.isFavorite, true, "favorite updates are persisted in the list cache");
+assert.equal(getMatchesPageCache()?.selectedMatchId, "m1", "favorite cache writes preserve selection");
+assert.equal(getMatchesPageCache()?.scrollTop, 420, "favorite cache writes preserve scroll position");
+assert.deepEqual(
+  getMatchesPageCache()?.scrollAnchor,
+  { matchId: "m1", offsetTop: 12 },
+  "favorite cache writes preserve the scroll anchor",
+);
+assert.equal(
+  Object.hasOwn(getMatchesPageCache()?.matches[0] ?? {}, "note"),
+  false,
+  "the list cache never receives favorite note text",
+);
 
 const requestedPreloadFilters: MatchFilters = { season: 23 };
 const freshPreloadMatches = [{ ...matches[0], matchId: "fresh-match", season: 23 }] satisfies MatchSummary[];
@@ -593,6 +652,35 @@ assert.deepEqual(
 );
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+const favoritePersistedSource = matchesPageSource.slice(
+  matchesPageSource.indexOf("const handleFavoritePersisted"),
+  matchesPageSource.indexOf("const favoriteController"),
+);
+assert.match(
+  favoritePersistedSource,
+  /const selectedFavoriteMatchId = selectedMatchIdRef\.current;/,
+  "favorite reconciliation reads the current selected match id instead of a render-time id",
+);
+assert.match(
+  favoritePersistedSource,
+  /if \(currentFiltersRef\.current\.favoriteOnly && favorite === null\) \{\s*await loadMatchesRef\.current\(currentFiltersRef\.current\);\s*return;/,
+  "unfavoriting under the favorite-only filter reloads the current timeline and returns",
+);
+assert.match(
+  favoritePersistedSource,
+  /if \(selectedFavoriteMatchId === null\) return;\s*setMatches/,
+  "a persistence result that finishes after selection clears must not update an unrelated list row",
+);
+assert.match(
+  favoritePersistedSource,
+  /setMatches\(\(current\) => \{\s*const next = updateMatchFavoriteState\(current, selectedFavoriteMatchId, favorite !== null\);\s*updateMatchesPageCache\(\{ matches: next \}\);\s*return next;\s*\}\);/,
+  "other favorite mutations update the matching list row and merge it into the cache",
+);
+assert.equal(
+  favoritePersistedSource.includes("favorite.note"),
+  false,
+  "favorite reconciliation never copies note text into list state or cache",
+);
 assert.match(
   matchesPageSource,
   /<div\s+ref=\{timelineRef\}\s+className="matchListPane phase6WorkbenchList"\s+onScroll=\{rememberScroll\}>/,

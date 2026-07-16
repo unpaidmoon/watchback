@@ -4,9 +4,10 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
+import { MatchListCard } from "../src/features/matches/MatchListCard";
 import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import { MatchDetailReport } from "../src/pages/MatchDetailPage";
-import type { MatchDetailView, PlayerRow } from "../src/shared/types";
+import type { MatchDetailView, MatchSummary, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
@@ -177,6 +178,64 @@ assert.equal(
   true,
   "MatchListCard should render the K/A/D value in the reference order",
 );
+
+const anonymousListMatch = {
+  matchId: "anonymous-favorite-row",
+  season: 22,
+  bucket: "preset",
+  gameMode: "SportPreset",
+  modeLabel: "匿名模式",
+  result: "win",
+  resultLabel: "胜利",
+  mapGuid: "",
+  mapName: "匿名地图",
+  heroGuid: "",
+  heroName: "匿名英雄",
+  beginTs: 0,
+  beginLabel: "70/01/01 08:00",
+  teamScore: 3,
+  opponentScore: 1,
+  kills: 12,
+  assists: 8,
+  deaths: 4,
+  damage: 12345,
+  healing: 2345,
+  mitigation: 3456,
+  durationSec: 600,
+  evaluation: null,
+  teamAwards: [],
+  isFavorite: true,
+  note: "绝不能出现在列表里的匿名备注",
+} satisfies MatchSummary & { note: string };
+const favoriteListMarkup = renderToStaticMarkup(
+  createElement(MatchListCard, {
+    match: anonymousListMatch,
+    selected: false,
+    onSelect: () => undefined,
+  }),
+);
+assert.match(
+  favoriteListMarkup,
+  /<span class="matchListFavoriteMark" title="已收藏" aria-label="已收藏">/,
+  "a favorited list row should expose the non-interactive favorite marker",
+);
+assert.match(favoriteListMarkup, /<svg[^>]*aria-hidden="true"/, "the favorite star should be decorative");
+assert.equal(
+  (favoriteListMarkup.match(/<button\b/g) ?? []).length,
+  1,
+  "the list card remains the only button and never nests a marker button",
+);
+assert.doesNotMatch(favoriteListMarkup, /绝不能出现在列表里的匿名备注/, "favorite notes never render in list rows");
+
+const plainListMarkup = renderToStaticMarkup(
+  createElement(MatchListCard, {
+    match: { ...anonymousListMatch, matchId: "anonymous-plain-row", isFavorite: false },
+    selected: false,
+    onSelect: () => undefined,
+  }),
+);
+assert.doesNotMatch(plainListMarkup, /matchListFavoriteMark|已收藏/, "a plain list row should not render a favorite marker");
+
 assert.match(
   matchStyleSource,
   /\.phase6WorkbenchList button\.matchListCard\s*\{(?=[^}]*height:\s*152px)(?=[^}]*grid-template-rows:\s*64px\s+88px)[^}]*\}/s,

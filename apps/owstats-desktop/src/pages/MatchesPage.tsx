@@ -29,6 +29,7 @@ import {
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
   shouldLoadMatchesForFilter,
+  updateMatchFavoriteState,
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
 import type { MatchesPageCache } from "../shared/matchesPageCache";
@@ -90,13 +91,26 @@ export function MatchesPage() {
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const hasVisibleFilters = activeMatchFilterChips(filters, options).length > 0;
   const { register } = useUnsavedChangesGuard();
+  const loadMatchesRef = useRef(loadMatches);
+  loadMatchesRef.current = loadMatches;
   const handleFavoritePersisted = useCallback(
-    (favorite: MatchDetailView["favorite"]) => {
+    async (favorite: MatchDetailView["favorite"]) => {
+      const selectedFavoriteMatchId = selectedMatchIdRef.current;
       setSelectedDetail((current) =>
-        current?.matchId === selectedMatchIdRef.current
+        current?.matchId === selectedFavoriteMatchId
           ? { ...current, favorite }
           : current,
       );
+      if (currentFiltersRef.current.favoriteOnly && favorite === null) {
+        await loadMatchesRef.current(currentFiltersRef.current);
+        return;
+      }
+      if (selectedFavoriteMatchId === null) return;
+      setMatches((current) => {
+        const next = updateMatchFavoriteState(current, selectedFavoriteMatchId, favorite !== null);
+        updateMatchesPageCache({ matches: next });
+        return next;
+      });
     },
     [],
   );

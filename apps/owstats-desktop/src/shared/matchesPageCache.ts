@@ -40,6 +40,18 @@ export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
   return matchesPageCache;
 }
 
+export function updateMatchFavoriteState<T extends { matchId: string; isFavorite: boolean }>(
+  matches: T[],
+  matchId: string,
+  isFavorite: boolean,
+) {
+  return matches.map((match) =>
+    match.matchId === matchId && match.isFavorite !== isFavorite
+      ? { ...match, isFavorite }
+      : match,
+  );
+}
+
 function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
   return {
     overview: null,
