@@ -18,6 +18,7 @@ mod importer;
 pub mod login_flow;
 pub mod login_target;
 mod match_evaluation;
+mod match_favorites;
 mod models;
 pub mod player_target;
 mod privacy_migration;
@@ -36,6 +37,7 @@ pub use importer::{
     import_full_season_payload, import_payload_value, import_payload_value_embedded,
 };
 pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSION};
+pub use match_favorites::{delete_match_favorite, get_match_favorite, save_match_favorite};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
 pub use redaction::redact_sensitive_json;
