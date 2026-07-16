@@ -59,10 +59,10 @@ apps/owstats-desktop/public/assets.stage-*/
 apps/owstats-desktop/public/assets.backup-*/
 
 # Test artifacts
-/test-results/
+.playwright-cli/
+test-results/
 court_image_*.png
 court_result.json
-apps/owstats-desktop/.playwright-cli/
 
 # Local reference/data dumps
 data/players/
