@@ -47,6 +47,15 @@ assert.doesNotMatch(tauriLibSource, /commands::start_dashen_login\b/);
 assert.doesNotMatch(tauriCommandsSource, /pub (?:async )?fn (?:logout|start_dashen_login)\b/);
 assert.doesNotMatch(apiSource, /export function (?:logout|startDashenLogin)\b/);
 assert.doesNotMatch(typesSource, /type (?:LogoutResult|CredentialLoginResult)\b/);
+const accountPublicContracts = typesSource.match(
+  /export type AccountSummary[\s\S]*?export type RemoveAccountResult[\s\S]*?};/,
+)?.[0] ?? "";
+assert.ok(accountPublicContracts, "账号管理公开类型必须存在");
+assert.doesNotMatch(
+  accountPublicContracts,
+  /roleId|role_id|customerToken|authorization|cookie|\btoken\b/i,
+  "账号管理公开类型不得声明私密身份或凭据字段",
+);
 assert.doesNotMatch(modelsSource, /struct (?:LogoutResult|CredentialLoginResult)\b/);
 assert.match(tauriLibSource, /commands::cancel_dashen_login\b/);
 assert.match(commandCenterStyles, /\.phase6CommandCenter \.accountManagerPanel\s*\{[\s\S]*?background:\s*var\(--glass-secondary\);[\s\S]*?box-shadow:\s*none;/);
@@ -89,6 +98,7 @@ assert.match(html, /disabled=""[^>]*>当前账号</);
 assert.match(html, />切换账号</);
 assert.doesNotMatch(html, /roleId|token|customerToken/);
 assert.match(html, /<h2[^>]*tabindex="-1"[^>]*>账号管理<\/h2>/);
+assert.equal((html.match(/accountManagerAddRow/g) ?? []).length, 1, "添加账号保持为独立一行");
 
 const accountActionGroups = [...html.matchAll(/<div class="accountManagerActions" role="group"[^>]*>([\s\S]*?)<\/div>/g)];
 assert.equal(accountActionGroups.length, 2, "每个账号行都提供一个具名操作组");
@@ -120,6 +130,7 @@ assert.match(removalDialog, /aria-labelledby="account-removal-title"/);
 assert.match(removalDialog, /aria-describedby="account-removal-description"/);
 assert.match(removalDialog, /Tester#5479/);
 assert.match(removalDialog, /永久删除该账号保存的凭证信息和对应本地数据库/);
+assert.doesNotMatch(removalDialog, /Second#2222|共享设置|浏览器|账号列表/);
 assert.match(removalDialog, />取消</);
 assert.match(removalDialog, />永久退出账号</);
 assert.equal((removalDialog.match(/<button/g) ?? []).length, 2, "确认框只有取消和永久退出两个清晰动作");

@@ -947,6 +947,75 @@ fn legacy_database_is_adopted_only_after_confirmed_account_identity() {
 }
 
 #[test]
+fn synthetic_legacy_upgrade_is_one_time_complete_and_preserves_shared_settings() {
+    let fixture = LegacyFixture::with_database_match("legacy-once-match");
+    fs::write(
+        fixture.shared.legacy_player_target(),
+        br#"{"battleTag":"Synthetic#1000"}"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.shared.legacy_player_profile(),
+        br#"{"battleTag":"Synthetic#1000"}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(fixture.shared.legacy_seasons()).unwrap();
+    fs::write(
+        fixture.shared.legacy_seasons().join("22.json"),
+        br#"{"season":22}"#,
+    )
+    .unwrap();
+    fs::write(fixture.shared.user_settings(), br#"{"theme":"system"}"#).unwrap();
+    let account = fixture.confirm_account();
+
+    fixture.manager.adopt_legacy(&account).unwrap();
+    assert_eq!(fixture.match_ids(&account), vec!["legacy-once-match"]);
+    assert!(account.paths().credentials().is_file());
+    assert!(account.paths().player_target().is_file());
+    assert!(account.paths().player_profile().is_file());
+    assert!(account.paths().seasons().join("22.json").is_file());
+    for source in [
+        fixture.shared.legacy_database(),
+        fixture.shared.legacy_credentials(),
+        fixture.shared.legacy_player_target(),
+        fixture.shared.legacy_player_profile(),
+        fixture.shared.legacy_seasons(),
+    ] {
+        assert!(!source.exists(), "validated legacy source was not removed");
+    }
+    let settings_before = fs::read(fixture.shared.user_settings()).unwrap();
+    let database_before = fs::read(account.paths().database()).unwrap();
+    let registry_before = fs::read(fixture.shared.registry()).unwrap();
+
+    let restarted = AccountContextManager::load(fixture.shared.clone()).unwrap();
+    let restarted_account = restarted.active_snapshot().unwrap();
+    restarted.adopt_legacy(&restarted_account).unwrap();
+    assert_eq!(
+        fixture.match_ids(&restarted_account),
+        vec!["legacy-once-match"]
+    );
+    assert_eq!(
+        fs::read(restarted_account.paths().database()).unwrap(),
+        database_before
+    );
+    assert_eq!(
+        fs::read(fixture.shared.registry()).unwrap(),
+        registry_before
+    );
+    assert_eq!(
+        fs::read(fixture.shared.user_settings()).unwrap(),
+        settings_before
+    );
+
+    let public_json = serde_json::to_string(&restarted.status().unwrap())
+        .unwrap()
+        .to_ascii_lowercase();
+    for forbidden in ["roleid", "role_id", "token", "synthetic-legacy-token"] {
+        assert!(!public_json.contains(forbidden));
+    }
+}
+
+#[test]
 fn legacy_files_without_database_are_published_and_cleaned_to_complete() {
     let fixture = LegacyFixture::without_database();
     let account = fixture.confirm_account();
@@ -1896,6 +1965,42 @@ fn public_status_and_profile_serialization_hide_internal_role_ids_and_secrets() 
 }
 
 #[test]
+fn account_public_json_never_contains_private_identity_or_secrets() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared).unwrap();
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    install_account(
+        &manager,
+        account_id,
+        101101,
+        "Privacy#1000",
+        "synthetic-private-secret",
+        true,
+    );
+
+    let json = serde_json::to_string(&manager.status().unwrap())
+        .unwrap()
+        .to_ascii_lowercase();
+    for forbidden in [
+        "roleid",
+        "role_id",
+        "101101",
+        "token",
+        "customertoken",
+        "cookie",
+        "authorization",
+        "credential\"",
+        "synthetic-private-secret",
+    ] {
+        assert!(
+            !json.contains(forbidden),
+            "public account JSON exposed forbidden data"
+        );
+    }
+}
+
+#[test]
 fn player_commands_resolve_exactly_one_active_snapshot_and_avoid_legacy_paths() {
     let source = include_str!("../src/commands.rs");
     for forbidden in [
@@ -2053,6 +2158,28 @@ fn missing_active_account_returns_a_chinese_product_error() {
 }
 
 #[test]
+fn empty_and_corrupt_registries_fail_safely_without_guessing_an_account() {
+    let empty_temp = tempfile::tempdir().unwrap();
+    let empty_shared = SharedAppPaths::from_app_data_dir(empty_temp.path());
+    let empty_manager = AccountContextManager::load(empty_shared).unwrap();
+    let status = empty_manager.status().unwrap();
+    assert_eq!(status.active_account_id, None);
+    assert!(status.accounts.is_empty());
+
+    let corrupt_temp = tempfile::tempdir().unwrap();
+    let corrupt_shared = SharedAppPaths::from_app_data_dir(corrupt_temp.path());
+    fs::write(corrupt_shared.registry(), b"not-json").unwrap();
+    let error = match AccountContextManager::load(corrupt_shared) {
+        Ok(_) => panic!("corrupt registry must not load"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("账号索引"));
+    for forbidden in ["not-json", "role_id", "token"] {
+        assert!(!error.to_ascii_lowercase().contains(forbidden));
+    }
+}
+
+#[test]
 fn replace_registry_persists_before_updating_memory_and_supports_concurrent_readers() {
     let temp = tempfile::tempdir().unwrap();
     let shared = SharedAppPaths::from_app_data_dir(temp.path());
@@ -2144,6 +2271,87 @@ fn account_paths_are_isolated_and_reject_traversal() {
     ] {
         assert!(AccountId::parse(invalid).is_err(), "accepted {invalid:?}");
     }
+}
+
+#[test]
+fn all_account_owned_paths_change_together_after_switch() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let first_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let second_id = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    for (id, tag, role_id) in [
+        (&first_id, "First#1000", 101101),
+        (&second_id, "Second#2000", 202202),
+    ] {
+        install_account(
+            &manager,
+            id.clone(),
+            role_id,
+            tag,
+            "synthetic-secret",
+            false,
+        );
+    }
+    manager
+        .switch_active(&first_id, "2026-07-16T10:00:00Z")
+        .unwrap();
+    let first = manager.active_snapshot().unwrap();
+    manager
+        .switch_active(&second_id, "2026-07-16T10:01:00Z")
+        .unwrap();
+    let second = manager.active_snapshot().unwrap();
+
+    assert_ne!(first.paths().credentials(), second.paths().credentials());
+    assert_ne!(
+        first.paths().player_target(),
+        second.paths().player_target()
+    );
+    assert_ne!(
+        first.paths().player_profile(),
+        second.paths().player_profile()
+    );
+    assert_ne!(first.paths().database(), second.paths().database());
+    assert_ne!(first.paths().seasons(), second.paths().seasons());
+    assert_ne!(first.paths().diagnostics(), second.paths().diagnostics());
+    assert_ne!(first.paths().backups(), second.paths().backups());
+}
+
+#[test]
+fn stale_credentials_do_not_hide_existing_local_account_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let manager = AccountContextManager::load(shared).unwrap();
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let paths = manager.shared_paths().account(&account_id);
+    fs::create_dir_all(paths.root()).unwrap();
+    write_manifest_atomic(
+        &paths.manifest(),
+        &manifest(account_id.clone(), "Expired#1000"),
+    )
+    .unwrap();
+    let mut stale = entry(account_id.clone(), "Expired#1000");
+    stale.credential_state = "stale".to_string();
+    manager
+        .replace_registry(AccountRegistry {
+            version: 1,
+            active_account_id: Some(account_id),
+            accounts: vec![stale],
+        })
+        .unwrap();
+    seed_match_for_active_account(&manager, "expired-credential-local-match");
+
+    assert_eq!(
+        manager.status().unwrap().accounts[0].credential_state,
+        "stale"
+    );
+    let rows = list_matches(
+        &manager.active_snapshot().unwrap().database(),
+        MatchFilters::default(),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].match_id, "expired-credential-local-match");
 }
 
 #[test]
@@ -2438,6 +2646,32 @@ fn switch_rejects_manifest_mismatch_without_registry_mutation() {
             .to_string(),
         "账号数据不完整，无法切换。"
     );
+    assert_eq!(manager.registry_snapshot().unwrap(), before);
+    assert_eq!(read_registry(&shared.registry()).unwrap(), before);
+}
+
+#[test]
+fn switch_rejects_missing_account_directory_without_registry_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let first = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+    let missing = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    let manager = AccountContextManager::load(shared.clone()).unwrap();
+    let first_paths = shared.account(&first);
+    fs::create_dir_all(first_paths.root()).unwrap();
+    write_manifest_atomic(
+        &first_paths.manifest(),
+        &manifest(first.clone(), "First#1000"),
+    )
+    .unwrap();
+    let before = registry_with_active(first.clone(), first, missing.clone());
+    manager.replace_registry(before.clone()).unwrap();
+
+    let error = manager
+        .switch_active(&missing, "2026-07-16T12:34:56Z")
+        .unwrap_err()
+        .to_string();
+    assert_eq!(error, "账号数据不完整，无法切换。");
     assert_eq!(manager.registry_snapshot().unwrap(), before);
     assert_eq!(read_registry(&shared.registry()).unwrap(), before);
 }
