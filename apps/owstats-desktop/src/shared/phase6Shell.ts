@@ -59,8 +59,11 @@ export function readableSyncProgress(progress: SyncProgress | null): string {
     return "等待同步";
   }
 
-  const total = progress.total > 0 ? String(progress.total) : "-";
-  return `正在同步：${progress.processed}/${total}，失败详情 ${progress.failedDetails}`;
+  if (progress.total <= 0) {
+    return progress.phase;
+  }
+
+  return `${progress.phase}：${progress.processed}/${progress.total}，失败详情 ${progress.failedDetails}`;
 }
 
 export function commandCenterMetrics(status: OnboardingStatus | null): CommandMetric[] {

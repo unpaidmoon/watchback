@@ -379,12 +379,40 @@ export type SyncRequest = {
   season: number;
 };
 
+export type SyncPageDiagnostic = {
+  matchKind: string;
+  gameMode: string;
+  page: number;
+  entries: number;
+  uniqueValidEntries: number;
+  newMatches: number;
+  missingDetails: number;
+  existingCompleteMatches: number;
+  earliestBeginTs: number | null;
+  latestBeginTs: number | null;
+};
+
+export type SyncDiagnostics = {
+  listDurationMs: number;
+  detailDurationMs: number;
+  persistDurationMs: number;
+  pages: SyncPageDiagnostic[];
+};
+
 export type SyncSummary = {
   season: number;
   phase: string;
   processed: number;
   total: number;
   currentMatchId: string | null;
+  listEntriesSeen: number;
+  newMatches: number;
+  missingDetails: number;
+  detailsRequested: number;
+  repairedDetails: number;
+  databaseMatches: number;
+  databaseDetails: number;
+  diagnostics: SyncDiagnostics;
   importedMatches: number;
   importedDetails: number;
   skippedDuplicates: number;

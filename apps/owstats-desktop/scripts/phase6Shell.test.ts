@@ -316,7 +316,13 @@ const progress: SyncProgress = {
   latestErrors: [],
 };
 
-assertEqual(readableSyncProgress(progress).includes("8/20"), true, "sync progress includes count");
+assertEqual(readableSyncProgress(null), "等待同步", "missing sync progress waits for synchronization");
+assertEqual(readableSyncProgress(progress), "details：8/20，失败详情 1", "sync progress includes phase and count");
+assertEqual(
+  readableSyncProgress({ ...progress, phase: "保存数据", processed: 0, total: 0 }),
+  "保存数据",
+  "zero-total progress displays only its phase",
+);
 assertEqual(
   productErrorMessage("TypeError: Cannot read properties of undefined (reading 'invoke')").includes("Tauri"),
   true,

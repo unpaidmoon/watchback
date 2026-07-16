@@ -339,7 +339,11 @@ export function OnboardingPage() {
       const summary = await syncSeason(season);
       clearMatchesPageCache();
       await loadDashboard();
-      setSyncNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
+      setSyncNotice(
+        summary.newMatches === 0 && summary.missingDetails === 0
+          ? `S${season} 已是最新数据，共校验 ${summary.listEntriesSeen} 场对局，无需重新获取详情。`
+          : `S${season} 更新完成：新增 ${summary.newMatches} 场，补全 ${summary.repairedDetails} 场详情，当前赛季共 ${summary.databaseMatches} 场。`,
+      );
     } catch (err) {
       setSyncError(productErrorMessage(err));
     } finally {
