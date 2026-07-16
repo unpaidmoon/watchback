@@ -124,7 +124,7 @@ export function SeasonSyncWorkbench({
                   className={`syncedSeasonLedgerRow${selectedSeason === seasonStatus.season ? " selected" : ""}${rowSyncing ? " syncing" : ""}`}
                   role="row"
                 >
-                  <div className="syncedSeasonSelectCell" role="cell" aria-colspan={4}>
+                  <div className="syncedSeasonSelectCell" role="cell">
                     <button
                       className="syncedSeasonSelect"
                       type="button"
@@ -133,15 +133,21 @@ export function SeasonSyncWorkbench({
                       onClick={() => onSelectSeason(seasonStatus.season)}
                     >
                       <span className="syncedSeasonName">{`S${seasonStatus.season}`}{rowSyncing ? <small>同步中</small> : null}</span>
-                      <span className="syncedSeasonCoverage">
-                        <span className="syncedSeasonCoverageTrack" aria-hidden="true">
-                          <span style={{ width: `${seasonStatus.coveragePercent}%` }} />
-                        </span>
-                        <span>{seasonStatus.coveragePercent}%</span>
-                      </span>
-                      <span>{seasonStatus.matchCount} 场</span>
-                      <span>{formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)}</span>
                     </button>
+                  </div>
+                  <div className="syncedSeasonCoverageCell" role="cell">
+                    <span className="syncedSeasonCoverage">
+                      <span className="syncedSeasonCoverageTrack" aria-hidden="true">
+                        <span style={{ width: `${seasonStatus.coveragePercent}%` }} />
+                      </span>
+                      <span>{seasonStatus.coveragePercent}%</span>
+                    </span>
+                  </div>
+                  <div className="syncedSeasonMatchCountCell" role="cell">
+                    {seasonStatus.matchCount} 场
+                  </div>
+                  <div className="syncedSeasonLastSyncCell" role="cell">
+                    {formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)}
                   </div>
                   <div className="syncedSeasonUpdateCell" role="cell">
                     <button
