@@ -103,23 +103,27 @@ pub async fn fetch_quick_season_with_base_url(
 
     let mut modes = NORMAL_MODES
         .iter()
-        .map(|mode| ("normal", *mode, false))
+        .map(|mode| ("normal".to_string(), (*mode).to_string(), false))
         .collect::<Vec<_>>();
     if request.include_fight {
-        modes.extend(FIGHT_MODES.iter().map(|mode| ("fight", *mode, true)));
+        modes.extend(
+            FIGHT_MODES
+                .iter()
+                .map(|mode| ("fight".to_string(), (*mode).to_string(), true)),
+        );
     }
     let client_ref = &client;
     let customer_token = &request.customer_token;
     let season_candidates_ref = &season_candidates;
     let inventory_ref = inventory;
     let mode_results = stream::iter(modes.into_iter().map(move |(kind, mode, fight)| {
-        let key = crate::sync::SeasonModeKey::new(kind, mode);
+        let key = crate::sync::SeasonModeKey::new(&kind, &mode);
         let mode_inventory = inventory_ref.modes.get(&key);
         async move {
             fetch_quick_history_for_mode(
                 client_ref,
                 customer_token,
-                mode,
+                &mode,
                 season_candidates_ref,
                 fight,
                 mode_inventory,

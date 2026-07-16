@@ -143,6 +143,7 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
     credential_path: &Path,
     target_path: &Path,
     season: i64,
+    mode: crate::models::SyncMode,
     customer_base_url: &str,
     progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
@@ -152,6 +153,7 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
         credential_path,
         target_path,
         season,
+        mode,
         customer_base_url,
         progress,
     )
@@ -164,6 +166,7 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
     credential_path: &Path,
     target_path: &Path,
     season: i64,
+    mode: crate::models::SyncMode,
     customer_base_url: &str,
     progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
@@ -172,7 +175,7 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
     if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
         return Err(anyhow!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR));
     }
-    sync_incremental_season_with_request(
+    sync_account_season_with_request(
         db,
         season_output_dir,
         crate::season_fetch::FullSeasonRequest {
@@ -191,6 +194,7 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
             detail_concurrency: 2,
             include_fight: true,
         },
+        mode,
         progress,
     )
     .await
@@ -201,6 +205,7 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
     season_output_dir: &Path,
     credential_path: &Path,
     season: i64,
+    mode: crate::models::SyncMode,
     customer_base_url: &str,
     progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
@@ -211,7 +216,7 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("当前登录账号尚未识别，无法同步本人数据，请重新登录。"))?;
-    sync_incremental_season_with_request(
+    sync_account_season_with_request(
         db,
         season_output_dir,
         crate::season_fetch::FullSeasonRequest {
@@ -230,15 +235,17 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
             detail_concurrency: 2,
             include_fight: true,
         },
+        mode,
         progress,
     )
     .await
 }
 
-async fn sync_incremental_season_with_request(
+async fn sync_account_season_with_request(
     db: &OwDatabase,
     season_output_dir: &Path,
     request: crate::season_fetch::FullSeasonRequest,
+    mode: crate::models::SyncMode,
     mut progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
     let season = request.season;
@@ -251,7 +258,20 @@ async fn sync_incremental_season_with_request(
         failed_details: 0,
         latest_errors: Vec::new(),
     });
-    let inventory = load_season_sync_inventory(db, season)?;
+    let inventory = if db.path().is_file() {
+        load_season_sync_inventory(db, season)?
+    } else {
+        SeasonSyncInventory::default()
+    };
+    if mode == crate::models::SyncMode::QuickUpdate
+        && (inventory.match_ids.is_empty()
+            || !inventory
+                .modes
+                .values()
+                .any(|mode| mode.latest_begin_ts.is_some()))
+    {
+        return Err(anyhow!("该赛季尚无可用本地水位，请先使用全量抓取。"));
+    }
     progress(SyncProgress {
         season,
         phase: "正在获取赛季对局列表".to_string(),
@@ -261,9 +281,14 @@ async fn sync_incremental_season_with_request(
         failed_details: 0,
         latest_errors: Vec::new(),
     });
-    let fetch =
-        crate::season_fetch::fetch_season_increment_with_base_url(request, &inventory.detail_ids)
-            .await?;
+    let fetch = match mode {
+        crate::models::SyncMode::QuickUpdate => {
+            crate::season_fetch::fetch_quick_season_with_base_url(request, &inventory).await?
+        }
+        crate::models::SyncMode::FullFetch => {
+            crate::season_fetch::fetch_full_season_with_base_url(request).await?
+        }
+    };
     if fetch.entries == 0 {
         return Err(anyhow!(
             "未拉取到 S{season} 赛季对局；未更新本地数据库或快照，请确认该赛季有战绩，或稍后重新登录后再试。"
@@ -315,9 +340,25 @@ async fn sync_incremental_season_with_request(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let page_diagnostics = build_page_diagnostics(&list_pages, &inventory);
-    let attempted_detail_ids = selection
-        .entries
+    let mut page_diagnostics = build_page_diagnostics(&list_pages, &inventory);
+    for (mode_key, stop_reason) in &fetch.quick_scan_stop_reasons {
+        let Some((match_kind, game_mode)) = mode_key.split_once(':') else {
+            continue;
+        };
+        if let Some(last_page) = page_diagnostics
+            .iter_mut()
+            .filter(|page| page.match_kind == match_kind && page.game_mode == game_mode)
+            .max_by_key(|page| page.page)
+        {
+            last_page.watermark_reached = stop_reason == "watermark_reached";
+            last_page.stop_reason = Some(stop_reason.clone());
+        }
+    }
+    let attempted_entries = match mode {
+        crate::models::SyncMode::QuickUpdate => &selection.entries,
+        crate::models::SyncMode::FullFetch => &entries,
+    };
+    let attempted_detail_ids = attempted_entries
         .iter()
         .filter_map(|entry| string_field(entry, "matchId"))
         .collect::<HashSet<_>>();
@@ -338,7 +379,6 @@ async fn sync_incremental_season_with_request(
         .map(|(match_id, _)| match_id)
         .collect::<HashSet<_>>()
         .len();
-    let persist_started = std::time::Instant::now();
     progress(SyncProgress {
         season,
         phase: "正在更新本地数据库".to_string(),
@@ -348,10 +388,54 @@ async fn sync_incremental_season_with_request(
         failed_details: detail_errors.len(),
         latest_errors: Vec::new(),
     });
+    let summary = finalize_fetched_season(
+        db,
+        season_output_dir,
+        season,
+        mode,
+        &fetch.payload,
+        entries,
+        details,
+        detail_errors,
+        attempted_detail_ids,
+        &selection,
+        repaired_details,
+        page_diagnostics,
+        &fetch,
+    )?;
+    progress(SyncProgress {
+        season,
+        phase: "同步完成".to_string(),
+        processed: summary.processed,
+        total: summary.total,
+        current_match_id: None,
+        failed_details: summary.failed_details,
+        latest_errors: summary.latest_errors.clone(),
+    });
+    Ok(summary)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finalize_fetched_season(
+    db: &OwDatabase,
+    season_output_dir: &Path,
+    season: i64,
+    mode: crate::models::SyncMode,
+    cached_player: &Value,
+    entries: Vec<Value>,
+    details: Vec<Value>,
+    detail_errors: Vec<Value>,
+    attempted_detail_ids: HashSet<String>,
+    selection: &DetailSelection,
+    repaired_details: usize,
+    page_diagnostics: Vec<crate::models::SyncPageDiagnostic>,
+    fetch: &crate::season_fetch::FullSeasonFetch,
+) -> Result<SyncSummary> {
+    let persist_started = std::time::Instant::now();
     let mut summary = persist::sync_import_incremental_parts(
         db,
         season,
-        &fetch.payload,
+        cached_player,
         entries,
         details,
         detail_errors,
@@ -360,7 +444,7 @@ async fn sync_incremental_season_with_request(
     let (database_matches, database_details) =
         incremental::query_season_database_totals(db, season)?;
     let complete_payload =
-        rebuild_complete_season_payload(db, season, &fetch.payload).map_err(|error| {
+        rebuild_complete_season_payload(db, season, cached_player).map_err(|error| {
             anyhow!(
                 "数据库更新成功，但本地快照更新失败：{}",
                 crate::redaction::redact_sensitive_text(&error.to_string())
@@ -372,6 +456,7 @@ async fn sync_incremental_season_with_request(
             crate::redaction::redact_sensitive_text(&error.to_string())
         )
     })?;
+    summary.mode = mode;
     summary.list_entries_seen = fetch.entries;
     summary.new_matches = selection.new_matches;
     summary.missing_details = selection.missing_details;
@@ -384,17 +469,9 @@ async fn sync_incremental_season_with_request(
         detail_duration_ms: fetch.detail_duration_ms,
         persist_duration_ms: persist_started.elapsed().as_millis() as u64,
         pages: page_diagnostics,
-        quick_scan_limited: false,
+        quick_scan_limited: fetch.quick_scan_limited,
     };
-    progress(SyncProgress {
-        season,
-        phase: "同步完成".to_string(),
-        processed: summary.processed,
-        total: summary.total,
-        current_match_id: None,
-        failed_details: summary.failed_details,
-        latest_errors: summary.latest_errors.clone(),
-    });
+    summary.quick_scan_limited = fetch.quick_scan_limited;
     Ok(summary)
 }
 

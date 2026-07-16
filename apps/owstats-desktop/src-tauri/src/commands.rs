@@ -566,6 +566,7 @@ pub async fn sync_season(
         &credential_path,
         &target_path,
         request.season,
+        request.mode,
         "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
         move |progress| {
             let _ = emit_app.emit("sync-progress", progress);

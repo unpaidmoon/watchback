@@ -5,7 +5,7 @@ use owstats_desktop_lib::player_target::{
     PlayerTarget,
 };
 use owstats_desktop_lib::{
-    sync_season_with_credentials_and_target_paths_output_dir_base_url, OwDatabase,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url, OwDatabase, SyncMode,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -117,6 +117,7 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
         &credential_path,
         &target_path,
         23,
+        SyncMode::FullFetch,
         &format!("{}/customer", server.base_url),
         |_| {},
     )
@@ -1015,6 +1016,50 @@ async fn quick_fetch_rejects_empty_customer_token_with_chinese_message() {
 }
 
 #[tokio::test]
+async fn quick_update_without_local_watermark_rejects_before_network_or_database_write() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db_path = temp.path().join("sync.sqlite3");
+    let db = OwDatabase::new(&db_path);
+
+    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::QuickUpdate,
+        "http://127.0.0.1:1/customer",
+        |_| {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(error, "该赛季尚无可用本地水位，请先使用全量抓取。");
+    assert!(!db_path.exists());
+    assert!(!season_dir.exists());
+}
+
+#[tokio::test]
 async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_season_directory() {
     let temp = tempfile::tempdir().unwrap();
     let app_data = temp.path().join("app-data");
@@ -1037,6 +1082,7 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
             &season_dir,
             &app_data.join(".dashen_credentials.json"),
             23,
+            SyncMode::FullFetch,
             &format!("{}/customer", server.base_url),
             |progress| progresses.push(progress),
         )
@@ -1061,7 +1107,7 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
 }
 
 #[tokio::test]
-async fn desktop_sync_defaults_to_incremental_details() {
+async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details() {
     let temp = tempfile::tempdir().unwrap();
     let credential_path = temp.path().join("credentials.json");
     let target_path = temp.path().join("target.json");
@@ -1092,6 +1138,7 @@ async fn desktop_sync_defaults_to_incremental_details() {
         &credential_path,
         &target_path,
         23,
+        SyncMode::FullFetch,
         &format!("{}/customer", server.base_url),
         |progress| phases.push(progress.phase),
     )
@@ -1099,6 +1146,8 @@ async fn desktop_sync_defaults_to_incremental_details() {
     .unwrap();
 
     assert_eq!(first.list_entries_seen, 3);
+    assert_eq!(first.mode, SyncMode::FullFetch);
+    assert!(!first.quick_scan_limited);
     assert_eq!(first.new_matches, 3);
     assert_eq!(first.missing_details, 0);
     assert_eq!(first.details_requested, 3);
@@ -1141,6 +1190,7 @@ async fn desktop_sync_defaults_to_incremental_details() {
         &credential_path,
         &target_path,
         23,
+        SyncMode::QuickUpdate,
         &format!("{}/customer", server.base_url),
         |_| {},
     )
@@ -1148,6 +1198,13 @@ async fn desktop_sync_defaults_to_incremental_details() {
     .unwrap();
 
     assert_eq!(second.list_entries_seen, 3);
+    assert_eq!(second.mode, SyncMode::QuickUpdate);
+    assert!(!second.quick_scan_limited);
+    assert!(second
+        .diagnostics
+        .pages
+        .iter()
+        .any(|page| page.stop_reason.as_deref() == Some("watermark_reached")));
     assert_eq!(second.new_matches, 0);
     assert_eq!(second.missing_details, 0);
     assert_eq!(second.details_requested, 0);
@@ -1168,6 +1225,35 @@ async fn desktop_sync_defaults_to_incremental_details() {
             .count(),
         0
     );
+    server.requests.lock().unwrap().clear();
+
+    let refreshed = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::FullFetch,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    assert_eq!(refreshed.mode, SyncMode::FullFetch);
+    assert_eq!(refreshed.details_requested, 3);
+    let refreshed_requests = server.requests.lock().unwrap().clone();
+    assert_eq!(
+        refreshed_requests
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchInfo"))
+            .count(),
+        3
+    );
+    assert!(refreshed_requests.iter().any(|request| {
+        request.first_line.contains("/queryMatchList")
+            && request.first_line.contains("gameMode=sport")
+            && request.first_line.contains("page=2")
+    }));
     let snapshot: serde_json::Value = serde_json::from_slice(
         &std::fs::read(season_dir.join("local_s23_full_season.json")).unwrap(),
     )
@@ -1217,6 +1303,7 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
         &credential_path,
         &target_path,
         23,
+        SyncMode::FullFetch,
         &format!("{}/customer", populated.base_url),
         |_| {},
     )
@@ -1232,6 +1319,7 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
         &credential_path,
         &target_path,
         23,
+        SyncMode::QuickUpdate,
         &format!("{}/customer", empty.base_url),
         |_| {},
     )
@@ -1283,6 +1371,7 @@ async fn desktop_incremental_snapshot_failure_reports_committed_database_boundar
         &credential_path,
         &target_path,
         23,
+        SyncMode::FullFetch,
         &format!("{}/customer", server.base_url),
         |_| {},
     )
@@ -1355,6 +1444,7 @@ async fn desktop_incremental_counts_only_valid_database_details_after_failed_rep
         &credential_path,
         &target_path,
         23,
+        SyncMode::QuickUpdate,
         &format!("{}/customer", server.base_url),
         |_| {},
     )
@@ -1377,6 +1467,111 @@ async fn desktop_incremental_counts_only_valid_database_details_after_failed_rep
     let inventory = owstats_desktop_lib::load_season_sync_inventory(&db, 23).unwrap();
     assert!(inventory.match_ids.contains("metric-invalid"));
     assert!(!inventory.detail_ids.contains("metric-invalid"));
+}
+
+#[tokio::test]
+async fn full_fetch_invalid_refresh_preserves_old_detail_and_player_index_and_records_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    owstats_desktop_lib::import_payload_value_embedded(
+        &db,
+        &serde_json::json!({
+            "season": 23,
+            "matches": {
+                "entries": [{
+                    "matchId": "metric-invalid",
+                    "gameMode": "sport",
+                    "matchRet": 1,
+                    "beginTs": 1700000000000_i64
+                }],
+                "details": [{
+                    "match_id": "metric-invalid",
+                    "match_kind": "normal",
+                    "payload": {"code": 0, "data": {
+                        "gameTimeSec": 60,
+                        "totalCount": {
+                            "teammateList": [{"bnetId": "old-player", "name": "旧玩家"}],
+                            "enemyList": []
+                        }
+                    }}
+                }],
+                "detail_errors": []
+            }
+        }),
+    )
+    .unwrap();
+    let old_detail: String = db
+        .connect()
+        .unwrap()
+        .query_row(
+            "SELECT raw_detail_json FROM match_details WHERE match_id='metric-invalid'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let server = spawn_failed_detail_metric_server();
+
+    let summary = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::FullFetch,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(summary.mode, SyncMode::FullFetch);
+    assert_eq!(summary.details_requested, 1);
+    assert_eq!(summary.failed_details, 1);
+    let conn = db.connect().unwrap();
+    let refreshed_detail: String = conn
+        .query_row(
+            "SELECT raw_detail_json FROM match_details WHERE match_id='metric-invalid'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(refreshed_detail, old_detail);
+    let indexed_player: String = conn
+        .query_row(
+            "SELECT bnet_id FROM match_players WHERE match_id='metric-invalid'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed_player, "old-player");
+    let error_message: String = conn
+        .query_row(
+            "SELECT message FROM sync_errors WHERE season=23 AND match_id='metric-invalid'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!error_message.contains("synthetic-account-secret"));
+    assert!(!error_message.contains("synthetic-player-key"));
 }
 
 #[derive(Clone, Debug)]
