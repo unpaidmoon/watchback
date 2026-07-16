@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FilterBar } from "../src/features/matches/FilterBar";
 import { MatchDetailPane } from "../src/features/matches/MatchDetailPane";
 import { MatchListPane } from "../src/features/matches/MatchListPane";
+import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import { PageHeader, PageSeasonSelect, StatusPill } from "../src/shared/page-shell";
 import type { ArenaDetailSlice, FilterOptions, MatchDetailView, MatchFilters, MatchSummary, PlayerRow } from "../src/shared/types";
 
@@ -54,6 +55,22 @@ const players = Array.from({ length: 12 }, (_, index) => createPlayer(index));
 const matches = Array.from({ length: 7 }, (_, index) => createMatch(index));
 const anonymousNormalDetail = createNormalDetail();
 const anonymousArenaDetail = createArenaDetail();
+const favoriteController: MatchFavoriteController = {
+  savedNote: "",
+  draftNote: "",
+  isFavorite: false,
+  busy: false,
+  error: null,
+  saved: false,
+  dirty: false,
+  count: 0,
+  canSave: false,
+  edit: () => undefined,
+  favoriteMatch: async () => undefined,
+  saveNote: async () => undefined,
+  unfavoriteMatch: async () => undefined,
+  confirmDiscard: () => true,
+};
 
 export function renderMatchWorkbenchFixture(state: MatchWorkbenchFixtureState): string {
   const arena = state === "wide-arena";
@@ -118,6 +135,7 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
               loading={false}
               error={null}
               matchId={detail.matchId}
+              favoriteController={favoriteController}
               onBack={() => undefined}
             />
           </section>
