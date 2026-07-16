@@ -498,10 +498,18 @@ pub struct FriendRecentMatch {
     pub healing_taken: i64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncMode {
+    QuickUpdate,
+    FullFetch,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncRequest {
     pub season: i64,
+    pub mode: SyncMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -517,6 +525,8 @@ pub struct SyncPageDiagnostic {
     pub existing_complete_matches: usize,
     pub earliest_begin_ts: Option<i64>,
     pub latest_begin_ts: Option<i64>,
+    pub stop_reason: Option<String>,
+    pub watermark_reached: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -526,12 +536,14 @@ pub struct SyncDiagnostics {
     pub detail_duration_ms: u64,
     pub persist_duration_ms: u64,
     pub pages: Vec<SyncPageDiagnostic>,
+    pub quick_scan_limited: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSummary {
     pub season: i64,
+    pub mode: SyncMode,
     pub phase: String,
     pub processed: usize,
     pub total: usize,
@@ -550,6 +562,7 @@ pub struct SyncSummary {
     pub database_matches: usize,
     pub database_details: usize,
     pub diagnostics: SyncDiagnostics,
+    pub quick_scan_limited: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

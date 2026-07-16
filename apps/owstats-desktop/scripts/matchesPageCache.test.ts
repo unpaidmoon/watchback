@@ -1072,6 +1072,6 @@ assert.match(
 );
 assert.match(
   onboardingSource,
-  /const summary = await syncSeason\(season\);\s*clearMatchesPageCache\(\);/s,
+  /const summary = await syncSeason\(season, mode\);\s*clearMatchesPageCache\(\);/s,
   "a completed season sync invalidates the cached match list before reloading dashboard data",
 );

@@ -127,6 +127,7 @@ pub fn sync_import_parts(
         .collect::<Vec<_>>();
     Ok(SyncSummary {
         season,
+        mode: crate::models::SyncMode::FullFetch,
         phase: "completed".to_string(),
         processed: total,
         total,
@@ -145,6 +146,7 @@ pub fn sync_import_parts(
         database_matches: 0,
         database_details: 0,
         diagnostics: Default::default(),
+        quick_scan_limited: false,
     })
 }
 
@@ -194,6 +196,7 @@ pub(super) fn sync_import_incremental_parts(
         .collect::<Vec<_>>();
     Ok(SyncSummary {
         season,
+        mode: crate::models::SyncMode::FullFetch,
         phase: "completed".to_string(),
         processed: total,
         total,
@@ -212,6 +215,7 @@ pub(super) fn sync_import_incremental_parts(
         database_matches: 0,
         database_details: 0,
         diagnostics: Default::default(),
+        quick_scan_limited: false,
     })
 }
 

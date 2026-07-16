@@ -8,7 +8,7 @@ import {
 } from "../src/shared/phase6Shell.ts";
 import { checkAppUpdate, getPlayerProfile, getUserSettings, listAccounts, saveUserSettings } from "../src/shared/api.ts";
 import { formatCompactTimestamp, seasonSyncGateCopy } from "../src/features/command-center/SeasonHealthPanel.tsx";
-import { resolveCommandCenterSeason } from "../src/features/command-center/SeasonSyncWorkbench.tsx";
+import * as seasonSyncWorkbench from "../src/features/command-center/SeasonSyncWorkbench.tsx";
 import type { OnboardingStatus, SyncProgress } from "../src/shared/types.ts";
 import { readFileSync } from "node:fs";
 
@@ -40,8 +40,23 @@ const styles = [
 ].join("\n");
 const commandCenterStyles = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
 const pageShellStyles = readFileSync(new URL("../src/styles/page-shell.css", import.meta.url), "utf8");
+const { resolveCommandCenterSeason } = seasonSyncWorkbench;
+const runSeasonQuickUpdate = Reflect.get(seasonSyncWorkbench, "runSeasonQuickUpdate") as undefined | ((season: number, onQuickUpdate: (season: number) => void) => void);
+assertEqual(typeof runSeasonQuickUpdate, "function", "row updates expose a directly testable quick-update handler");
+if (runSeasonQuickUpdate) {
+  let selectedSeason = 23;
+  let updatedSeason: number | null = null;
+  runSeasonQuickUpdate(22, (season) => {
+    updatedSeason = season;
+  });
+  assertEqual(updatedSeason, 22, "row updates invoke quick update with the row season");
+  assertEqual(selectedSeason, 23, "row updates do not mutate the selected season");
+}
 assertEqual(/\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*minmax\(220px, 1fr\) minmax\(0, 2fr\)/.test(commandCenterStyles), true, "sync controls and ledger use the confirmed 1:2 layout");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "ledger rows meet the interaction target");
+assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "row update controls meet the interaction target");
+assertEqual(/grid-template-columns:\s*minmax\(64px, 0\.55fr\) minmax\(150px, 1\.5fr\) minmax\(88px, 0\.75fr\) minmax\(112px, 0\.9fr\) 80px;/.test(commandCenterStyles), true, "ledger reserves a stable operation column for the updating label");
+assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?width:\s*80px;[\s\S]*?min-width:\s*80px;/.test(commandCenterStyles), true, "row update controls keep the same width while running");
 assertEqual(/\.syncedSeasonCoverageTrack > span\s*\{[\s\S]*?background:\s*var\(--data-primary\)/.test(commandCenterStyles), true, "coverage uses the approved data color");
 assertEqual(/@media \(max-width: 920px\)[\s\S]*?\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*1fr/.test(commandCenterStyles), true, "narrow layout stacks control above ledger");
 assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
@@ -161,12 +176,12 @@ assertEqual(onboardingSource.includes("let disposed = false"), true, "late event
 assertEqual(onboardingSource.includes("if (disposed)"), true, "late event listeners immediately unlisten after cleanup");
 assertEqual(onboardingSource.includes("function acquireOperationLock()"), true, "account and season actions share one synchronous lock");
 assertEqual(
-  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)[\s\S]*?finally[\s\S]*?releaseOperationLock\(\)/.test(onboardingSource),
+  /async function runSeasonSync\(season: number, mode: SyncMode\)[\s\S]*?if \(!acquireOperationLock\(\)\)[\s\S]*?finally[\s\S]*?releaseOperationLock\(\)/.test(onboardingSource),
   true,
   "season sync owns and releases the shared operation lock",
 );
 assertEqual(
-  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)\s*\{[\s\S]*?setSyncError\(/.test(onboardingSource),
+  /async function runSeasonSync\(season: number, mode: SyncMode\)[\s\S]*?if \(!acquireOperationLock\(\)\)\s*\{[\s\S]*?setSyncError\(/.test(onboardingSource),
   true,
   "season sync lock failures stay beside the sync control",
 );
@@ -200,7 +215,12 @@ assertEqual(seasonWorkbenchSource.includes("普通对局"), false, "ledger omits
 assertEqual(seasonWorkbenchSource.includes("角斗对局"), false, "ledger omits non-approved columns");
 assertEqual(seasonWorkbenchSource.includes("aria-pressed"), true, "ledger rows expose their selected state");
 assertEqual(onboardingSource.includes('aria-label="赛季号"'), false, "numeric season input is removed");
-assertEqual(seasonWorkbenchSource.includes("`同步 S${selectedSeason}`"), true, "season sync button text follows the selected season");
+assertEqual(seasonWorkbenchSource.includes('onFullFetch: (season: number) => void'), true, "workbench exposes an explicit full-fetch action");
+assertEqual(seasonWorkbenchSource.includes('onQuickUpdate: (season: number) => void'), true, "workbench exposes an explicit row update action");
+assertEqual(seasonWorkbenchSource.includes('"全量抓取"'), true, "selected-season primary action is named full fetch");
+assertEqual(seasonWorkbenchSource.includes('"更新"'), true, "synced-season rows expose a compact update action");
+assertEqual(/onClick=\{\(\) => runSeasonQuickUpdate\(seasonStatus\.season, onQuickUpdate\)\}/.test(seasonWorkbenchSource), true, "row update uses its own season through the tested handler");
+assertEqual(/<button[^>]*className=.*syncedSeasonLedgerRow[\s\S]*?<button/.test(seasonWorkbenchSource), false, "season rows do not nest buttons");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("status.currentSeason"), true, "command center consumes the backend current season without global state");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");

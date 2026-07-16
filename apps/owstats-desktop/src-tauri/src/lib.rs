@@ -48,13 +48,17 @@ pub use sync::rebuild_complete_season_payload;
 #[doc(hidden)]
 pub use sync::write_season_payload;
 pub use sync::{
-    build_page_diagnostics, dump_season_json, dump_season_json_with_base_url,
+    build_page_diagnostics, classify_quick_page, dump_season_json, dump_season_json_with_base_url,
     load_season_sync_inventory, select_detail_entries, sync_import_parts, sync_season,
     sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
+    sync_season_with_credentials_and_target_paths_with_mode_base_url,
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
     sync_season_with_current_account_credentials_path_output_dir_base_url,
-    sync_season_with_progress, DetailSelection, SeasonSyncInventory,
+    sync_season_with_current_account_credentials_path_output_dir_with_mode_base_url,
+    sync_season_with_progress, DetailSelection, ModeSyncInventory, QuickPageDecision,
+    SeasonModeKey, SeasonSyncInventory,
 };
 
 pub fn run() {

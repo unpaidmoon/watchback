@@ -44,7 +44,7 @@ import { formatSyncNotice, hasDesktopBackend, productErrorMessage, readableSyncP
 import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
-import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
+import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncMode, SyncProgress } from "../shared/types";
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
@@ -70,6 +70,7 @@ export function OnboardingPage() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
+  const [syncingMode, setSyncingMode] = useState<SyncMode | null>(null);
   const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
@@ -235,6 +236,7 @@ export function OnboardingPage() {
     setSyncError(null);
     setSyncNotice(null);
     setSyncingSeason(null);
+    setSyncingMode(null);
     setAccountStatus((current) => current ? {
       ...current,
       activeAccountId: null,
@@ -323,20 +325,21 @@ export function OnboardingPage() {
     }
   }
 
-  async function runSeasonSync(season: number) {
+  async function runSeasonSync(season: number, mode: SyncMode) {
     if (!acquireOperationLock()) {
       setSyncError("当前正在处理账号操作，请完成后再同步。");
       return;
     }
     dashboardRequestGenerationRef.current += 1;
     setSyncingSeason(season);
+    setSyncingMode(mode);
     setNotice(null);
     setError(null);
     setSyncNotice(null);
     setSyncError(null);
     setSyncProgress(null);
     try {
-      const summary = await syncSeason(season);
+      const summary = await syncSeason(season, mode);
       clearMatchesPageCache();
       await loadDashboard();
       setSyncNotice(formatSyncNotice(season, summary));
@@ -344,6 +347,7 @@ export function OnboardingPage() {
       setSyncError(productErrorMessage(err));
     } finally {
       setSyncingSeason(null);
+      setSyncingMode(null);
       releaseOperationLock();
     }
   }
@@ -601,11 +605,13 @@ export function OnboardingPage() {
                   targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
                   accountOperationBusy={accountOperationBusy}
                   syncingSeason={syncingSeason}
+                  syncingMode={syncingMode}
                   progress={syncProgress}
                   syncError={syncError}
                   syncNotice={syncNotice}
                   onSelectSeason={selectSyncSeason}
-                  onSync={runSeasonSync}
+                  onFullFetch={(season) => void runSeasonSync(season, "fullFetch")}
+                  onQuickUpdate={(season) => void runSeasonSync(season, "quickUpdate")}
                 />
               ) : (
                 <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>
