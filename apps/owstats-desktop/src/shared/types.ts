@@ -60,8 +60,42 @@ export type CredentialStatus = {
   state: string;
   message: string;
   exposesSecret: boolean;
-  roleId?: number | null;
   savedAt: string | null;
+};
+
+export type AccountSummary = {
+  accountId: string;
+  battleTag: string;
+  isActive: boolean;
+  credentialState: "ready" | "stale" | "incomplete" | "missing" | string;
+  createdAt: string;
+  lastUsedAt: string;
+};
+
+export type AccountManagerStatus = {
+  activeAccountId: string | null;
+  accounts: AccountSummary[];
+  message: string;
+};
+
+export type AccountLoginResult = {
+  kind:
+    | "newAccountAdded"
+    | "existingAccountUpdated"
+    | "differentExistingAccount"
+    | "differentNewAccount"
+    | string;
+  accountId: string | null;
+  battleTag: string | null;
+  message: string;
+  shouldOfferSwitch: boolean;
+};
+
+export type RemoveAccountResult = {
+  removed: boolean;
+  activeAccountId: string | null;
+  message: string;
+  reloadRequired: boolean;
 };
 
 export type CredentialLoginResult = {
@@ -92,7 +126,6 @@ export type ClearPlayerTargetResult = {
 };
 
 export type PlayerProfile = {
-  roleId: number | null;
   playerId: string | null;
   avatarUrl: string | null;
   endorsementLevel: number | null;

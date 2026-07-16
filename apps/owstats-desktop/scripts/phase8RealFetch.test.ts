@@ -81,8 +81,9 @@ for (const field of ["detectedBnet", "currentBnet", "message", "syncAllowed", "c
 }
 assert.match(types, /type CredentialLoginResult\s*=\s*\{[\s\S]*?status:\s*CredentialStatus;[\s\S]*?target:\s*LoginTargetStatus;/, "login result returns credential and target status together");
 assert.match(types, /type ClearPlayerTargetResult\s*=\s*\{[\s\S]*?cleared:\s*boolean;[\s\S]*?target:\s*LoginTargetStatus;/, "clear result returns the replacement login target status");
-assert.match(types, /type CredentialStatus\s*=\s*\{[\s\S]*?roleId\?:\s*number\s*\|\s*null;/, "optional Rust roleId serialization is optional in TypeScript");
-assert.match(models, /struct CredentialStatus\s*\{[\s\S]*?skip_serializing_if\s*=\s*"Option::is_none"[\s\S]*?role_id:\s*Option<i64>/, "credential roleId may be omitted by Rust serialization");
+assert.doesNotMatch(types, /type CredentialStatus\s*=\s*\{[^}]*roleId/s, "public credential status does not expose roleId");
+assert.doesNotMatch(types, /type PlayerProfile\s*=\s*\{[^}]*roleId/s, "public player profile does not expose roleId");
+assert.match(models, /struct CredentialStatus\s*\{[\s\S]*?#\[serde\(skip_serializing\)\][\s\S]*?role_id:\s*Option<i64>/, "credential roleId is never serialized to the frontend");
 
 assert.equal(normalizeLoginTargetName(" Alice＃1234 "), "alice#1234", "frontend target normalization matches backend hash and case handling");
 assert.notEqual(

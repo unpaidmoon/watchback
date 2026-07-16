@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AccountLoginResult,
+  AccountManagerStatus,
   CareerMmrBuildStatus,
   CareerMmrHistory,
   CareerMmrHistoryRequest,
@@ -26,12 +28,26 @@ import type {
   ClearPlayerTargetResult,
   PlayerSearchOption,
   RankingResponse,
+  RemoveAccountResult,
   SeasonAnalysis,
   SyncSummary,
   LogoutResult,
   UpdateCheckResult,
   UserSettings,
 } from "./types";
+
+export const listAccounts = () => invoke<AccountManagerStatus>("list_accounts");
+
+export const addAccount = () => invoke<AccountLoginResult>("add_account");
+
+export const switchAccount = (accountId: string) =>
+  invoke<AccountManagerStatus>("switch_account", { accountId });
+
+export const reloginAccount = (accountId: string) =>
+  invoke<AccountLoginResult>("relogin_account", { accountId });
+
+export const removeAccount = (accountId: string) =>
+  invoke<RemoveAccountResult>("remove_account", { accountId });
 
 export function getOverview() {
   return invoke<Overview>("get_overview");

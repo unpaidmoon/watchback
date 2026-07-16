@@ -428,7 +428,7 @@ export function OnboardingPage() {
     normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
   );
   const warnings = status?.health.warnings ?? [];
-  const displayName = profile?.playerId ?? (status?.credentialStatus.roleId ? `角色 ${status.credentialStatus.roleId}` : "未登录玩家");
+  const displayName = profile?.playerId ?? "未登录玩家";
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
   const canUseData = Boolean(status?.canEnterReview);
   const presetMatches = status?.localData.presetMatches ?? 0;
