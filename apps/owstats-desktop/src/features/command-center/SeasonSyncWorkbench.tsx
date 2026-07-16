@@ -29,6 +29,13 @@ export function resolveCommandCenterSeason(
   return syncableSeasons.includes(requested) ? requested : currentSeason;
 }
 
+export function runSeasonQuickUpdate(
+  season: number,
+  onQuickUpdate: (season: number) => void,
+) {
+  onQuickUpdate(season);
+}
+
 export function SeasonSyncWorkbench({
   selectedSeason,
   currentSeason,
@@ -154,7 +161,7 @@ export function SeasonSyncWorkbench({
                       className="ghostButton syncedSeasonUpdateButton"
                       type="button"
                       aria-label={`更新 S${seasonStatus.season}`}
-                      onClick={() => onQuickUpdate(seasonStatus.season)}
+                      onClick={() => runSeasonQuickUpdate(seasonStatus.season, onQuickUpdate)}
                       disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
                     >
                       {rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : "更新"}
