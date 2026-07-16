@@ -24,7 +24,9 @@ fn inventory_is_scoped_to_the_requested_season() {
     .unwrap();
     conn.execute(
         "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
-         VALUES ('s23-complete', 'normal', '{\"payload\":{\"code\":0,\"data\":{}}}', 'now')",
+         VALUES ('s23-complete', 'normal',
+            '{\"match_id\":\"s23-complete\",\"match_kind\":\"normal\",\"payload\":{\"code\":0,\"data\":{}}}',
+            'now')",
         [],
     )
     .unwrap();
@@ -40,7 +42,9 @@ fn inventory_is_scoped_to_the_requested_season() {
     .unwrap();
     conn.execute(
         "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
-         VALUES ('s22-complete', 'normal', '{\"payload\":{\"code\":0,\"data\":{}}}', 'now')",
+         VALUES ('s22-complete', 'normal',
+            '{\"match_id\":\"s22-complete\",\"match_kind\":\"normal\",\"payload\":{\"code\":0,\"data\":{}}}',
+            'now')",
         [],
     )
     .unwrap();
@@ -70,6 +74,8 @@ fn inventory_treats_only_valid_wrapped_details_as_complete() {
         "empty-object",
         "damaged-json",
         "failed-payload",
+        "missing-kind",
+        "unknown-kind",
     ] {
         conn.execute(
             "INSERT INTO matches (
@@ -86,15 +92,29 @@ fn inventory_treats_only_valid_wrapped_details_as_complete() {
         (
             "valid-normal",
             "normal",
-            r#"{"payload":{"code":0,"data":{}}}"#,
+            r#"{"match_id":"valid-normal","match_kind":"normal","payload":{"code":0,"data":{}}}"#,
         ),
-        ("valid-fight", "fight", r#"{"payload":{"data":{}}}"#),
+        (
+            "valid-fight",
+            "fight",
+            r#"{"match_id":"valid-fight","match_kind":"fight","payload":{"data":{}}}"#,
+        ),
         ("empty-object", "normal", "{}"),
         ("damaged-json", "normal", "{not-json"),
         (
             "failed-payload",
             "normal",
-            r#"{"payload":{"code":500,"data":{}}}"#,
+            r#"{"match_id":"failed-payload","match_kind":"normal","payload":{"code":500,"data":{}}}"#,
+        ),
+        (
+            "missing-kind",
+            "normal",
+            r#"{"match_id":"missing-kind","payload":{"code":0,"data":{}}}"#,
+        ),
+        (
+            "unknown-kind",
+            "custom",
+            r#"{"match_id":"unknown-kind","match_kind":"custom","payload":{"code":0,"data":{}}}"#,
         ),
     ] {
         conn.execute(
@@ -116,6 +136,8 @@ fn inventory_treats_only_valid_wrapped_details_as_complete() {
             "empty-object",
             "damaged-json",
             "failed-payload",
+            "missing-kind",
+            "unknown-kind",
         ]
         .into_iter()
         .map(str::to_string)

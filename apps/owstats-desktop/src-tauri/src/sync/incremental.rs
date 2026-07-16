@@ -1,4 +1,5 @@
 use crate::db::OwDatabase;
+use crate::importer::is_valid_match_detail;
 use anyhow::Result;
 use rusqlite::params;
 use serde_json::Value;
@@ -15,22 +16,6 @@ pub struct DetailSelection {
     pub entries: Vec<Value>,
     pub new_matches: usize,
     pub missing_details: usize,
-}
-
-fn is_valid_detail_json(raw_detail_json: &str) -> bool {
-    let Ok(Value::Object(detail)) = serde_json::from_str(raw_detail_json) else {
-        return false;
-    };
-    let detail = Value::Object(detail);
-    if !detail
-        .pointer("/payload/data")
-        .is_some_and(Value::is_object)
-    {
-        return false;
-    }
-    detail.pointer("/payload/code").is_none_or(|code| {
-        code.as_i64() == Some(0) || code.as_u64() == Some(0) || code.as_f64() == Some(0.0)
-    })
 }
 
 pub fn load_season_sync_inventory(db: &OwDatabase, season: i64) -> Result<SeasonSyncInventory> {
@@ -50,7 +35,10 @@ pub fn load_season_sync_inventory(db: &OwDatabase, season: i64) -> Result<Season
     for row in rows {
         let (match_id, raw_detail_json) = row?;
         inventory.match_ids.insert(match_id.clone());
-        if raw_detail_json.as_deref().is_some_and(is_valid_detail_json) {
+        let parsed_detail = raw_detail_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+        if parsed_detail.as_ref().is_some_and(is_valid_match_detail) {
             inventory.detail_ids.insert(match_id);
         }
     }

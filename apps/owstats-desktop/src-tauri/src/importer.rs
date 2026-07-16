@@ -101,7 +101,7 @@ fn import_payload_value_with_lookups(
         ImportBehavior::FullSnapshot => supplied_details,
         ImportBehavior::Incremental { .. } => supplied_details
             .into_iter()
-            .filter(is_valid_detail)
+            .filter(is_valid_match_detail)
             .collect(),
     };
     let errors = matches_block
@@ -862,7 +862,7 @@ fn details_by_match_id(details: &[Value]) -> HashMap<String, &Value> {
         .collect()
 }
 
-fn is_valid_detail(detail: &Value) -> bool {
+pub(crate) fn is_valid_match_detail(detail: &Value) -> bool {
     detail
         .get("match_id")
         .and_then(Value::as_str)
