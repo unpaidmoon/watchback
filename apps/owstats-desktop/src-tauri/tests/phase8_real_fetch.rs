@@ -548,6 +548,206 @@ async fn incremental_fetch_scans_past_known_pages_and_requests_only_missing_deta
 }
 
 #[tokio::test]
+async fn quick_fetch_stops_each_mode_at_its_local_watermark_without_details() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::{fetch_quick_season_with_base_url, FullSeasonRequest};
+    use owstats_desktop_lib::{ModeSyncInventory, SeasonModeKey, SeasonSyncInventory};
+    use std::collections::{HashMap, HashSet};
+
+    let server = spawn_quick_scan_server(QuickScanScenario::Known);
+    let inventory = quick_inventory();
+    let fetch = fetch_quick_season_with_base_url(
+        FullSeasonRequest {
+            credentials: DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            customer_token: "synthetic-customer-token".to_string(),
+            input_bnet: "Synthetic#1000".to_string(),
+            resolved_bnet: Some("Synthetic#1000".to_string()),
+            season: 22,
+            customer_base_url: format!("{}/customer", server.base_url),
+            pages_per_batch: 99,
+            detail_concurrency: 2,
+            include_fight: true,
+        },
+        &inventory,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        quick_list_pages(&server),
+        HashMap::from([
+            ("sport".to_string(), vec![1]),
+            ("leisure".to_string(), vec![1]),
+            ("QuickFight".to_string(), vec![1]),
+            ("LeisureFight".to_string(), vec![1]),
+            ("SportFight".to_string(), vec![1]),
+        ])
+    );
+    assert_eq!(fetch.details_requested, 0);
+    assert!(!fetch.quick_scan_limited);
+    assert!(fetch
+        .quick_scan_stop_reasons
+        .values()
+        .all(|reason| reason == "watermark_reached"));
+
+    fn quick_inventory() -> SeasonSyncInventory {
+        let mut inventory = SeasonSyncInventory::default();
+        for (kind, mode) in [
+            ("normal", "sport"),
+            ("normal", "leisure"),
+            ("fight", "QuickFight"),
+            ("fight", "LeisureFight"),
+            ("fight", "SportFight"),
+        ] {
+            let id = format!("known-{mode}");
+            inventory.match_ids.insert(id.clone());
+            inventory.detail_ids.insert(id.clone());
+            inventory.modes.insert(
+                SeasonModeKey::new(kind, mode),
+                ModeSyncInventory {
+                    match_ids: HashSet::from([id.clone()]),
+                    detail_ids: HashSet::from([id]),
+                    latest_begin_ts: Some(1_700_000_000),
+                },
+            );
+        }
+        inventory
+    }
+}
+
+#[tokio::test]
+async fn quick_fetch_scans_new_sport_until_known_boundary_and_only_fetches_scanned_details() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let server = spawn_quick_scan_server(QuickScanScenario::NewSport);
+    let inventory = quick_test_inventory();
+    let fetch = fetch_quick_season_with_base_url(
+        quick_request(
+            &server,
+            DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            22,
+        ),
+        &inventory,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(quick_list_pages(&server)["sport"], vec![1, 2, 3]);
+    for mode in ["leisure", "QuickFight", "LeisureFight", "SportFight"] {
+        assert_eq!(quick_list_pages(&server)[mode], vec![1]);
+    }
+    assert_eq!(fetch.details_requested, 2);
+    let requests = server.requests.lock().unwrap();
+    let details = requests
+        .iter()
+        .filter_map(|request| request_query_param(&request.first_line, "matchId"))
+        .collect::<Vec<_>>();
+    assert_eq!(details.len(), 2);
+    assert!(details.contains(&"new-sport-1"));
+    assert!(details.contains(&"new-sport-2"));
+}
+
+#[tokio::test]
+async fn quick_fetch_caps_unsafe_mode_at_five_pages_and_scans_modes_concurrently() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let server = spawn_quick_scan_server(QuickScanScenario::UnsafeSportDelayed);
+    let fetch = fetch_quick_season_with_base_url(
+        quick_request(
+            &server,
+            DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            22,
+        ),
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(quick_list_pages(&server)["sport"], vec![1, 2, 3, 4, 5]);
+    assert!(!quick_list_pages(&server)["sport"].contains(&6));
+    assert!(fetch.quick_scan_limited);
+    assert_eq!(fetch.quick_scan_stop_reasons["normal:sport"], "page_limit");
+    assert!(
+        *server.max_active_lists.lock().unwrap() > 1,
+        "different modes should overlap while each mode remains sequential"
+    );
+}
+
+#[tokio::test]
+async fn quick_fetch_stops_on_legal_empty_pages_and_preserves_current_season_fallback() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let credentials = DashenCredentials {
+        role_id: 123,
+        token: "synthetic-account-token".to_string(),
+        dts: Some(2026),
+        server: 1,
+    };
+    let empty_server = spawn_quick_scan_server(QuickScanScenario::Empty);
+    let empty_fetch = fetch_quick_season_with_base_url(
+        quick_request(&empty_server, credentials.clone(), 22),
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap();
+    assert!(quick_list_pages(&empty_server)
+        .values()
+        .all(|pages| pages == &[1]));
+    assert!(empty_fetch
+        .quick_scan_stop_reasons
+        .values()
+        .all(|reason| reason == "empty"));
+    assert!(!empty_fetch.quick_scan_limited);
+
+    let fallback_server = spawn_quick_scan_server(QuickScanScenario::CurrentFallback);
+    let fallback_fetch = fetch_quick_season_with_base_url(
+        quick_request(&fallback_server, credentials, 23),
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fallback_fetch.details_requested, 0);
+    let requests = fallback_server.requests.lock().unwrap();
+    for mode in [
+        "sport",
+        "leisure",
+        "QuickFight",
+        "LeisureFight",
+        "SportFight",
+    ] {
+        let pages = requests
+            .iter()
+            .filter(|request| {
+                request_path(&request.first_line)
+                    .is_some_and(|path| path.ends_with("/queryMatchList"))
+                    && request_query_param(&request.first_line, "gameMode") == Some(mode)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(pages.len(), 2);
+        assert!(!pages[0].first_line.contains("season=23"));
+        assert!(pages[1].first_line.contains("season=23"));
+    }
+}
+
+#[tokio::test]
 async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_season_directory() {
     let temp = tempfile::tempdir().unwrap();
     let app_data = temp.path().join("app-data");
@@ -1419,6 +1619,186 @@ fn incremental_season_response(request_line: &str) -> &'static str {
         return r#"{"code":0,"data":{"matchRet":1}}"#;
     }
     r#"{"code":0,"data":{"matchList":[]}}"#
+}
+
+#[derive(Clone, Copy)]
+enum QuickScanScenario {
+    Known,
+    NewSport,
+    UnsafeSportDelayed,
+    Empty,
+    CurrentFallback,
+}
+
+struct QuickScanServer {
+    base_url: String,
+    requests: Arc<Mutex<Vec<RecordedRequest>>>,
+    max_active_lists: Arc<Mutex<usize>>,
+}
+
+fn quick_request(
+    server: &QuickScanServer,
+    credentials: owstats_desktop_lib::dashen_client::DashenCredentials,
+    season: i64,
+) -> owstats_desktop_lib::season_fetch::FullSeasonRequest {
+    owstats_desktop_lib::season_fetch::FullSeasonRequest {
+        credentials,
+        customer_token: "synthetic-customer-token".to_string(),
+        input_bnet: "Synthetic#1000".to_string(),
+        resolved_bnet: Some("Synthetic#1000".to_string()),
+        season,
+        customer_base_url: format!("{}/customer", server.base_url),
+        pages_per_batch: 99,
+        detail_concurrency: 2,
+        include_fight: true,
+    }
+}
+
+fn quick_test_inventory() -> owstats_desktop_lib::SeasonSyncInventory {
+    use owstats_desktop_lib::{ModeSyncInventory, SeasonModeKey, SeasonSyncInventory};
+    use std::collections::HashSet;
+
+    let mut inventory = SeasonSyncInventory::default();
+    for (kind, mode) in [
+        ("normal", "sport"),
+        ("normal", "leisure"),
+        ("fight", "QuickFight"),
+        ("fight", "LeisureFight"),
+        ("fight", "SportFight"),
+    ] {
+        let id = format!("known-{mode}");
+        inventory.match_ids.insert(id.clone());
+        inventory.detail_ids.insert(id.clone());
+        inventory.modes.insert(
+            SeasonModeKey::new(kind, mode),
+            ModeSyncInventory {
+                match_ids: HashSet::from([id.clone()]),
+                detail_ids: HashSet::from([id]),
+                latest_begin_ts: Some(1_700_000_000),
+            },
+        );
+    }
+    inventory
+}
+
+fn quick_list_pages(server: &QuickScanServer) -> std::collections::HashMap<String, Vec<i64>> {
+    let mut pages = std::collections::HashMap::<String, Vec<i64>>::new();
+    for request in server.requests.lock().unwrap().iter().filter(|request| {
+        request_path(&request.first_line).is_some_and(|path| path.ends_with("/queryMatchList"))
+    }) {
+        let mode = request_query_param(&request.first_line, "gameMode")
+            .unwrap()
+            .to_string();
+        let page = request_query_param(&request.first_line, "page")
+            .unwrap()
+            .parse()
+            .unwrap();
+        pages.entry(mode).or_default().push(page);
+    }
+    for mode_pages in pages.values_mut() {
+        mode_pages.sort_unstable();
+    }
+    pages
+}
+
+fn spawn_quick_scan_server(scenario: QuickScanScenario) -> QuickScanServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let active_lists = Arc::new(Mutex::new(0_usize));
+    let max_active_lists = Arc::new(Mutex::new(0_usize));
+    let captured = requests.clone();
+    let active_for_thread = active_lists.clone();
+    let max_for_thread = max_active_lists.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming().take(128) {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let captured = captured.clone();
+            let active_lists = active_for_thread.clone();
+            let max_active_lists = max_for_thread.clone();
+            thread::spawn(move || {
+                let mut buffer = [0_u8; 8192];
+                let Ok(read) = stream.read(&mut buffer) else {
+                    return;
+                };
+                let first_line = String::from_utf8_lossy(&buffer[..read])
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                captured.lock().unwrap().push(RecordedRequest {
+                    first_line: first_line.clone(),
+                    headers: String::new(),
+                    body: String::new(),
+                });
+                let is_list =
+                    request_path(&first_line).is_some_and(|path| path.ends_with("/queryMatchList"));
+                if is_list {
+                    let mut active = active_lists.lock().unwrap();
+                    *active += 1;
+                    let mut peak = max_active_lists.lock().unwrap();
+                    *peak = (*peak).max(*active);
+                }
+                if is_list && matches!(scenario, QuickScanScenario::UnsafeSportDelayed) {
+                    thread::sleep(Duration::from_millis(40));
+                }
+                let body = quick_scan_response(&first_line, scenario);
+                if is_list {
+                    *active_lists.lock().unwrap() -= 1;
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+        }
+    });
+    QuickScanServer {
+        base_url: format!("http://{addr}"),
+        requests,
+        max_active_lists,
+    }
+}
+
+fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> String {
+    if request_line.contains("/queryCard") {
+        return r#"{"code":0,"data":{"level":1}}"#.to_string();
+    }
+    if request_line.contains("/queryCountInfo") {
+        return r#"{"code":0,"data":{"total":1}}"#.to_string();
+    }
+    if request_line.contains("/queryMatchInfo") {
+        return r#"{"code":0,"data":{"matchRet":1}}"#.to_string();
+    }
+    let Some(mode) = request_query_param(request_line, "gameMode") else {
+        return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();
+    };
+    let page = request_query_param(request_line, "page")
+        .and_then(|page| page.parse::<i64>().ok())
+        .unwrap_or_default();
+    if matches!(scenario, QuickScanScenario::Empty)
+        || (matches!(scenario, QuickScanScenario::CurrentFallback)
+            && request_query_param(request_line, "season").is_none())
+    {
+        return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::UnsafeSportDelayed) && mode == "sport" {
+        return r#"{"code":0,"data":{"matchList":[{"unexpected":"shape"}]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::NewSport) && mode == "sport" {
+        return match page {
+            1 => r#"{"code":0,"data":{"matchList":[{"matchId":"new-sport-1","beginTs":1700000200}]}}"#,
+            2 => r#"{"code":0,"data":{"matchList":[{"matchId":"new-sport-2","beginTs":1700000100}]}}"#,
+            _ => r#"{"code":0,"data":{"matchList":[{"matchId":"known-sport","beginTs":1700000000}]}}"#,
+        }
+        .to_string();
+    }
+    format!(
+        r#"{{"code":0,"data":{{"matchList":[{{"matchId":"known-{mode}","beginTs":1700000000}}]}}}}"#
+    )
 }
 
 fn spawn_delayed_detail_server() -> DelayedDetailServer {
