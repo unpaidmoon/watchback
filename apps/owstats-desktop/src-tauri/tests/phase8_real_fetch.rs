@@ -683,7 +683,10 @@ async fn quick_fetch_caps_unsafe_mode_at_five_pages_and_scans_modes_concurrently
     assert_eq!(quick_list_pages(&server)["sport"], vec![1, 2, 3, 4, 5]);
     assert!(!quick_list_pages(&server)["sport"].contains(&6));
     assert!(fetch.quick_scan_limited);
-    assert_eq!(fetch.quick_scan_stop_reasons["normal:sport"], "page_limit");
+    assert_eq!(
+        fetch.quick_scan_stop_reasons["normal:sport"],
+        "unsafe_response"
+    );
     assert!(
         *server.max_active_lists.lock().unwrap() > 1,
         "different modes should overlap while each mode remains sequential"
@@ -858,7 +861,119 @@ async fn quick_fetch_shares_five_page_budget_across_current_season_candidates() 
         .iter()
         .all(|request| !request.first_line.contains("season=23")));
     assert!(fetch.quick_scan_limited);
+    assert_eq!(
+        fetch.quick_scan_stop_reasons["normal:sport"],
+        "unsafe_response"
+    );
+}
+
+#[tokio::test]
+async fn quick_fetch_preserves_unsafe_outcome_after_later_empty_or_watermark() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    for scenario in [
+        QuickScanScenario::UnsafeThenEmpty,
+        QuickScanScenario::UnsafeThenKnown,
+    ] {
+        let server = spawn_quick_scan_server(scenario);
+        let fetch = fetch_quick_season_with_base_url(
+            quick_request(
+                &server,
+                DashenCredentials {
+                    role_id: 123,
+                    token: "synthetic-account-token".to_string(),
+                    dts: Some(2026),
+                    server: 1,
+                },
+                22,
+            ),
+            &quick_test_inventory(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(quick_list_pages(&server)["sport"], vec![1, 2]);
+        assert_eq!(
+            fetch.quick_scan_stop_reasons["normal:sport"],
+            "unsafe_response"
+        );
+        assert!(fetch.quick_scan_limited);
+    }
+}
+
+#[tokio::test]
+async fn quick_fetch_reports_page_limit_when_current_candidate_stops_as_budget_expires() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let server = spawn_quick_scan_server(QuickScanScenario::CurrentEmptyAtBudget);
+    let fetch = fetch_quick_season_with_base_url(
+        quick_request(
+            &server,
+            DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            23,
+        ),
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap();
+
+    let requests = server.requests.lock().unwrap();
+    let sport_requests = requests
+        .iter()
+        .filter(|request| {
+            request_path(&request.first_line).is_some_and(|path| path.ends_with("/queryMatchList"))
+                && request_query_param(&request.first_line, "gameMode") == Some("sport")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sport_requests
+            .iter()
+            .map(|request| request_query_param(&request.first_line, "page").unwrap())
+            .collect::<Vec<_>>(),
+        vec!["1", "2", "3", "4", "5"]
+    );
+    assert!(sport_requests
+        .iter()
+        .all(|request| !request.first_line.contains("season=23")));
     assert_eq!(fetch.quick_scan_stop_reasons["normal:sport"], "page_limit");
+    assert!(fetch.quick_scan_limited);
+}
+
+#[tokio::test]
+async fn quick_fetch_rejects_empty_customer_token_with_chinese_message() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::{fetch_quick_season_with_base_url, FullSeasonRequest};
+
+    let error = fetch_quick_season_with_base_url(
+        FullSeasonRequest {
+            credentials: DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            customer_token: " ".to_string(),
+            input_bnet: "Synthetic#1000".to_string(),
+            resolved_bnet: None,
+            season: 23,
+            customer_base_url: "http://127.0.0.1:1/customer".to_string(),
+            pages_per_batch: 1,
+            detail_concurrency: 1,
+            include_fight: true,
+        },
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error.to_string(), "请先绑定目标玩家");
 }
 
 #[tokio::test]
@@ -1743,6 +1858,9 @@ enum QuickScanScenario {
     Empty,
     CurrentFallback,
     CurrentUnsafeSport,
+    UnsafeThenEmpty,
+    UnsafeThenKnown,
+    CurrentEmptyAtBudget,
 }
 
 struct QuickScanServer {
@@ -1902,6 +2020,29 @@ fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> Strin
     }
     if matches!(scenario, QuickScanScenario::CurrentUnsafeSport) && mode == "sport" {
         return r#"{"code":0,"data":{"matchList":[{"unexpected":"shape"}]}}"#.to_string();
+    }
+    if matches!(
+        scenario,
+        QuickScanScenario::UnsafeThenEmpty | QuickScanScenario::UnsafeThenKnown
+    ) && mode == "sport"
+        && page == 1
+    {
+        return r#"{"code":500,"data":{"matchList":[]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::UnsafeThenEmpty) && mode == "sport" && page == 2 {
+        return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::UnsafeThenKnown) && mode == "sport" && page == 2 {
+        return r#"{"code":0,"data":{"matchList":[{"matchId":"known-sport","beginTs":1700000000}]}}"#
+            .to_string();
+    }
+    if matches!(scenario, QuickScanScenario::CurrentEmptyAtBudget) && mode == "sport" {
+        if page == 5 {
+            return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();
+        }
+        return format!(
+            r#"{{"code":0,"data":{{"matchList":[{{"matchId":"new-sport-{page}","beginTs":1700000200}}]}}}}"#
+        );
     }
     if matches!(scenario, QuickScanScenario::UnsafeSportDelayed) && mode == "sport" {
         return r#"{"code":0,"data":{"matchList":[{"unexpected":"shape"}]}}"#.to_string();

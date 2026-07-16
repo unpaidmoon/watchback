@@ -70,7 +70,7 @@ pub async fn fetch_quick_season_with_base_url(
         return Err(anyhow!("season must be greater than 0"));
     }
     if request.customer_token.trim().is_empty() {
-        return Err(anyhow!("璇峰厛缁戝畾鐩爣鐜╁"));
+        return Err(anyhow!("请先绑定目标玩家"));
     }
 
     let client = DashenClient::new_with_rate_limit(
@@ -555,6 +555,7 @@ async fn fetch_quick_history_for_mode(
     let mut limited = false;
     let empty_match_ids = HashSet::new();
     let mut remaining_pages = QUICK_UPDATE_MAX_PAGES_PER_MODE;
+    let mut unsafe_seen = false;
 
     for (candidate_index, request_season) in season_candidates.iter().enumerate() {
         let mut candidate_entries = Vec::new();
@@ -603,15 +604,21 @@ async fn fetch_quick_history_for_mode(
                     stopped = true;
                     break;
                 }
-                crate::sync::QuickPageDecision::Continue
-                | crate::sync::QuickPageDecision::Unsafe => {}
+                crate::sync::QuickPageDecision::Continue => {}
+                crate::sync::QuickPageDecision::Unsafe => {
+                    unsafe_seen = true;
+                }
             }
             page += 1;
         }
         let has_fallback = candidate_index + 1 < season_candidates.len();
-        if !stopped && remaining_pages == 0 {
+        if remaining_pages == 0 && (!stopped || has_fallback) {
             final_entries = candidate_entries;
-            final_reason = "page_limit".to_string();
+            final_reason = if unsafe_seen {
+                "unsafe_response".to_string()
+            } else {
+                "page_limit".to_string()
+            };
             limited = true;
             break;
         }
@@ -619,7 +626,12 @@ async fn fetch_quick_history_for_mode(
             continue;
         }
         final_entries = candidate_entries;
-        final_reason = reason.to_string();
+        if unsafe_seen {
+            final_reason = "unsafe_response".to_string();
+            limited = true;
+        } else {
+            final_reason = reason.to_string();
+        }
         break;
     }
 

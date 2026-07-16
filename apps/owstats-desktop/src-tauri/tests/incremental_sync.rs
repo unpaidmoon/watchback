@@ -462,6 +462,30 @@ fn quick_page_recognized_empty_container_precedes_watermark_checks() {
 }
 
 #[test]
+fn quick_page_treats_nonzero_business_code_as_unsafe_before_empty_list() {
+    assert_eq!(
+        classify_quick_page(
+            &json!({"code": 500, "data": {"matchList": []}}),
+            &HashSet::new(),
+            None,
+        ),
+        QuickPageDecision::Unsafe
+    );
+    assert_eq!(
+        classify_quick_page(
+            &json!({"code": 0, "data": {"matchList": []}}),
+            &HashSet::new(),
+            None,
+        ),
+        QuickPageDecision::Empty
+    );
+    assert_eq!(
+        classify_quick_page(&json!({"data": {"matchList": []}}), &HashSet::new(), None,),
+        QuickPageDecision::Empty
+    );
+}
+
+#[test]
 fn quick_page_unrecognized_or_error_shell_is_unsafe() {
     for payload in [json!({"code": 0, "data": {}}), json!({"error": "failed"})] {
         assert_eq!(

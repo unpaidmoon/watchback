@@ -122,6 +122,11 @@ pub fn classify_quick_page(
     known_match_ids: &HashSet<String>,
     watermark: Option<i64>,
 ) -> QuickPageDecision {
+    if raw_payload.get("code").is_some_and(|code| {
+        code.as_i64() != Some(0) && code.as_u64() != Some(0) && code.as_f64() != Some(0.0)
+    }) {
+        return QuickPageDecision::Unsafe;
+    }
     let Some(raw_entries) =
         crate::season_fetch::extract_raw_match_entries_if_recognized(raw_payload)
     else {
