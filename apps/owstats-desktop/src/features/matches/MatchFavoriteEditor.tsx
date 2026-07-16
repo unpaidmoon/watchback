@@ -1,15 +1,19 @@
 import { Star } from "lucide-react";
-import type { MatchFavoriteEditorController } from "./useMatchFavoriteEditor";
+import type { MatchFavoriteController } from "./useMatchFavoriteEditor";
 
 type MatchFavoriteEditorProps = {
-  controller: MatchFavoriteEditorController;
+  controller: MatchFavoriteController;
 };
 
 export function MatchFavoriteEditor({
   controller,
 }: MatchFavoriteEditorProps) {
   const {
-    state,
+    isFavorite,
+    draftNote,
+    busy,
+    error,
+    saved,
     count,
     canSave,
     edit,
@@ -18,18 +22,18 @@ export function MatchFavoriteEditor({
     unfavoriteMatch,
   } = controller;
 
-  if (!state.isFavorite) {
+  if (!isFavorite) {
     return (
       <section className="matchFavoriteEditor is-empty" aria-label="对局收藏">
-        {state.error ? <p role="alert">{state.error}</p> : null}
+        {error ? <p className="matchFavoriteError" role="alert">{error}</p> : null}
         <button
           type="button"
-          className="secondary"
-          disabled={state.busy}
+          className="secondaryButton"
+          disabled={busy}
           onClick={() => void favoriteMatch()}
         >
           <Star aria-hidden="true" />
-          {state.busy ? "正在收藏..." : "收藏此对局"}
+          {busy ? "正在收藏..." : "收藏此对局"}
         </button>
       </section>
     );
@@ -41,21 +45,23 @@ export function MatchFavoriteEditor({
       className="matchFavoriteEditor is-favorite"
       aria-label="对局收藏与备注"
     >
-      <label htmlFor="match-favorite-note">对局备注</label>
-      <textarea
-        id="match-favorite-note"
-        value={state.draftNote}
-        disabled={state.busy}
-        onChange={(event) => edit(event.currentTarget.value)}
-      />
-      <p className={overLimit ? "is-over-limit" : undefined}>
-        {count}/500
-      </p>
-      <div className="matchFavoriteEditor__actions">
+      <div className="matchFavoriteNoteField">
+        <label htmlFor="match-favorite-note">对局备注</label>
+        <textarea
+          id="match-favorite-note"
+          value={draftNote}
+          disabled={busy}
+          onChange={(event) => edit(event.currentTarget.value)}
+        />
+        <p className={overLimit ? "is-over-limit" : undefined}>
+          {count}/500
+        </p>
+      </div>
+      <div className="matchFavoriteActions">
         <button
           type="button"
-          className="secondary"
-          disabled={state.busy}
+          className="secondaryButton"
+          disabled={busy}
           onClick={() => void unfavoriteMatch()}
         >
           <Star aria-hidden="true" fill="currentColor" />
@@ -63,14 +69,15 @@ export function MatchFavoriteEditor({
         </button>
         <button
           type="button"
+          className="primaryButton"
           disabled={!canSave}
           onClick={() => void saveNote()}
         >
-          {state.busy ? "正在保存..." : "保存备注"}
+          {busy ? "正在保存..." : "保存备注"}
         </button>
       </div>
-      {state.saved ? <p role="status">已保存</p> : null}
-      {state.error ? <p role="alert">{state.error}</p> : null}
+      {saved ? <p role="status">已保存</p> : null}
+      {error ? <p className="matchFavoriteError" role="alert">{error}</p> : null}
     </section>
   );
 }

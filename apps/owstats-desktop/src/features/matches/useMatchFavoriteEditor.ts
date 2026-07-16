@@ -5,37 +5,29 @@ import type { MatchFavoriteView } from "../../shared/types";
 import {
   createMatchFavoriteDraft,
   favoriteCharacterCount,
-  matchFavoriteReducer,
-  type MatchFavoriteDraft,
+  isCurrentMatchFavoriteMutation,
+  matchFavoriteDraftReducer,
+  normalizeMatchFavorite,
+  shouldResetMatchFavoriteDraft,
 } from "./matchFavoriteState";
 
 type PersistFavorite = (
   favorite: MatchFavoriteView | null,
 ) => void | Promise<void>;
 
-export type MatchFavoriteEditorController = {
-  state: MatchFavoriteDraft;
-  dirty: boolean;
-  count: number;
-  canSave: boolean;
-  edit: (note: string) => void;
-  favoriteMatch: () => Promise<void>;
-  saveNote: () => Promise<void>;
-  unfavoriteMatch: () => Promise<void>;
-  confirmDiscard: () => boolean;
-};
-
 export function useMatchFavoriteEditor(
   matchId: string | null | undefined,
-  favorite: MatchFavoriteView | null,
+  favorite: MatchFavoriteView | null | undefined,
   onPersisted: PersistFavorite,
-): MatchFavoriteEditorController {
+) {
   const [state, dispatch] = useReducer(
-    matchFavoriteReducer,
-    favorite,
+    matchFavoriteDraftReducer,
+    normalizeMatchFavorite(favorite),
     createMatchFavoriteDraft,
   );
   const previousMatchId = useRef(matchId);
+  const currentMatchId = useRef(matchId);
+  currentMatchId.current = matchId;
   const dirty = state.isFavorite && state.draftNote !== state.savedNote;
   const count = useMemo(
     () => favoriteCharacterCount(state.draftNote),
@@ -43,17 +35,17 @@ export function useMatchFavoriteEditor(
   );
 
   useEffect(() => {
-    const matchChanged = previousMatchId.current !== matchId;
+    const shouldReset = shouldResetMatchFavoriteDraft({
+      previousMatchId: previousMatchId.current,
+      matchId,
+      favorite,
+      state,
+    });
     previousMatchId.current = matchId;
-    const incomingNote = favorite?.note ?? "";
-    const incomingIsFavorite = favorite !== null;
-    const incomingChanged =
-      incomingIsFavorite !== state.isFavorite || incomingNote !== state.savedNote;
-
-    if (matchChanged || (!dirty && incomingChanged)) {
-      dispatch({ type: "reset", favorite });
+    if (shouldReset) {
+      dispatch({ type: "reset", favorite: normalizeMatchFavorite(favorite) });
     }
-  }, [dirty, favorite, matchId, state.isFavorite, state.savedNote]);
+  }, [favorite, matchId]);
 
   const edit = useCallback((note: string) => {
     dispatch({ type: "edit", note });
@@ -61,38 +53,56 @@ export function useMatchFavoriteEditor(
 
   const favoriteMatch = useCallback(async () => {
     if (!matchId) return;
+    const requestMatchId = matchId;
     dispatch({ type: "start" });
     try {
-      const persisted = await saveMatchFavorite({ matchId, note: "" });
-      dispatch({ type: "saved", note: persisted.note });
+      const persisted = await saveMatchFavorite({
+        matchId: requestMatchId,
+        note: "",
+      });
+      if (
+        !isCurrentMatchFavoriteMutation(requestMatchId, currentMatchId.current)
+      ) return;
+      dispatch({ type: "saved", favorite: persisted });
       await onPersisted(persisted);
     } catch (error) {
-      dispatch({ type: "failure", error: productErrorMessage(error) });
+      if (!isCurrentMatchFavoriteMutation(requestMatchId, currentMatchId.current)) return;
+      dispatch({ type: "failure", message: productErrorMessage(error) });
     }
   }, [matchId, onPersisted]);
 
   const saveNote = useCallback(async () => {
     if (!matchId || favoriteCharacterCount(state.draftNote) > 500) return;
+    const requestMatchId = matchId;
     const note = state.draftNote;
     dispatch({ type: "start" });
     try {
-      const persisted = await saveMatchFavorite({ matchId, note });
-      dispatch({ type: "saved", note: persisted.note });
+      const persisted = await saveMatchFavorite({ matchId: requestMatchId, note });
+      if (
+        !isCurrentMatchFavoriteMutation(requestMatchId, currentMatchId.current)
+      ) return;
+      dispatch({ type: "saved", favorite: persisted });
       await onPersisted(persisted);
     } catch (error) {
-      dispatch({ type: "failure", error: productErrorMessage(error) });
+      if (!isCurrentMatchFavoriteMutation(requestMatchId, currentMatchId.current)) return;
+      dispatch({ type: "failure", message: productErrorMessage(error) });
     }
   }, [matchId, onPersisted, state.draftNote]);
 
   const unfavoriteMatch = useCallback(async () => {
     if (!matchId) return;
+    const requestMatchId = matchId;
     dispatch({ type: "start" });
     try {
-      await deleteMatchFavorite(matchId);
+      await deleteMatchFavorite(requestMatchId);
+      if (
+        !isCurrentMatchFavoriteMutation(requestMatchId, currentMatchId.current)
+      ) return;
       dispatch({ type: "deleted" });
       await onPersisted(null);
     } catch (error) {
-      dispatch({ type: "failure", error: productErrorMessage(error) });
+      if (!isCurrentMatchFavoriteMutation(requestMatchId, currentMatchId.current)) return;
+      dispatch({ type: "failure", message: productErrorMessage(error) });
     }
   }, [matchId, onPersisted]);
 
@@ -107,7 +117,7 @@ export function useMatchFavoriteEditor(
   }, [dirty, state.savedNote]);
 
   return {
-    state,
+    ...state,
     dirty,
     count,
     canSave: dirty && count <= 500 && !state.busy,
@@ -118,3 +128,7 @@ export function useMatchFavoriteEditor(
     confirmDiscard,
   };
 }
+
+export type MatchFavoriteController = ReturnType<
+  typeof useMatchFavoriteEditor
+>;

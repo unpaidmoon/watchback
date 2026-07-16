@@ -9,13 +9,19 @@ export type MatchFavoriteDraft = {
   saved: boolean;
 };
 
-export type MatchFavoriteAction =
+export type MatchFavoriteDraftAction =
   | { type: "reset"; favorite: MatchFavoriteView | null }
   | { type: "edit"; note: string }
   | { type: "start" }
-  | { type: "saved"; note: string }
+  | { type: "saved"; favorite: MatchFavoriteView }
   | { type: "deleted" }
-  | { type: "failure"; error: string };
+  | { type: "failure"; message: string };
+
+export function normalizeMatchFavorite(
+  favorite: MatchFavoriteView | null | undefined,
+): MatchFavoriteView | null {
+  return favorite ?? null;
+}
 
 export function createMatchFavoriteDraft(
   favorite: MatchFavoriteView | null,
@@ -35,9 +41,9 @@ export function favoriteCharacterCount(value: string): number {
   return Array.from(value).length;
 }
 
-export function matchFavoriteReducer(
+export function matchFavoriteDraftReducer(
   state: MatchFavoriteDraft,
-  action: MatchFavoriteAction,
+  action: MatchFavoriteDraftAction,
 ): MatchFavoriteDraft {
   switch (action.type) {
     case "reset":
@@ -48,16 +54,41 @@ export function matchFavoriteReducer(
       return { ...state, busy: true, error: null, saved: false };
     case "saved":
       return {
-        savedNote: action.note,
-        draftNote: action.note,
+        ...createMatchFavoriteDraft(action.favorite),
         isFavorite: true,
-        busy: false,
-        error: null,
         saved: true,
       };
     case "deleted":
       return createMatchFavoriteDraft(null);
     case "failure":
-      return { ...state, busy: false, error: action.error, saved: false };
+      return { ...state, busy: false, error: action.message, saved: false };
   }
+}
+
+export function shouldResetMatchFavoriteDraft({
+  previousMatchId,
+  matchId,
+  favorite,
+  state,
+}: {
+  previousMatchId: string | null | undefined;
+  matchId: string | null | undefined;
+  favorite: MatchFavoriteView | null | undefined;
+  state: MatchFavoriteDraft;
+}): boolean {
+  if (previousMatchId !== matchId) return true;
+  const normalizedFavorite = normalizeMatchFavorite(favorite);
+  const dirty = state.isFavorite && state.draftNote !== state.savedNote;
+  if (dirty) return false;
+  return (
+    (normalizedFavorite !== null) !== state.isFavorite ||
+    (normalizedFavorite?.note ?? "") !== state.savedNote
+  );
+}
+
+export function isCurrentMatchFavoriteMutation(
+  requestMatchId: string,
+  currentMatchId: string | null | undefined,
+): boolean {
+  return requestMatchId === currentMatchId;
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MatchFavoriteEditor } from "../src/features/matches/MatchFavoriteEditor";
-import type { MatchFavoriteEditorController } from "../src/features/matches/useMatchFavoriteEditor";
+import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 
 const commands = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -96,15 +96,13 @@ assert.match(types, /favoriteOnly\?:\s*boolean/);
 assert.match(types, /isFavorite:\s*boolean/);
 assert.match(types, /favorite:\s*MatchFavoriteView\s*\|\s*null/);
 
-const emptyController: MatchFavoriteEditorController = {
-  state: {
-    savedNote: "",
-    draftNote: "",
-    isFavorite: false,
-    busy: false,
-    error: null,
-    saved: false,
-  },
+const emptyController: MatchFavoriteController = {
+  savedNote: "",
+  draftNote: "",
+  isFavorite: false,
+  busy: false,
+  error: null,
+  saved: false,
   dirty: false,
   count: 0,
   canSave: false,
@@ -120,17 +118,18 @@ const emptyEditor = renderToStaticMarkup(
 assert.match(emptyEditor, /aria-label="对局收藏"/);
 assert.match(emptyEditor, /收藏此对局/);
 assert.doesNotMatch(emptyEditor, /对局备注/);
+const failedEmptyEditor = renderToStaticMarkup(
+  createElement(MatchFavoriteEditor, {
+    controller: { ...emptyController, error: "收藏失败" },
+  }),
+);
+assert.match(failedEmptyEditor, /class="matchFavoriteError" role="alert"/);
 
-const favoriteController: MatchFavoriteEditorController = {
+const favoriteController: MatchFavoriteController = {
   ...emptyController,
-  state: {
-    savedNote: "保持高台",
-    draftNote: "保持高台",
-    isFavorite: true,
-    busy: false,
-    error: null,
-    saved: false,
-  },
+  savedNote: "保持高台",
+  draftNote: "保持高台",
+  isFavorite: true,
   count: 4,
 };
 const favoriteEditor = renderToStaticMarkup(
@@ -140,11 +139,26 @@ assert.match(favoriteEditor, /aria-label="对局收藏与备注"/);
 assert.match(favoriteEditor, /对局备注/);
 assert.match(favoriteEditor, /保存备注/);
 assert.match(favoriteEditor, /已收藏/);
+assert.match(favoriteEditor, /class="matchFavoriteNoteField"/);
+assert.match(favoriteEditor, /class="matchFavoriteActions"/);
+assert.match(favoriteEditor, /class="secondaryButton"/);
+assert.match(favoriteEditor, /class="primaryButton"/);
 
 const editorSource = readFileSync(
   new URL("../src/features/matches/MatchFavoriteEditor.tsx", import.meta.url),
   "utf8",
 );
-assert.doesNotMatch(editorSource, /window\.localStorage/);
+assert.doesNotMatch(editorSource, /localStorage/);
 assert.doesNotMatch(editorSource, /rawJson/);
 assert.doesNotMatch(editorSource, /maxLength/);
+assert.doesNotMatch(editorSource, /matchListCard|matchRow/);
+
+const listCardSource = readFileSync(
+  new URL("../src/features/matches/MatchListCard.tsx", import.meta.url),
+  "utf8",
+);
+assert.doesNotMatch(
+  listCardSource,
+  /MatchFavoriteEditor/,
+  "the note editor must not be nested inside the clickable match list card",
+);
