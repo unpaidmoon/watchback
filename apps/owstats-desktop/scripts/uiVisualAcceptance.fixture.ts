@@ -493,7 +493,6 @@ export const fixtureOnboarding = {
     state: "ready",
     message: "合成登录状态可用",
     exposesSecret: false,
-    roleId: 23001,
     savedAt: "2026-07-14 08:20",
   },
   localData: {
@@ -512,7 +511,6 @@ export const fixtureOnboarding = {
 } satisfies OnboardingStatus;
 
 export const fixturePlayerProfile = {
-  roleId: 23001,
   playerId: "示例玩家",
   avatarUrl: null,
   endorsementLevel: 3,
@@ -609,7 +607,6 @@ export const fixtureEmptyOnboarding = {
     state: "missing",
     message: "尚未建立合成登录状态",
     exposesSecret: false,
-    roleId: null,
     savedAt: null,
   },
   localData: {

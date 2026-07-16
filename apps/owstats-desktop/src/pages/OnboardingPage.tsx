@@ -41,6 +41,7 @@ import { DataFact, formatTimestamp } from "../features/command-center/SeasonHeal
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
+import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncProgress } from "../shared/types";
@@ -262,7 +263,7 @@ export function OnboardingPage() {
       },
       formatError: productErrorMessage,
       refreshAccounts: loadDashboard,
-      clearCache: invalidateDashboardCache,
+      clearCache: clearAccountScopedFrontendCaches,
       failClosed: failClosedAccountContext,
       refreshAfterMutation: () => loadDashboard(true),
     };

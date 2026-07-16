@@ -9,14 +9,17 @@ import {
   scheduleReviewScrollRestore,
   type ReviewView,
 } from "../features/review/reviewNavigation";
-import { getPersonalSeasonReview, getSeasonAnalysis } from "../shared/api";
+import { getSeasonAnalysis } from "../shared/api";
 import { achievementBadgeUrl, rankAssetUrl } from "../shared/assets";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { formatWinRate } from "../shared/rankingUtils";
 import { buildReviewAchievements as buildSharedReviewAchievements } from "../shared/reviewAchievements";
+import { requestPersonalSeasonReviewOnce } from "../shared/personalReviewRequestCache";
 import type { EvidenceLink, PersonalSeasonReview, RoleRankSummary, SeasonAnalysis } from "../shared/types";
+
+export { requestPersonalSeasonReviewOnce } from "../shared/personalReviewRequestCache";
 
 type ReviewAchievement = {
   key: AchievementKey;
@@ -66,26 +69,6 @@ export function hasReviewSeasonData(
 
 export function shouldRequestReviewSeason(selectedSeason: number | undefined, loadedSeason: number | null) {
   return selectedSeason === undefined || selectedSeason !== loadedSeason;
-}
-
-const inFlightReviewRequests = new Map<string, Promise<PersonalSeasonReview>>();
-
-export function requestPersonalSeasonReviewOnce(
-  season: number | undefined,
-  load: (requestedSeason?: number) => Promise<PersonalSeasonReview> = getPersonalSeasonReview,
-) {
-  const requestKey = season === undefined ? "latest" : `season:${season}`;
-  const existingRequest = inFlightReviewRequests.get(requestKey);
-  if (existingRequest) return existingRequest;
-
-  const pendingRequest = load(season);
-  const request = pendingRequest.finally(() => {
-    if (inFlightReviewRequests.get(requestKey) === request) {
-      inFlightReviewRequests.delete(requestKey);
-    }
-  });
-  inFlightReviewRequests.set(requestKey, request);
-  return request;
 }
 
 export function ReviewEmptyState({ onAction = () => undefined }: { onAction?: () => void }) {

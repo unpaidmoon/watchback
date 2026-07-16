@@ -30,7 +30,7 @@ const serialized = JSON.stringify({
 
 assert.doesNotMatch(
   serialized,
-  /"(?:token|customerToken|cookie|authorization|credential|browser[_-]?profile)"\s*:/i,
+  /"(?:token|customerToken|cookie|authorization|credential|browser[_-]?profile|roleId)"\s*:/i,
   "visual fixtures must not contain secret-bearing field names",
 );
 assert.doesNotMatch(serialized, /\b\d{16,}\b/, "visual fixtures must not contain raw-looking long numeric identifiers");

@@ -162,6 +162,7 @@ async function runContextMutation<T extends { message: string }>(
       dependencies.setError(`${mutationFailureLabel}：${dependencies.formatError(error)}。请重试。`);
       return false;
     }
+    dependencies.clearCache();
     dependencies.failClosed();
     try {
       dependencies.reload();
@@ -207,6 +208,7 @@ export function runRemoveAccountOperation(account: AccountSummary, dependencies:
     try {
       const result = await dependencies.invoke();
       if (result.removed && result.reloadRequired) {
+        dependencies.clearCache();
         dependencies.failClosed();
         try {
           dependencies.reload();

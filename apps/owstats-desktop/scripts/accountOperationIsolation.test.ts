@@ -163,6 +163,7 @@ function operationHarness(refreshMutation: () => Promise<string | null> = async 
 for (const reloadThrows of [false, true]) {
   const harness = operationHarness();
   const reload = () => {
+    assert.equal(harness.state().clearCount, 1, "switch clears account-scoped caches once before reload");
     assert.equal(harness.state().oldSnapshotPresent, false, "switch 必须先 fail-close 再 reload");
     if (reloadThrows) throw new Error("reload unavailable");
   };
@@ -172,6 +173,7 @@ for (const reloadThrows of [false, true]) {
   assert.equal(harness.state().releaseCount, 1, "switch 生命周期只释放一次");
   assert.equal(harness.state().failClosedCount, 1);
   assert.equal(harness.state().mutationRefreshCount, 1);
+  assert.equal(harness.state().clearCount, 1, "switch mutation clears cross-page caches exactly once");
   assert.equal(harness.state().freshActiveAccountId, secondAccount.accountId);
   assert.equal(harness.state().error, null, "reload 抛错不是后端切换失败");
 }
@@ -191,6 +193,7 @@ for (const reloadThrows of [false, true]) {
   await runSwitchAccountOperation(secondAccount, { ...harness.deps, invoke: async () => { throw new Error("switch failed"); }, reload: () => undefined });
   assert.equal(harness.state().locked, false);
   assert.equal(harness.state().busy, null);
+  assert.equal(harness.state().clearCount, 0, "failed switch mutation does not clear cross-page caches");
   assert.equal(harness.state().error, "切换账号失败：安全错误。请重试。");
 }
 
@@ -205,6 +208,7 @@ for (const reloadThrows of [false, true]) {
 for (const reloadThrows of [false, true]) {
   const harness = operationHarness(async () => null);
   const reload = () => {
+    assert.equal(harness.state().clearCount, 1, "remove clears account-scoped caches once before reload");
     assert.equal(harness.state().oldSnapshotPresent, false, "remove 必须先 fail-close 再 reload");
     if (reloadThrows) throw new Error("reload unavailable");
   };
@@ -218,6 +222,7 @@ for (const reloadThrows of [false, true]) {
   assert.equal(harness.state().releaseCount, 1, "remove 生命周期只释放一次");
   assert.equal(harness.state().failClosedCount, 1);
   assert.equal(harness.state().mutationRefreshCount, 1);
+  assert.equal(harness.state().clearCount, 1, "remove mutation clears cross-page caches exactly once");
   assert.equal(harness.state().oldSnapshotPresent, false);
   assert.equal(harness.state().error, null, "reload 抛错不是后端退出失败");
 }
@@ -259,6 +264,7 @@ for (const reloadThrows of [false, true]) {
   assert.equal(harness.state().locked, false);
   assert.equal(harness.state().busy, null);
   assert.equal(harness.state().releaseCount, 1);
+  assert.equal(harness.state().clearCount, 0, "failed remove mutation does not clear cross-page caches");
   assert.equal(harness.state().error, "退出账号失败：安全错误。请重试。");
 }
 
