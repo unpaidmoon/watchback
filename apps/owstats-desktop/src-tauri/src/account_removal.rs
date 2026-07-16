@@ -993,27 +993,6 @@ fn select_fallback(shared: &SharedAppPaths, registry: &AccountRegistry) -> Optio
         .map(|entry| entry.account_id.clone())
 }
 
-pub(crate) fn validate_switch_target(
-    shared: &SharedAppPaths,
-    registry: &AccountRegistry,
-    account_id: &AccountId,
-) -> Result<()> {
-    let entry = registry
-        .accounts
-        .iter()
-        .find(|entry| &entry.account_id == account_id)
-        .ok_or_else(|| anyhow!("账号不存在。"))?;
-    ensure_safe_shared_roots(shared).map_err(|_| anyhow!("账号数据不完整，无法切换。"))?;
-    let paths = shared.account(account_id);
-    ensure_safe_directory(paths.root()).map_err(|_| anyhow!("账号数据不完整，无法切换。"))?;
-    let manifest = read_manifest(&paths.manifest(), account_id)
-        .map_err(|_| anyhow!("账号数据不完整，无法切换。"))?;
-    if manifest.battle_tag != entry.battle_tag {
-        bail!("账号数据不完整，无法切换。")
-    }
-    Ok(())
-}
-
 pub(crate) fn deletion_recovery_required(
     shared: &SharedAppPaths,
     registry: &AccountRegistry,

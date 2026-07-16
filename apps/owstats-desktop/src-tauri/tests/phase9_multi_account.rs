@@ -1285,13 +1285,15 @@ fn copying_and_validating_recovery_do_not_require_registry_manifest_or_credentia
         let fixture = LegacyFixture::with_database_match("legacy-match");
         let account = fixture.confirm_account();
         let account_id = account.account_id().clone();
+        let account_paths = account.paths().clone();
+        drop(account);
         let staging = fixture.staging(&account_id);
         fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("partial"), "synthetic").unwrap();
         fixture.write_journal(&account_id, phase);
         fs::remove_file(fixture.shared.registry()).unwrap();
-        fs::remove_file(account.paths().manifest()).unwrap();
-        fs::remove_file(account.paths().credentials()).unwrap();
+        fs::remove_file(account_paths.manifest()).unwrap();
+        fs::remove_file(account_paths.credentials()).unwrap();
 
         AccountContextManager::load(fixture.shared.clone()).unwrap();
 
@@ -1363,9 +1365,7 @@ fn linked_account_root_is_rejected_before_identity_or_publish_access() {
             accounts: vec![entry(account_id, "Linked#1000")],
         })
         .unwrap();
-    let snapshot = fixture.manager.active_snapshot().unwrap();
-
-    assert!(fixture.manager.adopt_legacy(&snapshot).is_err());
+    assert!(fixture.manager.active_snapshot().is_err());
     assert!(fixture.shared.legacy_database().is_file());
     assert!(!external.join("owstats.sqlite3").exists());
 }
@@ -1839,6 +1839,14 @@ fn switching_active_context_routes_queries_to_separate_databases() {
     let shared = SharedAppPaths::from_app_data_dir(temp.path());
     let first_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
     let second_id = AccountId::parse("9a494190-fdee-46f2-abd2-7de46f4f4376").unwrap();
+    for (id, tag) in [
+        (&first_id, "Synthetic#1000"),
+        (&second_id, "Synthetic#2000"),
+    ] {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(&paths.manifest(), &manifest(id.clone(), tag)).unwrap();
+    }
     let manager = AccountContextManager::load(shared).unwrap();
 
     manager

@@ -1100,7 +1100,7 @@ fn stage_capture(
 
 fn adopt_legacy_if_waiting(manager: &AccountContextManager, account_id: &AccountId) -> Result<()> {
     if manager.migration_state()? == LegacyMigrationState::WaitingForAccount {
-        manager.adopt_legacy(&manager.snapshot_for(account_id))?;
+        manager.adopt_legacy(&manager.snapshot_for(account_id)?)?;
     }
     Ok(())
 }

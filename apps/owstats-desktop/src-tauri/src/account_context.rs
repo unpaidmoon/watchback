@@ -1,4 +1,6 @@
-use crate::account_store::{read_registry, write_registry_atomic, AccountId, AccountRegistry};
+use crate::account_store::{
+    read_manifest, read_registry, write_registry_atomic, AccountId, AccountRegistry,
+};
 use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::models::{AccountManagerStatus, AccountSummary, RemoveAccountResult};
 use anyhow::{anyhow, Context, Result};
@@ -22,6 +24,13 @@ pub struct AccountContextManager {
 pub struct AccountContextSnapshot {
     account_id: AccountId,
     paths: AccountPaths,
+    _storage_lease: Arc<ActiveStorageLease>,
+}
+
+#[derive(Debug)]
+struct ActiveStorageLease {
+    #[cfg(windows)]
+    _handles: Vec<std::fs::File>,
 }
 
 impl AccountContextManager {
@@ -41,14 +50,23 @@ impl AccountContextManager {
             AccountRegistry::default()
         };
 
-        Ok(Self {
+        let manager = Self {
             shared,
             registry: Arc::new(RwLock::new(registry)),
             recovery_failed: Arc::new(RwLock::new(recovery_failed)),
             migration_lock: Arc::new(Mutex::new(())),
             login_lock: Arc::new(Mutex::new(())),
             deletion_recovery_required: Arc::new(RwLock::new(false)),
-        })
+        };
+        let registry = manager.registry_snapshot()?;
+        if let Some(account_id) = registry.active_account_id.as_ref() {
+            manager.validate_account_storage(
+                &registry,
+                account_id,
+                "账号数据不完整，无法使用。",
+            )?;
+        }
+        Ok(manager)
     }
 
     pub fn active_snapshot(&self) -> Result<AccountContextSnapshot> {
@@ -56,9 +74,16 @@ impl AccountContextManager {
         let registry = self.registry_snapshot()?;
         let account_id = registry
             .active_account_id
+            .clone()
             .ok_or_else(|| anyhow!(NO_ACTIVE_ACCOUNT_MESSAGE))?;
         let paths = self.shared.account(&account_id);
-        Ok(AccountContextSnapshot { account_id, paths })
+        let storage_lease =
+            self.validate_account_storage(&registry, &account_id, "账号数据不完整，无法使用。")?;
+        Ok(AccountContextSnapshot {
+            account_id,
+            paths,
+            _storage_lease: storage_lease,
+        })
     }
 
     pub fn list_accounts(&self) -> Result<Vec<AccountSummary>> {
@@ -112,7 +137,8 @@ impl AccountContextManager {
     pub fn switch_active(&self, account_id: &AccountId, now: &str) -> Result<AccountManagerStatus> {
         let _mutation = self.lock_login_publication()?;
         let mut registry = self.registry_snapshot()?;
-        crate::account_removal::validate_switch_target(&self.shared, &registry, account_id)?;
+        let _storage_lease =
+            self.validate_account_storage(&registry, account_id, "账号数据不完整，无法切换。")?;
         let target = registry
             .accounts
             .iter_mut()
@@ -276,11 +302,36 @@ impl AccountContextManager {
         Ok(())
     }
 
-    pub(crate) fn snapshot_for(&self, account_id: &AccountId) -> AccountContextSnapshot {
-        AccountContextSnapshot {
+    pub(crate) fn snapshot_for(&self, account_id: &AccountId) -> Result<AccountContextSnapshot> {
+        let registry = self.registry_snapshot()?;
+        let storage_lease =
+            self.validate_account_storage(&registry, account_id, "账号数据不完整，无法使用。")?;
+        Ok(AccountContextSnapshot {
             account_id: account_id.clone(),
             paths: self.shared.account(account_id),
+            _storage_lease: storage_lease,
+        })
+    }
+
+    fn validate_account_storage(
+        &self,
+        registry: &AccountRegistry,
+        account_id: &AccountId,
+        invalid_message: &'static str,
+    ) -> Result<Arc<ActiveStorageLease>> {
+        let entry = registry
+            .accounts
+            .iter()
+            .find(|entry| &entry.account_id == account_id)
+            .ok_or_else(|| anyhow!("账号不存在。"))?;
+        let lease = pin_and_validate_account_storage(&self.shared, account_id)
+            .map_err(|_| anyhow!(invalid_message))?;
+        let manifest = read_manifest(&self.shared.account(account_id).manifest(), account_id)
+            .map_err(|_| anyhow!(invalid_message))?;
+        if manifest.battle_tag != entry.battle_tag {
+            return Err(anyhow!(invalid_message));
         }
+        Ok(Arc::new(lease))
     }
 
     pub fn shared_paths(&self) -> &SharedAppPaths {
@@ -329,6 +380,119 @@ impl AccountContextManager {
     }
 }
 
+#[cfg(not(windows))]
+fn pin_and_validate_account_storage(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+) -> Result<ActiveStorageLease> {
+    fn ordinary_directory(path: &std::path::Path) -> Result<()> {
+        let metadata = std::fs::symlink_metadata(path)?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(anyhow!("unsafe account directory"));
+        }
+        Ok(())
+    }
+
+    ordinary_directory(shared.root())?;
+    ordinary_directory(&shared.accounts_root())?;
+    let paths = shared.account(account_id);
+    ordinary_directory(paths.root())?;
+    let canonical_shared = std::fs::canonicalize(shared.root())?;
+    let canonical_accounts = std::fs::canonicalize(shared.accounts_root())?;
+    let canonical_account = std::fs::canonicalize(paths.root())?;
+    if canonical_accounts.parent() != Some(canonical_shared.as_path())
+        || canonical_account.parent() != Some(canonical_accounts.as_path())
+    {
+        return Err(anyhow!("account directory escaped storage root"));
+    }
+    let manifest_metadata = std::fs::symlink_metadata(paths.manifest())?;
+    if !manifest_metadata.is_file() || manifest_metadata.file_type().is_symlink() {
+        return Err(anyhow!("unsafe account manifest"));
+    }
+    let canonical_manifest = std::fs::canonicalize(paths.manifest())?;
+    if canonical_manifest.parent() != Some(canonical_account.as_path()) {
+        return Err(anyhow!("account manifest escaped account directory"));
+    }
+    Ok(ActiveStorageLease {})
+}
+
+#[cfg(windows)]
+fn pin_and_validate_account_storage(
+    shared: &SharedAppPaths,
+    account_id: &AccountId,
+) -> Result<ActiveStorageLease> {
+    const FILE_LIST_DIRECTORY: u32 = 0x1;
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    fn pin(path: &std::path::Path, expect_directory: bool, access: u32) -> Result<std::fs::File> {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+        let before = std::fs::symlink_metadata(path)?;
+        if before.file_type().is_symlink()
+            || before.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || before.is_dir() != expect_directory
+            || before.is_file() == expect_directory
+        {
+            return Err(anyhow!("unsafe active account entry"));
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .access_mode(access)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS);
+        let handle = options.open(path)?;
+        let opened = handle.metadata()?;
+        if opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || opened.is_dir() != expect_directory
+            || opened.is_file() == expect_directory
+        {
+            return Err(anyhow!("unsafe active account entry"));
+        }
+        Ok(handle)
+    }
+
+    let paths = shared.account(account_id);
+    let handles = vec![
+        pin(
+            shared.root(),
+            true,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+        )?,
+        pin(
+            &shared.accounts_root(),
+            true,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+        )?,
+        pin(
+            paths.root(),
+            true,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+        )?,
+        pin(
+            &paths.manifest(),
+            false,
+            GENERIC_READ | FILE_READ_ATTRIBUTES,
+        )?,
+    ];
+    let canonical_shared = std::fs::canonicalize(shared.root())?;
+    let canonical_accounts = std::fs::canonicalize(shared.accounts_root())?;
+    let canonical_account = std::fs::canonicalize(paths.root())?;
+    let canonical_manifest = std::fs::canonicalize(paths.manifest())?;
+    if canonical_accounts.parent() != Some(canonical_shared.as_path())
+        || canonical_account.parent() != Some(canonical_accounts.as_path())
+        || canonical_manifest.parent() != Some(canonical_account.as_path())
+    {
+        return Err(anyhow!("active account storage escaped its boundary"));
+    }
+    Ok(ActiveStorageLease { _handles: handles })
+}
+
 impl AccountContextSnapshot {
     pub fn account_id(&self) -> &AccountId {
         &self.account_id
@@ -351,6 +515,68 @@ mod tests {
         read_registry, write_manifest_atomic, AccountManifest, AccountRegistryEntry,
     };
     use std::fs;
+
+    fn write_account_fixture(
+        shared: &SharedAppPaths,
+        id: &AccountId,
+        battle_tag: &str,
+    ) -> AccountRegistryEntry {
+        let paths = shared.account(id);
+        fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(
+            &paths.manifest(),
+            &AccountManifest {
+                version: 1,
+                account_id: id.clone(),
+                role_id: 101101,
+                battle_tag: battle_tag.into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        fs::write(paths.database(), b"synthetic-db").unwrap();
+        AccountRegistryEntry {
+            account_id: id.clone(),
+            battle_tag: battle_tag.into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            last_used_at: "2026-01-02T00:00:00Z".into(),
+            credential_state: "ready".into(),
+        }
+    }
+
+    #[cfg(windows)]
+    fn link_directory(link: &std::path::Path, target: &std::path::Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    fn link_directory(link: &std::path::Path, target: &std::path::Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    fn manager_with_registry(
+        shared: &SharedAppPaths,
+        active: AccountId,
+        accounts: Vec<AccountRegistryEntry>,
+    ) -> AccountContextManager {
+        write_registry_atomic(
+            &shared.registry(),
+            &AccountRegistry {
+                version: 1,
+                active_account_id: Some(active),
+                accounts,
+            },
+        )
+        .unwrap();
+        AccountContextManager::load(shared.clone()).unwrap()
+    }
 
     fn manager_fixture() -> (tempfile::TempDir, AccountContextManager, AccountId) {
         let temp = tempfile::tempdir().unwrap();
@@ -386,6 +612,150 @@ mod tests {
             })
             .unwrap();
         (temp, manager, id)
+    }
+
+    #[test]
+    fn active_snapshot_accepts_a_complete_ordinary_account_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let entry = write_account_fixture(&shared, &id, "Synthetic#1000");
+        let manager = manager_with_registry(&shared, id.clone(), vec![entry]);
+
+        assert_eq!(manager.active_snapshot().unwrap().account_id(), &id);
+    }
+
+    #[test]
+    fn load_and_active_snapshot_fail_closed_when_active_storage_is_missing_or_mismatched() {
+        for case in ["missing", "manifest-mismatch"] {
+            let temp = tempfile::tempdir().unwrap();
+            let shared = SharedAppPaths::from_app_data_dir(temp.path());
+            fs::create_dir_all(shared.root()).unwrap();
+            let id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+            let entry = if case == "missing" {
+                AccountRegistryEntry {
+                    account_id: id.clone(),
+                    battle_tag: "Synthetic#1000".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    last_used_at: "2026-01-02T00:00:00Z".into(),
+                    credential_state: "ready".into(),
+                }
+            } else {
+                let entry = write_account_fixture(&shared, &id, "Synthetic#1000");
+                let other = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+                write_manifest_atomic(
+                    &shared.account(&id).manifest(),
+                    &AccountManifest {
+                        version: 1,
+                        account_id: other,
+                        role_id: 202202,
+                        battle_tag: "Synthetic#1000".into(),
+                        created_at: "2026-01-01T00:00:00Z".into(),
+                        updated_at: "2026-01-01T00:00:00Z".into(),
+                    },
+                )
+                .unwrap_err();
+                fs::write(
+                    shared.account(&id).manifest(),
+                    br#"{"version":1,"accountId":"22222222-2222-4222-8222-222222222222","roleId":202202,"battleTag":"Synthetic#1000","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}"#,
+                )
+                .unwrap();
+                entry
+            };
+            write_registry_atomic(
+                &shared.registry(),
+                &AccountRegistry {
+                    version: 1,
+                    active_account_id: Some(id.clone()),
+                    accounts: vec![entry],
+                },
+            )
+            .unwrap();
+
+            assert!(AccountContextManager::load(shared).is_err(), "case={case}");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let entry = write_account_fixture(&shared, &id, "Synthetic#1000");
+        let manager = manager_with_registry(&shared, id.clone(), vec![entry]);
+        fs::remove_dir_all(shared.account(&id).root()).unwrap();
+        assert!(manager.active_snapshot().is_err());
+    }
+
+    #[test]
+    fn load_and_active_snapshot_reject_reparse_active_storage_without_mutating_target() {
+        for target_kind in ["other-account", "outside-sentinel"] {
+            let temp = tempfile::tempdir().unwrap();
+            let shared = SharedAppPaths::from_app_data_dir(temp.path());
+            let active = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+            let other = AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+            let active_entry = write_account_fixture(&shared, &active, "Active#1000");
+            let other_entry = write_account_fixture(&shared, &other, "Other#2000");
+            let manager = manager_with_registry(
+                &shared,
+                active.clone(),
+                vec![active_entry.clone(), other_entry.clone()],
+            );
+            let active_root = shared.account(&active).root().to_path_buf();
+            fs::remove_dir_all(&active_root).unwrap();
+            let target = if target_kind == "other-account" {
+                shared.account(&other).root().to_path_buf()
+            } else {
+                let sentinel = temp.path().join("outside-sentinel");
+                fs::create_dir_all(&sentinel).unwrap();
+                fs::write(
+                    sentinel.join("do-not-read-or-change"),
+                    b"synthetic-sentinel",
+                )
+                .unwrap();
+                sentinel
+            };
+            link_directory(&active_root, &target);
+            let before = fs::symlink_metadata(target.join("do-not-read-or-change")).ok();
+
+            assert!(
+                manager.active_snapshot().is_err(),
+                "target_kind={target_kind}"
+            );
+            assert!(
+                AccountContextManager::load(shared.clone()).is_err(),
+                "target_kind={target_kind}"
+            );
+            let after = fs::symlink_metadata(target.join("do-not-read-or-change")).ok();
+            assert_eq!(before.map(|m| m.len()), after.map(|m| m.len()));
+            assert!(
+                fs::symlink_metadata(&active_root)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+                    || cfg!(windows)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn active_snapshot_pins_validated_storage_against_path_replacement() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AccountContextSnapshot>();
+
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let entry = write_account_fixture(&shared, &id, "Synthetic#1000");
+        let manager = manager_with_registry(&shared, id.clone(), vec![entry]);
+        let snapshot = manager.active_snapshot().unwrap();
+        let cloned_snapshot = snapshot.clone();
+        let root = shared.account(&id).root().to_path_buf();
+        let replacement = shared.accounts_root().join("replacement");
+
+        assert!(fs::rename(&root, &replacement).is_err());
+        drop(snapshot);
+        assert!(fs::rename(&root, &replacement).is_err());
+        drop(cloned_snapshot);
+        fs::rename(&root, &replacement).unwrap();
     }
 
     #[test]
