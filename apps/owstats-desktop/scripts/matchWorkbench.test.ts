@@ -863,3 +863,67 @@ assert.equal(
   "第 1 回合队友",
   "round selection should switch the displayed player data",
 );
+
+let allowStandaloneDiscard = false;
+let standaloneConfirmCount = 0;
+const standaloneArenaController: MatchFavoriteController = {
+  ...favoriteController,
+  dirty: true,
+  confirmDiscard: () => {
+    standaloneConfirmCount += 1;
+    return allowStandaloneDiscard;
+  },
+};
+
+function renderStandaloneArenaWithTestHooks(): React.ReactElement {
+  const previousDispatcher = dispatcherRef.current;
+  dispatcherRef.current = arenaHookDispatcher;
+  arenaHookIndex = 0;
+  try {
+    return MatchDetailReport({
+      detail: arenaDetail,
+      loading: false,
+      error: null,
+      matchId: arenaDetail.matchId,
+      favoriteController: standaloneArenaController,
+    });
+  } finally {
+    dispatcherRef.current = previousDispatcher;
+  }
+}
+
+arenaStateSlots.length = 0;
+const initialStandaloneArenaTree = renderStandaloneArenaWithTestHooks();
+findReactElement(
+  initialStandaloneArenaTree,
+  (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+  "standalone arena summary should render the favorite editor",
+);
+const standaloneArenaSelector = findReactElement(
+  initialStandaloneArenaTree,
+  (element) =>
+    typeof element.type === "function" &&
+    element.type.name === "ArenaSelector" &&
+    typeof element.props.onSelect === "function",
+  "standalone arena detail should expose its real slice selection handler",
+);
+(standaloneArenaSelector.props.onSelect as (key: string) => void)("round-1");
+assert.equal(standaloneConfirmCount, 1, "leaving standalone arena summary should confirm once");
+const rejectedStandaloneArenaTree = renderStandaloneArenaWithTestHooks();
+findReactElement(
+  rejectedStandaloneArenaTree,
+  (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+  "rejected standalone arena navigation should remain on summary",
+);
+
+allowStandaloneDiscard = true;
+(standaloneArenaSelector.props.onSelect as (key: string) => void)("round-1");
+const selectedStandaloneRoundTree = renderStandaloneArenaWithTestHooks();
+assert.throws(
+  () => findReactElement(
+    selectedStandaloneRoundTree,
+    (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+    "standalone arena round must not render the favorite editor",
+  ),
+  /standalone arena round must not render the favorite editor/,
+);

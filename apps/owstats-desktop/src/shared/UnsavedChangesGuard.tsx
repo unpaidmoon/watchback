@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-type UnsavedChangesRegistration = {
+export type UnsavedChangesGuardRegistration = {
   isDirty: boolean;
   confirmDiscard: () => boolean;
 };
@@ -17,37 +17,55 @@ type NavigationEvent = {
   preventDefault: () => void;
 };
 
+type BeforeUnloadEventLike = NavigationEvent & {
+  returnValue: string;
+};
+
 type UnsavedChangesGuardValue = {
-  register: (guard: UnsavedChangesRegistration | null) => void;
+  register: (guard: UnsavedChangesGuardRegistration | null) => void;
   guardNavigation: (event?: NavigationEvent) => boolean;
 };
 
 const UnsavedChangesGuardContext =
   createContext<UnsavedChangesGuardValue | null>(null);
 
+export function guardUnsavedNavigation(
+  registration: UnsavedChangesGuardRegistration | null,
+  event?: NavigationEvent,
+) {
+  if (!registration?.isDirty || registration.confirmDiscard()) return true;
+  event?.preventDefault();
+  return false;
+}
+
+export function guardUnsavedBeforeUnload(
+  registration: UnsavedChangesGuardRegistration | null,
+  event: BeforeUnloadEventLike,
+) {
+  if (!registration?.isDirty) return;
+  event.preventDefault();
+  event.returnValue = "";
+}
+
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
-  const registrationRef = useRef<UnsavedChangesRegistration | null>(null);
+  const registrationRef = useRef<UnsavedChangesGuardRegistration | null>(null);
 
   const register = useCallback(
-    (guard: UnsavedChangesRegistration | null) => {
+    (guard: UnsavedChangesGuardRegistration | null) => {
       registrationRef.current = guard;
     },
     [],
   );
 
-  const guardNavigation = useCallback((event?: NavigationEvent) => {
-    const guard = registrationRef.current;
-    if (!guard?.isDirty || guard.confirmDiscard()) return true;
-    event?.preventDefault();
-    return false;
-  }, []);
+  const guardNavigation = useCallback(
+    (event?: NavigationEvent) =>
+      guardUnsavedNavigation(registrationRef.current, event),
+    [],
+  );
 
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!registrationRef.current?.isDirty) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
+    const handleBeforeUnload = (event: BeforeUnloadEvent) =>
+      guardUnsavedBeforeUnload(registrationRef.current, event);
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
@@ -67,9 +85,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
 export function useUnsavedChangesGuard() {
   const value = useContext(UnsavedChangesGuardContext);
   if (!value) {
-    throw new Error(
-      "useUnsavedChangesGuard 必须在 UnsavedChangesProvider 内使用",
-    );
+    throw new Error("UnsavedChangesGuardProvider is missing");
   }
   return value;
 }

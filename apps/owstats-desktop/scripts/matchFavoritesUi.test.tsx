@@ -4,6 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MatchFavoriteEditor } from "../src/features/matches/MatchFavoriteEditor";
 import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
+import {
+  guardUnsavedBeforeUnload,
+  guardUnsavedNavigation,
+  useUnsavedChangesGuard,
+} from "../src/shared/UnsavedChangesGuard";
 
 const commands = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
@@ -39,6 +44,102 @@ assert.match(compactDetailSource, /favoriteController:\s*MatchFavoriteController
 assert.match(detailPaneSource, /favoriteController/);
 assert.doesNotMatch(compactDetailSource, /useMatchFavoriteEditor\s*\(/);
 assert.doesNotMatch(detailPaneSource, /useMatchFavoriteEditor\s*\(/);
+assert.match(
+  compactDetailSource,
+  /function selectCompactArenaSlice[\s\S]*favoriteController\.confirmDiscard\(\)[\s\S]*selected\.key === "summary"[\s\S]*<MatchFavoriteEditor/,
+);
+assert.match(
+  detailPageSource,
+  /function selectArenaSlice[\s\S]*favoriteController\.confirmDiscard\(\)[\s\S]*selectedArena\.key === "summary"[\s\S]*<MatchFavoriteEditor/,
+);
+
+let cleanConfirmCount = 0;
+let cleanPreventDefaultCount = 0;
+assert.equal(
+  guardUnsavedNavigation(
+    { isDirty: false, confirmDiscard: () => {
+      cleanConfirmCount += 1;
+      return false;
+    } },
+    { preventDefault: () => {
+      cleanPreventDefaultCount += 1;
+    } },
+  ),
+  true,
+);
+assert.equal(cleanConfirmCount, 0);
+assert.equal(cleanPreventDefaultCount, 0);
+assert.equal(guardUnsavedNavigation(null), true);
+
+let acceptedConfirmCount = 0;
+assert.equal(
+  guardUnsavedNavigation({
+    isDirty: true,
+    confirmDiscard: () => {
+      acceptedConfirmCount += 1;
+      return true;
+    },
+  }),
+  true,
+);
+assert.equal(acceptedConfirmCount, 1);
+
+let rejectedConfirmCount = 0;
+let rejectedPreventDefaultCount = 0;
+assert.equal(
+  guardUnsavedNavigation(
+    {
+      isDirty: true,
+      confirmDiscard: () => {
+        rejectedConfirmCount += 1;
+        return false;
+      },
+    },
+    { preventDefault: () => {
+      rejectedPreventDefaultCount += 1;
+    } },
+  ),
+  false,
+);
+assert.equal(rejectedConfirmCount, 1);
+assert.equal(rejectedPreventDefaultCount, 1);
+
+const cleanUnloadEvent = {
+  preventDefaultCount: 0,
+  returnValue: "unchanged",
+  preventDefault() {
+    this.preventDefaultCount += 1;
+  },
+};
+guardUnsavedBeforeUnload(
+  { isDirty: false, confirmDiscard: () => true },
+  cleanUnloadEvent,
+);
+assert.equal(cleanUnloadEvent.preventDefaultCount, 0);
+assert.equal(cleanUnloadEvent.returnValue, "unchanged");
+
+const dirtyUnloadEvent = {
+  preventDefaultCount: 0,
+  returnValue: "unchanged",
+  preventDefault() {
+    this.preventDefaultCount += 1;
+  },
+};
+guardUnsavedBeforeUnload(
+  { isDirty: true, confirmDiscard: () => true },
+  dirtyUnloadEvent,
+);
+assert.equal(dirtyUnloadEvent.preventDefaultCount, 1);
+assert.equal(dirtyUnloadEvent.returnValue, "");
+
+function MissingProviderProbe() {
+  useUnsavedChangesGuard();
+  return null;
+}
+assert.throws(
+  () => renderToStaticMarkup(createElement(MissingProviderProbe)),
+  /UnsavedChangesGuardProvider is missing/,
+);
 
 const saveCommandPattern =
   /#\[tauri::command\]\s*pub fn save_match_favorite\s*\(\s*accounts\s*:\s*State\s*<\s*'_\s*,\s*AccountContextManager\s*>\s*,\s*request\s*:\s*MatchFavoriteRequest\s*,?\s*\)\s*->\s*Result\s*<\s*MatchFavoriteView\s*,\s*String\s*>\s*\{/;
