@@ -18,6 +18,13 @@ const PRESET_MODES: &[&str] = &[
     "sport",
 ];
 
+enum ImportBehavior {
+    FullSnapshot,
+    Incremental {
+        attempted_detail_ids: HashSet<String>,
+    },
+}
+
 pub fn import_full_season_payload(
     db: &OwDatabase,
     path: impl AsRef<Path>,
@@ -32,7 +39,27 @@ pub fn import_full_season_payload(
 }
 
 pub fn import_payload_value_embedded(db: &OwDatabase, payload: &Value) -> Result<ImportSummary> {
-    import_payload_value_with_lookups(db, payload, load_embedded_lookup()?)
+    import_payload_value_with_lookups(
+        db,
+        payload,
+        load_embedded_lookup()?,
+        ImportBehavior::FullSnapshot,
+    )
+}
+
+pub fn import_incremental_payload_value_embedded(
+    db: &OwDatabase,
+    payload: &Value,
+    attempted_detail_ids: HashSet<String>,
+) -> Result<ImportSummary> {
+    import_payload_value_with_lookups(
+        db,
+        payload,
+        load_embedded_lookup()?,
+        ImportBehavior::Incremental {
+            attempted_detail_ids,
+        },
+    )
 }
 
 pub fn import_payload_value(
@@ -40,13 +67,19 @@ pub fn import_payload_value(
     payload: &Value,
     project_root: &Path,
 ) -> Result<ImportSummary> {
-    import_payload_value_with_lookups(db, payload, load_lookup(project_root))
+    import_payload_value_with_lookups(
+        db,
+        payload,
+        load_lookup(project_root),
+        ImportBehavior::FullSnapshot,
+    )
 }
 
 fn import_payload_value_with_lookups(
     db: &OwDatabase,
     payload: &Value,
     lookups: Lookups,
+    behavior: ImportBehavior,
 ) -> Result<ImportSummary> {
     let sanitized_payload = sanitize_persisted_json(payload);
     let payload = &sanitized_payload;
@@ -59,11 +92,18 @@ fn import_payload_value_with_lookups(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let details = matches_block
+    let supplied_details = matches_block
         .get("details")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let details = match &behavior {
+        ImportBehavior::FullSnapshot => supplied_details,
+        ImportBehavior::Incremental { .. } => supplied_details
+            .into_iter()
+            .filter(is_valid_detail)
+            .collect(),
+    };
     let errors = matches_block
         .get("detail_errors")
         .and_then(Value::as_array)
@@ -93,15 +133,9 @@ fn import_payload_value_with_lookups(
         let hero_guid = string_field(entry, "heroGuid").unwrap_or_default();
         let map_name = lookups.maps.get(&map_guid).cloned();
         let hero_name = lookups.heroes.get(&hero_guid).cloned();
-        tx.execute(
-            r#"
-            INSERT INTO matches (
-                match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
-                hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
-                deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(match_id) DO UPDATE SET
+        let conflict_update = match &behavior {
+            ImportBehavior::FullSnapshot => {
+                r#"
                 season=excluded.season,
                 bucket=excluded.bucket,
                 game_mode=excluded.game_mode,
@@ -124,7 +158,51 @@ fn import_payload_value_with_lookups(
                 duration_sec=excluded.duration_sec,
                 raw_entry_json=excluded.raw_entry_json,
                 updated_at=excluded.updated_at
-            "#,
+                "#
+            }
+            ImportBehavior::Incremental { .. } => {
+                r#"
+                season=excluded.season,
+                bucket=CASE WHEN excluded.match_kind='' THEN matches.bucket ELSE excluded.bucket END,
+                game_mode=excluded.game_mode,
+                match_kind=CASE WHEN excluded.match_kind='' THEN matches.match_kind ELSE excluded.match_kind END,
+                result=excluded.result,
+                map_guid=excluded.map_guid,
+                map_name=excluded.map_name,
+                hero_guid=excluded.hero_guid,
+                hero_name=excluded.hero_name,
+                begin_ts=excluded.begin_ts,
+                team_score=excluded.team_score,
+                opponent_score=excluded.opponent_score,
+                kills=excluded.kills,
+                assists=excluded.assists,
+                deaths=excluded.deaths,
+                damage=excluded.damage,
+                healing=excluded.healing,
+                mitigation=excluded.mitigation,
+                total_worth=excluded.total_worth,
+                duration_sec=CASE
+                    WHEN excluded.duration_sec<=0 AND matches.duration_sec>0 THEN matches.duration_sec
+                    ELSE excluded.duration_sec
+                END,
+                raw_entry_json=excluded.raw_entry_json,
+                updated_at=excluded.updated_at
+                "#
+            }
+        };
+        tx.execute(
+            &format!(
+                r#"
+            INSERT INTO matches (
+                match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+                hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+                deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(match_id) DO UPDATE SET
+                {conflict_update}
+            "#
+            ),
             params![
                 match_id,
                 season.max(int_field(entry, "_dashenSeason")),
@@ -176,9 +254,31 @@ fn import_payload_value_with_lookups(
         )?;
     }
 
-    rebuild_match_players_for_season(&tx, season, &details, &lookups, Some(payload), &now)?;
+    rebuild_match_players_for_import(
+        &tx,
+        season,
+        &details,
+        &lookups,
+        Some(payload),
+        &now,
+        &behavior,
+    )?;
 
-    tx.execute("DELETE FROM sync_errors WHERE season = ?", [season])?;
+    match &behavior {
+        ImportBehavior::FullSnapshot => {
+            tx.execute("DELETE FROM sync_errors WHERE season = ?", [season])?;
+        }
+        ImportBehavior::Incremental {
+            attempted_detail_ids,
+        } => {
+            for match_id in attempted_detail_ids {
+                tx.execute(
+                    "DELETE FROM sync_errors WHERE season = ? AND match_id = ?",
+                    params![season, match_id],
+                )?;
+            }
+        }
+    }
 
     for error in &errors {
         tx.execute(
@@ -204,6 +304,16 @@ fn import_payload_value_with_lookups(
         [season],
         |row| row.get(0),
     )?;
+    let matches_count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM matches WHERE season = ?",
+        [season],
+        |row| row.get(0),
+    )?;
+    let details_count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM match_details d JOIN matches m ON m.match_id = d.match_id WHERE m.season = ?",
+        [season],
+        |row| row.get(0),
+    )?;
 
     tx.execute(
         r#"
@@ -219,8 +329,8 @@ fn import_payload_value_with_lookups(
         params![
             season,
             now,
-            entries.len() as i64,
-            details.len() as i64,
+            matches_count,
+            details_count,
             latest_error_count
         ],
     )?;
@@ -287,28 +397,57 @@ pub fn rebuild_match_players_from_existing_details(db: &OwDatabase) -> Result<()
             })?;
             rows.collect::<rusqlite::Result<Vec<Value>>>()?
         };
-        rebuild_match_players_for_season(&tx, season, &details, &lookups, None, &now)?;
+        rebuild_match_players_for_import(
+            &tx,
+            season,
+            &details,
+            &lookups,
+            None,
+            &now,
+            &ImportBehavior::FullSnapshot,
+        )?;
     }
     tx.commit()?;
     Ok(())
 }
 
-fn rebuild_match_players_for_season(
+fn rebuild_match_players_for_import(
     tx: &rusqlite::Transaction<'_>,
     season: i64,
     details: &[Value],
     lookups: &Lookups,
     payload: Option<&Value>,
     now: &str,
+    behavior: &ImportBehavior,
 ) -> Result<()> {
-    tx.execute(
-        "DELETE FROM match_players WHERE season = ?",
-        params![season],
-    )?;
-    tx.execute(
-        "DELETE FROM arena_match_players WHERE season = ?",
-        params![season],
-    )?;
+    match behavior {
+        ImportBehavior::FullSnapshot => {
+            tx.execute(
+                "DELETE FROM match_players WHERE season = ?",
+                params![season],
+            )?;
+            tx.execute(
+                "DELETE FROM arena_match_players WHERE season = ?",
+                params![season],
+            )?;
+        }
+        ImportBehavior::Incremental { .. } => {
+            let match_ids = details
+                .iter()
+                .filter_map(|detail| string_field(detail, "match_id"))
+                .collect::<HashSet<_>>();
+            for match_id in match_ids {
+                tx.execute(
+                    "DELETE FROM match_players WHERE season = ? AND match_id = ?",
+                    params![season, match_id],
+                )?;
+                tx.execute(
+                    "DELETE FROM arena_match_players WHERE season = ? AND match_id = ?",
+                    params![season, match_id],
+                )?;
+            }
+        }
+    }
     let current_bnet = payload
         .and_then(|item| item.pointer("/profile_card/data/bnetId"))
         .and_then(value_to_string)
@@ -721,6 +860,16 @@ fn details_by_match_id(details: &[Value]) -> HashMap<String, &Value> {
         .iter()
         .filter_map(|item| string_field(item, "match_id").map(|id| (id, item)))
         .collect()
+}
+
+fn is_valid_detail(detail: &Value) -> bool {
+    detail.is_object()
+        && detail
+            .pointer("/payload/data")
+            .is_some_and(Value::is_object)
+        && detail.pointer("/payload/code").is_none_or(|code| {
+            code.as_i64() == Some(0) || code.as_u64() == Some(0) || code.as_f64() == Some(0.0)
+        })
 }
 
 fn duration_from_detail(detail: Option<&&Value>) -> i64 {

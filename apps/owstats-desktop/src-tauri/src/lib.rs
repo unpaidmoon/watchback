@@ -33,7 +33,8 @@ mod sync_coordinator;
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
 pub use importer::{
-    import_full_season_payload, import_payload_value, import_payload_value_embedded,
+    import_full_season_payload, import_incremental_payload_value_embedded, import_payload_value,
+    import_payload_value_embedded,
 };
 pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSION};
 pub use models::*;

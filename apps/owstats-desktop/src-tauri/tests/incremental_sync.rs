@@ -1,8 +1,10 @@
 use owstats_desktop_lib::{
+    import_incremental_payload_value_embedded, import_payload_value_embedded,
     load_season_sync_inventory, select_detail_entries, OwDatabase, SeasonSyncInventory,
 };
 use rusqlite::params;
 use serde_json::json;
+use std::collections::HashSet;
 
 #[test]
 fn inventory_is_scoped_to_the_requested_season() {
@@ -154,4 +156,242 @@ fn detail_selector_returns_only_new_or_missing_details() {
     assert_eq!(ids, vec!["missing", "new"]);
     assert_eq!(selection.new_matches, 1);
     assert_eq!(selection.missing_details, 1);
+}
+
+fn entry(match_id: &str, game_mode: &str, begin_ts: i64) -> serde_json::Value {
+    json!({
+        "matchId": match_id,
+        "gameMode": game_mode,
+        "matchRet": 1,
+        "beginTs": begin_ts
+    })
+}
+
+fn normal_detail(match_id: &str, duration: i64, player_id: &str) -> serde_json::Value {
+    json!({
+        "match_id": match_id,
+        "match_kind": "normal",
+        "payload": {
+            "code": 0,
+            "data": {
+                "gameTimeSec": duration,
+                "totalCount": {
+                    "teammateList": [{
+                        "bnetId": player_id,
+                        "name": format!("玩家-{player_id}"),
+                        "heroGuid": "hero"
+                    }],
+                    "enemyList": []
+                }
+            }
+        }
+    })
+}
+
+fn payload(
+    season: i64,
+    entries: Vec<serde_json::Value>,
+    details: Vec<serde_json::Value>,
+    detail_errors: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    json!({
+        "season": season,
+        "matches": {
+            "entries": entries,
+            "details": details,
+            "detail_errors": detail_errors
+        }
+    })
+}
+
+#[test]
+fn incremental_import_preserves_unrefreshed_derivations_and_replaces_refreshed_index() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("first", "SportPreset", 1),
+                entry("second", "SportPreset", 2),
+            ],
+            vec![
+                normal_detail("first", 101, "first-old"),
+                normal_detail("second", 202, "second-old"),
+            ],
+            vec![],
+        ),
+    )
+    .unwrap();
+
+    let summary = import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("first", "QuickFight", 11),
+                entry("second", "SportPreset", 22),
+            ],
+            vec![
+                json!({
+                    "match_id": "first",
+                    "match_kind": "normal",
+                    "payload": {}
+                }),
+                normal_detail("second", 303, "second-new"),
+            ],
+            vec![],
+        ),
+        ["first".to_string(), "second".to_string()]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let first: (String, String, i64, i64, String) = conn
+        .query_row(
+            "SELECT match_kind, bucket, duration_sec, begin_ts,
+                    (SELECT group_concat(bnet_id, ',') FROM match_players WHERE match_id='first')
+             FROM matches WHERE match_id='first'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    let second: (i64, String) = conn
+        .query_row(
+            "SELECT duration_sec,
+                    (SELECT group_concat(bnet_id, ',') FROM match_players WHERE match_id='second')
+             FROM matches WHERE match_id='second'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(
+        first,
+        (
+            "normal".to_string(),
+            "preset".to_string(),
+            101,
+            11,
+            "first-old".to_string()
+        )
+    );
+    assert_eq!(second, (303, "second-new".to_string()));
+    assert_eq!(summary.details_seen, 1);
+}
+
+#[test]
+fn incremental_import_reconciles_only_attempted_detail_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    let initial_errors = ["unattempted", "recovered", "failed"]
+        .into_iter()
+        .map(|match_id| {
+            json!({
+                "match_id": match_id,
+                "error_type": "detail_fetch",
+                "message": format!("old-{match_id}")
+            })
+        })
+        .collect();
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("unattempted", "SportPreset", 1),
+                entry("recovered", "SportPreset", 2),
+                entry("failed", "SportPreset", 3),
+            ],
+            vec![],
+            initial_errors,
+        ),
+    )
+    .unwrap();
+
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![],
+            vec![normal_detail("recovered", 10, "player")],
+            vec![json!({
+                "match_id": "failed",
+                "error_type": "detail_fetch",
+                "message": "new-failed"
+            })],
+        ),
+        ["recovered".to_string(), "failed".to_string()]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let rows = {
+        let mut statement = conn
+            .prepare("SELECT match_id, message FROM sync_errors WHERE season=23 ORDER BY match_id")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    assert_eq!(
+        rows,
+        vec![
+            ("failed".to_string(), "new-failed".to_string()),
+            ("unattempted".to_string(), "old-unattempted".to_string())
+        ]
+    );
+}
+
+#[test]
+fn incremental_import_writes_season_totals_from_sqlite() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    let initial_entries = (0..10)
+        .map(|index| entry(&format!("old-{index}"), "SportPreset", index))
+        .collect::<Vec<_>>();
+    let initial_details = (0..10)
+        .map(|index| normal_detail(&format!("old-{index}"), 100 + index, "player"))
+        .collect::<Vec<_>>();
+    import_payload_value_embedded(&db, &payload(23, initial_entries, initial_details, vec![]))
+        .unwrap();
+
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![entry("new", "SportPreset", 20)],
+            vec![normal_detail("new", 120, "player")],
+            vec![],
+        ),
+        HashSet::from(["new".to_string()]),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let totals: (i64, i64) = conn
+        .query_row(
+            "SELECT matches_count, details_count FROM seasons WHERE season=23",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(totals, (11, 11));
 }
