@@ -10,6 +10,7 @@ use owstats_desktop_lib::{
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
     sync_season_with_current_account_credentials_path_output_dir_base_url, OwDatabase, SyncMode,
 };
+use rusqlite::params;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -1266,13 +1267,9 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     assert_eq!(quick_detail_progress.processed, 0);
     assert_eq!(quick_detail_progress.total, 0);
     let second_requests = server.requests.lock().unwrap().clone();
-    assert!(
-        second_requests
-            .iter()
-            .filter(|request| request.first_line.contains("/queryMatchList"))
-            .count()
-            > 0
-    );
+    assert!(second_requests
+        .iter()
+        .any(|request| request.first_line.contains("/queryMatchList")));
     assert_eq!(
         second_requests
             .iter()
@@ -1325,6 +1322,186 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
         "synthetic-account-secret",
     ] {
         assert!(!summary_text.contains(secret));
+    }
+}
+
+#[tokio::test]
+async fn unchanged_quick_update_uses_one_list_request_per_canonical_mode_and_no_details() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    seed_complete_canonical_mode_watermarks(&db);
+    let server = spawn_quick_scan_server(QuickScanScenario::Known);
+
+    let summary = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::QuickUpdate,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(summary.mode, SyncMode::QuickUpdate);
+    assert!(!summary.quick_scan_limited);
+    assert_eq!(summary.details_requested, 0);
+    let pages = quick_list_pages(&server);
+    for mode in [
+        "sport",
+        "leisure",
+        "QuickFight",
+        "LeisureFight",
+        "SportFight",
+    ] {
+        assert_eq!(
+            pages.get(mode).map(Vec::as_slice),
+            Some([1_i64].as_slice()),
+            "unchanged quick update must request exactly page one for {mode}"
+        );
+    }
+    assert_eq!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchInfo"))
+            .count(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn quick_budget_defers_deep_history_until_full_fetch_and_rebuilds_a_safe_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    seed_complete_canonical_mode_watermarks(&db);
+    let server = spawn_quick_scan_server(QuickScanScenario::DeepHistory);
+
+    let quick = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::QuickUpdate,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(quick.mode, SyncMode::QuickUpdate);
+    assert!(quick.quick_scan_limited);
+    assert_eq!(
+        db.connect()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM matches WHERE match_id='deep-late-match'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0,
+        "page-six history is outside the quick-update budget"
+    );
+    let quick_sport_pages = server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| {
+            request.first_line.contains("/queryMatchList")
+                && request.first_line.contains("gameMode=sport")
+        })
+        .filter_map(|request| request_query_param(&request.first_line, "page"))
+        .map(|page| page.parse::<i64>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(quick_sport_pages, vec![1, 2, 3, 4, 5]);
+    server.requests.lock().unwrap().clear();
+
+    let full = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::FullFetch,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(full.mode, SyncMode::FullFetch);
+    assert_eq!(
+        db.connect()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM matches WHERE match_id='deep-late-match'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1,
+        "full fetch must continue through page six"
+    );
+    let snapshot = std::fs::read_to_string(season_dir.join("local_s23_full_season.json")).unwrap();
+    assert!(snapshot.contains("known-sport"));
+    assert!(snapshot.contains("deep-late-match"));
+    for sensitive in [
+        "synthetic-account-secret",
+        "synthetic-player-key",
+        "synthetic-detail-token",
+        "synthetic-authorization-secret",
+        "customerToken",
+        "authorization",
+    ] {
+        assert!(
+            !snapshot.contains(sensitive),
+            "rebuilt snapshot leaked {sensitive}"
+        );
     }
 }
 
@@ -1627,6 +1804,11 @@ async fn full_fetch_invalid_refresh_preserves_old_detail_and_player_index_and_re
         .unwrap();
     assert!(!error_message.contains("synthetic-account-secret"));
     assert!(!error_message.contains("synthetic-player-key"));
+    let snapshot = std::fs::read_to_string(season_dir.join("local_s23_full_season.json")).unwrap();
+    assert!(snapshot.contains("metric-invalid"));
+    assert!(snapshot.contains("old-player"));
+    assert!(!snapshot.contains("synthetic-account-secret"));
+    assert!(!snapshot.contains("synthetic-player-key"));
 }
 
 #[derive(Clone, Debug)]
@@ -1870,6 +2052,49 @@ fn spawn_full_season_server() -> RecordingServer {
     RecordingServer {
         base_url: format!("http://{addr}"),
         requests,
+    }
+}
+
+fn seed_complete_canonical_mode_watermarks(db: &OwDatabase) {
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    for (match_id, match_kind, game_mode) in [
+        ("known-sport", "normal", "sport"),
+        ("known-leisure", "normal", "leisure"),
+        ("known-QuickFight", "fight", "QuickFight"),
+        ("known-LeisureFight", "fight", "LeisureFight"),
+        ("known-SportFight", "fight", "SportFight"),
+    ] {
+        let raw_entry = serde_json::json!({
+            "matchId": match_id,
+            "gameMode": game_mode,
+            "matchRet": 1,
+            "beginTs": 1_700_000_000_000_i64,
+            "_dashenSeason": 23
+        })
+        .to_string();
+        conn.execute(
+            "INSERT INTO matches (
+                match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+                begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+                mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+             ) VALUES (?1, 23, 'preset', ?2, ?3, 'win', '', '',
+                1700000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60, ?4, 'now')",
+            params![match_id, game_mode, match_kind, raw_entry],
+        )
+        .unwrap();
+        let raw_detail = serde_json::json!({
+            "match_id": match_id,
+            "match_kind": match_kind,
+            "payload": {"code": 0, "data": {"matchRet": 1, "duration": 60}}
+        })
+        .to_string();
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+             VALUES (?1, ?2, ?3, 'now')",
+            params![match_id, match_kind, raw_detail],
+        )
+        .unwrap();
     }
 }
 
@@ -2150,6 +2375,7 @@ enum QuickScanScenario {
     UnsafeThenKnown,
     CurrentEmptyAtBudget,
     BusinessErrorEntryThenKnown,
+    DeepHistory,
 }
 
 struct QuickScanServer {
@@ -2292,6 +2518,11 @@ fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> Strin
     if request_line.contains("/queryCountInfo") {
         return r#"{"code":0,"data":{"total":1}}"#.to_string();
     }
+    if request_line.contains("/queryMatchInfo")
+        && matches!(scenario, QuickScanScenario::DeepHistory)
+    {
+        return r#"{"code":0,"data":{"matchRet":1,"duration":120,"customerToken":"synthetic-detail-token","authorization":"synthetic-authorization-secret"}}"#.to_string();
+    }
     if request_line.contains("/queryMatchInfo") {
         return r#"{"code":0,"data":{"matchRet":1}}"#.to_string();
     }
@@ -2349,6 +2580,23 @@ fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> Strin
     }
     if matches!(scenario, QuickScanScenario::UnsafeSportDelayed) && mode == "sport" {
         return r#"{"code":0,"data":{"matchList":[{"unexpected":"shape"}]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::DeepHistory) && mode == "sport" {
+        return match page {
+            1..=5 => format!(
+                r#"{{"code":0,"data":{{"matchList":[{{"matchId":"quick-sport-{page}","matchRet":1,"beginTs":1700000100000}}]}}}}"#
+            ),
+            6 => r#"{"code":0,"data":{"matchList":[{"matchId":"deep-late-match","matchRet":1,"beginTs":1600000000000}]}}"#.to_string(),
+            _ => r#"{"code":0,"data":{"matchList":[]}}"#.to_string(),
+        };
+    }
+    if matches!(scenario, QuickScanScenario::DeepHistory) {
+        if page == 1 {
+            return format!(
+                r#"{{"code":0,"data":{{"matchList":[{{"matchId":"known-{mode}","matchRet":1,"beginTs":1700000000000}}]}}}}"#
+            );
+        }
+        return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();
     }
     if matches!(scenario, QuickScanScenario::NewSport) && mode == "sport" {
         return match page {

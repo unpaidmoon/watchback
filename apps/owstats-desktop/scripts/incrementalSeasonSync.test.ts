@@ -117,6 +117,7 @@ const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx",
 const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
 const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
 const workbenchSource = readFileSync(new URL("../src/features/command-center/SeasonSyncWorkbench.tsx", import.meta.url), "utf8");
+const seasonFetchSource = readFileSync(new URL("../src-tauri/src/season_fetch.rs", import.meta.url), "utf8");
 
 assert.match(
   typesSource,
@@ -145,4 +146,19 @@ assert.match(
   onboardingSource,
   /setSyncNotice\(formatSyncNotice\(season, summary\)\);/,
   "Onboarding delegates incremental result copy to formatSyncNotice",
+);
+assert.match(
+  seasonFetchSource,
+  /pub const QUICK_UPDATE_MAX_PAGES_PER_MODE: i64 = 5;/,
+  "quick update keeps a hard five-page budget per mode",
+);
+assert.match(
+  seasonFetchSource,
+  /const NORMAL_MODES: &\[&str\] = &\["sport", "leisure"\];/,
+  "quick request ledger includes both canonical normal modes",
+);
+assert.match(
+  seasonFetchSource,
+  /const FIGHT_MODES: &\[&str\] = &\["QuickFight", "LeisureFight", "SportFight"\];/,
+  "quick request ledger includes all canonical fight modes",
 );
