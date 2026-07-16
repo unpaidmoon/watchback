@@ -1255,6 +1255,7 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
         vec![
             "正在检查本地水位",
             "正在快速检查最新对局",
+            "发现 0 场新对局",
             "正在获取最新对局详情",
             "正在更新本地数据库",
             "更新完成",
@@ -1266,6 +1267,12 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
         .unwrap();
     assert_eq!(quick_detail_progress.processed, 0);
     assert_eq!(quick_detail_progress.total, 0);
+    let discovered_progress = quick_progresses
+        .iter()
+        .find(|progress| progress.phase == "发现 0 场新对局")
+        .unwrap();
+    assert_eq!(discovered_progress.processed, 0);
+    assert_eq!(discovered_progress.total, 0);
     let second_requests = server.requests.lock().unwrap().clone();
     assert!(second_requests
         .iter()
@@ -1558,10 +1565,11 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
     .await
     .unwrap();
     let snapshot_path = season_dir.join("local_s23_full_season.json");
-    let before = std::fs::read(&snapshot_path).unwrap();
+    let before: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
 
     let empty = spawn_successful_desktop_sync_server(true);
-    let error = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+    let summary = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1572,11 +1580,19 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
         |_| {},
     )
     .await
-    .unwrap_err()
-    .to_string();
+    .unwrap();
 
-    assert!(error.contains("未拉取到 S23 赛季对局"));
-    assert_eq!(std::fs::read(&snapshot_path).unwrap(), before);
+    assert_eq!(summary.mode, SyncMode::QuickUpdate);
+    assert_eq!(summary.list_entries_seen, 0);
+    assert_eq!(summary.new_matches, 0);
+    assert_eq!(summary.missing_details, 0);
+    assert_eq!(summary.details_requested, 0);
+    assert_eq!(summary.database_matches, 3);
+    assert_eq!(summary.database_details, 3);
+    let after: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    assert_eq!(after["matches"]["entries"], before["matches"]["entries"]);
+    assert_eq!(after["matches"]["details"], before["matches"]["details"]);
     let conn = db.connect().unwrap();
     assert_eq!(
         conn.query_row("SELECT COUNT(*) FROM matches WHERE season=23", [], |row| {
@@ -1585,6 +1601,86 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
         .unwrap(),
         3
     );
+    let requests = empty.requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchList"))
+            .count(),
+        10,
+        "recognized empty quick update should check the season fallbacks for each canonical mode"
+    );
+    for mode in [
+        "sport",
+        "leisure",
+        "QuickFight",
+        "LeisureFight",
+        "SportFight",
+    ] {
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| {
+                    request.first_line.contains("/queryMatchList")
+                        && request.first_line.contains(&format!("gameMode={mode}"))
+                        && request.first_line.contains("page=1")
+                })
+                .count(),
+            2,
+            "recognized empty quick update should try both season candidates for {mode}"
+        );
+    }
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchInfo"))
+            .count(),
+        0,
+        "recognized empty quick update must not request details"
+    );
+}
+
+#[tokio::test]
+async fn desktop_full_fetch_still_rejects_a_zero_entry_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    let empty = spawn_successful_desktop_sync_server(true);
+
+    let error = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        SyncMode::FullFetch,
+        &format!("{}/customer", empty.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("未拉取到 S23 赛季对局"));
+    assert!(!season_dir.join("local_s23_full_season.json").exists());
 }
 
 #[tokio::test]

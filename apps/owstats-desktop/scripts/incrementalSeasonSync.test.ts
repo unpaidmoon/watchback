@@ -86,7 +86,7 @@ const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
     expected: "S23 已更新扫描范围内的数据；快速更新已达到扫描范围，如需完整校验请使用全量抓取。",
   },
   {
-    name: "unsafe quick update uses the range-limited copy",
+    name: "unsafe quick update reports an abnormal page without claiming the scan limit",
     summary: {
       ...baseSummary,
       mode: "quickUpdate",
@@ -95,7 +95,7 @@ const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
         pages: [{ ...baseSummary.diagnostics.pages[0], stopReason: "unsafe_response" }],
       },
     },
-    expected: "S23 已更新扫描范围内的数据；快速更新已达到扫描范围，如需完整校验请使用全量抓取。",
+    expected: "S23 快速更新遇到页面异常，无法确认已到达完整边界；已保留本地数据，如需完整校验请使用全量抓取。",
   },
   {
     name: "new match detail failures",

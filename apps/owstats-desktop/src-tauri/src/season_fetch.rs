@@ -66,6 +66,14 @@ pub async fn fetch_quick_season_with_base_url(
     request: FullSeasonRequest,
     inventory: &crate::sync::SeasonSyncInventory,
 ) -> Result<FullSeasonFetch> {
+    fetch_quick_season_with_base_url_and_selection_progress(request, inventory, |_| {}).await
+}
+
+pub async fn fetch_quick_season_with_base_url_and_selection_progress(
+    request: FullSeasonRequest,
+    inventory: &crate::sync::SeasonSyncInventory,
+    mut selection_progress: impl FnMut(usize),
+) -> Result<FullSeasonFetch> {
     if request.season <= 0 {
         return Err(anyhow!("season must be greater than 0"));
     }
@@ -147,14 +155,9 @@ pub async fn fetch_quick_season_with_base_url(
         quick_scan_stop_reasons.insert(fetched.mode_key, fetched.stop_reason);
     }
     let entries = dedupe_entries(entries, request.season);
-    let detail_entries = entries
-        .iter()
-        .filter(|entry| {
-            string_field(entry, "matchId")
-                .is_some_and(|match_id| !inventory.detail_ids.contains(&match_id))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let selection = crate::sync::select_detail_entries(&entries, inventory);
+    selection_progress(selection.new_matches);
+    let detail_entries = selection.entries;
     let details_requested = detail_entries.len();
     let list_duration_ms = list_started.elapsed().as_millis() as u64;
     let detail_started = Instant::now();

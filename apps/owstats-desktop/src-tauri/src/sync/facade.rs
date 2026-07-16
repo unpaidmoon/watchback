@@ -355,13 +355,28 @@ async fn sync_account_season_with_request(
     });
     let fetch = match mode {
         crate::models::SyncMode::QuickUpdate => {
-            crate::season_fetch::fetch_quick_season_with_base_url(request, &inventory).await?
+            crate::season_fetch::fetch_quick_season_with_base_url_and_selection_progress(
+                request,
+                &inventory,
+                |new_matches| {
+                    progress(SyncProgress {
+                        season,
+                        phase: format!("发现 {new_matches} 场新对局"),
+                        processed: 0,
+                        total: 0,
+                        current_match_id: None,
+                        failed_details: 0,
+                        latest_errors: Vec::new(),
+                    });
+                },
+            )
+            .await?
         }
         crate::models::SyncMode::FullFetch => {
             crate::season_fetch::fetch_full_season_with_base_url(request).await?
         }
     };
-    if fetch.entries == 0 {
+    if mode == crate::models::SyncMode::FullFetch && fetch.entries == 0 {
         return Err(anyhow!(
             "未拉取到 S{season} 赛季对局；未更新本地数据库或快照，请确认该赛季有战绩，或稍后重新登录后再试。"
         ));

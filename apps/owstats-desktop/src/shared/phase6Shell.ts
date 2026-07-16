@@ -68,7 +68,11 @@ export function readableSyncProgress(progress: SyncProgress | null): string {
 
 export function formatSyncNotice(season: number, summary: SyncSummary): string {
   const quickScanUnsafe = summary.diagnostics.pages.some((page) => page.stopReason === "unsafe_response");
-  if (summary.mode === "quickUpdate" && (summary.quickScanLimited || quickScanUnsafe)) {
+  if (summary.mode === "quickUpdate" && quickScanUnsafe) {
+    return `S${season} 快速更新遇到页面异常，无法确认已到达完整边界；已保留本地数据，如需完整校验请使用全量抓取。`;
+  }
+
+  if (summary.mode === "quickUpdate" && summary.quickScanLimited) {
     return `S${season} 已更新扫描范围内的数据；快速更新已达到扫描范围，如需完整校验请使用全量抓取。`;
   }
 
