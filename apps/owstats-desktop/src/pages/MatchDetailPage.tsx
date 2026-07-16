@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMatchDetails } from "../shared/api";
 import { arenaHeaderMapKey, arenaHeaderTitle, arenaResultSubLabel, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../shared/arenaDetailFormat";
@@ -16,7 +16,10 @@ import {
   type MatchFavoriteController,
 } from "../features/matches/useMatchFavoriteEditor";
 import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
-import { invalidateStandaloneMatchFavoritePersistence } from "../shared/matchesPageCache";
+import {
+  invalidateStandaloneMatchFavoritePersistence,
+  shouldInvalidateStandaloneFavoriteCache,
+} from "../shared/matchesPageCache";
 
 export function MatchDetailPage() {
   const { matchId } = useParams();
@@ -24,10 +27,14 @@ export function MatchDetailPage() {
   const [detail, setDetail] = useState<MatchDetailView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const favoriteRef = useRef<MatchDetailView["favorite"] | undefined>(undefined);
   const { register } = useUnsavedChangesGuard();
   const handleFavoritePersisted = useCallback(
     (favorite: MatchDetailView["favorite"]) => {
-      invalidateStandaloneMatchFavoritePersistence();
+      if (shouldInvalidateStandaloneFavoriteCache(favoriteRef.current, favorite)) {
+        invalidateStandaloneMatchFavoritePersistence();
+      }
+      favoriteRef.current = favorite;
       setDetail((current) =>
         current ? { ...current, favorite } : current,
       );
@@ -63,7 +70,9 @@ export function MatchDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      setDetail(await getMatchDetails(nextMatchId));
+      const nextDetail = await getMatchDetails(nextMatchId);
+      favoriteRef.current = nextDetail.favorite;
+      setDetail(nextDetail);
     } catch (err) {
       setError(productErrorMessage(err));
     } finally {

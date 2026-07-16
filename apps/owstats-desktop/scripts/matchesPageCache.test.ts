@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { filtersFromParams, validateFilters } from "../src/features/matches/matchFilters.ts";
+import {
+  filtersFromParams,
+  restoreRejectedMatchesSearchParams,
+  validateFilters,
+} from "../src/features/matches/matchFilters.ts";
 import * as matchesPageCacheModule from "../src/shared/matchesPageCache.ts";
 import {
   canCommitMatchTimelineRequest,
@@ -21,6 +25,7 @@ import {
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
+  shouldInvalidateStandaloneFavoriteCache,
   shouldLoadMatchesForFilter,
   updateMatchesPageCache,
 } from "../src/shared/matchesPageCache.ts";
@@ -680,6 +685,19 @@ assert.deepEqual(
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const matchDetailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 
+assert.equal(shouldInvalidateStandaloneFavoriteCache(null, { note: "" }), true);
+assert.equal(shouldInvalidateStandaloneFavoriteCache({ note: "old" }, null), true);
+assert.equal(
+  shouldInvalidateStandaloneFavoriteCache({ note: "old" }, { note: "new" }),
+  false,
+  "a note-only update keeps the timeline favorite presence unchanged",
+);
+assert.equal(
+  shouldInvalidateStandaloneFavoriteCache(undefined, { note: "" }),
+  false,
+  "favorite presence is not invalidated before standalone detail has loaded",
+);
+
 updateMatchesPageCache({
   filters: { favoriteOnly: true },
   loadedFilterKey: matchFiltersKey({ favoriteOnly: true }),
@@ -693,8 +711,13 @@ assert.equal(
 );
 assert.match(
   matchDetailPageSource,
-  /const handleFavoritePersisted[\s\S]*invalidateStandaloneMatchFavoritePersistence\(\);[\s\S]*setDetail/,
-  "the standalone persisted callback must use the tested cache invalidation helper before updating detail state",
+  /const favoriteRef = useRef<MatchDetailView\["favorite"\] \| undefined>\(undefined\);[\s\S]*const handleFavoritePersisted[\s\S]*shouldInvalidateStandaloneFavoriteCache\(favoriteRef\.current, favorite\)[\s\S]*invalidateStandaloneMatchFavoritePersistence\(\);[\s\S]*favoriteRef\.current = favorite;[\s\S]*setDetail/,
+  "standalone persistence compares and updates a stable favorite ref before updating detail state",
+);
+assert.match(
+  matchDetailPageSource,
+  /const nextDetail = await getMatchDetails\(nextMatchId\);\s*favoriteRef\.current = nextDetail\.favorite;\s*setDetail\(nextDetail\);/,
+  "loading standalone detail synchronizes the favorite-presence ref",
 );
 
 let sameFilterConfirmCount = 0;
@@ -803,6 +826,26 @@ assert.equal(
 );
 assert.equal(combinedNavigationConfirmCount, 1, "a combined filter and match transition confirms exactly once");
 
+const restoredFromQaAccepted = restoreRejectedMatchesSearchParams(
+  "season=22&matchId=match-old&qa=1",
+  { season: 23 },
+  "match-current",
+);
+assert.equal(restoredFromQaAccepted.get("qa"), "1");
+assert.equal(restoredFromQaAccepted.get("season"), "23");
+assert.equal(restoredFromQaAccepted.get("matchId"), "match-current");
+
+const restoredFromPlainAccepted = restoreRejectedMatchesSearchParams(
+  "season=22&matchId=match-old",
+  { season: 23 },
+  "match-current",
+);
+assert.equal(
+  restoredFromPlainAccepted.has("qa"),
+  false,
+  "an attempted qa=1 URL cannot add QA mode when the last accepted URL had none",
+);
+
 assert.match(
   matchesPageSource,
   /function setFilters\(nextFilters: MatchFilters\) \{\s*if \(!guardMatchFilterChange\(currentFiltersRef\.current, nextFilters, favoriteController\.confirmDiscard\)\) return false;\s*commitFilters\(nextFilters\);[\s\S]*?function commitFilters\(nextFilters: MatchFilters\) \{/,
@@ -889,10 +932,20 @@ assert.match(
   "selection reconciliation waits until the current filter list is loaded",
 );
 assert.equal(matchesPageSource.includes("const searchParamsKey = searchParams.toString();"), true, "MatchesPage tracks same-instance URL changes");
+assert.equal(
+  matchesPageSource.includes("const lastAcceptedSearchParamsKeyRef = useRef(searchParamsKey);"),
+  true,
+  "MatchesPage tracks the last accepted canonical URL independently from attempted navigation",
+);
 assert.match(
   matchesPageSource,
-  /const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(!guardMatchesPageNavigation\(\s*\{\s*currentFilters: filters,\s*nextFilters: navigation\.filters,\s*currentSelectedMatchId: selectedMatchId,\s*nextSelectedMatchId: navigation\.selectedMatchId,\s*\},\s*favoriteController\.confirmDiscard,\s*\)\) \{\s*const restoredSearchParams = preserveQaParam\(searchParams, paramsFromFilters\(filters, selectedMatchId\)\);\s*const restoredSearchParamsKey = restoredSearchParams\.toString\(\);\s*lastWrittenSearchParamsKeyRef\.current = restoredSearchParamsKey;\s*setSearchParams\(restoredSearchParams, \{ replace: true \}\);\s*return;\s*\}\s*if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) commitFilters\(navigation\.filters\);\s*if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);/,
-  "URL navigation guards the whole transition once, restores the current canonical URL on rejection, and commits only after approval",
+  /if \(!navigationDecision\.shouldApplyNavigation\) \{\s*lastAcceptedSearchParamsKeyRef\.current = searchParamsKey;\s*return;\s*\}[\s\S]*?if \(!guardMatchesPageNavigation\([\s\S]*?\)\) \{\s*const restoredSearchParams = restoreRejectedMatchesSearchParams\(\s*lastAcceptedSearchParamsKeyRef\.current,\s*filters,\s*selectedMatchId,\s*\);[\s\S]*?lastWrittenSearchParamsKeyRef\.current = restoredSearchParamsKey;[\s\S]*?setSearchParams\(restoredSearchParams, \{ replace: true \}\);\s*return;\s*\}\s*lastAcceptedSearchParamsKeyRef\.current = searchParamsKey;\s*if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) commitFilters/,
+  "URL navigation records accepted echoes, restores rejected transitions from the prior accepted key, and records accepted external navigation",
+);
+assert.match(
+  matchesPageSource,
+  /useEffect\(\(\) => \{\s*if \(!hasLoadedOptions\(options\)\) return;[\s\S]*?\}, \[\s*favoriteController\.busy,\s*favoriteController\.confirmDiscard,\s*favoriteController\.dirty,\s*filters,\s*options,\s*\]\);/,
+  "filter validation retries after busy or dirty guard state changes",
 );
 assert.equal(
   matchesPageSource.includes("const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);"),
@@ -986,8 +1039,8 @@ assert.equal(
 );
 assert.match(
   matchesPageSource,
-  /const cleaned = validateFilters\(filters, options\);[\s\S]*?\}, \[filters, options\]\);/,
-  "filter validation reruns after URL navigation changes filters as well as after options load",
+  /const cleaned = validateFilters\(filters, options\);[\s\S]*?\}, \[\s*favoriteController\.busy,\s*favoriteController\.confirmDiscard,\s*favoriteController\.dirty,\s*filters,\s*options,\s*\]\);/,
+  "filter validation reruns after URL navigation, options load, or favorite guard state changes",
 );
 assert.equal(
   matchesPageSource.includes("if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;"),

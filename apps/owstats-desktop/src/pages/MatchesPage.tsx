@@ -10,6 +10,7 @@ import {
   filtersFromParams,
   hasLoadedOptions,
   paramsFromFilters,
+  restoreRejectedMatchesSearchParams,
   validateFilters,
 } from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
@@ -65,6 +66,7 @@ export function MatchesPage() {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const pageLifetimeRef = useRef(createMatchesPageLifetime());
   const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);
+  const lastAcceptedSearchParamsKeyRef = useRef(searchParamsKey);
   const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));
   const loadedFilterKeyRef = useRef(canHydrateCache ? cachedPage?.loadedFilterKey ?? "" : "");
   const currentFiltersRef = useRef(initialFilters);
@@ -162,7 +164,10 @@ export function MatchesPage() {
       lastWrittenSearchParamsKeyRef.current,
     );
     lastWrittenSearchParamsKeyRef.current = navigationDecision.nextLastWrittenSearchParamsKey;
-    if (!navigationDecision.shouldApplyNavigation) return;
+    if (!navigationDecision.shouldApplyNavigation) {
+      lastAcceptedSearchParamsKeyRef.current = searchParamsKey;
+      return;
+    }
     const navigation = chooseMatchesPageNavigationState(
       filtersFromParams(searchParams),
       searchParams.get("matchId"),
@@ -178,12 +183,17 @@ export function MatchesPage() {
       },
       favoriteController.confirmDiscard,
     )) {
-      const restoredSearchParams = preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId));
+      const restoredSearchParams = restoreRejectedMatchesSearchParams(
+        lastAcceptedSearchParamsKeyRef.current,
+        filters,
+        selectedMatchId,
+      );
       const restoredSearchParamsKey = restoredSearchParams.toString();
       lastWrittenSearchParamsKeyRef.current = restoredSearchParamsKey;
       setSearchParams(restoredSearchParams, { replace: true });
       return;
     }
+    lastAcceptedSearchParamsKeyRef.current = searchParamsKey;
     if (matchFiltersKey(navigation.filters) !== matchFiltersKey(filters)) commitFilters(navigation.filters);
     if (navigation.selectedMatchId !== selectedMatchId) setSelectedMatchIdSafely(navigation.selectedMatchId);
   }, [searchParamsKey]);
@@ -288,7 +298,13 @@ export function MatchesPage() {
     if (JSON.stringify(cleaned) !== JSON.stringify(filters)) {
       setFilters(cleaned);
     }
-  }, [filters, options]);
+  }, [
+    favoriteController.busy,
+    favoriteController.confirmDiscard,
+    favoriteController.dirty,
+    filters,
+    options,
+  ]);
 
   async function hydrateInitialMatches(nextFilters: MatchFilters) {
     const pageDataRequestId = ++pageDataRequestIdRef.current;
