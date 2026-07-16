@@ -76,6 +76,7 @@ fn inventory_treats_only_valid_wrapped_details_as_complete() {
         "failed-payload",
         "missing-kind",
         "unknown-kind",
+        "mismatched-id",
     ] {
         conn.execute(
             "INSERT INTO matches (
@@ -116,6 +117,11 @@ fn inventory_treats_only_valid_wrapped_details_as_complete() {
             "custom",
             r#"{"match_id":"unknown-kind","match_kind":"custom","payload":{"code":0,"data":{}}}"#,
         ),
+        (
+            "mismatched-id",
+            "normal",
+            r#"{"match_id":"different-id","match_kind":"normal","payload":{"code":0,"data":{}}}"#,
+        ),
     ] {
         conn.execute(
             "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
@@ -138,6 +144,7 @@ fn inventory_treats_only_valid_wrapped_details_as_complete() {
             "failed-payload",
             "missing-kind",
             "unknown-kind",
+            "mismatched-id",
         ]
         .into_iter()
         .map(str::to_string)

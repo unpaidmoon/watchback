@@ -1,5 +1,5 @@
 use crate::db::OwDatabase;
-use crate::importer::is_valid_match_detail;
+use crate::importer::is_valid_match_detail_for;
 use anyhow::Result;
 use rusqlite::params;
 use serde_json::Value;
@@ -38,7 +38,10 @@ pub fn load_season_sync_inventory(db: &OwDatabase, season: i64) -> Result<Season
         let parsed_detail = raw_detail_json
             .as_deref()
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-        if parsed_detail.as_ref().is_some_and(is_valid_match_detail) {
+        if parsed_detail
+            .as_ref()
+            .is_some_and(|detail| is_valid_match_detail_for(detail, &match_id))
+        {
             inventory.detail_ids.insert(match_id);
         }
     }

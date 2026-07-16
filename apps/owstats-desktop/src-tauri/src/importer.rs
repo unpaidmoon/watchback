@@ -879,6 +879,11 @@ pub(crate) fn is_valid_match_detail(detail: &Value) -> bool {
         })
 }
 
+pub(crate) fn is_valid_match_detail_for(detail: &Value, expected_match_id: &str) -> bool {
+    is_valid_match_detail(detail)
+        && detail.get("match_id").and_then(Value::as_str) == Some(expected_match_id)
+}
+
 fn duration_from_detail(detail: Option<&&Value>) -> i64 {
     let Some(detail) = detail else {
         return 0;
