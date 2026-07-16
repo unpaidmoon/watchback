@@ -129,6 +129,62 @@ fn inventory_tracks_latest_watermark_and_ids_per_mode() {
 }
 
 #[test]
+fn inventory_infers_modes_for_incremental_entries_without_valid_details() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("incomplete-normal", "sport", 10),
+                entry("incomplete-fight", "QuickFight", 20),
+            ],
+            vec![],
+            vec![],
+        ),
+        HashSet::from([
+            "incomplete-normal".to_string(),
+            "incomplete-fight".to_string(),
+        ]),
+    )
+    .unwrap();
+    let conn = db.connect().unwrap();
+    let empty_kinds = conn
+        .query_row(
+            "SELECT COUNT(*) FROM matches WHERE season=23 AND match_kind=''",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(empty_kinds, 2);
+    drop(conn);
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+    let normal = inventory
+        .modes
+        .get(&SeasonModeKey::new("normal", "sport"))
+        .unwrap();
+    let fight = inventory
+        .modes
+        .get(&SeasonModeKey::new("fight", "QuickFight"))
+        .unwrap();
+
+    assert_eq!(
+        normal.match_ids,
+        HashSet::from(["incomplete-normal".to_string()])
+    );
+    assert!(normal.detail_ids.is_empty());
+    assert_eq!(normal.latest_begin_ts, Some(10));
+    assert_eq!(
+        fight.match_ids,
+        HashSet::from(["incomplete-fight".to_string()])
+    );
+    assert!(fight.detail_ids.is_empty());
+    assert_eq!(fight.latest_begin_ts, Some(20));
+}
+
+#[test]
 fn inventory_treats_only_valid_wrapped_details_as_complete() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));

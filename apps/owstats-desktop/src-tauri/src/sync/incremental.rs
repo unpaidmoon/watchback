@@ -21,6 +21,21 @@ impl SeasonModeKey {
     }
 }
 
+fn normalized_season_mode_key(match_kind: &str, game_mode: &str) -> Option<SeasonModeKey> {
+    let game_mode = game_mode.trim();
+    if game_mode.is_empty() {
+        return None;
+    }
+    let normalized_kind = match match_kind.trim() {
+        "normal" => Some("normal"),
+        "fight" => Some("fight"),
+        _ if super::FIGHT_MODES.contains(&game_mode) => Some("fight"),
+        _ if super::NORMAL_MODES.contains(&game_mode) => Some("normal"),
+        _ => None,
+    }?;
+    Some(SeasonModeKey::new(normalized_kind, game_mode))
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModeSyncInventory {
     pub match_ids: HashSet<String>,
@@ -85,11 +100,8 @@ pub fn load_season_sync_inventory(db: &OwDatabase, season: i64) -> Result<Season
         if has_valid_detail {
             inventory.detail_ids.insert(match_id.clone());
         }
-        if !match_kind.trim().is_empty() && !game_mode.trim().is_empty() {
-            let mode = inventory
-                .modes
-                .entry(SeasonModeKey::new(match_kind, game_mode))
-                .or_default();
+        if let Some(mode_key) = normalized_season_mode_key(&match_kind, &game_mode) {
+            let mode = inventory.modes.entry(mode_key).or_default();
             mode.match_ids.insert(match_id.clone());
             if has_valid_detail {
                 mode.detail_ids.insert(match_id);
