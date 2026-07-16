@@ -4,13 +4,13 @@ use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
-    sync_season_with_credentials_and_target_paths_output_dir_base_url, AccountLoginResult,
-    ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus, FilterOptions,
-    FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LoginTargetStatus,
-    MatchDetailView, MatchFavoriteRequest, MatchFavoriteView, MatchFilters, MatchSummary,
-    OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview,
-    PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis,
-    SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
+    AccountLoginResult, ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus,
+    FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary,
+    LoginTargetStatus, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView, MatchFilters,
+    MatchSummary, OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest,
+    PersonalSeasonReview, PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse,
+    SeasonAnalysis, SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -560,7 +560,7 @@ pub async fn sync_season(
     .map_err(to_message)?;
     let db = account.database();
     let emit_app = app.clone();
-    sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &root,
         &credential_path,

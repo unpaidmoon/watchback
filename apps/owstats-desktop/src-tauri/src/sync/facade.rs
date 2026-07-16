@@ -143,11 +143,33 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
     credential_path: &Path,
     target_path: &Path,
     season: i64,
+    customer_base_url: &str,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    sync_season_with_credentials_and_target_paths_with_mode_base_url(
+        db,
+        project_root,
+        credential_path,
+        target_path,
+        season,
+        crate::models::SyncMode::FullFetch,
+        customer_base_url,
+        progress,
+    )
+    .await
+}
+
+pub async fn sync_season_with_credentials_and_target_paths_with_mode_base_url(
+    db: &OwDatabase,
+    project_root: &Path,
+    credential_path: &Path,
+    target_path: &Path,
+    season: i64,
     mode: crate::models::SyncMode,
     customer_base_url: &str,
     progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
-    sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         db,
         &project_root.join("data").join("players"),
         credential_path,
@@ -161,6 +183,28 @@ pub async fn sync_season_with_credentials_and_target_paths_base_url(
 }
 
 pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    db: &OwDatabase,
+    season_output_dir: &Path,
+    credential_path: &Path,
+    target_path: &Path,
+    season: i64,
+    customer_base_url: &str,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+        db,
+        season_output_dir,
+        credential_path,
+        target_path,
+        season,
+        crate::models::SyncMode::FullFetch,
+        customer_base_url,
+        progress,
+    )
+    .await
+}
+
+pub async fn sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
     db: &OwDatabase,
     season_output_dir: &Path,
     credential_path: &Path,
@@ -201,6 +245,26 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
 }
 
 pub async fn sync_season_with_current_account_credentials_path_output_dir_base_url(
+    db: &OwDatabase,
+    season_output_dir: &Path,
+    credential_path: &Path,
+    season: i64,
+    customer_base_url: &str,
+    progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    sync_season_with_current_account_credentials_path_output_dir_with_mode_base_url(
+        db,
+        season_output_dir,
+        credential_path,
+        season,
+        crate::models::SyncMode::FullFetch,
+        customer_base_url,
+        progress,
+    )
+    .await
+}
+
+pub async fn sync_season_with_current_account_credentials_path_output_dir_with_mode_base_url(
     db: &OwDatabase,
     season_output_dir: &Path,
     credential_path: &Path,
@@ -442,20 +506,11 @@ fn finalize_fetched_season(
         attempted_detail_ids,
     )?;
     let (database_matches, database_details) =
-        incremental::query_season_database_totals(db, season)?;
-    let complete_payload =
-        rebuild_complete_season_payload(db, season, cached_player).map_err(|error| {
-            anyhow!(
-                "数据库更新成功，但本地快照更新失败：{}",
-                crate::redaction::redact_sensitive_text(&error.to_string())
-            )
-        })?;
-    write_season_payload(season_output_dir, season, &complete_payload).map_err(|error| {
-        anyhow!(
-            "数据库更新成功，但本地快照更新失败：{}",
-            crate::redaction::redact_sensitive_text(&error.to_string())
-        )
-    })?;
+        query_season_database_totals_after_commit(db, season)?;
+    let complete_payload = rebuild_complete_season_payload(db, season, cached_player)
+        .map_err(committed_snapshot_update_error)?;
+    write_season_payload(season_output_dir, season, &complete_payload)
+        .map_err(committed_snapshot_update_error)?;
     summary.mode = mode;
     summary.list_entries_seen = fetch.entries;
     summary.new_matches = selection.new_matches;
@@ -473,6 +528,20 @@ fn finalize_fetched_season(
     };
     summary.quick_scan_limited = fetch.quick_scan_limited;
     Ok(summary)
+}
+
+fn query_season_database_totals_after_commit(
+    db: &OwDatabase,
+    season: i64,
+) -> Result<(usize, usize)> {
+    incremental::query_season_database_totals(db, season).map_err(committed_snapshot_update_error)
+}
+
+fn committed_snapshot_update_error(error: impl std::fmt::Display) -> anyhow::Error {
+    anyhow!(
+        "数据库更新成功，但本地快照更新失败：{}",
+        crate::redaction::redact_sensitive_text(&error.to_string())
+    )
 }
 
 pub async fn dump_season_json(
@@ -524,4 +593,33 @@ pub async fn dump_season_json_with_base_url(
         failed_details,
         skipped_duplicates,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn committed_statistics_failure_uses_snapshot_boundary_message() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temp.path());
+
+        let error = query_season_database_totals_after_commit(&db, 23).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .starts_with("数据库更新成功，但本地快照更新失败："));
+    }
+
+    #[test]
+    fn committed_snapshot_error_redacts_sensitive_text() {
+        let error = committed_snapshot_update_error(anyhow!(
+            "request failed token=synthetic-secret customerToken=synthetic-player-key"
+        ));
+        let message = error.to_string();
+
+        assert!(message.starts_with("数据库更新成功，但本地快照更新失败："));
+        assert!(!message.contains("synthetic-secret"));
+        assert!(!message.contains("synthetic-player-key"));
+    }
 }

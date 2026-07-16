@@ -78,8 +78,11 @@ pub use facade::{
     dump_season_json, dump_season_json_with_base_url, sync_season, sync_season_with_base_url,
     sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
+    sync_season_with_credentials_and_target_paths_with_mode_base_url,
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
     sync_season_with_current_account_credentials_path_output_dir_base_url,
+    sync_season_with_current_account_credentials_path_output_dir_with_mode_base_url,
     sync_season_with_progress,
 };
 pub use incremental::{

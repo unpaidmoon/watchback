@@ -5,7 +5,10 @@ use owstats_desktop_lib::player_target::{
     PlayerTarget,
 };
 use owstats_desktop_lib::{
-    sync_season_with_credentials_and_target_paths_output_dir_base_url, OwDatabase, SyncMode,
+    sync_season_with_credentials_and_target_paths_base_url,
+    sync_season_with_credentials_and_target_paths_output_dir_base_url,
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
+    sync_season_with_current_account_credentials_path_output_dir_base_url, OwDatabase, SyncMode,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -111,7 +114,7 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
     let db = OwDatabase::new(&database_path);
     let server = spawn_request_counting_server();
 
-    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let error = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -142,6 +145,40 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
         assert!(!error.contains(secret));
     }
     server.join();
+}
+
+#[tokio::test]
+async fn legacy_target_path_facades_accept_their_original_signatures() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    let credential_path = temp.path().join("missing-credentials.json");
+    let target_path = temp.path().join("missing-target.json");
+
+    let project_error = sync_season_with_credentials_and_target_paths_base_url(
+        &db,
+        temp.path(),
+        &credential_path,
+        &target_path,
+        23,
+        "http://127.0.0.1:1/customer",
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+    let output_error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &temp.path().join("seasons"),
+        &credential_path,
+        &target_path,
+        23,
+        "http://127.0.0.1:1/customer",
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+
+    assert!(!project_error.to_string().is_empty());
+    assert!(!output_error.to_string().is_empty());
 }
 
 #[tokio::test]
@@ -1040,7 +1077,7 @@ async fn quick_update_without_local_watermark_rejects_before_network_or_database
     let db_path = temp.path().join("sync.sqlite3");
     let db = OwDatabase::new(&db_path);
 
-    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let error = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1076,18 +1113,16 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
     let mut progresses = Vec::new();
 
-    let summary =
-        owstats_desktop_lib::sync_season_with_current_account_credentials_path_output_dir_base_url(
-            &db,
-            &season_dir,
-            &app_data.join(".dashen_credentials.json"),
-            23,
-            SyncMode::FullFetch,
-            &format!("{}/customer", server.base_url),
-            |progress| progresses.push(progress),
-        )
-        .await
-        .unwrap();
+    let summary = sync_season_with_current_account_credentials_path_output_dir_base_url(
+        &db,
+        &season_dir,
+        &app_data.join(".dashen_credentials.json"),
+        23,
+        &format!("{}/customer", server.base_url),
+        |progress| progresses.push(progress),
+    )
+    .await
+    .unwrap();
 
     let raw_path = season_dir.join("local_s23_full_season.json");
     assert!(raw_path.exists());
@@ -1132,7 +1167,7 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
     let mut phases = Vec::new();
 
-    let first = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let first = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1184,7 +1219,7 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     );
     server.requests.lock().unwrap().clear();
 
-    let second = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let second = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1227,7 +1262,7 @@ async fn desktop_sync_dispatches_full_then_quick_and_full_refetches_all_details(
     );
     server.requests.lock().unwrap().clear();
 
-    let refreshed = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let refreshed = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1297,7 +1332,7 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
     .unwrap();
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
     let populated = spawn_successful_desktop_sync_server(false);
-    sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1313,7 +1348,7 @@ async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
     let before = std::fs::read(&snapshot_path).unwrap();
 
     let empty = spawn_successful_desktop_sync_server(true);
-    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let error = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1365,7 +1400,7 @@ async fn desktop_incremental_snapshot_failure_reports_committed_database_boundar
     let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
     let server = spawn_successful_desktop_sync_server(false);
 
-    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let error = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &blocked_output,
         &credential_path,
@@ -1438,7 +1473,7 @@ async fn desktop_incremental_counts_only_valid_database_details_after_failed_rep
     drop(conn);
     let server = spawn_failed_detail_metric_server();
 
-    let summary = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let summary = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
@@ -1530,7 +1565,7 @@ async fn full_fetch_invalid_refresh_preserves_old_detail_and_player_index_and_re
         .unwrap();
     let server = spawn_failed_detail_metric_server();
 
-    let summary = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+    let summary = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
         &db,
         &season_dir,
         &credential_path,
