@@ -65,6 +65,7 @@ struct ModeFetchPages {
 mod client;
 mod facade;
 mod fetch;
+mod incremental;
 mod payload;
 mod persist;
 
@@ -80,5 +81,8 @@ pub use facade::{
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
     sync_season_with_current_account_credentials_path_output_dir_base_url,
     sync_season_with_progress,
+};
+pub use incremental::{
+    load_season_sync_inventory, select_detail_entries, DetailSelection, SeasonSyncInventory,
 };
 pub use persist::sync_import_parts;
