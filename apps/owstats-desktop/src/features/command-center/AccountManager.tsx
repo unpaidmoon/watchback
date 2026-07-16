@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import type { AccountSummary } from "../../shared/types";
 
 export type AccountManagerProps = {
@@ -13,22 +14,34 @@ export type AccountManagerProps = {
 type AccountRemovalDialogProps = {
   account: AccountSummary;
   busy: boolean;
+  fallbackFocusRef: RefObject<HTMLElement>;
   onCancel: () => void;
   onConfirm: () => void;
 };
 
-export function AccountRemovalDialog({ account, busy, onCancel, onConfirm }: AccountRemovalDialogProps) {
+export function AccountRemovalDialog({
+  account,
+  busy,
+  fallbackFocusRef,
+  onCancel,
+  onConfirm,
+}: AccountRemovalDialogProps) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const busyRef = useRef(busy);
+  const onCancelRef = useRef(onCancel);
+  const confirmedRef = useRef(false);
+  busyRef.current = busy;
+  onCancelRef.current = onCancel;
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelButtonRef.current?.focus();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) {
+      if (event.key === "Escape" && !busyRef.current) {
         event.preventDefault();
-        onCancel();
+        onCancelRef.current();
         return;
       }
 
@@ -55,9 +68,12 @@ export function AccountRemovalDialog({ account, busy, onCancel, onConfirm }: Acc
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
+      const previousFocusUnavailable =
+        !previousFocus?.isConnected || (previousFocus instanceof HTMLButtonElement && previousFocus.disabled);
+      const focusTarget = confirmedRef.current || previousFocusUnavailable ? fallbackFocusRef.current : previousFocus;
+      focusTarget?.focus();
     };
-  }, [busy, onCancel]);
+  }, [fallbackFocusRef]);
 
   return (
     <div className="accountRemovalBackdrop" role="presentation" onClick={busy ? undefined : onCancel}>
@@ -77,7 +93,16 @@ export function AccountRemovalDialog({ account, busy, onCancel, onConfirm }: Acc
           <button ref={cancelButtonRef} type="button" onClick={onCancel} disabled={busy}>
             取消
           </button>
-          <button ref={confirmButtonRef} className="dangerButton" type="button" onClick={onConfirm} disabled={busy}>
+          <button
+            ref={confirmButtonRef}
+            className="dangerButton"
+            type="button"
+            onClick={() => {
+              confirmedRef.current = true;
+              onConfirm();
+            }}
+            disabled={busy}
+          >
             永久退出账号
           </button>
         </div>
@@ -110,6 +135,7 @@ export function AccountManager({
   onRemove,
 }: AccountManagerProps) {
   const [pendingRemoval, setPendingRemoval] = useState<AccountSummary | null>(null);
+  const managerHeadingRef = useRef<HTMLHeadingElement>(null);
   const isBusy = busyAction !== null;
 
   function confirmRemoval() {
@@ -124,7 +150,9 @@ export function AccountManager({
   return (
     <section className="accountManager" aria-labelledby="account-manager-title">
       <div className="accountManagerHeading">
-        <h2 id="account-manager-title">账号管理</h2>
+        <h2 ref={managerHeadingRef} id="account-manager-title" tabIndex={-1}>
+          账号管理
+        </h2>
         <p>每个账号的凭证和本地数据独立保存。</p>
       </div>
 
@@ -148,7 +176,7 @@ export function AccountManager({
                 <span className="accountManagerAccountName">{account.battleTag}</span>
                 <span className="accountManagerAccountMeta">{credentialLabel(account.credentialState)}</span>
               </div>
-              <div className="accountManagerActions" aria-label={`${account.battleTag} 的账号操作`}>
+              <div className="accountManagerActions" role="group" aria-label={`${account.battleTag} 的账号操作`}>
                 {account.isActive ? (
                   <button type="button" disabled>
                     当前账号
@@ -179,6 +207,7 @@ export function AccountManager({
         <AccountRemovalDialog
           account={pendingRemoval}
           busy={isBusy}
+          fallbackFocusRef={managerHeadingRef}
           onCancel={() => setPendingRemoval(null)}
           onConfirm={confirmRemoval}
         />

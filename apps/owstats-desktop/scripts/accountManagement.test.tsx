@@ -39,6 +39,14 @@ assert.equal((html.match(/退出账号/g) ?? []).length, 2);
 assert.match(html, /disabled=""[^>]*>当前账号</);
 assert.match(html, />切换账号</);
 assert.doesNotMatch(html, /roleId|token|customerToken/);
+assert.match(html, /<h2[^>]*tabindex="-1"[^>]*>账号管理<\/h2>/);
+
+const accountActionGroups = [...html.matchAll(/<div class="accountManagerActions" role="group"[^>]*>([\s\S]*?)<\/div>/g)];
+assert.equal(accountActionGroups.length, 2, "每个账号行都提供一个具名操作组");
+for (const group of accountActionGroups) {
+  assert.equal((group[1]?.match(/<button/g) ?? []).length, 3, "每个账号行始终保留三个操作位置");
+  assert.match(group[0], /aria-label="[^"]+ 的账号操作"/);
+}
 
 const removalDialog = renderToStaticMarkup(
   createElement(AccountRemovalDialog, {
@@ -51,6 +59,7 @@ const removalDialog = renderToStaticMarkup(
       lastUsedAt: "2026-07-16T00:00:00Z",
     },
     busy: false,
+    fallbackFocusRef: { current: null },
     onCancel: () => undefined,
     onConfirm: () => undefined,
   }),
@@ -58,7 +67,10 @@ const removalDialog = renderToStaticMarkup(
 
 assert.match(removalDialog, /role="alertdialog"/);
 assert.match(removalDialog, /aria-modal="true"/);
+assert.match(removalDialog, /aria-labelledby="account-removal-title"/);
+assert.match(removalDialog, /aria-describedby="account-removal-description"/);
 assert.match(removalDialog, /Tester#5479/);
 assert.match(removalDialog, /永久删除该账号保存的凭证信息和对应本地数据库/);
 assert.match(removalDialog, />取消</);
 assert.match(removalDialog, />永久退出账号</);
+assert.equal((removalDialog.match(/<button/g) ?? []).length, 2, "确认框只有取消和永久退出两个清晰动作");

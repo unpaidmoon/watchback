@@ -83,7 +83,12 @@ assert.match(types, /type CredentialLoginResult\s*=\s*\{[\s\S]*?status:\s*Creden
 assert.match(types, /type ClearPlayerTargetResult\s*=\s*\{[\s\S]*?cleared:\s*boolean;[\s\S]*?target:\s*LoginTargetStatus;/, "clear result returns the replacement login target status");
 assert.doesNotMatch(types, /type CredentialStatus\s*=\s*\{[^}]*roleId/s, "public credential status does not expose roleId");
 assert.doesNotMatch(types, /type PlayerProfile\s*=\s*\{[^}]*roleId/s, "public player profile does not expose roleId");
-assert.match(models, /struct CredentialStatus\s*\{[\s\S]*?#\[serde\(skip_serializing\)\][\s\S]*?role_id:\s*Option<i64>/, "credential roleId is never serialized to the frontend");
+const credentialStatusBody = models.match(/pub struct CredentialStatus\s*\{([^}]*)\}/s)?.[1];
+const playerProfileBody = models.match(/pub struct PlayerProfile\s*\{([^}]*)\}/s)?.[1];
+assert.ok(credentialStatusBody, "Rust CredentialStatus struct exists");
+assert.ok(playerProfileBody, "Rust PlayerProfile struct exists");
+assert.match(credentialStatusBody, /#\[serde\(skip_serializing\)\]\s*pub role_id:\s*Option<i64>/, "credential roleId is never serialized to the frontend");
+assert.match(playerProfileBody, /#\[serde\(skip_serializing\)\]\s*pub role_id:\s*Option<i64>/, "player profile roleId is never serialized to the frontend");
 
 assert.equal(normalizeLoginTargetName(" Alice＃1234 "), "alice#1234", "frontend target normalization matches backend hash and case handling");
 assert.notEqual(
