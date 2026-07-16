@@ -227,6 +227,23 @@ export function guardMatchFilterChange(
   );
 }
 
+export function guardMatchesPageNavigation(
+  transition: {
+    currentFilters: MatchFilters;
+    nextFilters: MatchFilters;
+    currentSelectedMatchId: string | null;
+    nextSelectedMatchId: string | null;
+  },
+  confirmDiscard: () => boolean,
+) {
+  const filtersUnchanged =
+    matchFiltersKey(transition.currentFilters) ===
+    matchFiltersKey(transition.nextFilters);
+  const matchUnchanged =
+    transition.currentSelectedMatchId === transition.nextSelectedMatchId;
+  return (filtersUnchanged && matchUnchanged) || confirmDiscard();
+}
+
 export type MatchesPagePreloadLoaders = {
   getOverview: () => Promise<Overview>;
   listMatchFilters: () => Promise<FilterOptions>;

@@ -14,6 +14,7 @@ import {
   computeMatchAnchorScrollTop,
   getMatchesPageCache,
   guardMatchFilterChange,
+  guardMatchesPageNavigation,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
   invalidateStandaloneMatchFavoritePersistence,
@@ -729,10 +730,83 @@ assert.equal(
   true,
 );
 assert.equal(acceptedFilterConfirmCount, 1);
+
+let unchangedNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 23, favoriteOnly: true },
+      nextFilters: { favoriteOnly: true, season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-a",
+    },
+    () => {
+      unchangedNavigationConfirmCount += 1;
+      return false;
+    },
+  ),
+  true,
+);
+assert.equal(unchangedNavigationConfirmCount, 0);
+
+let matchOnlyNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 23 },
+      nextFilters: { season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-b",
+    },
+    () => {
+      matchOnlyNavigationConfirmCount += 1;
+      return false;
+    },
+  ),
+  false,
+);
+assert.equal(matchOnlyNavigationConfirmCount, 1, "match-only URL transitions can be rejected while dirty or busy");
+
+let filterOnlyNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 22 },
+      nextFilters: { season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-a",
+    },
+    () => {
+      filterOnlyNavigationConfirmCount += 1;
+      return false;
+    },
+  ),
+  false,
+);
+assert.equal(filterOnlyNavigationConfirmCount, 1);
+
+let combinedNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 22 },
+      nextFilters: { season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-b",
+    },
+    () => {
+      combinedNavigationConfirmCount += 1;
+      return true;
+    },
+  ),
+  true,
+);
+assert.equal(combinedNavigationConfirmCount, 1, "a combined filter and match transition confirms exactly once");
+
 assert.match(
   matchesPageSource,
-  /function setFilters\(nextFilters: MatchFilters\) \{\s*if \(!guardMatchFilterChange\(currentFiltersRef\.current, nextFilters, favoriteController\.confirmDiscard\)\) return false;/,
-  "the central setFilters path must reject changed filters before mutating refs or state",
+  /function setFilters\(nextFilters: MatchFilters\) \{\s*if \(!guardMatchFilterChange\(currentFiltersRef\.current, nextFilters, favoriteController\.confirmDiscard\)\) return false;\s*commitFilters\(nextFilters\);[\s\S]*?function commitFilters\(nextFilters: MatchFilters\) \{/,
+  "UI filter entry points guard before using the internal filter commit path",
 );
 const favoritePersistedSource = matchesPageSource.slice(
   matchesPageSource.indexOf("const handleFavoritePersisted"),
@@ -817,8 +891,8 @@ assert.match(
 assert.equal(matchesPageSource.includes("const searchParamsKey = searchParams.toString();"), true, "MatchesPage tracks same-instance URL changes");
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \{\s*const navigationDecision = consumeMatchesSearchParamsNavigation\(\s*searchParamsKey,\s*lastWrittenSearchParamsKeyRef\.current,\s*\);\s*lastWrittenSearchParamsKeyRef\.current = navigationDecision\.nextLastWrittenSearchParamsKey;\s*if \(!navigationDecision\.shouldApplyNavigation\) return;\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(\s*matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\) &&\s*!setFilters\(navigation\.filters\)\s*\) return;[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
-  "URL navigation consumes local echoes while external navigation still updates filters and selection",
+  /const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(!guardMatchesPageNavigation\(\s*\{\s*currentFilters: filters,\s*nextFilters: navigation\.filters,\s*currentSelectedMatchId: selectedMatchId,\s*nextSelectedMatchId: navigation\.selectedMatchId,\s*\},\s*favoriteController\.confirmDiscard,\s*\)\) \{\s*const restoredSearchParams = preserveQaParam\(searchParams, paramsFromFilters\(filters, selectedMatchId\)\);\s*const restoredSearchParamsKey = restoredSearchParams\.toString\(\);\s*lastWrittenSearchParamsKeyRef\.current = restoredSearchParamsKey;\s*setSearchParams\(restoredSearchParams, \{ replace: true \}\);\s*return;\s*\}\s*if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) commitFilters\(navigation\.filters\);\s*if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);/,
+  "URL navigation guards the whole transition once, restores the current canonical URL on rejection, and commits only after approval",
 );
 assert.equal(
   matchesPageSource.includes("const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);"),

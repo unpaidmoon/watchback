@@ -25,6 +25,7 @@ import {
   createMatchesPageLifetime,
   getMatchesPageCache,
   guardMatchFilterChange,
+  guardMatchesPageNavigation,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
   matchFiltersKey,
@@ -168,10 +169,22 @@ export function MatchesPage() {
       getMatchesPageCache(),
       hasExplicitMatchFilterParams(searchParams),
     );
-    if (
-      matchFiltersKey(navigation.filters) !== matchFiltersKey(filters) &&
-      !setFilters(navigation.filters)
-    ) return;
+    if (!guardMatchesPageNavigation(
+      {
+        currentFilters: filters,
+        nextFilters: navigation.filters,
+        currentSelectedMatchId: selectedMatchId,
+        nextSelectedMatchId: navigation.selectedMatchId,
+      },
+      favoriteController.confirmDiscard,
+    )) {
+      const restoredSearchParams = preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId));
+      const restoredSearchParamsKey = restoredSearchParams.toString();
+      lastWrittenSearchParamsKeyRef.current = restoredSearchParamsKey;
+      setSearchParams(restoredSearchParams, { replace: true });
+      return;
+    }
+    if (matchFiltersKey(navigation.filters) !== matchFiltersKey(filters)) commitFilters(navigation.filters);
     if (navigation.selectedMatchId !== selectedMatchId) setSelectedMatchIdSafely(navigation.selectedMatchId);
   }, [searchParamsKey]);
 
@@ -354,13 +367,17 @@ export function MatchesPage() {
 
   function setFilters(nextFilters: MatchFilters) {
     if (!guardMatchFilterChange(currentFiltersRef.current, nextFilters, favoriteController.confirmDiscard)) return false;
+    commitFilters(nextFilters);
+    return true;
+  }
+
+  function commitFilters(nextFilters: MatchFilters) {
     currentFiltersRef.current = nextFilters;
     if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
       setBusy(true);
       setError(null);
     }
     setFiltersState(nextFilters);
-    return true;
   }
 
   function retryMatches() {
