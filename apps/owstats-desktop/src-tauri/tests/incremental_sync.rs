@@ -1,6 +1,7 @@
 use owstats_desktop_lib::{
     import_incremental_payload_value_embedded, import_payload_value_embedded,
-    load_season_sync_inventory, select_detail_entries, OwDatabase, SeasonSyncInventory,
+    load_season_sync_inventory, rebuild_complete_season_payload, select_detail_entries,
+    write_season_payload, OwDatabase, SeasonSyncInventory,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -575,4 +576,219 @@ fn incremental_import_rejects_malformed_detail_identity_and_kind() {
     assert_eq!(player_ids("unknown-kind"), vec!["unknown-kind-old"]);
     assert_eq!(player_ids("valid-normal"), vec!["normal-new"]);
     assert_eq!(fight_players, vec!["fight-new"]);
+}
+
+#[test]
+fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("snapshot-old", "SportPreset", 10),
+                entry("snapshot-new", "SportPreset", 20),
+            ],
+            vec![
+                normal_detail("snapshot-old", 100, "old-player"),
+                normal_detail("snapshot-new", 200, "new-player"),
+            ],
+            vec![json!({
+                "match_id": "snapshot-old",
+                "error_type": "detail_fetch",
+                "message": "synthetic failure"
+            })],
+        ),
+    )
+    .unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE matches
+         SET raw_entry_json = json_set(raw_entry_json, '$.nested.customerToken', 'db-secret')
+         WHERE match_id = 'snapshot-old'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE match_details
+         SET raw_detail_json = json_set(raw_detail_json, '$.payload.data.cookie', 'db-cookie')
+         WHERE match_id = 'snapshot-new'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE sync_errors
+         SET raw_json = json_set(raw_json, '$.authorization', 'db-authorization')
+         WHERE season = 23",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let current_delta = json!({
+        "season": 23,
+        "profile_card": {"name": "synthetic-profile"},
+        "count_info": {"fetched": 1},
+        "list_pages": [{"page": 1}],
+        "customerToken": "current-secret",
+        "nested": {"credential": "current-credential"},
+        "matches": {
+            "total": 1,
+            "entries": [entry("snapshot-new", "SportPreset", 20)],
+            "details": [normal_detail("snapshot-new", 200, "new-player")],
+            "detail_errors": []
+        }
+    });
+
+    let rebuilt = rebuild_complete_season_payload(&db, 23, &current_delta).unwrap();
+    let entries = rebuilt["matches"]["entries"].as_array().unwrap();
+    let details = rebuilt["matches"]["details"].as_array().unwrap();
+    assert_eq!(rebuilt["matches"]["total"], 2);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(details.len(), 2);
+    assert_eq!(
+        rebuilt["matches"]["detail_errors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(entries[0]["matchId"], "snapshot-new");
+    assert_eq!(entries[1]["matchId"], "snapshot-old");
+    assert_eq!(rebuilt["profile_card"]["name"], "synthetic-profile");
+    assert_eq!(rebuilt["count_info"]["fetched"], 1);
+    assert_eq!(rebuilt["list_pages"][0]["page"], 1);
+
+    let serialized = serde_json::to_string(&rebuilt)
+        .unwrap()
+        .to_ascii_lowercase();
+    for sensitive in [
+        "token",
+        "customertoken",
+        "cookie",
+        "authorization",
+        "credential",
+        "db-secret",
+        "db-cookie",
+        "db-authorization",
+        "current-secret",
+        "current-credential",
+    ] {
+        assert!(
+            !serialized.contains(sensitive),
+            "rebuilt snapshot leaked {sensitive}"
+        );
+    }
+}
+
+#[test]
+fn rebuilt_snapshot_is_scoped_to_requested_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            22,
+            vec![entry("snapshot-s22", "SportPreset", 30)],
+            vec![normal_detail("snapshot-s22", 300, "s22-player")],
+            vec![json!({
+                "match_id": "snapshot-s22",
+                "error_type": "detail_fetch",
+                "message": "s22-only"
+            })],
+        ),
+    )
+    .unwrap();
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![entry("snapshot-s23", "SportPreset", 20)],
+            vec![normal_detail("snapshot-s23", 200, "s23-player")],
+            vec![json!({
+                "match_id": "snapshot-s23",
+                "error_type": "detail_fetch",
+                "message": "s23-only"
+            })],
+        ),
+    )
+    .unwrap();
+
+    let rebuilt =
+        rebuild_complete_season_payload(&db, 23, &json!({"season": 23, "matches": {}})).unwrap();
+    let serialized = serde_json::to_string(&rebuilt).unwrap();
+    assert!(serialized.contains("snapshot-s23"));
+    assert!(serialized.contains("s23-only"));
+    assert!(!serialized.contains("snapshot-s22"));
+    assert!(!serialized.contains("s22-only"));
+}
+
+#[test]
+fn rebuilt_snapshot_malformed_database_json_is_safe_and_preserves_existing_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+            begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+            mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+         ) VALUES (
+            'snapshot-malformed', 23, 'preset', 'sport', 'normal', 'win', 'map', 'hero',
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
+            '{customerToken:private-malformed-secret', 'now'
+         )",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let output_dir = temp.path().join("seasons");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let existing_path = output_dir.join("local_s23_full_season.json");
+    let existing = br#"{"stable":"old-complete-snapshot"}"#;
+    std::fs::write(&existing_path, existing).unwrap();
+
+    let error = rebuild_complete_season_payload(&db, 23, &json!({"season": 23, "matches": {}}))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("match entry"));
+    assert!(!error.contains("customerToken"));
+    assert!(!error.contains("private-malformed-secret"));
+    assert_eq!(std::fs::read(&existing_path).unwrap(), existing);
+}
+
+#[test]
+fn atomic_snapshot_replaces_existing_json_without_temp_residue() {
+    let temp = tempfile::tempdir().unwrap();
+    let output_dir = temp.path().join("nested").join("seasons");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let path = output_dir.join("local_s23_full_season.json");
+    std::fs::write(&path, br#"{"state":"old"}"#).unwrap();
+    let replacement = json!({
+        "state": "complete",
+        "matches": {
+            "total": 2,
+            "entries": [{"matchId": "old"}, {"matchId": "new"}],
+            "details": [{"match_id": "old"}, {"match_id": "new"}],
+            "detail_errors": []
+        }
+    });
+
+    let written = write_season_payload(&output_dir, 23, &replacement).unwrap();
+
+    assert_eq!(written, path);
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&written).unwrap()).unwrap();
+    assert_eq!(parsed, replacement);
+    let remaining = std::fs::read_dir(&output_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining,
+        vec![std::ffi::OsString::from("local_s23_full_season.json")]
+    );
 }

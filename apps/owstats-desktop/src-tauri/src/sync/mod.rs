@@ -68,11 +68,11 @@ mod fetch;
 mod incremental;
 mod payload;
 mod persist;
+mod snapshot;
 
 use client::*;
 use fetch::*;
 use payload::*;
-use persist::*;
 
 pub use facade::{
     dump_season_json, dump_season_json_with_base_url, sync_season, sync_season_with_base_url,
@@ -86,3 +86,7 @@ pub use incremental::{
     load_season_sync_inventory, select_detail_entries, DetailSelection, SeasonSyncInventory,
 };
 pub use persist::sync_import_parts;
+#[doc(hidden)]
+pub use persist::write_season_payload;
+#[doc(hidden)]
+pub use snapshot::rebuild_complete_season_payload;

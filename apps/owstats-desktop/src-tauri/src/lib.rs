@@ -43,12 +43,12 @@ pub use redaction::redact_sensitive_json;
 pub use review::{get_onboarding_status, get_personal_season_review};
 pub use sync::{
     dump_season_json, dump_season_json_with_base_url, load_season_sync_inventory,
-    select_detail_entries, sync_import_parts, sync_season, sync_season_with_base_url,
-    sync_season_with_credentials_and_target_paths_base_url,
+    rebuild_complete_season_payload, select_detail_entries, sync_import_parts, sync_season,
+    sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
     sync_season_with_current_account_credentials_path_output_dir_base_url,
-    sync_season_with_progress, DetailSelection, SeasonSyncInventory,
+    sync_season_with_progress, write_season_payload, DetailSelection, SeasonSyncInventory,
 };
 
 pub fn run() {

@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::HashMap;
+use std::io::Write;
 
 const INVALID_DETAIL_MESSAGE: &str = "详情响应无有效数据";
 
@@ -61,18 +62,27 @@ fn normalize_incremental_detail_outcomes(
     (valid_details, normalized_errors)
 }
 
-pub(super) fn write_season_payload(
-    output_dir: &Path,
-    season: i64,
-    payload: &Value,
-) -> Result<PathBuf> {
+pub fn write_season_payload(output_dir: &Path, season: i64, payload: &Value) -> Result<PathBuf> {
     std::fs::create_dir_all(output_dir)
         .with_context(|| format!("failed to create output directory {}", output_dir.display()))?;
     let path = output_dir.join(format!("local_s{season}_full_season.json"));
     let sanitized = crate::redaction::sanitize_persisted_json(payload);
-    let text = serde_json::to_string_pretty(&sanitized)?;
-    std::fs::write(&path, text)
-        .with_context(|| format!("failed to write season payload {}", path.display()))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(output_dir)
+        .with_context(|| format!("failed to create temporary season payload for S{season}"))?;
+    serde_json::to_writer_pretty(temporary.as_file_mut(), &sanitized)
+        .with_context(|| format!("failed to serialize season payload for S{season}"))?;
+    temporary
+        .as_file_mut()
+        .flush()
+        .with_context(|| format!("failed to flush season payload for S{season}"))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .with_context(|| format!("failed to sync season payload for S{season}"))?;
+    temporary
+        .persist(&path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("failed to replace season payload for S{season}"))?;
     Ok(path)
 }
 
