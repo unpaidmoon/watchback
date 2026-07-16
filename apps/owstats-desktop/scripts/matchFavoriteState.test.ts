@@ -208,3 +208,41 @@ assert.equal(
   "the current A operation remains guarded after stale tokens end",
 );
 assert.equal(gate.end(currentMatchAToken), true);
+
+const pendingSyncGate = createMatchFavoriteMutationGate("match-pending");
+const pendingSyncToken = pendingSyncGate.begin("match-pending");
+assert.ok(pendingSyncToken);
+const cleanBusyState = {
+  ...createMatchFavoriteDraft({ note: "旧值" }),
+  busy: true,
+};
+assert.equal(
+  shouldResetMatchFavoriteDraft({
+    previousMatchId: "match-pending",
+    matchId: "match-pending",
+    favorite: { note: "外部新值" },
+    state: cleanBusyState,
+  }),
+  true,
+);
+assert.equal(
+  pendingSyncGate.hasInFlight(),
+  true,
+  "the effect defers the otherwise eligible external reset while mutation reconciliation is active",
+);
+const failedPendingState = matchFavoriteDraftReducer(cleanBusyState, {
+  type: "failure",
+  message: "请求失败",
+});
+assert.equal(pendingSyncGate.end(pendingSyncToken), true);
+assert.equal(failedPendingState.busy, false);
+assert.equal(
+  shouldResetMatchFavoriteDraft({
+    previousMatchId: "match-pending",
+    matchId: "match-pending",
+    favorite: { note: "外部新值" },
+    state: failedPendingState,
+  }),
+  true,
+  "after failure releases the gate, the pending clean external value remains eligible to reset",
+);

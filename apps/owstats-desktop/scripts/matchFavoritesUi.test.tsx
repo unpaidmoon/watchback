@@ -162,6 +162,15 @@ assert.match(editorHookSource, /createMatchFavoriteMutationGate/);
 assert.match(editorHookSource, /mutationGate\.begin\(/);
 assert.match(editorHookSource, /mutationGate\.commitMatch\(/);
 assert.match(editorHookSource, /mutationGate\.end\(/);
+const favoriteSyncEffectDependencies = editorHookSource.match(
+  /useEffect\(\(\) => \{[\s\S]*?\}, \[([\s\S]*?)\]\);/,
+)?.[1];
+assert.ok(favoriteSyncEffectDependencies);
+assert.match(
+  favoriteSyncEffectDependencies,
+  /state\.busy/,
+  "pending external favorites must resume synchronization when a mutation clears busy",
+);
 assert.match(
   editorHookSource,
   /收藏已保存，但页面状态刷新失败，请稍后重试。/,

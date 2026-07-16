@@ -84,6 +84,7 @@ export function useMatchFavoriteEditor(
   }, [
     favorite,
     matchId,
+    state.busy,
     state.draftNote,
     state.isFavorite,
     state.savedNote,
