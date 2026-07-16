@@ -115,6 +115,7 @@ assert.deepEqual(
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("season=21")), true, "S21 query counts as an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=1")), true, "favorite query counts as an explicit filter");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("qa=1")), false, "qa query does not override cached filters");
 
 assert.deepEqual(
@@ -148,6 +149,11 @@ assert.notEqual(
   matchFiltersKey({ season: 21 }),
   matchFiltersKey({ season: 22 }),
   "S21 and S22 use different match-list cache keys",
+);
+assert.notEqual(
+  matchFiltersKey({}),
+  matchFiltersKey({ favoriteOnly: true }),
+  "favorites-only filters produce a distinct cache key",
 );
 
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), false, "cache does not hydrate before first successful load");
