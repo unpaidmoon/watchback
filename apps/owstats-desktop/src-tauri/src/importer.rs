@@ -85,7 +85,7 @@ fn import_payload_value_with_lookups(
             continue;
         }
         let detail = details_by_id.get(&match_id);
-        let mode = string_field(entry, "gameMode").unwrap_or_default();
+        let mode = normalized_game_mode(entry);
         let match_kind = detail
             .and_then(|item| string_field(item, "match_kind"))
             .unwrap_or_default();
@@ -691,6 +691,20 @@ fn bucket_for(mode: &str, match_kind: &str) -> &'static str {
         "stadium"
     } else {
         "preset"
+    }
+}
+
+fn normalized_game_mode(entry: &Value) -> String {
+    let mode = string_field(entry, "gameMode").unwrap_or_default();
+    let instance_type = string_field(entry, "instanceType")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match (mode.to_ascii_lowercase().as_str(), instance_type.as_str()) {
+        ("leisure", "it_unranked") => "LeisurePreset".to_string(),
+        ("leisure", "it_ruleset") => "Leisure6v6".to_string(),
+        ("sport", "it_ranked") => "SportPreset".to_string(),
+        ("sport", "it_ruleset") => "SportOpen".to_string(),
+        _ => mode,
     }
 }
 

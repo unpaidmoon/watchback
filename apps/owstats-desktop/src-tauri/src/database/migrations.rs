@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 6;
+pub const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 struct Migration {
     version: i64,
@@ -41,6 +41,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 6,
         name: "career role mmr",
         apply: migrate_v6,
+    },
+    Migration {
+        version: 7,
+        name: "normal match mode normalization",
+        apply: migrate_v7,
     },
 ];
 
@@ -231,6 +236,28 @@ fn migrate_v6(transaction: &Transaction<'_>) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_career_role_season_summary_lookup
             ON career_role_season_summary(model_version, season, role);
         "#,
+    )?;
+    Ok(())
+}
+
+fn migrate_v7(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute(
+        r#"
+        UPDATE matches
+        SET game_mode = CASE
+            WHEN json_valid(raw_entry_json) THEN CASE
+                LOWER(TRIM(game_mode)) || ':' || LOWER(TRIM(json_extract(raw_entry_json, '$.instanceType')))
+                WHEN 'leisure:it_unranked' THEN 'LeisurePreset'
+                WHEN 'leisure:it_ruleset' THEN 'Leisure6v6'
+                WHEN 'sport:it_ranked' THEN 'SportPreset'
+                WHEN 'sport:it_ruleset' THEN 'SportOpen'
+                ELSE game_mode
+            END
+            ELSE game_mode
+        END
+        WHERE LOWER(TRIM(game_mode)) IN ('leisure', 'sport')
+        "#,
+        [],
     )?;
     Ok(())
 }

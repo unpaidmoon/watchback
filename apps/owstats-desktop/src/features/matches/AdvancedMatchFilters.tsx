@@ -1,5 +1,5 @@
 import type { FilterOptions, MatchFilters } from "../../shared/types";
-import { matchPrimaryTags } from "./matchFilters";
+import { filterResultLabel, matchPrimaryTags } from "./matchFilters";
 
 export type AdvancedMatchFiltersProps = {
   filters: MatchFilters;
@@ -16,10 +16,12 @@ export function AdvancedMatchFilters(props: AdvancedMatchFiltersProps) {
   return (
     <div id="advanced-match-filters" className="advancedMatchFilters phase6FilterRow phase6FilterRowSecondary">
       <label>
-        英雄
-        <select value={props.filters.hero ?? ""} onChange={(event) => props.onPatch({ hero: emptyOrValue(event.target.value) })}>
+        胜负
+        <select value={props.filters.result ?? ""} onChange={(event) => props.onPatch({ result: emptyOrValue(event.target.value) })}>
           <option value="">全部</option>
-          {props.options.heroes.map((hero) => <option key={hero.id} value={hero.id}>{hero.label}</option>)}
+          {props.options.results.map((result) => (
+            <option key={result} value={result}>{filterResultLabel(result)}</option>
+          ))}
         </select>
       </label>
       <label>

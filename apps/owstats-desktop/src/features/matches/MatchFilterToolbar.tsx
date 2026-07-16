@@ -1,6 +1,6 @@
 import { Search, X } from "lucide-react";
 import type { FilterOptions, MatchFilters, PlayerSearchOption } from "../../shared/types";
-import { filterModeLabel, filterResultLabel } from "./matchFilters";
+import { filterModeLabel } from "./matchFilters";
 
 export type MatchFilterToolbarProps = {
   filters: MatchFilters;
@@ -36,12 +36,10 @@ export function MatchFilterToolbar(props: MatchFilterToolbarProps) {
         </select>
       </label>
       <label>
-        胜负
-        <select value={props.filters.result ?? ""} onChange={(event) => props.onPatch({ result: emptyOrValue(event.target.value) })}>
+        英雄
+        <select value={props.filters.hero ?? ""} onChange={(event) => props.onPatch({ hero: emptyOrValue(event.target.value) })}>
           <option value="">全部</option>
-          {props.options.results.map((result) => (
-            <option key={result} value={result}>{filterResultLabel(result)}</option>
-          ))}
+          {props.options.heroes.map((hero) => <option key={hero.id} value={hero.id}>{hero.label}</option>)}
         </select>
       </label>
       <label className="phase6PlayerSearchLabel">

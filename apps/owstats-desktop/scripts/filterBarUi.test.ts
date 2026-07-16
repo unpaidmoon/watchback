@@ -17,12 +17,15 @@ assert.equal(source.includes("shortcut("), false, "FilterBar should not keep dat
 assert.match(source, /<MatchFilterToolbar/);
 assert.match(source, /<AdvancedMatchFilters/);
 assert.match(source, /<ActiveFilterChips/);
-for (const label of ["模式", "胜负", "玩家名称", "更多筛选", "清除"]) assert.match(toolbarSource, new RegExp(label));
-for (const label of ["英雄", "地图", "复盘标签", "开始日期", "结束日期"]) assert.match(advancedSource, new RegExp(label));
-assert.doesNotMatch(toolbarSource, />\s*(英雄|地图|复盘标签|开始日期|结束日期)\s*</);
+for (const label of ["模式", "英雄", "玩家名称", "更多筛选", "清除"]) assert.match(toolbarSource, new RegExp(label));
+for (const label of ["胜负", "地图", "复盘标签", "开始日期", "结束日期"]) assert.match(advancedSource, new RegExp(label));
+assert.doesNotMatch(toolbarSource, />\s*(胜负|地图|复盘标签|开始日期|结束日期)\s*</);
+assert.doesNotMatch(advancedSource, />\s*英雄\s*</);
 assert.match(chipsSource, /aria-label="有效筛选"/);
 assert.match(chipsSource, /aria-label=\{`移除\$\{chip\.label\}`\}/);
 
+assert.equal(countAdvancedMatchFilters({ hero: "ana" }), 0);
+assert.equal(countAdvancedMatchFilters({ result: "win" }), 1);
 assert.equal(countAdvancedMatchFilters({ hero: "ana", map: "ilios", result: "win" }), 2);
 assert.deepEqual(clearVisibleMatchFilters({ season: 23, hero: "ana", result: "win" }), { season: 23 });
 assert.deepEqual(removeMatchFilter({ season: 23, hero: "ana", result: "win" }, "hero"), { season: 23, result: "win" });

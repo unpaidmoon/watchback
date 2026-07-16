@@ -693,7 +693,61 @@ fn database_initialize_sets_schema_version_idempotently() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
+}
+
+#[test]
+fn database_migration_backfills_umbrella_normal_match_modes() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    let cases = [
+        ("quick-preset", "leisure", "IT_UNRANKED", "LeisurePreset"),
+        ("quick-6v6", "leisure", "IT_RULESET", "Leisure6v6"),
+        ("ranked-preset", "sport", "IT_RANKED", "SportPreset"),
+        ("ranked-open", "sport", "IT_RULESET", "SportOpen"),
+    ];
+    for (index, (match_id, game_mode, instance_type, _)) in cases.iter().enumerate() {
+        conn.execute(
+            r#"
+            INSERT INTO matches (
+                match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,
+                hero_guid, hero_name, begin_ts, team_score, opponent_score, kills, assists,
+                deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+            ) VALUES (?1, 21, 'preset', ?2, 'normal', 'win', 'map', '地图', 'hero', '英雄',
+                ?3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 60, ?4, '2026-07-16T00:00:00Z')
+            "#,
+            rusqlite::params![
+                match_id,
+                game_mode,
+                index as i64,
+                json!({"gameMode": game_mode, "instanceType": instance_type}).to_string()
+            ],
+        )
+        .unwrap();
+    }
+    conn.pragma_update(None, "user_version", 6_i64).unwrap();
+    drop(conn);
+
+    db.initialize().unwrap();
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    for (match_id, _, _, expected_mode) in cases {
+        let stored_mode: String = conn
+            .query_row(
+                "SELECT game_mode FROM matches WHERE match_id = ?1",
+                [match_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_mode, expected_mode, "unexpected mode for {match_id}");
+    }
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 7);
 }
 
 #[test]
@@ -800,7 +854,7 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
 }
@@ -945,7 +999,7 @@ fn database_migrates_v2_arena_player_index_idempotently() {
         )
         .unwrap();
 
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert_eq!(arena_table_count, 1);
     assert_eq!(
         arena_columns,
@@ -1414,6 +1468,55 @@ fn filter_options_expose_only_the_six_supported_match_modes() {
             "LeisureFight",
         ]
     );
+}
+
+#[test]
+fn imports_umbrella_normal_modes_as_supported_match_modes() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    let cases = [
+        ("quick-preset", "leisure", "IT_UNRANKED", "LeisurePreset"),
+        ("quick-6v6", "leisure", "IT_RULESET", "Leisure6v6"),
+        ("ranked-preset", "sport", "IT_RANKED", "SportPreset"),
+        ("ranked-open", "sport", "IT_RULESET", "SportOpen"),
+    ];
+    let entries = cases
+        .iter()
+        .enumerate()
+        .map(|(index, (match_id, game_mode, instance_type, _))| {
+            json!({
+                "matchId": match_id,
+                "matchRet": 1,
+                "mapGuid": "map-a",
+                "heroGuid": "hero-current",
+                "beginTs": 1_700_000_000_000_i64 + index as i64,
+                "gameMode": game_mode,
+                "instanceType": instance_type
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "season": 21,
+        "matches": {
+            "entries": entries,
+            "details": [],
+            "detail_errors": []
+        }
+    });
+
+    import_payload_value(&db, &payload, temp.path()).unwrap();
+
+    let conn = db.connect().unwrap();
+    for (match_id, _, _, expected_mode) in cases {
+        let stored_mode: String = conn
+            .query_row(
+                "SELECT game_mode FROM matches WHERE match_id = ?1",
+                [match_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_mode, expected_mode, "unexpected mode for {match_id}");
+    }
 }
 
 #[test]

@@ -238,6 +238,11 @@ assert.match(
 );
 assert.match(
   matchStyleSource,
+  /\.phase6WorkbenchList \.matchListCardBannerCopy > span \+ span\s*\{(?=[^}]*flex:\s*0 0 auto)(?=[^}]*max-width:\s*none)[^}]*\}/s,
+  "MatchListCard mode label should keep its full intrinsic width instead of inheriting a percentage cap from the map name",
+);
+assert.match(
+  matchStyleSource,
   /\.phase6WorkbenchList \.matchListCardData\s*\{[^}]*grid-template-columns:\s*60px\s+minmax\(0,\s*0\.7fr\)\s+minmax\(0,\s*1\.2fr\)\s+minmax\(0,\s*1\.3fr\)/s,
   "MatchListCard data row should use avatar, KAD, combined stats, and performance columns",
 );

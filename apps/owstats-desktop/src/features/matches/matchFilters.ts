@@ -1,7 +1,7 @@
 import type { FilterOptions, MatchFilters } from "../../shared/types";
 import { modeLabel } from "../../shared/rankingUtils";
 
-export const advancedMatchFilterKeys = ["hero", "map", "primaryTag", "dateFrom", "dateTo"] as const;
+export const advancedMatchFilterKeys = ["result", "map", "primaryTag", "dateFrom", "dateTo"] as const;
 export type VisibleMatchFilterKey = Exclude<keyof MatchFilters, "season">;
 
 export type ActiveMatchFilterChip = {
