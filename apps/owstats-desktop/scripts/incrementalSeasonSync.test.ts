@@ -88,17 +88,17 @@ const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.u
 
 assert.match(
   typesSource,
-  /export type SyncMode = "quickUpdate" \| "fullFetch";/,
+  /export\s+type\s+SyncMode\s*=\s*"quickUpdate"\s*\|\s*"fullFetch"\s*;/,
   "shared types expose the explicit season sync modes",
 );
 assert.match(
   apiSource,
-  /export function syncSeason\(season: number, mode: SyncMode\)/,
+  /export\s+function\s+syncSeason\s*\(\s*season\s*:\s*number\s*,\s*mode\s*:\s*SyncMode\s*\)/,
   "syncSeason requires an explicit sync mode",
 );
 assert.match(
   apiSource,
-  /invoke<SyncSummary>\("sync_season", \{ request: \{ season, mode \} \}\)/,
+  /invoke\s*<\s*SyncSummary\s*>\s*\(\s*"sync_season"\s*,\s*\{\s*request\s*:\s*\{\s*season\s*,\s*mode\s*\}\s*\}\s*\)/,
   "syncSeason forwards season and mode in the invoke request",
 );
 assert.match(
