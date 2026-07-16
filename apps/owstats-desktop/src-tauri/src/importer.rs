@@ -863,7 +863,14 @@ fn details_by_match_id(details: &[Value]) -> HashMap<String, &Value> {
 }
 
 fn is_valid_detail(detail: &Value) -> bool {
-    detail.is_object()
+    detail
+        .get("match_id")
+        .and_then(Value::as_str)
+        .is_some_and(|match_id| !match_id.trim().is_empty())
+        && detail
+            .get("match_kind")
+            .and_then(Value::as_str)
+            .is_some_and(|match_kind| matches!(match_kind, "normal" | "fight"))
         && detail
             .pointer("/payload/data")
             .is_some_and(Value::is_object)

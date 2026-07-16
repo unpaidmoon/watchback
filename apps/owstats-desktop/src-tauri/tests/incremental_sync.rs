@@ -188,6 +188,26 @@ fn normal_detail(match_id: &str, duration: i64, player_id: &str) -> serde_json::
     })
 }
 
+fn fight_detail(match_id: &str, duration: i64, player_id: &str) -> serde_json::Value {
+    json!({
+        "match_id": match_id,
+        "match_kind": "fight",
+        "payload": {
+            "code": 0,
+            "data": {
+                "gameTimeSec": duration,
+                "totalCount": {
+                    "teammateList": [{
+                        "bnetId": player_id,
+                        "name": format!("角斗玩家-{player_id}")
+                    }],
+                    "enemyList": []
+                }
+            }
+        }
+    })
+}
+
 fn payload(
     season: i64,
     entries: Vec<serde_json::Value>,
@@ -394,4 +414,136 @@ fn incremental_import_writes_season_totals_from_sqlite() {
         )
         .unwrap();
     assert_eq!(totals, (11, 11));
+}
+
+#[test]
+fn incremental_import_rejects_malformed_detail_identity_and_kind() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("missing-kind", "SportPreset", 1),
+                entry("empty-kind", "SportPreset", 2),
+                entry("unknown-kind", "SportPreset", 3),
+                entry("valid-normal", "SportPreset", 4),
+                entry("valid-fight", "QuickFight", 5),
+            ],
+            vec![
+                normal_detail("missing-kind", 10, "missing-kind-old"),
+                normal_detail("empty-kind", 20, "empty-kind-old"),
+                normal_detail("unknown-kind", 30, "unknown-kind-old"),
+                normal_detail("valid-normal", 40, "normal-old"),
+                fight_detail("valid-fight", 50, "fight-old"),
+            ],
+            vec![],
+        ),
+    )
+    .unwrap();
+
+    let summary = import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![],
+            vec![
+                json!({
+                    "match_kind": "normal",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "   ",
+                    "match_kind": "fight",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "missing-kind",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "empty-kind",
+                    "match_kind": "   ",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "unknown-kind",
+                    "match_kind": "custom",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                normal_detail("valid-normal", 60, "normal-new"),
+                fight_detail("valid-fight", 70, "fight-new"),
+            ],
+            vec![],
+        ),
+        [
+            "missing-kind",
+            "empty-kind",
+            "unknown-kind",
+            "valid-normal",
+            "valid-fight",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let preserved_kinds = {
+        let mut statement = conn
+            .prepare(
+                "SELECT match_id, match_kind
+                 FROM match_details
+                 WHERE match_id IN ('missing-kind', 'empty-kind', 'unknown-kind')
+                 ORDER BY match_id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let player_ids = |match_id: &str| -> Vec<String> {
+        let mut statement = conn
+            .prepare("SELECT bnet_id FROM match_players WHERE match_id=? ORDER BY bnet_id")
+            .unwrap();
+        statement
+            .query_map([match_id], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let fight_players = {
+        let mut statement = conn
+            .prepare(
+                "SELECT bnet_id FROM arena_match_players
+                 WHERE match_id='valid-fight' ORDER BY bnet_id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .unwrap()
+    };
+
+    assert_eq!(summary.details_seen, 2);
+    assert_eq!(
+        preserved_kinds,
+        vec![
+            ("empty-kind".to_string(), "normal".to_string()),
+            ("missing-kind".to_string(), "normal".to_string()),
+            ("unknown-kind".to_string(), "normal".to_string()),
+        ]
+    );
+    assert_eq!(player_ids("missing-kind"), vec!["missing-kind-old"]);
+    assert_eq!(player_ids("empty-kind"), vec!["empty-kind-old"]);
+    assert_eq!(player_ids("unknown-kind"), vec!["unknown-kind-old"]);
+    assert_eq!(player_ids("valid-normal"), vec!["normal-new"]);
+    assert_eq!(fight_players, vec!["fight-new"]);
 }
