@@ -1,7 +1,8 @@
 use owstats_desktop_lib::{
-    build_page_diagnostics, import_incremental_payload_value_embedded,
+    build_page_diagnostics, classify_quick_page, import_incremental_payload_value_embedded,
     import_payload_value_embedded, load_season_sync_inventory, rebuild_complete_season_payload,
-    select_detail_entries, write_season_payload, OwDatabase, SeasonSyncInventory,
+    select_detail_entries, write_season_payload, OwDatabase, QuickPageDecision, SeasonModeKey,
+    SeasonSyncInventory,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -60,6 +61,71 @@ fn inventory_is_scoped_to_the_requested_season() {
         inventory.detail_ids,
         ["s23-complete".to_string()].into_iter().collect()
     );
+}
+
+#[test]
+fn inventory_tracks_latest_watermark_and_ids_per_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    for (match_id, match_kind, game_mode, begin_ts) in [
+        ("normal-old", "normal", "SportPreset", 10),
+        ("normal-new", "normal", "SportPreset", 30),
+        ("fight", "fight", "QuickFight", 20),
+        ("no-watermark", "normal", "LeisurePreset", 0),
+        ("empty-mode", "normal", "", 100),
+    ] {
+        conn.execute(
+            "INSERT INTO matches (
+                match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+                begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+                mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+             ) VALUES (?1, 23, 'preset', ?2, ?3, 'win', 'map', 'hero',
+                ?4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, '{}', 'now')",
+            params![match_id, game_mode, match_kind, begin_ts],
+        )
+        .unwrap();
+    }
+    conn.execute(
+        "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+         VALUES ('normal-new', 'normal',
+            '{\"match_id\":\"normal-new\",\"match_kind\":\"normal\",\"payload\":{\"code\":0,\"data\":{}}}',
+            'now')",
+        [],
+    )
+    .unwrap();
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+    let normal = inventory
+        .modes
+        .get(&SeasonModeKey::new("normal", "SportPreset"))
+        .unwrap();
+    let fight = inventory
+        .modes
+        .get(&SeasonModeKey::new("fight", "QuickFight"))
+        .unwrap();
+    let no_watermark = inventory
+        .modes
+        .get(&SeasonModeKey::new("normal", "LeisurePreset"))
+        .unwrap();
+
+    assert_eq!(
+        normal.match_ids,
+        HashSet::from(["normal-old".to_string(), "normal-new".to_string()])
+    );
+    assert_eq!(normal.detail_ids, HashSet::from(["normal-new".to_string()]));
+    assert_eq!(normal.latest_begin_ts, Some(30));
+    assert_eq!(fight.match_ids, HashSet::from(["fight".to_string()]));
+    assert_eq!(fight.latest_begin_ts, Some(20));
+    assert_eq!(
+        no_watermark.match_ids,
+        HashSet::from(["no-watermark".to_string()])
+    );
+    assert_eq!(no_watermark.latest_begin_ts, None);
+    assert!(!inventory
+        .modes
+        .contains_key(&SeasonModeKey::new("normal", "")));
 }
 
 #[test]
@@ -189,10 +255,88 @@ fn detail_selector_returns_only_new_or_missing_details() {
 }
 
 #[test]
+fn quick_page_stops_when_all_ids_are_known_at_or_below_watermark() {
+    let entries = vec![
+        json!({"matchId": "known-a", "beginTs": 30}),
+        json!({"matchId": "known-b", "beginTs": 20}),
+    ];
+    let known = HashSet::from(["known-a".to_string(), "known-b".to_string()]);
+
+    assert_eq!(
+        classify_quick_page(&entries, &known, Some(30)),
+        QuickPageDecision::WatermarkReached
+    );
+}
+
+#[test]
+fn quick_page_continues_for_unknown_old_id_or_newer_timestamp() {
+    let known = HashSet::from(["known".to_string()]);
+
+    assert_eq!(
+        classify_quick_page(
+            &[json!({"matchId": "unknown", "beginTs": 10})],
+            &known,
+            Some(30)
+        ),
+        QuickPageDecision::Continue
+    );
+    assert_eq!(
+        classify_quick_page(
+            &[json!({"matchId": "known", "beginTs": 31})],
+            &known,
+            Some(30)
+        ),
+        QuickPageDecision::Continue
+    );
+}
+
+#[test]
+fn quick_page_is_unsafe_when_any_raw_entry_lacks_identity_or_positive_time() {
+    let known = HashSet::from(["known".to_string()]);
+
+    for entries in [
+        vec![json!({"matchId": "", "beginTs": 10})],
+        vec![json!({"beginTs": 10})],
+        vec![json!({"matchId": "known"})],
+        vec![json!({"matchId": "known", "beginTs": 0})],
+        vec![
+            json!({"matchId": "unknown", "beginTs": 40}),
+            json!({"matchId": "known"}),
+        ],
+    ] {
+        assert_eq!(
+            classify_quick_page(&entries, &known, Some(30)),
+            QuickPageDecision::Unsafe
+        );
+    }
+}
+
+#[test]
+fn quick_page_empty_precedes_watermark_checks() {
+    assert_eq!(
+        classify_quick_page(&[], &HashSet::new(), None),
+        QuickPageDecision::Empty
+    );
+}
+
+#[test]
+fn quick_page_without_watermark_is_unsafe() {
+    assert_eq!(
+        classify_quick_page(
+            &[json!({"matchId": "known", "beginTs": 10})],
+            &HashSet::from(["known".to_string()]),
+            None
+        ),
+        QuickPageDecision::Unsafe
+    );
+}
+
+#[test]
 fn page_diagnostics_are_sorted_aggregated_and_identity_free() {
     let inventory = SeasonSyncInventory {
         match_ids: HashSet::from(["known-complete".to_string(), "known-missing".to_string()]),
         detail_ids: HashSet::from(["known-complete".to_string()]),
+        ..SeasonSyncInventory::default()
     };
     let list_pages = vec![
         json!({
