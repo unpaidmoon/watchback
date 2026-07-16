@@ -8,9 +8,10 @@ pub fn rebuild_complete_season_payload(
 ) -> Result<Value> {
     db.initialize()?;
     let conn = db.connect()?;
+    let transaction = conn.unchecked_transaction()?;
 
     let entries = parse_rows(
-        &conn,
+        &transaction,
         "SELECT raw_entry_json
          FROM matches
          WHERE season = ?1
@@ -19,7 +20,7 @@ pub fn rebuild_complete_season_payload(
         "match entry",
     )?;
     let details = parse_rows(
-        &conn,
+        &transaction,
         "SELECT d.raw_detail_json
          FROM match_details d
          JOIN matches m ON m.match_id = d.match_id
@@ -29,7 +30,7 @@ pub fn rebuild_complete_season_payload(
         "match detail",
     )?;
     let detail_errors = parse_rows(
-        &conn,
+        &transaction,
         "SELECT raw_json
          FROM sync_errors
          WHERE season = ?1
@@ -37,6 +38,7 @@ pub fn rebuild_complete_season_payload(
         season,
         "sync error",
     )?;
+    transaction.rollback()?;
 
     let mut rebuilt = current_fetch_payload.clone();
     let matches = rebuilt
@@ -52,7 +54,24 @@ pub fn rebuild_complete_season_payload(
     matches.insert("details".to_string(), Value::Array(details));
     matches.insert("detail_errors".to_string(), Value::Array(detail_errors));
 
-    Ok(crate::redaction::sanitize_persisted_json(&rebuilt))
+    Ok(sanitize_snapshot_value(&rebuilt))
+}
+
+fn sanitize_snapshot_value(value: &Value) -> Value {
+    redact_snapshot_strings(&crate::redaction::sanitize_persisted_json(value))
+}
+
+fn redact_snapshot_strings(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, child)| (key.clone(), redact_snapshot_strings(child)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(redact_snapshot_strings).collect()),
+        Value::String(text) => Value::String(crate::redaction::redact_sensitive_text(text)),
+        _ => value.clone(),
+    }
 }
 
 fn parse_rows(

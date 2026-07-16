@@ -619,7 +619,11 @@ fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
     .unwrap();
     conn.execute(
         "UPDATE sync_errors
-         SET raw_json = json_set(raw_json, '$.authorization', 'db-authorization')
+         SET raw_json = json_set(
+             json_set(raw_json, '$.authorization', 'db-authorization'),
+             '$.message',
+             'Authorization: Bearer synthetic-bearer-secret'
+         )
          WHERE season = 23",
         [],
     )
@@ -654,6 +658,9 @@ fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
             .len(),
         1
     );
+    assert!(rebuilt["matches"]["detail_errors"][0]
+        .get("authorization")
+        .is_none());
     assert_eq!(entries[0]["matchId"], "snapshot-new");
     assert_eq!(entries[1]["matchId"], "snapshot-old");
     assert_eq!(rebuilt["profile_card"]["name"], "synthetic-profile");
@@ -667,11 +674,11 @@ fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
         "token",
         "customertoken",
         "cookie",
-        "authorization",
         "credential",
         "db-secret",
         "db-cookie",
         "db-authorization",
+        "synthetic-bearer-secret",
         "current-secret",
         "current-credential",
     ] {
@@ -783,6 +790,49 @@ fn atomic_snapshot_replaces_existing_json_without_temp_residue() {
     let parsed: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&written).unwrap()).unwrap();
     assert_eq!(parsed, replacement);
+    let remaining = std::fs::read_dir(&output_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining,
+        vec![std::ffi::OsString::from("local_s23_full_season.json")]
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn atomic_snapshot_persist_failure_preserves_existing_json_and_removes_temp_file() {
+    use std::io::{Read, Seek, SeekFrom};
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let output_dir = temp.path().join("seasons");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let path = output_dir.join("local_s23_full_season.json");
+    let existing = br#"{"state":"old-complete"}"#;
+    std::fs::write(&path, existing).unwrap();
+    let mut locked = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+
+    let error = write_season_payload(
+        &output_dir,
+        23,
+        &json!({"state": "replacement", "matches": {"total": 1}}),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("failed to replace season payload"));
+    locked.seek(SeekFrom::Start(0)).unwrap();
+    let mut preserved = Vec::new();
+    locked.read_to_end(&mut preserved).unwrap();
+    assert_eq!(preserved, existing);
+    drop(locked);
     let remaining = std::fs::read_dir(&output_dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
