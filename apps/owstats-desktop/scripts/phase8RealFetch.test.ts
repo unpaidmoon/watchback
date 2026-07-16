@@ -60,7 +60,8 @@ assert.match(seasonWorkbench, /onQuickUpdate:\s*\(season:\s*number\)\s*=>\s*void
 assert.match(seasonWorkbench, />\s*\{isSelectedFullFetch \? "全量抓取中…" : "全量抓取"\}\s*</, "primary action is full fetch");
 assert.match(seasonWorkbench, />\s*\{rowSyncing && syncingMode === "quickUpdate" \? "更新中…" : "更新"\}\s*</, "ledger rows expose quick update");
 assert.match(seasonWorkbench, /onClick=\{\(\) => onQuickUpdate\(seasonStatus\.season\)\}/, "row update acts on that row season");
-assert.doesNotMatch(seasonWorkbench, /onQuickUpdate\(seasonStatus\.season\)[\s\S]{0,120}onSelectSeason|onSelectSeason[\s\S]{0,120}onQuickUpdate\(seasonStatus\.season\)/, "row update does not change the left selection");
+assert.equal((seasonWorkbench.match(/disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null\}/g) ?? []).length, 2, "full fetch and every row update share the runtime sync gate");
+assert.match(seasonWorkbench, /<select[\s\S]*?disabled=\{syncingSeason !== null \|\| syncableSeasons\.length === 0\}/, "the season selector is disabled during every sync mode");
 assert.doesNotMatch(seasonWorkbench, /<button[^>]*className=.*syncedSeasonLedgerRow[\s\S]*?<button/, "season rows must not nest buttons");
 assert.match(seasonWorkbench, /<div className="syncedSeasonSelectCell" role="cell">\s*<button\s+className="syncedSeasonSelect"/, "the row owns a season cell before the season selection button");
 assert.match(seasonWorkbench, /<div className="syncedSeasonCoverageCell" role="cell">[\s\S]*?<div className="syncedSeasonMatchCountCell" role="cell">[\s\S]*?<div className="syncedSeasonLastSyncCell" role="cell">[\s\S]*?<div className="syncedSeasonUpdateCell" role="cell">/, "the row directly owns coverage, count, last-sync and operation cells");

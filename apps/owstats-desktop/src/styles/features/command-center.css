@@ -198,7 +198,7 @@
 .syncedSeasonLedgerHeader,
 .syncedSeasonLedgerRow {
   display: grid;
-  grid-template-columns: minmax(64px, 0.55fr) minmax(150px, 1.5fr) minmax(88px, 0.75fr) minmax(112px, 0.9fr) minmax(56px, auto);
+  grid-template-columns: minmax(64px, 0.55fr) minmax(150px, 1.5fr) minmax(88px, 0.75fr) minmax(112px, 0.9fr) 80px;
   gap: 12px;
   align-items: center;
 }
@@ -261,7 +261,8 @@
 }
 
 .syncedSeasonUpdateButton {
-  min-width: 56px;
+  width: 80px;
+  min-width: 80px;
   min-height: 44px;
   padding: 0 12px;
 }

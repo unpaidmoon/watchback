@@ -43,6 +43,8 @@ const pageShellStyles = readFileSync(new URL("../src/styles/page-shell.css", imp
 assertEqual(/\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*minmax\(220px, 1fr\) minmax\(0, 2fr\)/.test(commandCenterStyles), true, "sync controls and ledger use the confirmed 1:2 layout");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "ledger rows meet the interaction target");
 assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "row update controls meet the interaction target");
+assertEqual(/grid-template-columns:\s*minmax\(64px, 0\.55fr\) minmax\(150px, 1\.5fr\) minmax\(88px, 0\.75fr\) minmax\(112px, 0\.9fr\) 80px;/.test(commandCenterStyles), true, "ledger reserves a stable operation column for the updating label");
+assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?width:\s*80px;[\s\S]*?min-width:\s*80px;/.test(commandCenterStyles), true, "row update controls keep the same width while running");
 assertEqual(/\.syncedSeasonCoverageTrack > span\s*\{[\s\S]*?background:\s*var\(--data-primary\)/.test(commandCenterStyles), true, "coverage uses the approved data color");
 assertEqual(/@media \(max-width: 920px\)[\s\S]*?\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*1fr/.test(commandCenterStyles), true, "narrow layout stacks control above ledger");
 assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
