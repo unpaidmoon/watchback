@@ -86,42 +86,60 @@ export function shouldResetMatchFavoriteDraft({
   );
 }
 
-export type MatchFavoriteMutationGeneration = {
+export type MatchFavoriteMutationToken = {
   matchId: string | null;
   generation: number;
-};
-
-export type MatchFavoriteMutationToken = MatchFavoriteMutationGeneration & {
   requestId: number;
 };
 
-export function advanceMatchFavoriteMutationGeneration(
-  current: MatchFavoriteMutationGeneration,
-  matchId: string | null | undefined,
-): MatchFavoriteMutationGeneration {
-  const normalizedMatchId = matchId ?? null;
-  if (current.matchId === normalizedMatchId) return current;
+export type MatchFavoriteMutationGate = {
+  begin: (matchId: string) => MatchFavoriteMutationToken | null;
+  commitMatch: (matchId: string | null | undefined) => boolean;
+  hasInFlight: () => boolean;
+  isCurrent: (token: MatchFavoriteMutationToken) => boolean;
+  end: (token: MatchFavoriteMutationToken) => boolean;
+};
+
+export function createMatchFavoriteMutationGate(
+  initialMatchId: string | null | undefined,
+): MatchFavoriteMutationGate {
+  let matchId = initialMatchId ?? null;
+  let generation = 0;
+  let nextRequestId = 0;
+  let inFlight: MatchFavoriteMutationToken | null = null;
+
+  function isCurrent(token: MatchFavoriteMutationToken): boolean {
+    return (
+      inFlight !== null &&
+      token.matchId === matchId &&
+      token.generation === generation &&
+      token.requestId === inFlight.requestId
+    );
+  }
+
   return {
-    matchId: normalizedMatchId,
-    generation: current.generation + 1,
+    begin(candidateMatchId) {
+      if (inFlight !== null || candidateMatchId !== matchId) return null;
+      nextRequestId += 1;
+      inFlight = { matchId, generation, requestId: nextRequestId };
+      return inFlight;
+    },
+    commitMatch(candidateMatchId) {
+      const normalizedMatchId = candidateMatchId ?? null;
+      if (normalizedMatchId === matchId) return false;
+      matchId = normalizedMatchId;
+      generation += 1;
+      inFlight = null;
+      return true;
+    },
+    hasInFlight() {
+      return inFlight !== null;
+    },
+    isCurrent,
+    end(token) {
+      if (!isCurrent(token)) return false;
+      inFlight = null;
+      return true;
+    },
   };
-}
-
-export function createMatchFavoriteMutationToken(
-  current: MatchFavoriteMutationGeneration,
-  requestId: number,
-): MatchFavoriteMutationToken {
-  return { ...current, requestId };
-}
-
-export function isCurrentMatchFavoriteMutationToken(
-  token: MatchFavoriteMutationToken,
-  current: MatchFavoriteMutationGeneration,
-  currentRequestId: number,
-): boolean {
-  return (
-    token.matchId === current.matchId &&
-    token.generation === current.generation &&
-    token.requestId === currentRequestId
-  );
 }

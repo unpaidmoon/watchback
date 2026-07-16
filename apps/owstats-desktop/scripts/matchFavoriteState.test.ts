@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import {
-  advanceMatchFavoriteMutationGeneration,
-  createMatchFavoriteMutationToken,
   createMatchFavoriteDraft,
+  createMatchFavoriteMutationGate,
   favoriteCharacterCount,
-  isCurrentMatchFavoriteMutationToken,
   matchFavoriteDraftReducer,
   normalizeMatchFavorite,
   shouldResetMatchFavoriteDraft,
@@ -76,6 +74,36 @@ assert.deepEqual(reset, createMatchFavoriteDraft({ note: "服务端备注" }));
 
 const deleted = matchFavoriteDraftReducer(reset, { type: "deleted" });
 assert.deepEqual(deleted, createMatchFavoriteDraft(null));
+const failedReconciliationAfterSave = matchFavoriteDraftReducer(
+  matchFavoriteDraftReducer(edited, {
+    type: "saved",
+    favorite: { note: "后端已保存" },
+  }),
+  {
+    type: "failure",
+    message: "收藏已保存，但页面状态刷新失败，请稍后重试。",
+  },
+);
+assert.equal(failedReconciliationAfterSave.isFavorite, true);
+assert.equal(failedReconciliationAfterSave.savedNote, "后端已保存");
+assert.equal(failedReconciliationAfterSave.draftNote, "后端已保存");
+assert.equal(
+  failedReconciliationAfterSave.error,
+  "收藏已保存，但页面状态刷新失败，请稍后重试。",
+);
+const failedReconciliationAfterDelete = matchFavoriteDraftReducer(
+  matchFavoriteDraftReducer(reset, { type: "deleted" }),
+  {
+    type: "failure",
+    message: "已取消收藏，但页面状态刷新失败，请稍后重试。",
+  },
+);
+assert.equal(failedReconciliationAfterDelete.isFavorite, false);
+assert.equal(failedReconciliationAfterDelete.draftNote, "");
+assert.equal(
+  failedReconciliationAfterDelete.error,
+  "已取消收藏，但页面状态刷新失败，请稍后重试。",
+);
 
 assert.equal(
   shouldResetMatchFavoriteDraft({
@@ -123,25 +151,60 @@ assert.equal(
   "a pending external favorite synchronizes after the dirty draft becomes clean",
 );
 
-let generation = { matchId: "match-a" as string | null, generation: 0 };
-const oldMatchAToken = createMatchFavoriteMutationToken(generation, 1);
-generation = advanceMatchFavoriteMutationGeneration(generation, "match-b");
-generation = advanceMatchFavoriteMutationGeneration(generation, "match-a");
-assert.equal(generation.generation, 2);
+const gate = createMatchFavoriteMutationGate("match-a");
+const oldMatchAToken = gate.begin("match-a");
+assert.ok(oldMatchAToken);
+assert.equal(gate.hasInFlight(), true);
 assert.equal(
-  isCurrentMatchFavoriteMutationToken(oldMatchAToken, generation, 1),
+  gate.begin("match-a"),
+  null,
+  "a second mutation on the committed match is rejected while one is in flight",
+);
+const abortedCandidate = "match-b";
+assert.equal(abortedCandidate, "match-b");
+assert.equal(
+  gate.isCurrent(oldMatchAToken),
+  true,
+  "an uncommitted render candidate does not advance the generation",
+);
+assert.equal(gate.end(oldMatchAToken), true);
+assert.equal(gate.hasInFlight(), false);
+const nextMatchAToken = gate.begin("match-a");
+assert.ok(nextMatchAToken, "ending the current operation allows the next mutation");
+assert.equal(gate.end(nextMatchAToken), true);
+
+const firstGenerationAToken = gate.begin("match-a");
+assert.ok(firstGenerationAToken);
+assert.equal(gate.commitMatch("match-b"), true);
+const matchBToken = gate.begin("match-b");
+assert.ok(matchBToken);
+assert.equal(
+  gate.end(firstGenerationAToken),
+  false,
+  "an old A finally does not release the current B operation",
+);
+assert.equal(gate.begin("match-b"), null);
+assert.equal(gate.commitMatch("match-a"), true);
+const currentMatchAToken = gate.begin("match-a");
+assert.ok(currentMatchAToken);
+assert.equal(
+  gate.isCurrent(firstGenerationAToken),
   false,
   "A -> B -> A invalidates the request from the first A generation",
 );
-
-const firstSameMatchToken = createMatchFavoriteMutationToken(generation, 2);
-const secondSameMatchToken = createMatchFavoriteMutationToken(generation, 3);
 assert.equal(
-  isCurrentMatchFavoriteMutationToken(firstSameMatchToken, generation, 3),
+  gate.end(firstGenerationAToken),
   false,
-  "a newer request on the same match invalidates the older request",
+  "ending an old A token does not release the current A operation",
 );
 assert.equal(
-  isCurrentMatchFavoriteMutationToken(secondSameMatchToken, generation, 3),
-  true,
+  gate.end(matchBToken),
+  false,
+  "ending an old B token does not release the current A operation",
 );
+assert.equal(
+  gate.begin("match-a"),
+  null,
+  "the current A operation remains guarded after stale tokens end",
+);
+assert.equal(gate.end(currentMatchAToken), true);

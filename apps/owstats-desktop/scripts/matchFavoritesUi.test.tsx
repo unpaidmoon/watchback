@@ -153,6 +153,24 @@ assert.doesNotMatch(editorSource, /rawJson/);
 assert.doesNotMatch(editorSource, /maxLength/);
 assert.doesNotMatch(editorSource, /matchListCard|matchRow/);
 
+const editorHookSource = readFileSync(
+  new URL("../src/features/matches/useMatchFavoriteEditor.ts", import.meta.url),
+  "utf8",
+);
+assert.match(editorHookSource, /useLayoutEffect/);
+assert.match(editorHookSource, /createMatchFavoriteMutationGate/);
+assert.match(editorHookSource, /mutationGate\.begin\(/);
+assert.match(editorHookSource, /mutationGate\.commitMatch\(/);
+assert.match(editorHookSource, /mutationGate\.end\(/);
+assert.match(
+  editorHookSource,
+  /收藏已保存，但页面状态刷新失败，请稍后重试。/,
+);
+assert.match(
+  editorHookSource,
+  /已取消收藏，但页面状态刷新失败，请稍后重试。/,
+);
+
 const listCardSource = readFileSync(
   new URL("../src/features/matches/MatchListCard.tsx", import.meta.url),
   "utf8",

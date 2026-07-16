@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { deleteMatchFavorite, saveMatchFavorite } from "../../shared/api";
 import { productErrorMessage } from "../../shared/phase6Shell";
 import type { MatchFavoriteView } from "../../shared/types";
 import {
-  advanceMatchFavoriteMutationGeneration,
-  createMatchFavoriteMutationToken,
   createMatchFavoriteDraft,
+  createMatchFavoriteMutationGate,
   favoriteCharacterCount,
-  isCurrentMatchFavoriteMutationToken,
   matchFavoriteDraftReducer,
   normalizeMatchFavorite,
   shouldResetMatchFavoriteDraft,
@@ -27,51 +33,47 @@ export function useMatchFavoriteEditor(
     normalizeMatchFavorite(favorite),
     createMatchFavoriteDraft,
   );
-  const previousMatchId = useRef(matchId);
+  const [mutationGate] = useState(() =>
+    createMatchFavoriteMutationGate(matchId),
+  );
   const previousFavorite = useRef(normalizeMatchFavorite(favorite));
   const pendingExternalFavorite = useRef(false);
-  const mutationGeneration = useRef({
-    matchId: matchId ?? null,
-    generation: 0,
-  });
-  mutationGeneration.current = advanceMatchFavoriteMutationGeneration(
-    mutationGeneration.current,
-    matchId,
-  );
-  const mutationRequestId = useRef(0);
   const dirty = state.isFavorite && state.draftNote !== state.savedNote;
   const count = useMemo(
     () => favoriteCharacterCount(state.draftNote),
     [state.draftNote],
   );
 
+  useLayoutEffect(() => {
+    if (!mutationGate.commitMatch(matchId)) return;
+    const normalizedFavorite = normalizeMatchFavorite(favorite);
+    pendingExternalFavorite.current = false;
+    previousFavorite.current = normalizedFavorite;
+    dispatch({ type: "reset", favorite: normalizedFavorite });
+  }, [favorite, matchId, mutationGate]);
+
   useEffect(() => {
     const normalizedFavorite = normalizeMatchFavorite(favorite);
-    const matchChanged = previousMatchId.current !== matchId;
     const favoriteChanged =
       (previousFavorite.current !== null) !== (normalizedFavorite !== null) ||
       (previousFavorite.current?.note ?? "") !== (normalizedFavorite?.note ?? "");
     const shouldReset = shouldResetMatchFavoriteDraft({
-      previousMatchId: previousMatchId.current,
+      previousMatchId: matchId,
       matchId,
       favorite: normalizedFavorite,
       state,
     });
-    previousMatchId.current = matchId;
     previousFavorite.current = normalizedFavorite;
-
-    if (matchChanged) {
-      pendingExternalFavorite.current = false;
-      dispatch({ type: "reset", favorite: normalizedFavorite });
-      return;
-    }
 
     const incomingDiffersFromState =
       (normalizedFavorite !== null) !== state.isFavorite ||
       (normalizedFavorite?.note ?? "") !== state.savedNote;
     if (favoriteChanged) {
       pendingExternalFavorite.current = incomingDiffersFromState;
+    } else if (!incomingDiffersFromState) {
+      pendingExternalFavorite.current = false;
     }
+    if (mutationGate.hasInFlight()) return;
     if (
       shouldReset &&
       (favoriteChanged || pendingExternalFavorite.current)
@@ -87,24 +89,6 @@ export function useMatchFavoriteEditor(
     state.savedNote,
   ]);
 
-  const beginMutation = useCallback(() => {
-    mutationRequestId.current += 1;
-    return createMatchFavoriteMutationToken(
-      mutationGeneration.current,
-      mutationRequestId.current,
-    );
-  }, []);
-
-  const isCurrentMutation = useCallback(
-    (token: ReturnType<typeof createMatchFavoriteMutationToken>) =>
-      isCurrentMatchFavoriteMutationToken(
-        token,
-        mutationGeneration.current,
-        mutationRequestId.current,
-      ),
-    [],
-  );
-
   const edit = useCallback((note: string) => {
     dispatch({ type: "edit", note });
   }, []);
@@ -112,43 +96,82 @@ export function useMatchFavoriteEditor(
   const favoriteMatch = useCallback(async () => {
     if (!matchId) return;
     const requestMatchId = matchId;
-    const token = beginMutation();
+    const token = mutationGate.begin(requestMatchId);
+    if (!token) return;
     dispatch({ type: "start" });
     try {
-      const persisted = await saveMatchFavorite({
-        matchId: requestMatchId,
-        note: "",
-      });
-      if (!isCurrentMutation(token)) return;
-      dispatch({ type: "saved", favorite: persisted });
-      if (!isCurrentMutation(token)) return;
-      await onPersisted(persisted);
-    } catch (error) {
-      if (!isCurrentMutation(token)) return;
-      dispatch({ type: "failure", message: productErrorMessage(error) });
+      let persisted: MatchFavoriteView;
+      try {
+        persisted = await saveMatchFavorite({
+          matchId: requestMatchId,
+          note: "",
+        });
+      } catch (error) {
+        if (mutationGate.isCurrent(token)) {
+          dispatch({ type: "failure", message: productErrorMessage(error) });
+        }
+        return;
+      }
+      if (!mutationGate.isCurrent(token)) return;
+      try {
+        await onPersisted(persisted);
+      } catch {
+        if (mutationGate.isCurrent(token)) {
+          dispatch({ type: "saved", favorite: persisted });
+          dispatch({
+            type: "failure",
+            message: "收藏已保存，但页面状态刷新失败，请稍后重试。",
+          });
+        }
+        return;
+      }
+      if (mutationGate.isCurrent(token)) {
+        dispatch({ type: "saved", favorite: persisted });
+      }
+    } finally {
+      mutationGate.end(token);
     }
-  }, [beginMutation, isCurrentMutation, matchId, onPersisted]);
+  }, [matchId, mutationGate, onPersisted]);
 
   const saveNote = useCallback(async () => {
     if (!matchId || favoriteCharacterCount(state.draftNote) > 500) return;
     const requestMatchId = matchId;
-    const token = beginMutation();
+    const token = mutationGate.begin(requestMatchId);
+    if (!token) return;
     const note = state.draftNote;
     dispatch({ type: "start" });
     try {
-      const persisted = await saveMatchFavorite({ matchId: requestMatchId, note });
-      if (!isCurrentMutation(token)) return;
-      dispatch({ type: "saved", favorite: persisted });
-      if (!isCurrentMutation(token)) return;
-      await onPersisted(persisted);
-    } catch (error) {
-      if (!isCurrentMutation(token)) return;
-      dispatch({ type: "failure", message: productErrorMessage(error) });
+      let persisted: MatchFavoriteView;
+      try {
+        persisted = await saveMatchFavorite({ matchId: requestMatchId, note });
+      } catch (error) {
+        if (mutationGate.isCurrent(token)) {
+          dispatch({ type: "failure", message: productErrorMessage(error) });
+        }
+        return;
+      }
+      if (!mutationGate.isCurrent(token)) return;
+      try {
+        await onPersisted(persisted);
+      } catch {
+        if (mutationGate.isCurrent(token)) {
+          dispatch({ type: "saved", favorite: persisted });
+          dispatch({
+            type: "failure",
+            message: "收藏已保存，但页面状态刷新失败，请稍后重试。",
+          });
+        }
+        return;
+      }
+      if (mutationGate.isCurrent(token)) {
+        dispatch({ type: "saved", favorite: persisted });
+      }
+    } finally {
+      mutationGate.end(token);
     }
   }, [
-    beginMutation,
-    isCurrentMutation,
     matchId,
+    mutationGate,
     onPersisted,
     state.draftNote,
   ]);
@@ -156,19 +179,38 @@ export function useMatchFavoriteEditor(
   const unfavoriteMatch = useCallback(async () => {
     if (!matchId) return;
     const requestMatchId = matchId;
-    const token = beginMutation();
+    const token = mutationGate.begin(requestMatchId);
+    if (!token) return;
     dispatch({ type: "start" });
     try {
-      await deleteMatchFavorite(requestMatchId);
-      if (!isCurrentMutation(token)) return;
-      dispatch({ type: "deleted" });
-      if (!isCurrentMutation(token)) return;
-      await onPersisted(null);
-    } catch (error) {
-      if (!isCurrentMutation(token)) return;
-      dispatch({ type: "failure", message: productErrorMessage(error) });
+      try {
+        await deleteMatchFavorite(requestMatchId);
+      } catch (error) {
+        if (mutationGate.isCurrent(token)) {
+          dispatch({ type: "failure", message: productErrorMessage(error) });
+        }
+        return;
+      }
+      if (!mutationGate.isCurrent(token)) return;
+      try {
+        await onPersisted(null);
+      } catch {
+        if (mutationGate.isCurrent(token)) {
+          dispatch({ type: "deleted" });
+          dispatch({
+            type: "failure",
+            message: "已取消收藏，但页面状态刷新失败，请稍后重试。",
+          });
+        }
+        return;
+      }
+      if (mutationGate.isCurrent(token)) {
+        dispatch({ type: "deleted" });
+      }
+    } finally {
+      mutationGate.end(token);
     }
-  }, [beginMutation, isCurrentMutation, matchId, onPersisted]);
+  }, [matchId, mutationGate, onPersisted]);
 
   const confirmDiscard = useCallback(() => {
     if (!dirty) return true;
