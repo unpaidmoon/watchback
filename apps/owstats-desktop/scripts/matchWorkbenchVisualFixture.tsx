@@ -168,6 +168,7 @@ function createMatch(index: number): MatchSummary {
       { code: "kill", label: "击杀最高", tone: "gold" },
       { code: "mitigation", label: "抵挡最高", tone: "gold" },
     ] : [],
+    isFavorite: index === 0,
   };
 }
 
@@ -228,6 +229,7 @@ function createNormalDetail(): MatchDetailView {
     evaluation: { grade: "S", primaryTag: "尽力局", evidenceTags: ["伤害最高"], confidence: 0.9 },
     teamAwards: [{ code: "damage", label: "伤害最高", tone: "gold" }],
     sameRoleComparison: null,
+    favorite: null,
     rawJson: null,
   };
 }

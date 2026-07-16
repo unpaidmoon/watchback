@@ -75,6 +75,8 @@ pub fn run() {
             commands::list_match_timeline,
             commands::search_match_player_options,
             commands::get_match_details,
+            commands::save_match_favorite,
+            commands::delete_match_favorite,
             commands::refresh_match_evaluations,
             commands::get_friend_analytics,
             commands::get_friend_details,

@@ -90,6 +90,7 @@ export const fixtureMatches = [
     durationSec: 842,
     evaluation: normalEvaluation,
     teamAwards: [{ code: "healing", label: "本队治疗最高", tone: "gold" }],
+    isFavorite: false,
   },
   {
     matchId: "fixture-arena-1",
@@ -123,6 +124,7 @@ export const fixtureMatches = [
       confidence: 0.81,
     },
     teamAwards: [{ code: "kill", label: "本队击杀最高", tone: "gold" }],
+    isFavorite: false,
   },
 ] satisfies MatchSummary[];
 
@@ -163,6 +165,7 @@ export const fixtureNormalDetail = {
     current: { kills: 18, deaths: 5, damage: 8450, healing: 12780 },
     average: { kills: 14, deaths: 7, damage: 6910, healing: 10420 },
   },
+  favorite: null,
   rawJson: { source: "synthetic-visual-fixture", branch: "normal" },
 } satisfies MatchDetailView;
 
@@ -249,6 +252,7 @@ export const fixtureArenaDetail = {
   },
   teamAwards: [{ code: "kill", label: "本队击杀最高", tone: "gold" }],
   sameRoleComparison: null,
+  favorite: null,
   rawJson: { source: "synthetic-visual-fixture", branch: "arena" },
 } satisfies MatchDetailView;
 

@@ -16,6 +16,8 @@ import type {
   FriendAnalyticsFilters,
   FriendDetail,
   MatchDetailView,
+  MatchFavoriteRequest,
+  MatchFavoriteView,
   MatchFilters,
   MatchSummary,
   OnboardingStatus,
@@ -65,6 +67,14 @@ export function searchMatchPlayerOptions(query: string) {
 
 export function getMatchDetails(matchId: string) {
   return invoke<MatchDetailView>("get_match_details", { matchId });
+}
+
+export function saveMatchFavorite(request: MatchFavoriteRequest) {
+  return invoke<MatchFavoriteView>("save_match_favorite", { request });
+}
+
+export function deleteMatchFavorite(matchId: string) {
+  return invoke<void>("delete_match_favorite", { matchId });
 }
 
 export function refreshMatchEvaluations() {

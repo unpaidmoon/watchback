@@ -175,7 +175,7 @@ export function matchFiltersKey(filters: MatchFilters) {
   return JSON.stringify(
     Object.keys(filters)
       .sort()
-      .reduce<Record<string, string | number>>((result, key) => {
+      .reduce<Record<string, string | number | boolean>>((result, key) => {
         const value = filters[key as keyof MatchFilters];
         if (value !== undefined && value !== "") result[key] = value;
         return result;

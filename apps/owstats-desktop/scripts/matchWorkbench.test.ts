@@ -580,6 +580,7 @@ const normalDetail: MatchDetailView = {
   evaluation: null,
   teamAwards: [],
   sameRoleComparison: null,
+  favorite: null,
   rawJson: null,
 };
 

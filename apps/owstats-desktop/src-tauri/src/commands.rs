@@ -7,10 +7,10 @@ use crate::{
     sync_season_with_credentials_and_target_paths_output_dir_base_url, AccountLoginResult,
     ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus, FilterOptions,
     FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary, LoginTargetStatus,
-    MatchDetailView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
-    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SyncRequest, SyncSummary,
-    UpdateCheckResult, UserSettings,
+    MatchDetailView, MatchFavoriteRequest, MatchFavoriteView, MatchFilters, MatchSummary,
+    OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview,
+    PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis,
+    SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -67,6 +67,25 @@ pub fn get_match_details(
 ) -> Result<MatchDetailView, String> {
     let account = active_account(&accounts)?;
     get_match_detail(&account.database(), &match_id).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn save_match_favorite(
+    accounts: State<'_, AccountContextManager>,
+    request: MatchFavoriteRequest,
+) -> Result<MatchFavoriteView, String> {
+    let account = active_account(&accounts)?;
+    crate::save_match_favorite(&account.database(), &request.match_id, &request.note)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn delete_match_favorite(
+    accounts: State<'_, AccountContextManager>,
+    match_id: String,
+) -> Result<(), String> {
+    let account = active_account(&accounts)?;
+    crate::delete_match_favorite(&account.database(), &match_id).map_err(to_message)
 }
 
 #[tauri::command]
