@@ -69,6 +69,8 @@ type OperationLifecycle = {
   formatError: (error: unknown) => string;
   refreshAccounts: () => Promise<void>;
   clearCache: () => void;
+  failClosed: () => void;
+  refreshAfterMutation: () => Promise<void>;
 };
 
 async function runOperation(
@@ -140,16 +142,51 @@ type SwitchOperationDependencies = OperationLifecycle & {
   reload: () => void;
 };
 
+async function runContextMutation<T extends { message: string }>(
+  action: BusyAccountAction,
+  dependencies: OperationLifecycle & { invoke: () => Promise<T>; reload: () => void },
+  mutationFailureLabel: string,
+  refreshFailureMessage: string,
+) {
+  if (!dependencies.begin()) {
+    return false;
+  }
+  dependencies.setBusy(action);
+  dependencies.setNotice(null);
+  dependencies.setError(null);
+  try {
+    let result: T;
+    try {
+      result = await dependencies.invoke();
+    } catch (error) {
+      dependencies.setError(`${mutationFailureLabel}：${dependencies.formatError(error)}。请重试。`);
+      return false;
+    }
+    dependencies.failClosed();
+    try {
+      dependencies.reload();
+    } catch {
+      // Reload is only a best-effort takeover. The in-process refresh below is mandatory.
+    }
+    try {
+      await dependencies.refreshAfterMutation();
+      dependencies.setNotice(result.message);
+    } catch {
+      dependencies.setError(refreshFailureMessage);
+    }
+    return true;
+  } finally {
+    dependencies.setBusy(null);
+    dependencies.release();
+  }
+}
+
 export function runSwitchAccountOperation(account: AccountSummary, dependencies: SwitchOperationDependencies) {
-  return runOperation(
+  return runContextMutation(
     { kind: "switch", accountId: account.accountId },
     dependencies,
     "切换账号失败",
-    async () => {
-      await dependencies.invoke();
-      dependencies.clearCache();
-      dependencies.reload();
-    },
+    "账号已切换，但重新加载失败，请重试或重启。",
   );
 }
 
@@ -159,21 +196,42 @@ type RemoveOperationDependencies = OperationLifecycle & {
 };
 
 export function runRemoveAccountOperation(account: AccountSummary, dependencies: RemoveOperationDependencies) {
-  return runOperation(
-    { kind: "remove", accountId: account.accountId },
-    dependencies,
-    "退出账号失败",
-    async () => {
+  const action = { kind: "remove", accountId: account.accountId } as const;
+  if (!dependencies.begin()) {
+    return Promise.resolve(false);
+  }
+  dependencies.setBusy(action);
+  dependencies.setNotice(null);
+  dependencies.setError(null);
+  return (async () => {
+    try {
       const result = await dependencies.invoke();
       if (result.removed && result.reloadRequired) {
-        dependencies.clearCache();
-        dependencies.reload();
-        return;
+        dependencies.failClosed();
+        try {
+          dependencies.reload();
+        } catch {
+          // Reload is best-effort; the fresh account-scoped request is authoritative.
+        }
+        try {
+          await dependencies.refreshAfterMutation();
+          dependencies.setNotice(result.message);
+        } catch {
+          dependencies.setError("账号已退出，但重新加载失败，请重试或重启。");
+        }
+        return true;
       }
       await dependencies.refreshAccounts();
       dependencies.setNotice(result.message);
-    },
-  );
+      return true;
+    } catch (error) {
+      dependencies.setError(`退出账号失败：${dependencies.formatError(error)}。请重试。`);
+      return false;
+    } finally {
+      dependencies.setBusy(null);
+      dependencies.release();
+    }
+  })();
 }
 
 export function applyRemovalDecision(

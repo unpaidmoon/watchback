@@ -95,7 +95,7 @@ const secondStatus: AccountManagerStatus = { activeAccountId: secondAccount.acco
   assert.equal(appliedAccountId, secondAccount.accountId, "旧 scoped 响应不得覆盖新活动账号");
 }
 
-function operationHarness() {
+function operationHarness(refreshMutation: () => Promise<string | null> = async () => secondAccount.accountId) {
   let locked = false;
   let busy: unknown = null;
   let releaseCount = 0;
@@ -103,6 +103,10 @@ function operationHarness() {
   let error: string | null = null;
   let refreshCount = 0;
   let clearCount = 0;
+  let failClosedCount = 0;
+  let mutationRefreshCount = 0;
+  let oldSnapshotPresent = true;
+  let freshActiveAccountId: string | null = firstAccount.accountId;
   return {
     deps: {
       begin: () => {
@@ -130,17 +134,56 @@ function operationHarness() {
       clearCache: () => {
         clearCount += 1;
       },
+      failClosed: () => {
+        failClosedCount += 1;
+        oldSnapshotPresent = false;
+        freshActiveAccountId = null;
+      },
+      refreshAfterMutation: async () => {
+        mutationRefreshCount += 1;
+        freshActiveAccountId = await refreshMutation();
+      },
     },
-    state: () => ({ locked, busy, releaseCount, notice, error, refreshCount, clearCount }),
+    state: () => ({
+      locked,
+      busy,
+      releaseCount,
+      notice,
+      error,
+      refreshCount,
+      clearCount,
+      failClosedCount,
+      mutationRefreshCount,
+      oldSnapshotPresent,
+      freshActiveAccountId,
+    }),
   };
 }
 
-for (const reload of [() => undefined, () => { throw new Error("reload unavailable"); }]) {
+for (const reloadThrows of [false, true]) {
   const harness = operationHarness();
+  const reload = () => {
+    assert.equal(harness.state().oldSnapshotPresent, false, "switch 必须先 fail-close 再 reload");
+    if (reloadThrows) throw new Error("reload unavailable");
+  };
   await runSwitchAccountOperation(secondAccount, { ...harness.deps, invoke: async () => secondStatus, reload });
   assert.equal(harness.state().locked, false, "switch reload 返回或抛错后都必须释放锁");
   assert.equal(harness.state().busy, null, "switch reload 返回或抛错后都必须清除 busy");
   assert.equal(harness.state().releaseCount, 1, "switch 生命周期只释放一次");
+  assert.equal(harness.state().failClosedCount, 1);
+  assert.equal(harness.state().mutationRefreshCount, 1);
+  assert.equal(harness.state().freshActiveAccountId, secondAccount.accountId);
+  assert.equal(harness.state().error, null, "reload 抛错不是后端切换失败");
+}
+
+{
+  const harness = operationHarness(async () => { throw new Error("fresh refresh failed"); });
+  await runSwitchAccountOperation(secondAccount, { ...harness.deps, invoke: async () => secondStatus, reload: () => undefined });
+  assert.equal(harness.state().oldSnapshotPresent, false);
+  assert.equal(harness.state().freshActiveAccountId, null);
+  assert.equal(harness.state().locked, false);
+  assert.equal(harness.state().busy, null);
+  assert.equal(harness.state().error, "账号已切换，但重新加载失败，请重试或重启。");
 }
 
 {
@@ -159,8 +202,12 @@ for (const reload of [() => undefined, () => { throw new Error("reload unavailab
   assert.equal(removals, 1, "确认退出必须调用 remove");
 }
 
-for (const reload of [() => undefined, () => { throw new Error("reload unavailable"); }]) {
-  const harness = operationHarness();
+for (const reloadThrows of [false, true]) {
+  const harness = operationHarness(async () => null);
+  const reload = () => {
+    assert.equal(harness.state().oldSnapshotPresent, false, "remove 必须先 fail-close 再 reload");
+    if (reloadThrows) throw new Error("reload unavailable");
+  };
   await runRemoveAccountOperation(firstAccount, {
     ...harness.deps,
     invoke: async () => ({ removed: true, activeAccountId: null, message: "账号已退出", reloadRequired: true }),
@@ -169,7 +216,24 @@ for (const reload of [() => undefined, () => { throw new Error("reload unavailab
   assert.equal(harness.state().locked, false, "remove reload 返回或抛错后都必须释放锁");
   assert.equal(harness.state().busy, null, "remove reload 返回或抛错后都必须清除 busy");
   assert.equal(harness.state().releaseCount, 1, "remove 生命周期只释放一次");
-  assert.equal(harness.state().clearCount, 1, "remove 必须在 reload 前清理缓存");
+  assert.equal(harness.state().failClosedCount, 1);
+  assert.equal(harness.state().mutationRefreshCount, 1);
+  assert.equal(harness.state().oldSnapshotPresent, false);
+  assert.equal(harness.state().error, null, "reload 抛错不是后端退出失败");
+}
+
+{
+  const harness = operationHarness(async () => { throw new Error("fresh refresh failed"); });
+  await runRemoveAccountOperation(firstAccount, {
+    ...harness.deps,
+    invoke: async () => ({ removed: true, activeAccountId: null, message: "账号已退出", reloadRequired: true }),
+    reload: () => undefined,
+  });
+  assert.equal(harness.state().oldSnapshotPresent, false);
+  assert.equal(harness.state().freshActiveAccountId, null);
+  assert.equal(harness.state().locked, false);
+  assert.equal(harness.state().busy, null);
+  assert.equal(harness.state().error, "账号已退出，但重新加载失败，请重试或重启。");
 }
 
 {

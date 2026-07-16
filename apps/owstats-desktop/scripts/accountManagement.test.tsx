@@ -18,6 +18,11 @@ assert.match(onboardingSource, /<AccountManager/);
 assert.match(onboardingSource, /window\.location\.reload\(\)/);
 assert.match(onboardingSource, /dashboardCache = null/);
 assert.match(onboardingSource, /添加账号后即可同步和查看本地数据/);
+assert.match(
+  onboardingSource,
+  /!accountContextInvalidated && accountStatus\?\.activeAccountId/,
+  "fail-close 后不得渲染旧账号的同步和查询内容",
+);
 assert.ok(
   isolationSource.indexOf("const accountStatus = await options.listAccounts()") <
     isolationSource.indexOf("const scopedDashboard = await options.loadAccountScope()"),
@@ -33,8 +38,8 @@ assert.match(
   /cachedSnapshot\?\.accountStatus\.activeAccountId === accountStatus\.activeAccountId/,
   "仪表盘缓存必须绑定活动账号",
 );
-assert.match(isolationSource, /runSwitchAccountOperation[\s\S]*?clearCache\(\);[\s\S]*?reload\(\)/);
-assert.match(isolationSource, /result\.removed && result\.reloadRequired[\s\S]*?clearCache\(\);[\s\S]*?reload\(\)/);
+assert.match(isolationSource, /runContextMutation[\s\S]*?failClosed\(\);[\s\S]*?reload\(\)[\s\S]*?refreshAfterMutation\(\)/);
+assert.match(isolationSource, /result\.removed && result\.reloadRequired[\s\S]*?failClosed\(\);[\s\S]*?reload\(\)[\s\S]*?refreshAfterMutation\(\)/);
 assert.doesNotMatch(onboardingSource, /runLogout/);
 assert.doesNotMatch(onboardingSource, />退出登录</);
 assert.doesNotMatch(tauriLibSource, /commands::logout\b/);

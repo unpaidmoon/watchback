@@ -60,6 +60,7 @@ export function isCurrentDashboardRequest(requestGeneration: number, currentGene
 export function OnboardingPage() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [accountStatus, setAccountStatus] = useState<AccountManagerStatus | null>(null);
+  const [accountContextInvalidated, setAccountContextInvalidated] = useState(false);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [targetStatus, setTargetStatus] = useState<LoginTargetStatus | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
@@ -130,7 +131,7 @@ export function OnboardingPage() {
     void loadDashboard();
   }, []);
 
-  async function loadDashboard() {
+  async function loadDashboard(rethrow = false) {
     const requestGeneration = ++dashboardRequestGenerationRef.current;
     if (mountedRef.current) {
       setError(null);
@@ -172,12 +173,18 @@ export function OnboardingPage() {
       applyDashboardSnapshot(result.snapshot);
     } catch (err) {
       if (isCurrentDashboardRequest(requestGeneration, dashboardRequestGenerationRef.current, mountedRef.current)) {
-        setError(productErrorMessage(err));
+        if (!rethrow) {
+          setError(productErrorMessage(err));
+        }
+      }
+      if (rethrow) {
+        throw err;
       }
     }
   }
 
   function applyDashboardSnapshot(snapshot: DashboardSnapshot) {
+    setAccountContextInvalidated(false);
     setAccountStatus(snapshot.accountStatus);
     setStatus(snapshot.status);
     setProfile(snapshot.profile);
@@ -216,6 +223,25 @@ export function OnboardingPage() {
     return true;
   }
 
+  function failClosedAccountContext() {
+    invalidateDashboardCache();
+    setAccountContextInvalidated(true);
+    setStatus(null);
+    setProfile(null);
+    setTargetStatus(null);
+    setSelectedSeason(null);
+    setSyncProgress(null);
+    setSyncError(null);
+    setSyncNotice(null);
+    setSyncingSeason(null);
+    setAccountStatus((current) => current ? {
+      ...current,
+      activeAccountId: null,
+      accounts: current.accounts.map((account) => ({ ...account, isActive: false })),
+      message: "正在重新加载账号状态。",
+    } : current);
+  }
+
   function accountOperationLifecycle() {
     return {
       begin: beginAccountOperation,
@@ -237,6 +263,8 @@ export function OnboardingPage() {
       formatError: productErrorMessage,
       refreshAccounts: loadDashboard,
       clearCache: invalidateDashboardCache,
+      failClosed: failClosedAccountContext,
+      refreshAfterMutation: () => loadDashboard(true),
     };
   }
 
@@ -502,7 +530,7 @@ export function OnboardingPage() {
         </div>
       )}
 
-      {accountStatus?.activeAccountId ? <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
+      {!accountContextInvalidated && accountStatus?.activeAccountId ? <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
         <DataFact label="登录状态" value={credentialReady ? "已登录" : "待登录"} tone={credentialReady ? "good" : "warn"} />
         <DataFact label="本地对局" value={`${presetMatches} 场`} tone={presetMatches > 0 ? "good" : "warn"} />
         <DataFact label="覆盖率" value={`${coveragePercent}%`} tone={coveragePercent >= 80 ? "good" : "warn"} />
@@ -510,8 +538,10 @@ export function OnboardingPage() {
       </div> : null}
 
       <QaRegion id="CMD-PROFILE" className="phase6QaBlockRegion">
-        {accountStatus === null ? (
-          <div className="seasonSyncWorkbenchLoading" role="status">正在加载账号信息…</div>
+        {accountStatus === null || accountContextInvalidated ? (
+          <div className="seasonSyncWorkbenchLoading" role="status">
+            {accountContextInvalidated ? "账号状态已更新，正在重新加载…" : "正在加载账号信息…"}
+          </div>
         ) : accountStatus.activeAccountId ? <>
           <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
           <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
