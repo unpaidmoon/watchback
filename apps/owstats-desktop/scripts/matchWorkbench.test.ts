@@ -4,8 +4,10 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
+import { MatchListCard } from "../src/features/matches/MatchListCard";
+import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import { MatchDetailReport } from "../src/pages/MatchDetailPage";
-import type { MatchDetailView, PlayerRow } from "../src/shared/types";
+import type { MatchDetailView, MatchSummary, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
@@ -30,6 +32,42 @@ function sliceMediaBlock(source: string, marker: string): string {
 const compactDesktopStyles = sliceMediaBlock(matchStyleSource, "@media (min-width: 1401px) and (max-width: 1500px) {");
 const twoRowCardStyles = sliceMediaBlock(matchStyleSource, "@media (min-width: 641px) and (max-width: 1400px) {");
 const narrowHandsetStyles = sliceMediaBlock(matchStyleSource, "@media (max-width: 400px) {");
+
+assert.match(
+  matchStyleSource,
+  /\.matchFavoriteEditor\s*\{(?=[^}]*display:\s*grid)(?=[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto)(?=[^}]*align-items:\s*end)(?=[^}]*border-top:\s*1px solid var\(--border-subtle\))[^}]*\}/s,
+  "favorite editor should use the approved flat two-column detail layout",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchFavoriteNoteField textarea\s*\{(?=[^}]*min-height:\s*88px)(?=[^}]*resize:\s*vertical)(?=[^}]*border:\s*1px solid var\(--glass-border\))(?=[^}]*border-radius:\s*var\(--radius-control\))(?=[^}]*background:\s*var\(--surface-control\))[^}]*\}/s,
+  "favorite note should follow the existing control tokens and remain vertically resizable",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchListFavoriteMark\s*\{(?=[^}]*position:\s*absolute)(?=[^}]*top:\s*var\(--space-1\))(?=[^}]*right:\s*var\(--space-2\))(?=[^}]*display:\s*inline-flex)(?=[^}]*padding:\s*var\(--space-1\))(?=[^}]*border:\s*1px solid var\(--glass-border\))(?=[^}]*border-radius:\s*var\(--radius-control\))(?=[^}]*background:\s*var\(--action-primary\))(?=[^}]*color:\s*var\(--action-on-primary\))(?=[^}]*pointer-events:\s*none)[^}]*\}/s,
+  "favorite marker should use a stable high-contrast token surface without becoming interactive",
+);
+assert.match(
+  matchStyleSource,
+  /\.advancedMatchFilters\.phase6FilterRowSecondary\s*\{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s,
+  "wide advanced filters should expose all six fields in one row",
+);
+assert.match(
+  matchStyleSource,
+  /@media \(max-width:\s*1099px\)\s*\{[\s\S]*?\.matchFavoriteEditor\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*\}[\s\S]*?\.matchFavoriteActions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  "narrow detail should stack the editor and keep two equal action columns",
+);
+assert.match(
+  matchStyleSource,
+  /@media \(max-width:\s*1099px\)\s*\{[\s\S]*?\.matchDetailBackButton\s*\{(?=[^}]*position:\s*static)(?=[^}]*min-height:\s*44px)[^}]*\}/s,
+  "narrow back control should remain in normal flow instead of overlaying detail content",
+);
+assert.doesNotMatch(
+  matchStyleSource,
+  /@media \(max-width:\s*520px\)\s*\{[\s\S]*?\.matchFavoriteActions\s*\{[^}]*grid-template-columns/s,
+  "favorite actions should retain two equal columns at every width below 1099px",
+);
 
 assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesPage should render the combined match workbench layout");
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
@@ -176,6 +214,64 @@ assert.equal(
   true,
   "MatchListCard should render the K/A/D value in the reference order",
 );
+
+const anonymousListMatch = {
+  matchId: "anonymous-favorite-row",
+  season: 22,
+  bucket: "preset",
+  gameMode: "SportPreset",
+  modeLabel: "匿名模式",
+  result: "win",
+  resultLabel: "胜利",
+  mapGuid: "",
+  mapName: "匿名地图",
+  heroGuid: "",
+  heroName: "匿名英雄",
+  beginTs: 0,
+  beginLabel: "70/01/01 08:00",
+  teamScore: 3,
+  opponentScore: 1,
+  kills: 12,
+  assists: 8,
+  deaths: 4,
+  damage: 12345,
+  healing: 2345,
+  mitigation: 3456,
+  durationSec: 600,
+  evaluation: null,
+  teamAwards: [],
+  isFavorite: true,
+  note: "绝不能出现在列表里的匿名备注",
+} satisfies MatchSummary & { note: string };
+const favoriteListMarkup = renderToStaticMarkup(
+  createElement(MatchListCard, {
+    match: anonymousListMatch,
+    selected: false,
+    onSelect: () => undefined,
+  }),
+);
+assert.match(
+  favoriteListMarkup,
+  /<span class="matchListFavoriteMark" title="已收藏" aria-label="已收藏">/,
+  "a favorited list row should expose the non-interactive favorite marker",
+);
+assert.match(favoriteListMarkup, /<svg[^>]*aria-hidden="true"/, "the favorite star should be decorative");
+assert.equal(
+  (favoriteListMarkup.match(/<button\b/g) ?? []).length,
+  1,
+  "the list card remains the only button and never nests a marker button",
+);
+assert.doesNotMatch(favoriteListMarkup, /绝不能出现在列表里的匿名备注/, "favorite notes never render in list rows");
+
+const plainListMarkup = renderToStaticMarkup(
+  createElement(MatchListCard, {
+    match: { ...anonymousListMatch, matchId: "anonymous-plain-row", isFavorite: false },
+    selected: false,
+    onSelect: () => undefined,
+  }),
+);
+assert.doesNotMatch(plainListMarkup, /matchListFavoriteMark|已收藏/, "a plain list row should not render a favorite marker");
+
 assert.match(
   matchStyleSource,
   /\.phase6WorkbenchList button\.matchListCard\s*\{(?=[^}]*height:\s*152px)(?=[^}]*grid-template-rows:\s*64px\s+88px)[^}]*\}/s,
@@ -580,11 +676,30 @@ const normalDetail: MatchDetailView = {
   evaluation: null,
   teamAwards: [],
   sameRoleComparison: null,
+  favorite: null,
   rawJson: null,
+};
+
+const favoriteController: MatchFavoriteController = {
+  savedNote: "",
+  draftNote: "",
+  isFavorite: false,
+  busy: false,
+  error: null,
+  saved: false,
+  dirty: false,
+  count: 0,
+  canSave: false,
+  edit: () => undefined,
+  favoriteMatch: async () => undefined,
+  saveNote: async () => undefined,
+  unfavoriteMatch: async () => undefined,
+  confirmDiscard: () => true,
 };
 
 const navigationProps = {
   onRetry: () => undefined,
+  favoriteController,
 };
 
 const detailLoadingMarkup = renderToStaticMarkup(
@@ -619,6 +734,10 @@ assert.match(normalMarkup, /aria-label="普通对局详情"/);
 assert.doesNotMatch(normalMarkup, />本人表现</);
 assert.match(normalMarkup, />队友数据</);
 assert.match(normalMarkup, />对手数据</);
+assert.ok(
+  normalMarkup.indexOf("matchDetailTeamComparison") < normalMarkup.indexOf("matchFavoriteEditor"),
+  "compact normal favorite editor should be the last item after team comparison",
+);
 
 const standaloneNormalMarkup = renderToStaticMarkup(
   createElement(MatchDetailReport, {
@@ -630,6 +749,7 @@ const standaloneNormalMarkup = renderToStaticMarkup(
     loading: false,
     error: null,
     matchId: normalDetail.matchId,
+    favoriteController,
   }),
 );
 assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
@@ -637,6 +757,10 @@ assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should 
 assert.doesNotMatch(standaloneNormalMarkup, />对局表现</, "standalone normal detail should remove the personal summary eyebrow");
 assert.doesNotMatch(standaloneNormalMarkup, />评分与同队奖牌</, "standalone normal detail should remove the personal summary title");
 assert.doesNotMatch(standaloneNormalMarkup, /phase6PerformanceBadges/, "standalone normal detail should not render performance badges");
+assert.ok(
+  standaloneNormalMarkup.indexOf("detailContent") < standaloneNormalMarkup.indexOf("matchFavoriteEditor"),
+  "standalone normal favorite editor should render after detail content",
+);
 
 for (const [result, resultLabel, englishLabel] of [
   ["loss", "失败", "DEFEAT"],
@@ -648,6 +772,7 @@ for (const [result, resultLabel, englishLabel] of [
       loading: false,
       error: null,
       matchId: `anonymous-${result}`,
+      favoriteController,
     }),
   );
   assert.match(standaloneMarkup, new RegExp(`>${englishLabel}<`), `standalone ${result} detail should render ${englishLabel}`);
@@ -659,6 +784,7 @@ const standaloneUnknownMarkup = renderToStaticMarkup(
     loading: false,
     error: null,
     matchId: "anonymous-unknown",
+    favoriteController,
   }),
 );
 assert.match(standaloneUnknownMarkup, />UNKNOWN</, "unknown result should not be announced as a draw");
@@ -711,6 +837,24 @@ assert.match(arenaMarkup, /<button[^>]*><span>角斗汇总<\/span><\/button>/, "
 assert.match(arenaMarkup, /<button[^>]*><span>回合-1<\/span><strong>1 - 0<\/strong><\/button>/, "arena detail should keep the round switch and label");
 assert.match(arenaMarkup, />队友数据</, "arena detail should keep the teammate table");
 assert.match(arenaMarkup, />对手数据</, "arena detail should keep the enemy table");
+assert.ok(
+  arenaMarkup.indexOf("matchDetailTeamComparison") < arenaMarkup.indexOf("matchFavoriteEditor"),
+  "compact arena summary favorite editor should render after team content",
+);
+
+const standaloneArenaMarkup = renderToStaticMarkup(
+  createElement(MatchDetailReport, {
+    detail: arenaDetail,
+    loading: false,
+    error: null,
+    matchId: arenaDetail.matchId,
+    favoriteController,
+  }),
+);
+assert.ok(
+  standaloneArenaMarkup.indexOf("detailContent") < standaloneArenaMarkup.indexOf("matchFavoriteEditor"),
+  "standalone arena summary favorite editor should render after selected summary content",
+);
 
 type TestElement = React.ReactElement<Record<string, unknown>>;
 
@@ -789,6 +933,14 @@ const roundSwitch = findReactElement(
 );
 (roundSwitch.props.onClick as () => void)();
 const selectedRoundTree = renderArenaWithTestHooks();
+assert.throws(
+  () => findReactElement(
+    selectedRoundTree,
+    (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+    "selected arena round must not render the favorite editor",
+  ),
+  /selected arena round must not render the favorite editor/,
+);
 const selectedRoundHeader = findReactElement(
   selectedRoundTree,
   (element) => typeof element.type === "function" && element.type.name === "MatchDetailHeader",
@@ -805,4 +957,68 @@ assert.equal(
   (selectedRoundTeamTable.props.players as PlayerRow[])[0]?.name,
   "第 1 回合队友",
   "round selection should switch the displayed player data",
+);
+
+let allowStandaloneDiscard = false;
+let standaloneConfirmCount = 0;
+const standaloneArenaController: MatchFavoriteController = {
+  ...favoriteController,
+  dirty: true,
+  confirmDiscard: () => {
+    standaloneConfirmCount += 1;
+    return allowStandaloneDiscard;
+  },
+};
+
+function renderStandaloneArenaWithTestHooks(): React.ReactElement {
+  const previousDispatcher = dispatcherRef.current;
+  dispatcherRef.current = arenaHookDispatcher;
+  arenaHookIndex = 0;
+  try {
+    return MatchDetailReport({
+      detail: arenaDetail,
+      loading: false,
+      error: null,
+      matchId: arenaDetail.matchId,
+      favoriteController: standaloneArenaController,
+    });
+  } finally {
+    dispatcherRef.current = previousDispatcher;
+  }
+}
+
+arenaStateSlots.length = 0;
+const initialStandaloneArenaTree = renderStandaloneArenaWithTestHooks();
+findReactElement(
+  initialStandaloneArenaTree,
+  (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+  "standalone arena summary should render the favorite editor",
+);
+const standaloneArenaSelector = findReactElement(
+  initialStandaloneArenaTree,
+  (element) =>
+    typeof element.type === "function" &&
+    element.type.name === "ArenaSelector" &&
+    typeof element.props.onSelect === "function",
+  "standalone arena detail should expose its real slice selection handler",
+);
+(standaloneArenaSelector.props.onSelect as (key: string) => void)("round-1");
+assert.equal(standaloneConfirmCount, 1, "leaving standalone arena summary should confirm once");
+const rejectedStandaloneArenaTree = renderStandaloneArenaWithTestHooks();
+findReactElement(
+  rejectedStandaloneArenaTree,
+  (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+  "rejected standalone arena navigation should remain on summary",
+);
+
+allowStandaloneDiscard = true;
+(standaloneArenaSelector.props.onSelect as (key: string) => void)("round-1");
+const selectedStandaloneRoundTree = renderStandaloneArenaWithTestHooks();
+assert.throws(
+  () => findReactElement(
+    selectedStandaloneRoundTree,
+    (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
+    "standalone arena round must not render the favorite editor",
+  ),
+  /standalone arena round must not render the favorite editor/,
 );

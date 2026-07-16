@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { filtersFromParams, validateFilters } from "../src/features/matches/matchFilters.ts";
+import {
+  filtersFromParams,
+  restoreRejectedMatchesSearchParams,
+  validateFilters,
+} from "../src/features/matches/matchFilters.ts";
+import * as matchesPageCacheModule from "../src/shared/matchesPageCache.ts";
 import {
   canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
@@ -12,15 +17,53 @@ import {
   consumeMatchesSearchParamsNavigation,
   computeMatchAnchorScrollTop,
   getMatchesPageCache,
+  guardMatchFilterChange,
+  guardMatchesPageNavigation,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
+  invalidateStandaloneMatchFavoritePersistence,
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
+  shouldInvalidateStandaloneFavoriteCache,
   shouldLoadMatchesForFilter,
   updateMatchesPageCache,
 } from "../src/shared/matchesPageCache.ts";
 import type { FilterOptions, MatchFilters, MatchSummary, Overview } from "../src/shared/types.ts";
+
+const updateMatchFavoriteState = (
+  matchesPageCacheModule as unknown as {
+    updateMatchFavoriteState: <T extends { matchId: string; isFavorite: boolean }>(
+      matches: T[],
+      matchId: string,
+      isFavorite: boolean,
+    ) => T[];
+  }
+).updateMatchFavoriteState;
+assert.equal(typeof updateMatchFavoriteState, "function", "match favorite updates should expose an immutable list helper");
+
+const createMatchesPageLifetime = (
+  matchesPageCacheModule as unknown as {
+    createMatchesPageLifetime: () => {
+      activate: () => void;
+      deactivate: () => void;
+      isActive: () => boolean;
+    };
+  }
+).createMatchesPageLifetime;
+assert.equal(typeof createMatchesPageLifetime, "function", "matches page should expose its tested lifetime gate");
+const pageLifetime = createMatchesPageLifetime();
+assert.equal(pageLifetime.isActive(), false, "a page lifetime starts inactive before its effect setup");
+pageLifetime.activate();
+assert.equal(pageLifetime.isActive(), true, "effect setup activates the page lifetime");
+pageLifetime.deactivate();
+assert.equal(pageLifetime.isActive(), false, "effect cleanup deactivates the page lifetime");
+pageLifetime.activate();
+assert.equal(
+  pageLifetime.isActive(),
+  true,
+  "StrictMode cleanup followed by replayed effect setup reactivates the same page lifetime",
+);
 
 function createDeferred() {
   let resolve!: () => void;
@@ -60,6 +103,26 @@ assert.equal(
   "first-match",
   "a loaded list falls back to its first row when selection is missing",
 );
+
+const favoriteRows = [
+  { matchId: "target", isFavorite: false, label: "目标" },
+  { matchId: "other", isFavorite: true, label: "其它" },
+];
+const favoritedRows = updateMatchFavoriteState(favoriteRows, "target", true);
+assert.notEqual(favoritedRows, favoriteRows, "favorite updates always return a new array");
+assert.notEqual(favoritedRows[0], favoriteRows[0], "a changed target row is cloned");
+assert.deepEqual(favoritedRows[0], { matchId: "target", isFavorite: true, label: "目标" });
+assert.equal(favoritedRows[1], favoriteRows[1], "non-target rows preserve their references");
+
+const unchangedFavoriteRows = updateMatchFavoriteState(favoritedRows, "target", true);
+assert.notEqual(unchangedFavoriteRows, favoritedRows, "same-value updates still return a new array");
+assert.equal(unchangedFavoriteRows[0], favoritedRows[0], "a same-value target preserves its reference");
+assert.equal(unchangedFavoriteRows[1], favoritedRows[1], "same-value updates preserve non-target references");
+
+const missingFavoriteRows = updateMatchFavoriteState(favoriteRows, "missing", false);
+assert.notEqual(missingFavoriteRows, favoriteRows, "missing-id updates still return a new array");
+assert.equal(missingFavoriteRows[0], favoriteRows[0], "missing-id updates preserve the first row");
+assert.equal(missingFavoriteRows[1], favoriteRows[1], "missing-id updates preserve the second row");
 
 assert.equal(isLatestMatchRequest(1, 2), false, "an older match-list request cannot apply after a newer request starts");
 assert.equal(isLatestMatchRequest(2, 2), true, "the latest match-list request may apply its result");
@@ -115,6 +178,10 @@ assert.deepEqual(
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true, "hero query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("season=21")), true, "S21 query counts as an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=1")), true, "favorite query counts as an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=true")), false, "favorite=true is not an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=0")), false, "favorite=0 is not an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=")), false, "an empty favorite value is not an explicit filter");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("qa=1")), false, "qa query does not override cached filters");
 
 assert.deepEqual(
@@ -149,6 +216,11 @@ assert.notEqual(
   matchFiltersKey({ season: 22 }),
   "S21 and S22 use different match-list cache keys",
 );
+assert.notEqual(
+  matchFiltersKey({}),
+  matchFiltersKey({ favoriteOnly: true }),
+  "favorites-only filters produce a distinct cache key",
+);
 
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), false, "cache does not hydrate before first successful load");
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, true), false, "cache without loaded key does not hydrate explicit filters");
@@ -156,6 +228,19 @@ assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, tr
 updateMatchesPageCache({ loadedFilterKey: matchFiltersKey(cachedFilters), hasLoaded: true });
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), true, "cache hydrates normal route re-entry");
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, true), true, "cache hydrates explicit filters when loaded key matches");
+
+for (const invalidFavorite of ["favorite=true", "favorite=0", "favorite="]) {
+  const params = new URLSearchParams(invalidFavorite);
+  const navigation = chooseMatchesPageNavigationState(
+    filtersFromParams(params),
+    null,
+    getMatchesPageCache(),
+    hasExplicitMatchFilterParams(params),
+  );
+  assert.deepEqual(navigation.filters, cachedFilters, `${invalidFavorite} does not replace cached filters`);
+  assert.equal(navigation.selectedMatchId, "cached-match", `${invalidFavorite} does not replace the cached selected match`);
+  assert.equal(navigation.canHydrateCache, true, `${invalidFavorite} keeps the existing cache hydratable`);
+}
 
 const explicitNavigation = chooseMatchesPageNavigationState({ season: 21 }, "url-match", getMatchesPageCache(), true);
 assert.deepEqual(explicitNavigation.filters, { season: 21 }, "an external explicit query replaces cached filters");
@@ -282,8 +367,35 @@ const matches = [
     durationSec: 60,
     evaluation: null,
     teamAwards: [],
+    isFavorite: false,
   },
 ] satisfies MatchSummary[];
+
+clearMatchesPageCache();
+updateMatchesPageCache({
+  filters: { season: 22 },
+  matches,
+  selectedMatchId: "m1",
+  loadedFilterKey: matchFiltersKey({ season: 22 }),
+  scrollTop: 420,
+  scrollAnchor: { matchId: "m1", offsetTop: 12 },
+  hasLoaded: true,
+});
+const favoriteCacheRows = updateMatchFavoriteState(matches, "m1", true);
+updateMatchesPageCache({ matches: favoriteCacheRows });
+assert.equal(getMatchesPageCache()?.matches[0]?.isFavorite, true, "favorite updates are persisted in the list cache");
+assert.equal(getMatchesPageCache()?.selectedMatchId, "m1", "favorite cache writes preserve selection");
+assert.equal(getMatchesPageCache()?.scrollTop, 420, "favorite cache writes preserve scroll position");
+assert.deepEqual(
+  getMatchesPageCache()?.scrollAnchor,
+  { matchId: "m1", offsetTop: 12 },
+  "favorite cache writes preserve the scroll anchor",
+);
+assert.equal(
+  Object.hasOwn(getMatchesPageCache()?.matches[0] ?? {}, "note"),
+  false,
+  "the list cache never receives favorite note text",
+);
 
 const requestedPreloadFilters: MatchFilters = { season: 23 };
 const freshPreloadMatches = [{ ...matches[0], matchId: "fresh-match", season: 23 }] satisfies MatchSummary[];
@@ -571,6 +683,222 @@ assert.deepEqual(
 );
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+const matchDetailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
+
+assert.equal(shouldInvalidateStandaloneFavoriteCache(null, { note: "" }), true);
+assert.equal(shouldInvalidateStandaloneFavoriteCache({ note: "old" }, null), true);
+assert.equal(
+  shouldInvalidateStandaloneFavoriteCache({ note: "old" }, { note: "new" }),
+  false,
+  "a note-only update keeps the timeline favorite presence unchanged",
+);
+assert.equal(
+  shouldInvalidateStandaloneFavoriteCache(undefined, { note: "" }),
+  false,
+  "favorite presence is not invalidated before standalone detail has loaded",
+);
+
+updateMatchesPageCache({
+  filters: { favoriteOnly: true },
+  loadedFilterKey: matchFiltersKey({ favoriteOnly: true }),
+  hasLoaded: true,
+});
+invalidateStandaloneMatchFavoritePersistence();
+assert.equal(
+  getMatchesPageCache(),
+  null,
+  "standalone favorite persistence invalidates the hydrated timeline, including favorite-only results",
+);
+assert.match(
+  matchDetailPageSource,
+  /const favoriteRef = useRef<MatchDetailView\["favorite"\] \| undefined>\(undefined\);[\s\S]*const handleFavoritePersisted[\s\S]*shouldInvalidateStandaloneFavoriteCache\(favoriteRef\.current, favorite\)[\s\S]*invalidateStandaloneMatchFavoritePersistence\(\);[\s\S]*favoriteRef\.current = favorite;[\s\S]*setDetail/,
+  "standalone persistence compares and updates a stable favorite ref before updating detail state",
+);
+assert.match(
+  matchDetailPageSource,
+  /const nextDetail = await getMatchDetails\(nextMatchId\);\s*favoriteRef\.current = nextDetail\.favorite;\s*setDetail\(nextDetail\);/,
+  "loading standalone detail synchronizes the favorite-presence ref",
+);
+
+let sameFilterConfirmCount = 0;
+assert.equal(
+  guardMatchFilterChange(
+    { season: 23, favoriteOnly: true },
+    { favoriteOnly: true, season: 23 },
+    () => {
+      sameFilterConfirmCount += 1;
+      return false;
+    },
+  ),
+  true,
+);
+assert.equal(sameFilterConfirmCount, 0, "an equivalent filter key does not prompt");
+
+let rejectedFilterConfirmCount = 0;
+assert.equal(
+  guardMatchFilterChange({ season: 22 }, { season: 23 }, () => {
+    rejectedFilterConfirmCount += 1;
+    return false;
+  }),
+  false,
+);
+assert.equal(rejectedFilterConfirmCount, 1);
+
+let acceptedFilterConfirmCount = 0;
+assert.equal(
+  guardMatchFilterChange({ season: 22 }, { season: 23 }, () => {
+    acceptedFilterConfirmCount += 1;
+    return true;
+  }),
+  true,
+);
+assert.equal(acceptedFilterConfirmCount, 1);
+
+let unchangedNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 23, favoriteOnly: true },
+      nextFilters: { favoriteOnly: true, season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-a",
+    },
+    () => {
+      unchangedNavigationConfirmCount += 1;
+      return false;
+    },
+  ),
+  true,
+);
+assert.equal(unchangedNavigationConfirmCount, 0);
+
+let matchOnlyNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 23 },
+      nextFilters: { season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-b",
+    },
+    () => {
+      matchOnlyNavigationConfirmCount += 1;
+      return false;
+    },
+  ),
+  false,
+);
+assert.equal(matchOnlyNavigationConfirmCount, 1, "match-only URL transitions can be rejected while dirty or busy");
+
+let filterOnlyNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 22 },
+      nextFilters: { season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-a",
+    },
+    () => {
+      filterOnlyNavigationConfirmCount += 1;
+      return false;
+    },
+  ),
+  false,
+);
+assert.equal(filterOnlyNavigationConfirmCount, 1);
+
+let combinedNavigationConfirmCount = 0;
+assert.equal(
+  guardMatchesPageNavigation(
+    {
+      currentFilters: { season: 22 },
+      nextFilters: { season: 23 },
+      currentSelectedMatchId: "match-a",
+      nextSelectedMatchId: "match-b",
+    },
+    () => {
+      combinedNavigationConfirmCount += 1;
+      return true;
+    },
+  ),
+  true,
+);
+assert.equal(combinedNavigationConfirmCount, 1, "a combined filter and match transition confirms exactly once");
+
+const restoredFromQaAccepted = restoreRejectedMatchesSearchParams(
+  "season=22&matchId=match-old&qa=1",
+  { season: 23 },
+  "match-current",
+);
+assert.equal(restoredFromQaAccepted.get("qa"), "1");
+assert.equal(restoredFromQaAccepted.get("season"), "23");
+assert.equal(restoredFromQaAccepted.get("matchId"), "match-current");
+
+const restoredFromPlainAccepted = restoreRejectedMatchesSearchParams(
+  "season=22&matchId=match-old",
+  { season: 23 },
+  "match-current",
+);
+assert.equal(
+  restoredFromPlainAccepted.has("qa"),
+  false,
+  "an attempted qa=1 URL cannot add QA mode when the last accepted URL had none",
+);
+
+assert.match(
+  matchesPageSource,
+  /function setFilters\(nextFilters: MatchFilters\) \{\s*if \(!guardMatchFilterChange\(currentFiltersRef\.current, nextFilters, favoriteController\.confirmDiscard\)\) return false;\s*commitFilters\(nextFilters\);[\s\S]*?function commitFilters\(nextFilters: MatchFilters\) \{/,
+  "UI filter entry points guard before using the internal filter commit path",
+);
+const favoritePersistedSource = matchesPageSource.slice(
+  matchesPageSource.indexOf("const handleFavoritePersisted"),
+  matchesPageSource.indexOf("const favoriteController"),
+);
+assert.equal(
+  matchesPageSource.includes("const pageLifetimeRef = useRef(createMatchesPageLifetime());"),
+  true,
+  "MatchesPage should retain one tested lifetime gate across renders and StrictMode effect replay",
+);
+assert.match(
+  favoritePersistedSource,
+  /async \(favorite: MatchDetailView\["favorite"\]\) => \{\s*if \(!pageLifetimeRef\.current\.isActive\(\)\) return;\s*const selectedFavoriteMatchId = selectedMatchIdRef\.current;/,
+  "favorite reconciliation checks the shared page lifetime before reading selection or causing any state/cache side effect",
+);
+assert.match(
+  favoritePersistedSource,
+  /const selectedFavoriteMatchId = selectedMatchIdRef\.current;/,
+  "favorite reconciliation reads the current selected match id instead of a render-time id",
+);
+assert.match(
+  favoritePersistedSource,
+  /if \(currentFiltersRef\.current\.favoriteOnly && favorite === null\) \{\s*await loadMatchesRef\.current\(currentFiltersRef\.current\);\s*return;/,
+  "unfavoriting under the favorite-only filter reloads the current timeline and returns",
+);
+assert.match(
+  favoritePersistedSource,
+  /if \(selectedFavoriteMatchId === null\) return;\s*setMatches/,
+  "a persistence result that finishes after selection clears must not update an unrelated list row",
+);
+const favoriteStateUpdaterBody = favoritePersistedSource.match(
+  /setMatches\(\(current\) => \{([\s\S]*?)\}\);/,
+)?.[1] ?? "";
+assert.notEqual(favoriteStateUpdaterBody, "", "favorite reconciliation should update list state through a functional updater");
+assert.equal(
+  favoriteStateUpdaterBody.includes("updateMatchesPageCache"),
+  false,
+  "the React state updater must not perform cache side effects",
+);
+assert.match(
+  favoriteStateUpdaterBody,
+  /return updateMatchFavoriteState\(current, selectedFavoriteMatchId, favorite !== null\);/,
+  "the favorite state updater should only return the immutable helper result",
+);
+assert.equal(
+  favoritePersistedSource.includes("favorite.note"),
+  false,
+  "favorite reconciliation never copies note text into list state or cache",
+);
 assert.match(
   matchesPageSource,
   /<div\s+ref=\{timelineRef\}\s+className="matchListPane phase6WorkbenchList"\s+onScroll=\{rememberScroll\}>/,
@@ -604,10 +932,20 @@ assert.match(
   "selection reconciliation waits until the current filter list is loaded",
 );
 assert.equal(matchesPageSource.includes("const searchParamsKey = searchParams.toString();"), true, "MatchesPage tracks same-instance URL changes");
+assert.equal(
+  matchesPageSource.includes("const lastAcceptedSearchParamsKeyRef = useRef(searchParamsKey);"),
+  true,
+  "MatchesPage tracks the last accepted canonical URL independently from attempted navigation",
+);
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \{\s*const navigationDecision = consumeMatchesSearchParamsNavigation\(\s*searchParamsKey,\s*lastWrittenSearchParamsKeyRef\.current,\s*\);\s*lastWrittenSearchParamsKeyRef\.current = navigationDecision\.nextLastWrittenSearchParamsKey;\s*if \(!navigationDecision\.shouldApplyNavigation\) return;\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) setFilters\(navigation\.filters\);[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
-  "URL navigation consumes local echoes while external navigation still updates filters and selection",
+  /if \(!navigationDecision\.shouldApplyNavigation\) \{\s*lastAcceptedSearchParamsKeyRef\.current = searchParamsKey;\s*return;\s*\}[\s\S]*?if \(!guardMatchesPageNavigation\([\s\S]*?\)\) \{\s*const restoredSearchParams = restoreRejectedMatchesSearchParams\(\s*lastAcceptedSearchParamsKeyRef\.current,\s*filters,\s*selectedMatchId,\s*\);[\s\S]*?lastWrittenSearchParamsKeyRef\.current = restoredSearchParamsKey;[\s\S]*?setSearchParams\(restoredSearchParams, \{ replace: true \}\);\s*return;\s*\}\s*lastAcceptedSearchParamsKeyRef\.current = searchParamsKey;\s*if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) commitFilters/,
+  "URL navigation records accepted echoes, restores rejected transitions from the prior accepted key, and records accepted external navigation",
+);
+assert.match(
+  matchesPageSource,
+  /useEffect\(\(\) => \{\s*if \(!hasLoadedOptions\(options\)\) return;[\s\S]*?\}, \[\s*favoriteController\.busy,\s*favoriteController\.confirmDiscard,\s*favoriteController\.dirty,\s*filters,\s*options,\s*\]\);/,
+  "filter validation retries after busy or dirty guard state changes",
 );
 assert.equal(
   matchesPageSource.includes("const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);"),
@@ -651,8 +989,8 @@ assert.match(
 );
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \(\) => \{\s*pageDataRequestIdRef\.current \+= 1;\s*timelineRequestIdRef\.current \+= 1;\s*\}, \[\]\);/,
-  "leaving MatchesPage invalidates both metadata and timeline requests before a later re-entry",
+  /useEffect\(\(\) => \{\s*pageLifetimeRef\.current\.activate\(\);\s*return \(\) => \{\s*pageLifetimeRef\.current\.deactivate\(\);\s*pageDataRequestIdRef\.current \+= 1;\s*timelineRequestIdRef\.current \+= 1;\s*\};\s*\}, \[\]\);/,
+  "effect setup activates the shared lifetime while cleanup deactivates it and invalidates existing requests",
 );
 assert.equal(hydrateInitialMatchesSource.includes("const pageDataRequestId = ++pageDataRequestIdRef.current;"), true, "hydration owns a metadata request id");
 assert.equal(hydrateInitialMatchesSource.includes("const timelineRequestId = ++timelineRequestIdRef.current;"), true, "hydration separately owns its A timeline id");
@@ -701,14 +1039,26 @@ assert.equal(
 );
 assert.match(
   matchesPageSource,
-  /const cleaned = validateFilters\(filters, options\);[\s\S]*?\}, \[filters, options\]\);/,
-  "filter validation reruns after URL navigation changes filters as well as after options load",
+  /const cleaned = validateFilters\(filters, options\);[\s\S]*?\}, \[\s*favoriteController\.busy,\s*favoriteController\.confirmDiscard,\s*favoriteController\.dirty,\s*filters,\s*options,\s*\]\);/,
+  "filter validation reruns after URL navigation, options load, or favorite guard state changes",
 );
 assert.equal(
   matchesPageSource.includes("if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;"),
   true,
   "cache snapshots are only written for the list loaded under current filters",
 );
+const matchesCacheSyncStart = matchesPageSource.indexOf(
+  "if (loadedFilterKeyRef.current !== matchFiltersKey(filters)) return;",
+);
+const matchesCacheSyncEnd = matchesPageSource.indexOf("\n  useEffect(", matchesCacheSyncStart);
+const matchesCacheSyncEffect = matchesPageSource.slice(matchesCacheSyncStart, matchesCacheSyncEnd);
+assert.notEqual(matchesCacheSyncStart, -1, "MatchesPage should keep one guarded post-commit cache sync effect");
+assert.equal(
+  matchesCacheSyncEffect.includes("updateMatchesPageCache({"),
+  true,
+  "the guarded post-commit effect should own cache synchronization",
+);
+assert.match(matchesCacheSyncEffect, /\bmatches,\s*/, "the post-commit cache sync effect should persist committed match rows");
 assert.doesNotMatch(
   matchesPageSource,
   /updateMatchesPageCache\(\{\s*filters\s*\}\)/,

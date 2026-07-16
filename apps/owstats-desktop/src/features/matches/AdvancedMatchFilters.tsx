@@ -39,6 +39,16 @@ export function AdvancedMatchFilters(props: AdvancedMatchFiltersProps) {
         </select>
       </label>
       <label>
+        收藏状态
+        <select
+          value={props.filters.favoriteOnly ? "favorite" : ""}
+          onChange={(event) => props.onPatch({ favoriteOnly: event.target.value === "favorite" ? true : undefined })}
+        >
+          <option value="">全部</option>
+          <option value="favorite">仅看收藏</option>
+        </select>
+      </label>
+      <label>
         开始日期
         <input
           type="date"

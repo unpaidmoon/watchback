@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 7;
+pub const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 struct Migration {
     version: i64,
@@ -46,6 +46,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 7,
         name: "normal match mode normalization",
         apply: migrate_v7,
+    },
+    Migration {
+        version: 8,
+        name: "match favorites and notes",
+        apply: migrate_v8,
     },
 ];
 
@@ -258,6 +263,22 @@ fn migrate_v7(transaction: &Transaction<'_>) -> Result<()> {
         WHERE LOWER(TRIM(game_mode)) IN ('leisure', 'sport')
         "#,
         [],
+    )?;
+    Ok(())
+}
+
+fn migrate_v8(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS match_favorites (
+            match_id TEXT PRIMARY KEY REFERENCES matches(match_id) ON DELETE CASCADE,
+            note TEXT NOT NULL DEFAULT '' CHECK(length(note) <= 500),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_match_favorites_updated
+            ON match_favorites(updated_at DESC);
+        "#,
     )?;
     Ok(())
 }

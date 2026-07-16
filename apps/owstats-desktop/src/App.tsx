@@ -10,10 +10,12 @@ import { Phase6StyleBoardPage } from "./pages/Phase6StyleBoardPage";
 import { PersonalReviewPage } from "./pages/PersonalReviewPage";
 import { RankingPage } from "./pages/RankingPage";
 import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
+import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
 import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
 
 export function App() {
+  const { guardNavigation } = useUnsavedChangesGuard();
   return (
     <QaFeedbackProvider>
       <RouteFocusManager />
@@ -32,7 +34,7 @@ export function App() {
           <QaRegion id="NAV-CAPSULE" className="phase6QaInlineRegion">
             <nav className="appNav phase6ProductNav" aria-label="主导航">
               {phase6NavItems.map((item) => (
-                <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "appNavLink active" : "appNavLink")} title={item.title}>
+                <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "appNavLink active" : "appNavLink")} title={item.title} onClick={guardNavigation}>
                   {item.label}
                 </NavLink>
               ))}
@@ -40,7 +42,7 @@ export function App() {
           </QaRegion>
 
           <div className="appShellStatus phase6ShellStatus" aria-label="全局状态">
-            <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据" aria-current={false}>
+            <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据" aria-current={false} onClick={guardNavigation}>
               <CircleDot size={14} aria-hidden="true" />
               本地数据
             </NavLink>

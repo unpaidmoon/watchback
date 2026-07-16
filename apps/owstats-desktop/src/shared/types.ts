@@ -22,6 +22,16 @@ export type MatchFilters = {
   playerName?: string;
   dateFrom?: string;
   dateTo?: string;
+  favoriteOnly?: boolean;
+};
+
+export type MatchFavoriteView = {
+  note: string;
+};
+
+export type MatchFavoriteRequest = {
+  matchId: string;
+  note: string;
 };
 
 export type MatchEvaluationSummary = {
@@ -172,6 +182,7 @@ export type MatchSummary = {
   durationSec: number;
   evaluation: MatchEvaluationSummary | null;
   teamAwards: MatchPerformanceAward[];
+  isFavorite: boolean;
 };
 
 export type PlayerRow = {
@@ -237,6 +248,7 @@ export type MatchDetailView = {
   evaluation: MatchEvaluationSummary | null;
   teamAwards: MatchPerformanceAward[];
   sameRoleComparison: SameRoleComparison | null;
+  favorite: MatchFavoriteView | null;
   rawJson: unknown;
 };
 

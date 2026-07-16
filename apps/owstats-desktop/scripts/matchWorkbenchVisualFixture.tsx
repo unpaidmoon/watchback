@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FilterBar } from "../src/features/matches/FilterBar";
 import { MatchDetailPane } from "../src/features/matches/MatchDetailPane";
 import { MatchListPane } from "../src/features/matches/MatchListPane";
+import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import { PageHeader, PageSeasonSelect, StatusPill } from "../src/shared/page-shell";
 import type { ArenaDetailSlice, FilterOptions, MatchDetailView, MatchFilters, MatchSummary, PlayerRow } from "../src/shared/types";
 
@@ -52,8 +53,25 @@ const options: FilterOptions = {
 
 const players = Array.from({ length: 12 }, (_, index) => createPlayer(index));
 const matches = Array.from({ length: 7 }, (_, index) => createMatch(index));
+const anonymousFavoriteNote = "第二波团战站位值得复盘，注意先处理侧翼。";
 const anonymousNormalDetail = createNormalDetail();
 const anonymousArenaDetail = createArenaDetail();
+const favoriteController: MatchFavoriteController = {
+  savedNote: anonymousFavoriteNote,
+  draftNote: anonymousFavoriteNote,
+  isFavorite: true,
+  busy: false,
+  error: null,
+  saved: false,
+  dirty: false,
+  count: anonymousFavoriteNote.length,
+  canSave: false,
+  edit: () => undefined,
+  favoriteMatch: async () => undefined,
+  saveNote: async () => undefined,
+  unfavoriteMatch: async () => undefined,
+  confirmDiscard: () => true,
+};
 
 export function renderMatchWorkbenchFixture(state: MatchWorkbenchFixtureState): string {
   const arena = state === "wide-arena";
@@ -62,7 +80,8 @@ export function renderMatchWorkbenchFixture(state: MatchWorkbenchFixtureState): 
   const markup = inlineLocalAssets(renderToStaticMarkup(
     <FixtureApp state={state} detail={detail} detailOpen={detailOpen} />,
   ));
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>${fixtureStyles}\n${fixtureOnlyStyles}</style></head><body data-fixture-state="${state}">${markup}</body></html>`;
+  const overflowContract = state === "narrow-detail" ? ' data-horizontal-overflow-contract="none"' : "";
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>${fixtureStyles}\n${fixtureOnlyStyles}</style></head><body data-fixture-state="${state}"${overflowContract}>${markup}</body></html>`;
 }
 
 function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtureState; detail: MatchDetailView; detailOpen: boolean }) {
@@ -118,6 +137,7 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
               loading={false}
               error={null}
               matchId={detail.matchId}
+              favoriteController={favoriteControllerForState(state)}
               onBack={() => undefined}
             />
           </section>
@@ -168,6 +188,22 @@ function createMatch(index: number): MatchSummary {
       { code: "kill", label: "击杀最高", tone: "gold" },
       { code: "mitigation", label: "抵挡最高", tone: "gold" },
     ] : [],
+    isFavorite: index === 0,
+  };
+}
+
+function favoriteControllerForState(state: MatchWorkbenchFixtureState): MatchFavoriteController {
+  if (state !== "narrow-detail") return favoriteController;
+  const note = "复".repeat(500);
+  return {
+    ...favoriteController,
+    savedNote: anonymousFavoriteNote,
+    draftNote: note,
+    saved: false,
+    error: "匿名保存错误，请稍后重试。",
+    dirty: true,
+    count: note.length,
+    canSave: true,
   };
 }
 
@@ -228,6 +264,7 @@ function createNormalDetail(): MatchDetailView {
     evaluation: { grade: "S", primaryTag: "尽力局", evidenceTags: ["伤害最高"], confidence: 0.9 },
     teamAwards: [{ code: "damage", label: "伤害最高", tone: "gold" }],
     sameRoleComparison: null,
+    favorite: { note: anonymousFavoriteNote },
     rawJson: null,
   };
 }

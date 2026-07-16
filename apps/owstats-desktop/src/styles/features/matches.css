@@ -404,9 +404,8 @@
   }
 
   .matchDetailBackButton {
-    position: sticky;
-    top: 0;
-    z-index: 6;
+    position: static;
+    min-height: 44px;
     display: inline-flex;
     margin-bottom: var(--space-3);
     border-color: var(--border-subtle);
@@ -561,6 +560,28 @@
 .phase6WorkbenchList .matchListCardBannerCopy > span + span::before {
   content: "·";
   margin-right: var(--space-2);
+}
+
+.matchListFavoriteMark {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-2);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+  box-shadow: none;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.phase6WorkbenchList .matchListCardHeader:has(.matchListFavoriteMark) .matchListCardBannerCopy {
+  right: var(--space-10);
 }
 
 .phase6WorkbenchList .matchListCardData {
@@ -892,9 +913,135 @@
 }
 
 .advancedMatchFilters.phase6FilterRowSecondary {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
+}
+
+.matchFavoriteEditor {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-secondary) 72%, transparent);
+}
+
+.matchFavoriteEditor.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.matchFavoriteNoteField {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.matchFavoriteNoteField label {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.matchFavoriteNoteField textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 88px;
+  field-sizing: content;
+  padding: var(--space-3);
+  resize: vertical;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.matchFavoriteNoteField textarea:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
+}
+
+.matchFavoriteNoteField textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.matchFavoriteNoteField p,
+.matchFavoriteEditor > [role="status"],
+.matchFavoriteError {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.matchFavoriteNoteField p {
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.matchFavoriteActions {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.matchFavoriteEditor button {
+  min-width: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  font-weight: 400;
+}
+
+.matchFavoriteEditor .primaryButton {
+  border-color: var(--action-primary);
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+}
+
+.matchFavoriteEditor .secondaryButton {
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.matchFavoriteEditor .primaryButton:not(:disabled):hover {
+  opacity: 0.88;
+}
+
+.matchFavoriteEditor .secondaryButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--text-primary) 4%, var(--surface-control));
+}
+
+.matchFavoriteEditor button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.matchFavoriteEditor.is-favorite > [role="status"],
+.matchFavoriteEditor.is-favorite > .matchFavoriteError {
+  grid-column: 1 / -1;
+}
+
+.matchFavoriteError,
+.matchFavoriteNoteField .is-over-limit {
+  color: var(--status-danger-strong);
 }
 
 .activeFilterChips {
@@ -989,6 +1136,14 @@
   }
 
   .advancedMatchFilters.phase6FilterRowSecondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .matchFavoriteEditor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .matchFavoriteActions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

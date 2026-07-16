@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchDetailPane } from "../features/matches/MatchDetailPane";
+import { useMatchFavoriteEditor } from "../features/matches/useMatchFavoriteEditor";
 import { MatchListPane } from "../features/matches/MatchListPane";
 import {
   activeMatchFilterChips,
@@ -9,6 +10,7 @@ import {
   filtersFromParams,
   hasLoadedOptions,
   paramsFromFilters,
+  restoreRejectedMatchesSearchParams,
   validateFilters,
 } from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
@@ -21,17 +23,22 @@ import {
   chooseMatchesPageNavigationState,
   computeMatchAnchorScrollTop,
   consumeMatchesSearchParamsNavigation,
+  createMatchesPageLifetime,
   getMatchesPageCache,
+  guardMatchFilterChange,
+  guardMatchesPageNavigation,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
   shouldLoadMatchesForFilter,
+  updateMatchFavoriteState,
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
 import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { QaRegion } from "../shared/QaFeedbackLayer";
+import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { preserveQaParam } from "../shared/qaFeedback";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
@@ -57,7 +64,9 @@ export function MatchesPage() {
   const canHydrateCache = useMemo(() => canHydrateMatchesPageCache(cachedPage, initialFilters, hasExplicitFilters), []);
   const initialCacheRef = useRef(cachedPage);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const pageLifetimeRef = useRef(createMatchesPageLifetime());
   const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);
+  const lastAcceptedSearchParamsKeyRef = useRef(searchParamsKey);
   const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));
   const loadedFilterKeyRef = useRef(canHydrateCache ? cachedPage?.loadedFilterKey ?? "" : "");
   const currentFiltersRef = useRef(initialFilters);
@@ -87,10 +96,56 @@ export function MatchesPage() {
   const [error, setError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const hasVisibleFilters = activeMatchFilterChips(filters, options).length > 0;
+  const { register } = useUnsavedChangesGuard();
+  const loadMatchesRef = useRef(loadMatches);
+  loadMatchesRef.current = loadMatches;
+  const handleFavoritePersisted = useCallback(
+    async (favorite: MatchDetailView["favorite"]) => {
+      if (!pageLifetimeRef.current.isActive()) return;
+      const selectedFavoriteMatchId = selectedMatchIdRef.current;
+      setSelectedDetail((current) =>
+        current?.matchId === selectedFavoriteMatchId
+          ? { ...current, favorite }
+          : current,
+      );
+      if (currentFiltersRef.current.favoriteOnly && favorite === null) {
+        await loadMatchesRef.current(currentFiltersRef.current);
+        return;
+      }
+      if (selectedFavoriteMatchId === null) return;
+      setMatches((current) => {
+        return updateMatchFavoriteState(current, selectedFavoriteMatchId, favorite !== null);
+      });
+    },
+    [],
+  );
+  const favoriteController = useMatchFavoriteEditor(
+    selectedDetail?.matchId ?? selectedMatchId,
+    selectedDetail?.favorite,
+    handleFavoritePersisted,
+  );
 
-  useEffect(() => () => {
-    pageDataRequestIdRef.current += 1;
-    timelineRequestIdRef.current += 1;
+  useEffect(() => {
+    register(favoriteController.dirty || favoriteController.busy ? {
+      isDirty: favoriteController.dirty,
+      isBusy: favoriteController.busy,
+      confirmDiscard: favoriteController.confirmDiscard,
+    } : null);
+    return () => register(null);
+  }, [
+    favoriteController.busy,
+    favoriteController.confirmDiscard,
+    favoriteController.dirty,
+    register,
+  ]);
+
+  useEffect(() => {
+    pageLifetimeRef.current.activate();
+    return () => {
+      pageLifetimeRef.current.deactivate();
+      pageDataRequestIdRef.current += 1;
+      timelineRequestIdRef.current += 1;
+    };
   }, []);
 
   useEffect(() => {
@@ -109,14 +164,37 @@ export function MatchesPage() {
       lastWrittenSearchParamsKeyRef.current,
     );
     lastWrittenSearchParamsKeyRef.current = navigationDecision.nextLastWrittenSearchParamsKey;
-    if (!navigationDecision.shouldApplyNavigation) return;
+    if (!navigationDecision.shouldApplyNavigation) {
+      lastAcceptedSearchParamsKeyRef.current = searchParamsKey;
+      return;
+    }
     const navigation = chooseMatchesPageNavigationState(
       filtersFromParams(searchParams),
       searchParams.get("matchId"),
       getMatchesPageCache(),
       hasExplicitMatchFilterParams(searchParams),
     );
-    if (matchFiltersKey(navigation.filters) !== matchFiltersKey(filters)) setFilters(navigation.filters);
+    if (!guardMatchesPageNavigation(
+      {
+        currentFilters: filters,
+        nextFilters: navigation.filters,
+        currentSelectedMatchId: selectedMatchId,
+        nextSelectedMatchId: navigation.selectedMatchId,
+      },
+      favoriteController.confirmDiscard,
+    )) {
+      const restoredSearchParams = restoreRejectedMatchesSearchParams(
+        lastAcceptedSearchParamsKeyRef.current,
+        filters,
+        selectedMatchId,
+      );
+      const restoredSearchParamsKey = restoredSearchParams.toString();
+      lastWrittenSearchParamsKeyRef.current = restoredSearchParamsKey;
+      setSearchParams(restoredSearchParams, { replace: true });
+      return;
+    }
+    lastAcceptedSearchParamsKeyRef.current = searchParamsKey;
+    if (matchFiltersKey(navigation.filters) !== matchFiltersKey(filters)) commitFilters(navigation.filters);
     if (navigation.selectedMatchId !== selectedMatchId) setSelectedMatchIdSafely(navigation.selectedMatchId);
   }, [searchParamsKey]);
 
@@ -220,7 +298,13 @@ export function MatchesPage() {
     if (JSON.stringify(cleaned) !== JSON.stringify(filters)) {
       setFilters(cleaned);
     }
-  }, [filters, options]);
+  }, [
+    favoriteController.busy,
+    favoriteController.confirmDiscard,
+    favoriteController.dirty,
+    filters,
+    options,
+  ]);
 
   async function hydrateInitialMatches(nextFilters: MatchFilters) {
     const pageDataRequestId = ++pageDataRequestIdRef.current;
@@ -298,6 +382,12 @@ export function MatchesPage() {
   }
 
   function setFilters(nextFilters: MatchFilters) {
+    if (!guardMatchFilterChange(currentFiltersRef.current, nextFilters, favoriteController.confirmDiscard)) return false;
+    commitFilters(nextFilters);
+    return true;
+  }
+
+  function commitFilters(nextFilters: MatchFilters) {
     currentFiltersRef.current = nextFilters;
     if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
       setBusy(true);
@@ -401,6 +491,12 @@ export function MatchesPage() {
   }
 
   function selectMatch(matchId: string) {
+    if (
+      matchId !== selectedMatchIdRef.current &&
+      !favoriteController.confirmDiscard()
+    ) {
+      return;
+    }
     rememberScroll();
     setSelectedMatchIdSafely(matchId);
     setMobileDetailOpen(true);
@@ -458,8 +554,12 @@ export function MatchesPage() {
           loading={detailStateMatchId === selectedMatchId ? detailLoading : true}
           error={detailStateMatchId === selectedMatchId ? detailError : null}
           matchId={selectedMatchId}
+          favoriteController={favoriteController}
           onRetry={() => setDetailRetryKey((value) => value + 1)}
-          onBack={() => setMobileDetailOpen(false)}
+          onBack={() => {
+            if (!favoriteController.confirmDiscard()) return;
+            setMobileDetailOpen(false);
+          }}
         />
       </section>
     </div>

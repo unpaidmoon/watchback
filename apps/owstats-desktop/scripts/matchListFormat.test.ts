@@ -27,6 +27,7 @@ const baseMatch: MatchSummary = {
   durationSec: 600,
   evaluation: null,
   teamAwards: [],
+  isFavorite: false,
 };
 
 assert.equal(formatScoreLine(baseMatch), "3-0");

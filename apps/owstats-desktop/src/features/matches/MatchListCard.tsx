@@ -1,3 +1,4 @@
+import { Star } from "lucide-react";
 import { formatCompactStat, formatMatchPreviewKey, formatScoreLine } from "../../shared/matchListFormat";
 import { MatchPerformanceBadges } from "../../shared/PerformanceBadgesView";
 import { HeroAvatar, MapPreview } from "../../shared/phase6Components";
@@ -34,6 +35,11 @@ export function MatchListCard({ match, selected, onSelect }: MatchListCardProps)
           <span>{match.mapName}</span>
           <span>{match.modeLabel}</span>
         </span>
+        {match.isFavorite ? (
+          <span className="matchListFavoriteMark" title="已收藏" aria-label="已收藏">
+            <Star size={15} fill="currentColor" aria-hidden="true" />
+          </span>
+        ) : null}
       </span>
       <span className="matchListCardData">
         <span className="matchListCardAvatar">

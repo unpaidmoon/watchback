@@ -6,7 +6,9 @@ import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from ".
 import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
 import { MatchDetailHeader } from "./MatchDetailHeader";
+import { MatchFavoriteEditor } from "./MatchFavoriteEditor";
 import { MatchTeamTable } from "./MatchTeamTable";
+import type { MatchFavoriteController } from "./useMatchFavoriteEditor";
 
 export type CompactMatchDetailProps = {
   detail: MatchDetailView | null;
@@ -14,15 +16,16 @@ export type CompactMatchDetailProps = {
   error: string | null;
   matchId: string;
   onRetry: () => void;
+  favoriteController: MatchFavoriteController;
 };
 
-export function CompactMatchDetail({ detail, loading, error, matchId, onRetry }: CompactMatchDetailProps) {
+export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, favoriteController }: CompactMatchDetailProps) {
   if (error) {
     return <PageErrorState message={error} actionLabel="重新加载" onRetry={onRetry} />;
   }
   if (loading && !detail) return <PageLoadingState message="正在读取对局详情..." />;
   if (!detail) return <div className="emptyState phase6WorkbenchEmpty">未找到对局详情。</div>;
-  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} />;
+  if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} favoriteController={favoriteController} />;
 
   const mapName = detail.mapName ?? "未知地图";
   return (
@@ -46,12 +49,21 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry }:
             <MatchTeamTable title="对手数据" tone="enemy" players={detail.enemies.slice(0, 6)} showPerks />
           </div>
         </section>
+        <MatchFavoriteEditor controller={favoriteController} />
       </div>
     </section>
   );
 }
 
-function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; loading: boolean }) {
+function CompactArenaDetail({
+  detail,
+  loading,
+  favoriteController,
+}: {
+  detail: MatchDetailView;
+  loading: boolean;
+  favoriteController: MatchFavoriteController;
+}) {
   const arena = detail.arenaDetail;
   const [selectedKey, setSelectedKey] = useState("summary");
   const [expandedCompactArenaPlayerKeys, setExpandedCompactArenaPlayerKeys] = useState<Set<string>>(() => new Set());
@@ -64,6 +76,13 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
   if (!arena) return null;
 
   function selectCompactArenaSlice(nextKey: string) {
+    if (
+      selectedKey === arena?.summary.key &&
+      nextKey !== arena.summary.key &&
+      !favoriteController.confirmDiscard()
+    ) {
+      return;
+    }
     setSelectedKey(nextKey);
     setExpandedCompactArenaPlayerKeys(new Set());
   }
@@ -153,6 +172,9 @@ function CompactArenaDetail({ detail, loading }: { detail: MatchDetailView; load
             />
           </div>
         </section>
+        {selected.key === "summary" && (
+          <MatchFavoriteEditor controller={favoriteController} />
+        )}
       </div>
     </section>
   );

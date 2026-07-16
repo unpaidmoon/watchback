@@ -1,4 +1,4 @@
-import type { FilterOptions, ImportSummary, MatchFilters, MatchSummary, Overview } from "./types";
+import type { FilterOptions, ImportSummary, MatchFavoriteView, MatchFilters, MatchSummary, Overview } from "./types";
 
 export type MatchesPageCache = {
   overview: Overview | null;
@@ -24,12 +24,27 @@ export type MatchScrollAnchorCandidate = {
   bottom: number;
 };
 
-const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate"];
+const filterParamKeys = ["season", "hero", "map", "result", "mode", "primaryTag", "playerName", "startDate", "endDate", "favorite"];
 
 let matchesPageCache: MatchesPageCache | null = null;
 let cacheGeneration = 0;
 let latestCacheWriteId = 0;
 const preloadPromises = new Map<string, Promise<MatchesPageCache>>();
+
+export function createMatchesPageLifetime() {
+  let active = false;
+  return {
+    activate() {
+      active = true;
+    },
+    deactivate() {
+      active = false;
+    },
+    isActive() {
+      return active;
+    },
+  };
+}
 
 export function getMatchesPageCache() {
   return matchesPageCache;
@@ -38,6 +53,18 @@ export function getMatchesPageCache() {
 export function updateMatchesPageCache(patch: Partial<MatchesPageCache>) {
   matchesPageCache = createMatchesPageCache(patch);
   return matchesPageCache;
+}
+
+export function updateMatchFavoriteState<T extends { matchId: string; isFavorite: boolean }>(
+  matches: T[],
+  matchId: string,
+  isFavorite: boolean,
+) {
+  return matches.map((match) =>
+    match.matchId === matchId && match.isFavorite !== isFavorite
+      ? { ...match, isFavorite }
+      : match,
+  );
 }
 
 function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
@@ -63,8 +90,22 @@ export function clearMatchesPageCache() {
   preloadPromises.clear();
 }
 
+export function invalidateStandaloneMatchFavoritePersistence() {
+  clearMatchesPageCache();
+}
+
+export function shouldInvalidateStandaloneFavoriteCache(
+  previousFavorite: MatchFavoriteView | null | undefined,
+  nextFavorite: MatchFavoriteView | null,
+) {
+  if (previousFavorite === undefined) return false;
+  return (previousFavorite !== null) !== (nextFavorite !== null);
+}
+
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {
-  return filterParamKeys.some((key) => Boolean(params.get(key)));
+  return filterParamKeys.some((key) =>
+    key === "favorite" ? params.get(key) === "1" : Boolean(params.get(key)),
+  );
 }
 
 export function chooseInitialMatchFilters(urlFilters: MatchFilters, cachedFilters: MatchFilters | undefined, hasExplicitFilters: boolean) {
@@ -175,12 +216,40 @@ export function matchFiltersKey(filters: MatchFilters) {
   return JSON.stringify(
     Object.keys(filters)
       .sort()
-      .reduce<Record<string, string | number>>((result, key) => {
+      .reduce<Record<string, string | number | boolean>>((result, key) => {
         const value = filters[key as keyof MatchFilters];
         if (value !== undefined && value !== "") result[key] = value;
         return result;
       }, {}),
   );
+}
+
+export function guardMatchFilterChange(
+  currentFilters: MatchFilters,
+  nextFilters: MatchFilters,
+  confirmDiscard: () => boolean,
+) {
+  return (
+    matchFiltersKey(currentFilters) === matchFiltersKey(nextFilters) ||
+    confirmDiscard()
+  );
+}
+
+export function guardMatchesPageNavigation(
+  transition: {
+    currentFilters: MatchFilters;
+    nextFilters: MatchFilters;
+    currentSelectedMatchId: string | null;
+    nextSelectedMatchId: string | null;
+  },
+  confirmDiscard: () => boolean,
+) {
+  const filtersUnchanged =
+    matchFiltersKey(transition.currentFilters) ===
+    matchFiltersKey(transition.nextFilters);
+  const matchUnchanged =
+    transition.currentSelectedMatchId === transition.nextSelectedMatchId;
+  return (filtersUnchanged && matchUnchanged) || confirmDiscard();
 }
 
 export type MatchesPagePreloadLoaders = {

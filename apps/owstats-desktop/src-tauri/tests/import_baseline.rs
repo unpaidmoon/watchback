@@ -1,9 +1,9 @@
 #![recursion_limit = "256"]
 
 use owstats_desktop_lib::{
-    get_friend_analytics, get_match_detail, import_payload_value, list_filter_options,
-    list_matches, redact_sensitive_json, search_match_players, sync_import_parts,
-    FriendAnalyticsFilters, MatchFilters, OwDatabase,
+    get_friend_analytics, get_match_detail, get_match_favorite, import_payload_value,
+    list_filter_options, list_matches, redact_sensitive_json, save_match_favorite,
+    search_match_players, sync_import_parts, FriendAnalyticsFilters, MatchFilters, OwDatabase,
 };
 use serde_json::{json, Value};
 
@@ -13,6 +13,19 @@ fn import_synthetic_season(db: &OwDatabase) {
     std::fs::create_dir_all(&data_dir).unwrap();
     std::fs::write(data_dir.join("ow_config_cache.json"), lookup_payload()).unwrap();
     import_payload_value(db, &season_payload(), temp.path()).unwrap();
+}
+
+#[test]
+fn repeated_import_preserves_local_match_favorite_and_note() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+
+    import_synthetic_season(&db);
+    save_match_favorite(&db, "match-win", "保留这条本地备注").unwrap();
+    import_synthetic_season(&db);
+
+    let favorite = get_match_favorite(&db, "match-win").unwrap().unwrap();
+    assert_eq!(favorite.note, "保留这条本地备注");
 }
 
 #[test]
@@ -693,7 +706,7 @@ fn database_initialize_sets_schema_version_idempotently() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 }
 
 #[test]
@@ -747,7 +760,7 @@ fn database_migration_backfills_umbrella_normal_match_modes() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 }
 
 #[test]
@@ -854,7 +867,7 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
 }
@@ -999,7 +1012,7 @@ fn database_migrates_v2_arena_player_index_idempotently() {
         )
         .unwrap();
 
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     assert_eq!(arena_table_count, 1);
     assert_eq!(
         arena_columns,
@@ -1396,6 +1409,7 @@ fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
             player_name: None,
             date_from: Some(first.begin_label[0..10].to_string()),
             date_to: Some(first.begin_label[0..10].to_string()),
+            favorite_only: None,
         },
     )
     .unwrap();
