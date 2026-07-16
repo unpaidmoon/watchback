@@ -22,7 +22,7 @@ fn inventory_is_scoped_to_the_requested_season() {
     .unwrap();
     conn.execute(
         "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
-         VALUES ('s23-complete', 'normal', '{}', 'now')",
+         VALUES ('s23-complete', 'normal', '{\"payload\":{\"code\":0,\"data\":{}}}', 'now')",
         [],
     )
     .unwrap();
@@ -38,7 +38,7 @@ fn inventory_is_scoped_to_the_requested_season() {
     .unwrap();
     conn.execute(
         "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
-         VALUES ('s22-complete', 'normal', '{}', 'now')",
+         VALUES ('s22-complete', 'normal', '{\"payload\":{\"code\":0,\"data\":{}}}', 'now')",
         [],
     )
     .unwrap();
@@ -52,6 +52,79 @@ fn inventory_is_scoped_to_the_requested_season() {
     assert_eq!(
         inventory.detail_ids,
         ["s23-complete".to_string()].into_iter().collect()
+    );
+}
+
+#[test]
+fn inventory_treats_only_valid_wrapped_details_as_complete() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    for match_id in [
+        "no-detail",
+        "valid-normal",
+        "valid-fight",
+        "empty-object",
+        "damaged-json",
+        "failed-payload",
+    ] {
+        conn.execute(
+            "INSERT INTO matches (
+                match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+                begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+                mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+             ) VALUES (?1, 23, 'preset', 'sport', 'normal', 'win', 'map', 'hero',
+                1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, '{}', 'now')",
+            params![match_id],
+        )
+        .unwrap();
+    }
+    for (match_id, match_kind, raw_detail_json) in [
+        (
+            "valid-normal",
+            "normal",
+            r#"{"payload":{"code":0,"data":{}}}"#,
+        ),
+        ("valid-fight", "fight", r#"{"payload":{"data":{}}}"#),
+        ("empty-object", "normal", "{}"),
+        ("damaged-json", "normal", "{not-json"),
+        (
+            "failed-payload",
+            "normal",
+            r#"{"payload":{"code":500,"data":{}}}"#,
+        ),
+    ] {
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+             VALUES (?1, ?2, ?3, 'now')",
+            params![match_id, match_kind, raw_detail_json],
+        )
+        .unwrap();
+    }
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+
+    assert_eq!(
+        inventory.match_ids,
+        [
+            "no-detail",
+            "valid-normal",
+            "valid-fight",
+            "empty-object",
+            "damaged-json",
+            "failed-payload",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    );
+    assert_eq!(
+        inventory.detail_ids,
+        ["valid-normal", "valid-fight"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     );
 }
 

@@ -17,24 +17,40 @@ pub struct DetailSelection {
     pub missing_details: usize,
 }
 
+fn is_valid_detail_json(raw_detail_json: &str) -> bool {
+    let Ok(Value::Object(detail)) = serde_json::from_str(raw_detail_json) else {
+        return false;
+    };
+    let detail = Value::Object(detail);
+    if !detail
+        .pointer("/payload/data")
+        .is_some_and(Value::is_object)
+    {
+        return false;
+    }
+    detail.pointer("/payload/code").is_none_or(|code| {
+        code.as_i64() == Some(0) || code.as_u64() == Some(0) || code.as_f64() == Some(0.0)
+    })
+}
+
 pub fn load_season_sync_inventory(db: &OwDatabase, season: i64) -> Result<SeasonSyncInventory> {
     db.initialize()?;
     let conn = db.connect()?;
     let mut statement = conn.prepare(
         "SELECT m.match_id,
-                CASE WHEN d.match_id IS NULL THEN 0 ELSE 1 END
+                d.raw_detail_json
          FROM matches m
          LEFT JOIN match_details d ON d.match_id = m.match_id
          WHERE m.season = ?1",
     )?;
     let rows = statement.query_map(params![season], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
     })?;
     let mut inventory = SeasonSyncInventory::default();
     for row in rows {
-        let (match_id, has_detail) = row?;
+        let (match_id, raw_detail_json) = row?;
         inventory.match_ids.insert(match_id.clone());
-        if has_detail {
+        if raw_detail_json.as_deref().is_some_and(is_valid_detail_json) {
             inventory.detail_ids.insert(match_id);
         }
     }
