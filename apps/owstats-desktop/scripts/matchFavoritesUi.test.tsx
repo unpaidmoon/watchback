@@ -276,32 +276,56 @@ assert.match(favoriteEditor, /class="secondaryButton"/);
 assert.match(favoriteEditor, /class="primaryButton"/);
 
 const unicodeNote = "复".repeat(500);
+const unicodeErrorController: MatchFavoriteController = {
+  ...favoriteController,
+  savedNote: "已保存的匿名短备注。",
+  draftNote: unicodeNote,
+  dirty: true,
+  count: 500,
+  canSave: true,
+  saved: false,
+  error: "匿名保存错误，请稍后重试。",
+};
 const unicodeEditor = renderToStaticMarkup(
+  createElement(MatchFavoriteEditor, {
+    controller: unicodeErrorController,
+  }),
+);
+assert.match(unicodeEditor, new RegExp(`>${unicodeNote}</textarea>`), "500 Unicode characters should render without truncation");
+assert.match(unicodeEditor, />500\/500</);
+assert.doesNotMatch(unicodeEditor, /role="status">已保存</);
+assert.match(unicodeEditor, /class="matchFavoriteError" role="alert">匿名保存错误，请稍后重试。/);
+assert.doesNotMatch(unicodeEditor, /is-over-limit/);
+
+const savedEditor = renderToStaticMarkup(
   createElement(MatchFavoriteEditor, {
     controller: {
       ...favoriteController,
       savedNote: unicodeNote,
       draftNote: unicodeNote,
+      dirty: false,
       count: 500,
-      canSave: true,
+      canSave: false,
       saved: true,
-      error: "匿名保存错误，请稍后重试。",
+      error: null,
     },
   }),
 );
-assert.match(unicodeEditor, new RegExp(`>${unicodeNote}</textarea>`), "500 Unicode characters should render without truncation");
-assert.match(unicodeEditor, />500\/500</);
-assert.match(unicodeEditor, /role="status">已保存</);
-assert.match(unicodeEditor, /class="matchFavoriteError" role="alert">匿名保存错误，请稍后重试。/);
-assert.doesNotMatch(unicodeEditor, /is-over-limit/);
+assert.match(savedEditor, /role="status">已保存</);
+assert.doesNotMatch(savedEditor, /role="alert"/);
+assert.match(savedEditor, /<button[^>]*class="primaryButton" disabled=""/);
 
 const overLimitEditor = renderToStaticMarkup(
   createElement(MatchFavoriteEditor, {
     controller: {
       ...favoriteController,
+      savedNote: "已保存的匿名短备注。",
       draftNote: `${unicodeNote}复`,
+      dirty: true,
       count: 501,
       canSave: false,
+      saved: false,
+      error: null,
     },
   }),
 );
@@ -312,7 +336,11 @@ assert.match(matchesCss, /\.matchFavoriteEditor\s*\{/);
 assert.match(matchesCss, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 assert.match(matchesCss, /\.matchFavoriteEditor\.is-empty\s*\{[^}]*justify-content:\s*flex-end/s);
 assert.match(matchesCss, /\.matchFavoriteActions\s*\{[^}]*display:\s*grid/s);
-assert.match(matchesCss, /\.matchFavoriteError,\s*\.matchFavoriteNoteField \.is-over-limit\s*\{[^}]*color:\s*var\(--status-danger\)/s);
+assert.match(matchesCss, /\.matchFavoriteError,\s*\.matchFavoriteNoteField \.is-over-limit\s*\{[^}]*color:\s*var\(--status-danger-strong\)/s);
+assert.doesNotMatch(
+  matchesCss,
+  /\.matchFavoriteError,\s*\.matchFavoriteNoteField \.is-over-limit\s*\{[^}]*color:\s*var\(--status-danger\)\s*;/s,
+);
 assert.match(matchesCss, /\.matchFavoriteEditor button\s*\{[^}]*min-height:\s*44px/s);
 assert.match(
   matchesCss,

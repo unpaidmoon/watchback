@@ -45,8 +45,8 @@ assert.match(
 );
 assert.match(
   matchStyleSource,
-  /\.matchListFavoriteMark\s*\{(?=[^}]*position:\s*absolute)(?=[^}]*top:\s*var\(--space-1\))(?=[^}]*right:\s*var\(--space-2\))(?=[^}]*display:\s*inline-flex)(?=[^}]*color:\s*var\(--text-primary\))[^}]*\}/s,
-  "favorite marker should use the card positioning context without becoming interactive",
+  /\.matchListFavoriteMark\s*\{(?=[^}]*position:\s*absolute)(?=[^}]*top:\s*var\(--space-1\))(?=[^}]*right:\s*var\(--space-2\))(?=[^}]*display:\s*inline-flex)(?=[^}]*padding:\s*var\(--space-1\))(?=[^}]*border:\s*1px solid var\(--glass-border\))(?=[^}]*border-radius:\s*var\(--radius-control\))(?=[^}]*background:\s*var\(--action-primary\))(?=[^}]*color:\s*var\(--action-on-primary\))(?=[^}]*pointer-events:\s*none)[^}]*\}/s,
+  "favorite marker should use a stable high-contrast token surface without becoming interactive",
 );
 assert.match(
   matchStyleSource,

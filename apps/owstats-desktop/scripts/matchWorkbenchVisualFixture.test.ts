@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { renderMatchWorkbenchFixture, type MatchWorkbenchFixtureState } from "./matchWorkbenchVisualFixture";
 
 const states: MatchWorkbenchFixtureState[] = ["wide-normal", "wide-arena", "narrow-list", "narrow-detail"];
@@ -50,6 +51,18 @@ assert.match(
   renderMatchWorkbenchFixture("narrow-detail"),
   /data-horizontal-overflow-contract="none"/,
   "narrow detail fixture should explicitly opt into the no-horizontal-overflow contract",
+);
+const narrowDetailBody = renderMatchWorkbenchFixture("narrow-detail").slice(
+  renderMatchWorkbenchFixture("narrow-detail").indexOf("<body"),
+);
+assert.match(narrowDetailBody, />500\/500</);
+assert.match(narrowDetailBody, /role="alert">匿名保存错误，请稍后重试。/);
+assert.doesNotMatch(narrowDetailBody, /role="status">已保存</);
+const fixtureSource = readFileSync(new URL("./matchWorkbenchVisualFixture.tsx", import.meta.url), "utf8");
+assert.match(
+  fixtureSource,
+  /state !== "narrow-detail"[\s\S]*savedNote:\s*anonymousFavoriteNote[\s\S]*draftNote:\s*note[\s\S]*saved:\s*false[\s\S]*dirty:\s*true[\s\S]*count:\s*note\.length[\s\S]*canSave:\s*true/,
+  "narrow error fixture should model a dirty, saveable draft without a simultaneous saved state",
 );
 assert.doesNotMatch(
   wideNormalBody,

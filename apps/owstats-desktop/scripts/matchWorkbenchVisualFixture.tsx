@@ -197,10 +197,11 @@ function favoriteControllerForState(state: MatchWorkbenchFixtureState): MatchFav
   const note = "复".repeat(500);
   return {
     ...favoriteController,
-    savedNote: note,
+    savedNote: anonymousFavoriteNote,
     draftNote: note,
-    saved: true,
+    saved: false,
     error: "匿名保存错误，请稍后重试。",
+    dirty: true,
     count: note.length,
     canSave: true,
   };
