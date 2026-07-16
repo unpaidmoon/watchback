@@ -309,11 +309,7 @@ fn import_payload_value_with_lookups(
         [season],
         |row| row.get(0),
     )?;
-    let details_count: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM match_details d JOIN matches m ON m.match_id = d.match_id WHERE m.season = ?",
-        [season],
-        |row| row.get(0),
-    )?;
+    let details_count = count_valid_match_details_for_season(&tx, season)?;
 
     tx.execute(
         r#"
@@ -882,6 +878,33 @@ pub(crate) fn is_valid_match_detail(detail: &Value) -> bool {
 pub(crate) fn is_valid_match_detail_for(detail: &Value, expected_match_id: &str) -> bool {
     is_valid_match_detail(detail)
         && detail.get("match_id").and_then(Value::as_str) == Some(expected_match_id)
+}
+
+pub(crate) fn count_valid_match_details_for_season(
+    conn: &rusqlite::Connection,
+    season: i64,
+) -> Result<i64> {
+    let mut statement = conn.prepare(
+        "SELECT m.match_id, d.raw_detail_json
+         FROM matches m
+         JOIN match_details d ON d.match_id = m.match_id
+         WHERE m.season = ?1",
+    )?;
+    let rows = statement.query_map(params![season], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut valid_details = 0;
+    for row in rows {
+        let (match_id, raw_detail_json) = row?;
+        let parsed = serde_json::from_str::<Value>(&raw_detail_json).ok();
+        if parsed
+            .as_ref()
+            .is_some_and(|detail| is_valid_match_detail_for(detail, &match_id))
+        {
+            valid_details += 1;
+        }
+    }
+    Ok(valid_details)
 }
 
 fn duration_from_detail(detail: Option<&&Value>) -> i64 {

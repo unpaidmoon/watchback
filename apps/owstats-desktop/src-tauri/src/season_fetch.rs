@@ -399,31 +399,25 @@ pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
 }
 
 pub(crate) fn extract_raw_match_entries(payload: &Value) -> Vec<Value> {
-    let mut first_candidate = None;
-    for container in [
-        Some(payload),
-        payload.get("data"),
-        payload.get("result"),
-        payload.pointer("/data/result"),
-        payload.pointer("/result/data"),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Some(entries) = extract_raw_match_entries_from_container(container) {
-            first_candidate.get_or_insert(entries);
-            if match_objects(entries).is_some() {
-                return entries.to_vec();
-            }
-        }
-    }
-    first_candidate.unwrap_or_default().to_vec()
+    let mut candidates = Vec::new();
+    collect_match_entry_candidates(payload, &mut candidates);
+    candidates
+        .iter()
+        .copied()
+        .find(|entries| match_objects(entries).is_some())
+        .or_else(|| candidates.first().copied())
+        .unwrap_or_default()
+        .to_vec()
 }
 
-fn extract_raw_match_entries_from_container(container: &Value) -> Option<&[Value]> {
+fn collect_match_entry_candidates<'a>(container: &'a Value, candidates: &mut Vec<&'a [Value]>) {
     if let Some(items) = container.as_array() {
-        return Some(items);
+        candidates.push(items);
+        return;
     }
+    let Some(object) = container.as_object() else {
+        return;
+    };
     for key in [
         "matchList",
         "recentMatchList",
@@ -432,17 +426,27 @@ fn extract_raw_match_entries_from_container(container: &Value) -> Option<&[Value
         "rows",
         "items",
     ] {
-        if let Some(items) = container.get(key).and_then(Value::as_array) {
-            return Some(items);
+        if let Some(items) = object.get(key).and_then(Value::as_array) {
+            candidates.push(items);
         }
     }
-    None
+    for key in ["data", "result"] {
+        if let Some(nested) = object.get(key) {
+            collect_match_entry_candidates(nested, candidates);
+        }
+    }
 }
 
 fn match_objects(items: &[Value]) -> Option<Vec<Value>> {
     let entries = items
         .iter()
-        .filter(|item| item.is_object() && item.get("matchId").is_some())
+        .filter(|item| {
+            item.is_object()
+                && item
+                    .get("matchId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|match_id| !match_id.trim().is_empty())
+        })
         .cloned()
         .collect::<Vec<_>>();
     if entries.is_empty() {

@@ -257,6 +257,57 @@ fn page_diagnostics_are_sorted_aggregated_and_identity_free() {
     }
 }
 
+#[test]
+fn page_diagnostics_skip_empty_or_invalid_candidates_before_valid_protocol_entries() {
+    let inventory = SeasonSyncInventory::default();
+    let list_pages = vec![
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 1,
+            "payload": {"data": {
+                "list": [],
+                "records": [{"matchId": "valid-after-empty", "beginTs": 30}]
+            }}
+        }),
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 2,
+            "payload": {"data": {
+                "list": [{"notMatchId": "invalid"}],
+                "records": [{"matchId": "valid-after-invalid", "beginTs": 20}]
+            }}
+        }),
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 3,
+            "payload": {"data": {
+                "list": [{"notMatchId": "still-invalid"}],
+                "records": []
+            }}
+        }),
+    ];
+
+    let diagnostics = build_page_diagnostics(&list_pages, &inventory);
+
+    assert_eq!(diagnostics.len(), 3);
+    assert_eq!(diagnostics[0].entries, 1);
+    assert_eq!(diagnostics[0].unique_valid_entries, 1);
+    assert_eq!(diagnostics[0].new_matches, 1);
+    assert_eq!(diagnostics[1].entries, 1);
+    assert_eq!(diagnostics[1].unique_valid_entries, 1);
+    assert_eq!(diagnostics[1].new_matches, 1);
+    assert_eq!(diagnostics[2].entries, 1);
+    assert_eq!(diagnostics[2].unique_valid_entries, 0);
+    assert_eq!(diagnostics[2].new_matches, 0);
+    let serialized = serde_json::to_string(&diagnostics).unwrap();
+    for raw_id in ["valid-after-empty", "valid-after-invalid", "still-invalid"] {
+        assert!(!serialized.contains(raw_id));
+    }
+}
+
 fn entry(match_id: &str, game_mode: &str, begin_ts: i64) -> serde_json::Value {
     json!({
         "matchId": match_id,

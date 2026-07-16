@@ -833,6 +833,82 @@ async fn desktop_incremental_snapshot_failure_reports_committed_database_boundar
     );
 }
 
+#[tokio::test]
+async fn desktop_incremental_counts_only_valid_database_details_after_failed_repair() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+            begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+            mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+         ) VALUES (
+            'metric-invalid', 23, 'preset', 'sport', 'normal', 'win', '', '',
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '{}', 'now'
+         )",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+         VALUES ('metric-invalid', 'normal', '{}', 'now')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let server = spawn_failed_detail_metric_server();
+
+    let summary = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(summary.failed_details, 1);
+    assert_eq!(summary.database_matches, 1);
+    assert_eq!(summary.database_details, 0);
+    let conn = db.connect().unwrap();
+    let details_count: i64 = conn
+        .query_row(
+            "SELECT details_count FROM seasons WHERE season=23",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(details_count, 0);
+    drop(conn);
+    let inventory = owstats_desktop_lib::load_season_sync_inventory(&db, 23).unwrap();
+    assert!(inventory.match_ids.contains("metric-invalid"));
+    assert!(!inventory.detail_ids.contains("metric-invalid"));
+}
+
 #[derive(Clone, Debug)]
 struct RecordedRequest {
     first_line: String,
@@ -1124,6 +1200,70 @@ fn spawn_successful_desktop_sync_server(empty: bool) -> RecordingServer {
                 };
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+        }
+    });
+    RecordingServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
+}
+
+fn spawn_failed_detail_metric_server() -> RecordingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming().take(256) {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let captured = captured.clone();
+            thread::spawn(move || {
+                let mut buffer = [0_u8; 8192];
+                let Ok(read) = stream.read(&mut buffer) else {
+                    return;
+                };
+                if read == 0 {
+                    return;
+                }
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let first_line = request.lines().next().unwrap_or_default().to_string();
+                captured.lock().unwrap().push(RecordedRequest {
+                    first_line: first_line.clone(),
+                    headers: String::new(),
+                    body: String::new(),
+                });
+                let (status, body) = if first_line.contains("/queryCard") {
+                    ("200 OK", r#"{"code":0,"data":{"level":42}}"#)
+                } else if first_line.contains("/queryCountInfo") {
+                    ("200 OK", r#"{"code":0,"data":{"total":1}}"#)
+                } else if first_line.contains("/queryMatchList")
+                    && first_line.contains("gameMode=sport")
+                    && first_line.contains("page=1")
+                {
+                    (
+                        "200 OK",
+                        r#"{"code":0,"data":{"matchList":[
+                            {"matchId":"metric-invalid","matchRet":1,"beginTs":1700000000000}
+                        ]}}"#,
+                    )
+                } else if first_line.contains("/queryMatchInfo")
+                    && first_line.contains("matchId=metric-invalid")
+                {
+                    (
+                        "500 Internal Server Error",
+                        r#"{"code":500,"message":"synthetic detail failure"}"#,
+                    )
+                } else {
+                    ("200 OK", r#"{"code":0,"data":{"matchList":[]}}"#)
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());

@@ -169,13 +169,6 @@ pub(super) fn query_season_database_totals(db: &OwDatabase, season: i64) -> Resu
         params![season],
         |row| row.get::<_, i64>(0),
     )?;
-    let details = conn.query_row(
-        "SELECT COUNT(*)
-         FROM match_details d
-         JOIN matches m ON m.match_id = d.match_id
-         WHERE m.season = ?1",
-        params![season],
-        |row| row.get::<_, i64>(0),
-    )?;
+    let details = crate::importer::count_valid_match_details_for_season(&conn, season)?;
     Ok((matches.max(0) as usize, details.max(0) as usize))
 }
