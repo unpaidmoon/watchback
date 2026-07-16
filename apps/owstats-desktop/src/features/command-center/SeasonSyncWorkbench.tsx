@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { readableSyncProgress } from "../../shared/phase6Shell";
-import type { SeasonDataStatus, SyncProgress } from "../../shared/types";
+import type { SeasonDataStatus, SyncMode, SyncProgress } from "../../shared/types";
 import { formatCompactTimestamp, seasonSyncGateCopy } from "./SeasonHealthPanel";
 
 export type SeasonSyncWorkbenchProps = {
@@ -12,11 +12,13 @@ export type SeasonSyncWorkbenchProps = {
   targetSyncAllowed: boolean;
   accountOperationBusy: boolean;
   syncingSeason: number | null;
+  syncingMode: SyncMode | null;
   progress: SyncProgress | null;
   syncError: string | null;
   syncNotice: string | null;
   onSelectSeason: (season: number) => void;
-  onSync: (season: number) => void;
+  onFullFetch: (season: number) => void;
+  onQuickUpdate: (season: number) => void;
 };
 
 export function resolveCommandCenterSeason(
@@ -36,14 +38,17 @@ export function SeasonSyncWorkbench({
   targetSyncAllowed,
   accountOperationBusy,
   syncingSeason,
+  syncingMode,
   progress,
   syncError,
   syncNotice,
   onSelectSeason,
-  onSync,
+  onFullFetch,
+  onQuickUpdate,
 }: SeasonSyncWorkbenchProps) {
   const sortedStatuses = [...seasonStatuses].sort((left, right) => right.season - left.season);
   const isSyncing = syncingSeason === selectedSeason;
+  const isSelectedFullFetch = isSyncing && syncingMode === "fullFetch";
   const selectedHasData = seasonStatuses.some((item) => item.season === selectedSeason && item.matchCount > 0);
   const gateCopy = seasonSyncGateCopy(
     credentialReady,
@@ -78,11 +83,11 @@ export function SeasonSyncWorkbench({
         <button
           className="primaryButton seasonSyncButton"
           type="button"
-          onClick={() => onSync(selectedSeason)}
+          onClick={() => onFullFetch(selectedSeason)}
           disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
         >
           <RefreshCw size={18} />
-          {isSyncing ? "同步中" : `同步 S${selectedSeason}`}
+          {isSelectedFullFetch ? "全量抓取中…" : "全量抓取"}
         </button>
         <div className="seasonSyncFeedback" aria-live={syncError ? "assertive" : "polite"}>
           {syncError ? (
@@ -109,27 +114,43 @@ export function SeasonSyncWorkbench({
               <span role="columnheader">详情覆盖度</span>
               <span role="columnheader">本地对局</span>
               <span role="columnheader">最近同步</span>
+              <span role="columnheader">操作</span>
             </div>
             {sortedStatuses.map((seasonStatus) => {
               const rowSyncing = syncingSeason === seasonStatus.season;
               return (
-                <button
+                <div
                   key={seasonStatus.season}
                   className={`syncedSeasonLedgerRow${selectedSeason === seasonStatus.season ? " selected" : ""}${rowSyncing ? " syncing" : ""}`}
-                  type="button"
-                  aria-pressed={selectedSeason === seasonStatus.season}
-                  onClick={() => onSelectSeason(seasonStatus.season)}
+                  role="row"
                 >
-                  <span className="syncedSeasonName">{`S${seasonStatus.season}`}{rowSyncing ? <small>同步中</small> : null}</span>
-                  <span className="syncedSeasonCoverage">
-                    <span className="syncedSeasonCoverageTrack" aria-hidden="true">
-                      <span style={{ width: `${seasonStatus.coveragePercent}%` }} />
+                  <button
+                    className="syncedSeasonSelect"
+                    type="button"
+                    aria-label={`选择 S${seasonStatus.season}`}
+                    aria-pressed={selectedSeason === seasonStatus.season}
+                    onClick={() => onSelectSeason(seasonStatus.season)}
+                  >
+                    <span className="syncedSeasonName" role="cell">{`S${seasonStatus.season}`}{rowSyncing ? <small>同步中</small> : null}</span>
+                    <span className="syncedSeasonCoverage" role="cell">
+                      <span className="syncedSeasonCoverageTrack" aria-hidden="true">
+                        <span style={{ width: `${seasonStatus.coveragePercent}%` }} />
+                      </span>
+                      <span>{seasonStatus.coveragePercent}%</span>
                     </span>
-                    <span>{seasonStatus.coveragePercent}%</span>
-                  </span>
-                  <span>{seasonStatus.matchCount} 场</span>
-                  <span>{formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)}</span>
-                </button>
+                    <span role="cell">{seasonStatus.matchCount} 场</span>
+                    <span role="cell">{formatCompactTimestamp(seasonStatus.lastSyncedOrImportedAt)}</span>
+                  </button>
+                  <button
+                    className="ghostButton syncedSeasonUpdateButton"
+                    type="button"
+                    aria-label={`更新 S${seasonStatus.season}`}
+                    onClick={() => onQuickUpdate(seasonStatus.season)}
+                    disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
+                  >
+                    {rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : "更新"}
+                  </button>
+                </div>
               );
             })}
           </div>

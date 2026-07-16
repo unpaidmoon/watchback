@@ -116,6 +116,7 @@ for (const testCase of cases) {
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
 const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
+const workbenchSource = readFileSync(new URL("../src/features/command-center/SeasonSyncWorkbench.tsx", import.meta.url), "utf8");
 
 assert.match(
   typesSource,
@@ -134,9 +135,12 @@ assert.match(
 );
 assert.match(
   onboardingSource,
-  /const summary = await syncSeason\(season, "fullFetch"\);\s*clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
+  /async function runSeasonSync\(season: number, mode: SyncMode\)[\s\S]*?const summary = await syncSeason\(season, mode\);\s*clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
   "successful sync preserves sync, cache clear, dashboard reload order",
 );
+assert.match(onboardingSource, /onFullFetch=\{\(season\) => void runSeasonSync\(season, "fullFetch"\)\}/, "full-fetch control passes the explicit mode");
+assert.match(onboardingSource, /onQuickUpdate=\{\(season\) => void runSeasonSync\(season, "quickUpdate"\)\}/, "row update passes the explicit quick mode");
+assert.match(workbenchSource, /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null\}/, "all sync controls share the busy gate");
 assert.match(
   onboardingSource,
   /setSyncNotice\(formatSyncNotice\(season, summary\)\);/,

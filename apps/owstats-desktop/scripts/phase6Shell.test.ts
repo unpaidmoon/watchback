@@ -42,6 +42,7 @@ const commandCenterStyles = readFileSync(new URL("../src/styles/features/command
 const pageShellStyles = readFileSync(new URL("../src/styles/page-shell.css", import.meta.url), "utf8");
 assertEqual(/\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*minmax\(220px, 1fr\) minmax\(0, 2fr\)/.test(commandCenterStyles), true, "sync controls and ledger use the confirmed 1:2 layout");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "ledger rows meet the interaction target");
+assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "row update controls meet the interaction target");
 assertEqual(/\.syncedSeasonCoverageTrack > span\s*\{[\s\S]*?background:\s*var\(--data-primary\)/.test(commandCenterStyles), true, "coverage uses the approved data color");
 assertEqual(/@media \(max-width: 920px\)[\s\S]*?\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*1fr/.test(commandCenterStyles), true, "narrow layout stacks control above ledger");
 assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
@@ -161,12 +162,12 @@ assertEqual(onboardingSource.includes("let disposed = false"), true, "late event
 assertEqual(onboardingSource.includes("if (disposed)"), true, "late event listeners immediately unlisten after cleanup");
 assertEqual(onboardingSource.includes("function acquireOperationLock()"), true, "account and season actions share one synchronous lock");
 assertEqual(
-  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)[\s\S]*?finally[\s\S]*?releaseOperationLock\(\)/.test(onboardingSource),
+  /async function runSeasonSync\(season: number, mode: SyncMode\)[\s\S]*?if \(!acquireOperationLock\(\)\)[\s\S]*?finally[\s\S]*?releaseOperationLock\(\)/.test(onboardingSource),
   true,
   "season sync owns and releases the shared operation lock",
 );
 assertEqual(
-  /async function runSeasonSync\(season: number\)[\s\S]*?if \(!acquireOperationLock\(\)\)\s*\{[\s\S]*?setSyncError\(/.test(onboardingSource),
+  /async function runSeasonSync\(season: number, mode: SyncMode\)[\s\S]*?if \(!acquireOperationLock\(\)\)\s*\{[\s\S]*?setSyncError\(/.test(onboardingSource),
   true,
   "season sync lock failures stay beside the sync control",
 );
@@ -200,7 +201,12 @@ assertEqual(seasonWorkbenchSource.includes("普通对局"), false, "ledger omits
 assertEqual(seasonWorkbenchSource.includes("角斗对局"), false, "ledger omits non-approved columns");
 assertEqual(seasonWorkbenchSource.includes("aria-pressed"), true, "ledger rows expose their selected state");
 assertEqual(onboardingSource.includes('aria-label="赛季号"'), false, "numeric season input is removed");
-assertEqual(seasonWorkbenchSource.includes("`同步 S${selectedSeason}`"), true, "season sync button text follows the selected season");
+assertEqual(seasonWorkbenchSource.includes('onFullFetch: (season: number) => void'), true, "workbench exposes an explicit full-fetch action");
+assertEqual(seasonWorkbenchSource.includes('onQuickUpdate: (season: number) => void'), true, "workbench exposes an explicit row update action");
+assertEqual(seasonWorkbenchSource.includes('"全量抓取"'), true, "selected-season primary action is named full fetch");
+assertEqual(seasonWorkbenchSource.includes('"更新"'), true, "synced-season rows expose a compact update action");
+assertEqual(/onClick=\{\(\) => onQuickUpdate\(seasonStatus\.season\)\}/.test(seasonWorkbenchSource), true, "row update uses its own season directly");
+assertEqual(/<button[^>]*className=.*syncedSeasonLedgerRow[\s\S]*?<button/.test(seasonWorkbenchSource), false, "season rows do not nest buttons");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("status.currentSeason"), true, "command center consumes the backend current season without global state");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
