@@ -34,6 +34,29 @@ const updateMatchFavoriteState = (
 ).updateMatchFavoriteState;
 assert.equal(typeof updateMatchFavoriteState, "function", "match favorite updates should expose an immutable list helper");
 
+const createMatchesPageLifetime = (
+  matchesPageCacheModule as unknown as {
+    createMatchesPageLifetime: () => {
+      activate: () => void;
+      deactivate: () => void;
+      isActive: () => boolean;
+    };
+  }
+).createMatchesPageLifetime;
+assert.equal(typeof createMatchesPageLifetime, "function", "matches page should expose its tested lifetime gate");
+const pageLifetime = createMatchesPageLifetime();
+assert.equal(pageLifetime.isActive(), false, "a page lifetime starts inactive before its effect setup");
+pageLifetime.activate();
+assert.equal(pageLifetime.isActive(), true, "effect setup activates the page lifetime");
+pageLifetime.deactivate();
+assert.equal(pageLifetime.isActive(), false, "effect cleanup deactivates the page lifetime");
+pageLifetime.activate();
+assert.equal(
+  pageLifetime.isActive(),
+  true,
+  "StrictMode cleanup followed by replayed effect setup reactivates the same page lifetime",
+);
+
 function createDeferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((resolvePromise) => {
@@ -656,6 +679,16 @@ const favoritePersistedSource = matchesPageSource.slice(
   matchesPageSource.indexOf("const handleFavoritePersisted"),
   matchesPageSource.indexOf("const favoriteController"),
 );
+assert.equal(
+  matchesPageSource.includes("const pageLifetimeRef = useRef(createMatchesPageLifetime());"),
+  true,
+  "MatchesPage should retain one tested lifetime gate across renders and StrictMode effect replay",
+);
+assert.match(
+  favoritePersistedSource,
+  /async \(favorite: MatchDetailView\["favorite"\]\) => \{\s*if \(!pageLifetimeRef\.current\.isActive\(\)\) return;\s*const selectedFavoriteMatchId = selectedMatchIdRef\.current;/,
+  "favorite reconciliation checks the shared page lifetime before reading selection or causing any state/cache side effect",
+);
 assert.match(
   favoritePersistedSource,
   /const selectedFavoriteMatchId = selectedMatchIdRef\.current;/,
@@ -761,8 +794,8 @@ assert.match(
 );
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \(\) => \{\s*pageDataRequestIdRef\.current \+= 1;\s*timelineRequestIdRef\.current \+= 1;\s*\}, \[\]\);/,
-  "leaving MatchesPage invalidates both metadata and timeline requests before a later re-entry",
+  /useEffect\(\(\) => \{\s*pageLifetimeRef\.current\.activate\(\);\s*return \(\) => \{\s*pageLifetimeRef\.current\.deactivate\(\);\s*pageDataRequestIdRef\.current \+= 1;\s*timelineRequestIdRef\.current \+= 1;\s*\};\s*\}, \[\]\);/,
+  "effect setup activates the shared lifetime while cleanup deactivates it and invalidates existing requests",
 );
 assert.equal(hydrateInitialMatchesSource.includes("const pageDataRequestId = ++pageDataRequestIdRef.current;"), true, "hydration owns a metadata request id");
 assert.equal(hydrateInitialMatchesSource.includes("const timelineRequestId = ++timelineRequestIdRef.current;"), true, "hydration separately owns its A timeline id");

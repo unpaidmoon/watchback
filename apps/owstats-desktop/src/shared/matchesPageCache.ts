@@ -31,6 +31,21 @@ let cacheGeneration = 0;
 let latestCacheWriteId = 0;
 const preloadPromises = new Map<string, Promise<MatchesPageCache>>();
 
+export function createMatchesPageLifetime() {
+  let active = false;
+  return {
+    activate() {
+      active = true;
+    },
+    deactivate() {
+      active = false;
+    },
+    isActive() {
+      return active;
+    },
+  };
+}
+
 export function getMatchesPageCache() {
   return matchesPageCache;
 }

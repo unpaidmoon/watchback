@@ -22,6 +22,7 @@ import {
   chooseMatchesPageNavigationState,
   computeMatchAnchorScrollTop,
   consumeMatchesSearchParamsNavigation,
+  createMatchesPageLifetime,
   getMatchesPageCache,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
@@ -60,6 +61,7 @@ export function MatchesPage() {
   const canHydrateCache = useMemo(() => canHydrateMatchesPageCache(cachedPage, initialFilters, hasExplicitFilters), []);
   const initialCacheRef = useRef(cachedPage);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const pageLifetimeRef = useRef(createMatchesPageLifetime());
   const lastWrittenSearchParamsKeyRef = useRef<string | null>(null);
   const initialHydrationFilterKeyRef = useRef(canHydrateCache ? null : matchFiltersKey(initialFilters));
   const loadedFilterKeyRef = useRef(canHydrateCache ? cachedPage?.loadedFilterKey ?? "" : "");
@@ -95,6 +97,7 @@ export function MatchesPage() {
   loadMatchesRef.current = loadMatches;
   const handleFavoritePersisted = useCallback(
     async (favorite: MatchDetailView["favorite"]) => {
+      if (!pageLifetimeRef.current.isActive()) return;
       const selectedFavoriteMatchId = selectedMatchIdRef.current;
       setSelectedDetail((current) =>
         current?.matchId === selectedFavoriteMatchId
@@ -132,9 +135,13 @@ export function MatchesPage() {
     register,
   ]);
 
-  useEffect(() => () => {
-    pageDataRequestIdRef.current += 1;
-    timelineRequestIdRef.current += 1;
+  useEffect(() => {
+    pageLifetimeRef.current.activate();
+    return () => {
+      pageLifetimeRef.current.deactivate();
+      pageDataRequestIdRef.current += 1;
+      timelineRequestIdRef.current += 1;
+    };
   }, []);
 
   useEffect(() => {
