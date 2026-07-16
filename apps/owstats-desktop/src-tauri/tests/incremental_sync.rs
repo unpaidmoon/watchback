@@ -185,6 +185,28 @@ fn inventory_infers_modes_for_incremental_entries_without_valid_details() {
 }
 
 #[test]
+fn inventory_retains_global_id_but_rejects_unknown_mode_without_match_kind() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![entry("unknown-mode", "MysteryMode", 30)],
+            vec![],
+            vec![],
+        ),
+        HashSet::from(["unknown-mode".to_string()]),
+    )
+    .unwrap();
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+
+    assert!(inventory.match_ids.contains("unknown-mode"));
+    assert!(inventory.modes.is_empty());
+}
+
+#[test]
 fn inventory_treats_only_valid_wrapped_details_as_complete() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
