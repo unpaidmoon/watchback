@@ -1,7 +1,7 @@
 use owstats_desktop_lib::{
-    import_incremental_payload_value_embedded, import_payload_value_embedded,
-    load_season_sync_inventory, rebuild_complete_season_payload, select_detail_entries,
-    write_season_payload, OwDatabase, SeasonSyncInventory,
+    build_page_diagnostics, import_incremental_payload_value_embedded,
+    import_payload_value_embedded, load_season_sync_inventory, rebuild_complete_season_payload,
+    select_detail_entries, write_season_payload, OwDatabase, SeasonSyncInventory,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -186,6 +186,53 @@ fn detail_selector_returns_only_new_or_missing_details() {
     assert_eq!(ids, vec!["missing", "new"]);
     assert_eq!(selection.new_matches, 1);
     assert_eq!(selection.missing_details, 1);
+}
+
+#[test]
+fn page_diagnostics_are_sorted_aggregated_and_identity_free() {
+    let inventory = SeasonSyncInventory {
+        match_ids: HashSet::from(["known-complete".to_string(), "known-missing".to_string()]),
+        detail_ids: HashSet::from(["known-complete".to_string()]),
+    };
+    let list_pages = vec![
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 2,
+            "payload": {"data": {"matchList": [
+                {"matchId": "new-two", "beginTs": 20},
+                {"matchId": "known-complete", "beginTs": 10}
+            ]}}
+        }),
+        json!({
+            "kind": "fight",
+            "gameMode": "QuickFight",
+            "page": 1,
+            "payload": {"data": {"matchList": [
+                {"matchId": "known-missing", "beginTs": 30}
+            ]}}
+        }),
+    ];
+
+    let diagnostics = build_page_diagnostics(&list_pages, &inventory);
+
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics[0].match_kind, "fight");
+    assert_eq!(diagnostics[0].game_mode, "QuickFight");
+    assert_eq!(diagnostics[0].entries, 1);
+    assert_eq!(diagnostics[0].new_matches, 0);
+    assert_eq!(diagnostics[0].missing_details, 1);
+    assert_eq!(diagnostics[0].earliest_begin_ts, Some(30));
+    assert_eq!(diagnostics[0].latest_begin_ts, Some(30));
+    assert_eq!(diagnostics[1].entries, 2);
+    assert_eq!(diagnostics[1].new_matches, 1);
+    assert_eq!(diagnostics[1].missing_details, 0);
+    assert_eq!(diagnostics[1].earliest_begin_ts, Some(10));
+    assert_eq!(diagnostics[1].latest_begin_ts, Some(20));
+    let serialized = serde_json::to_string(&diagnostics).unwrap();
+    for identity in ["new-two", "known-complete", "known-missing", "matchId"] {
+        assert!(!serialized.contains(identity));
+    }
 }
 
 fn entry(match_id: &str, game_mode: &str, begin_ts: i64) -> serde_json::Value {

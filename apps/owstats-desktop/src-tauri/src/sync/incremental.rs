@@ -1,5 +1,6 @@
 use crate::db::OwDatabase;
 use crate::importer::is_valid_match_detail_for;
+use crate::models::SyncPageDiagnostic;
 use anyhow::Result;
 use rusqlite::params;
 use serde_json::Value;
@@ -80,4 +81,92 @@ pub fn select_detail_entries(
         new_matches,
         missing_details,
     }
+}
+
+pub fn build_page_diagnostics(
+    list_pages: &[Value],
+    inventory: &SeasonSyncInventory,
+) -> Vec<SyncPageDiagnostic> {
+    let mut diagnostics = list_pages
+        .iter()
+        .map(|list_page| {
+            let entries = list_page
+                .get("payload")
+                .map(crate::season_fetch::extract_match_entries)
+                .unwrap_or_default();
+            let mut seen = HashSet::new();
+            let mut new_matches = 0;
+            let mut missing_details = 0;
+            let mut begin_timestamps = entries
+                .iter()
+                .filter_map(|entry| entry.get("beginTs").and_then(Value::as_i64))
+                .collect::<Vec<_>>();
+            for entry in &entries {
+                let Some(match_id) = entry
+                    .get("matchId")
+                    .and_then(Value::as_str)
+                    .filter(|match_id| !match_id.is_empty())
+                else {
+                    continue;
+                };
+                if !seen.insert(match_id) {
+                    continue;
+                }
+                if !inventory.match_ids.contains(match_id) {
+                    new_matches += 1;
+                } else if !inventory.detail_ids.contains(match_id) {
+                    missing_details += 1;
+                }
+            }
+            begin_timestamps.sort_unstable();
+            SyncPageDiagnostic {
+                match_kind: list_page
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("normal")
+                    .to_string(),
+                game_mode: list_page
+                    .get("gameMode")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                page: list_page
+                    .get("page")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+                entries: entries.len(),
+                new_matches,
+                missing_details,
+                earliest_begin_ts: begin_timestamps.first().copied(),
+                latest_begin_ts: begin_timestamps.last().copied(),
+            }
+        })
+        .collect::<Vec<_>>();
+    diagnostics.sort_by(|left, right| {
+        (&left.match_kind, &left.game_mode, left.page).cmp(&(
+            &right.match_kind,
+            &right.game_mode,
+            right.page,
+        ))
+    });
+    diagnostics
+}
+
+pub(super) fn query_season_database_totals(db: &OwDatabase, season: i64) -> Result<(usize, usize)> {
+    db.initialize()?;
+    let conn = db.connect()?;
+    let matches = conn.query_row(
+        "SELECT COUNT(*) FROM matches WHERE season = ?1",
+        params![season],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let details = conn.query_row(
+        "SELECT COUNT(*)
+         FROM match_details d
+         JOIN matches m ON m.match_id = d.match_id
+         WHERE m.season = ?1",
+        params![season],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok((matches.max(0) as usize, details.max(0) as usize))
 }

@@ -83,7 +83,8 @@ pub use facade::{
     sync_season_with_progress,
 };
 pub use incremental::{
-    load_season_sync_inventory, select_detail_entries, DetailSelection, SeasonSyncInventory,
+    build_page_diagnostics, load_season_sync_inventory, select_detail_entries, DetailSelection,
+    SeasonSyncInventory,
 };
 pub use persist::sync_import_parts;
 #[doc(hidden)]

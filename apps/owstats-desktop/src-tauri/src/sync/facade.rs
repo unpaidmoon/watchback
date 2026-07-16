@@ -165,24 +165,16 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
     target_path: &Path,
     season: i64,
     customer_base_url: &str,
-    mut progress: impl FnMut(SyncProgress),
+    progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
     let credentials = read_credentials(credential_path)?;
     let target = crate::player_target::read_player_target_for_path(target_path)?;
     if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
         return Err(anyhow!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR));
     }
-    db.initialize()?;
-    progress(SyncProgress {
-        season,
-        phase: "拉取赛季 JSON".to_string(),
-        processed: 0,
-        total: 0,
-        current_match_id: None,
-        failed_details: 0,
-        latest_errors: Vec::new(),
-    });
-    let fetch = crate::season_fetch::fetch_full_season_with_base_url(
+    sync_incremental_season_with_request(
+        db,
+        season_output_dir,
         crate::season_fetch::FullSeasonRequest {
             credentials: crate::dashen_client::DashenCredentials {
                 role_id: credentials.role_id,
@@ -199,63 +191,9 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_base_url(
             detail_concurrency: 2,
             include_fight: true,
         },
+        progress,
     )
-    .await?;
-
-    write_season_payload(season_output_dir, season, &fetch.payload)?;
-    if fetch.entries == 0 {
-        return Err(anyhow!(
-            "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后重新登录后再试。"
-        ));
-    }
-
-    let entries = fetch
-        .payload
-        .pointer("/matches/entries")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let details = fetch
-        .payload
-        .pointer("/matches/details")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let detail_errors = fetch
-        .payload
-        .pointer("/matches/detail_errors")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    progress(SyncProgress {
-        season,
-        phase: "写入 SQLite".to_string(),
-        processed: fetch.entries,
-        total: fetch.entries,
-        current_match_id: None,
-        failed_details: detail_errors.len(),
-        latest_errors: Vec::new(),
-    });
-    let summary = sync_import_parts(
-        db,
-        season_output_dir,
-        season,
-        &fetch.payload,
-        entries,
-        details,
-        detail_errors,
-        0,
-    )?;
-    progress(SyncProgress {
-        season,
-        phase: "完成".to_string(),
-        processed: summary.processed,
-        total: summary.total,
-        current_match_id: None,
-        failed_details: summary.failed_details,
-        latest_errors: summary.latest_errors.clone(),
-    });
-    Ok(summary)
+    .await
 }
 
 pub async fn sync_season_with_current_account_credentials_path_output_dir_base_url(
@@ -264,9 +202,8 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
     credential_path: &Path,
     season: i64,
     customer_base_url: &str,
-    mut progress: impl FnMut(SyncProgress),
+    progress: impl FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
-    db.initialize()?;
     let credentials = read_credentials(credential_path)?;
     let customer_token = credentials
         .customer_token
@@ -274,16 +211,9 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("当前登录账号尚未识别，无法同步本人数据，请重新登录。"))?;
-    progress(SyncProgress {
-        season,
-        phase: "拉取赛季 JSON".to_string(),
-        processed: 0,
-        total: 0,
-        current_match_id: None,
-        failed_details: 0,
-        latest_errors: Vec::new(),
-    });
-    let fetch = crate::season_fetch::fetch_full_season_with_base_url(
+    sync_incremental_season_with_request(
+        db,
+        season_output_dir,
         crate::season_fetch::FullSeasonRequest {
             credentials: crate::dashen_client::DashenCredentials {
                 role_id: credentials.role_id,
@@ -300,12 +230,43 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
             detail_concurrency: 2,
             include_fight: true,
         },
+        progress,
     )
-    .await?;
-    write_season_payload(season_output_dir, season, &fetch.payload)?;
+    .await
+}
+
+async fn sync_incremental_season_with_request(
+    db: &OwDatabase,
+    season_output_dir: &Path,
+    request: crate::season_fetch::FullSeasonRequest,
+    mut progress: impl FnMut(SyncProgress),
+) -> Result<SyncSummary> {
+    let season = request.season;
+    progress(SyncProgress {
+        season,
+        phase: "正在检查本地数据".to_string(),
+        processed: 0,
+        total: 0,
+        current_match_id: None,
+        failed_details: 0,
+        latest_errors: Vec::new(),
+    });
+    let inventory = load_season_sync_inventory(db, season)?;
+    progress(SyncProgress {
+        season,
+        phase: "正在获取赛季对局列表".to_string(),
+        processed: 0,
+        total: 0,
+        current_match_id: None,
+        failed_details: 0,
+        latest_errors: Vec::new(),
+    });
+    let fetch =
+        crate::season_fetch::fetch_season_increment_with_base_url(request, &inventory.detail_ids)
+            .await?;
     if fetch.entries == 0 {
         return Err(anyhow!(
-            "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后重新登录后再试。"
+            "未拉取到 S{season} 赛季对局；未更新本地数据库或快照，请确认该赛季有战绩，或稍后重新登录后再试。"
         ));
     }
     let entries = fetch
@@ -314,40 +275,123 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_base_u
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let selection = select_detail_entries(&entries, &inventory);
+    progress(SyncProgress {
+        season,
+        phase: format!(
+            "发现 {} 场新对局，{} 场缺少详情",
+            selection.new_matches, selection.missing_details
+        ),
+        processed: 0,
+        total: fetch.details_requested,
+        current_match_id: None,
+        failed_details: fetch.failed_details,
+        latest_errors: Vec::new(),
+    });
     let details = fetch
         .payload
         .pointer("/matches/details")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    progress(SyncProgress {
+        season,
+        phase: format!(
+            "正在获取详情 {} / {}",
+            fetch.details_requested.saturating_sub(fetch.failed_details),
+            fetch.details_requested
+        ),
+        processed: fetch.details_requested.saturating_sub(fetch.failed_details),
+        total: fetch.details_requested,
+        current_match_id: None,
+        failed_details: fetch.failed_details,
+        latest_errors: Vec::new(),
+    });
     let detail_errors = fetch
         .payload
         .pointer("/matches/detail_errors")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let list_pages = fetch
+        .payload
+        .pointer("/matches/list_pages")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let page_diagnostics = build_page_diagnostics(&list_pages, &inventory);
+    let attempted_detail_ids = selection
+        .entries
+        .iter()
+        .filter_map(|entry| string_field(entry, "matchId"))
+        .collect::<HashSet<_>>();
+    let repair_candidates = attempted_detail_ids
+        .iter()
+        .filter(|match_id| {
+            inventory.match_ids.contains(*match_id) && !inventory.detail_ids.contains(*match_id)
+        })
+        .cloned()
+        .collect::<HashSet<_>>();
+    let repaired_details = details
+        .iter()
+        .filter_map(|detail| string_field(detail, "match_id").map(|match_id| (match_id, detail)))
+        .filter(|(match_id, detail)| {
+            repair_candidates.contains(match_id)
+                && crate::importer::is_valid_match_detail_for(detail, match_id)
+        })
+        .map(|(match_id, _)| match_id)
+        .collect::<HashSet<_>>()
+        .len();
+    let persist_started = std::time::Instant::now();
     progress(SyncProgress {
         season,
-        phase: "写入 SQLite".to_string(),
-        processed: fetch.entries,
-        total: fetch.entries,
+        phase: "正在更新本地数据库".to_string(),
+        processed: fetch.details_requested.saturating_sub(fetch.failed_details),
+        total: fetch.details_requested,
         current_match_id: None,
         failed_details: detail_errors.len(),
         latest_errors: Vec::new(),
     });
-    let summary = sync_import_parts(
+    let mut summary = persist::sync_import_incremental_parts(
         db,
-        season_output_dir,
         season,
         &fetch.payload,
         entries,
         details,
         detail_errors,
-        0,
+        attempted_detail_ids,
     )?;
+    let (database_matches, database_details) =
+        incremental::query_season_database_totals(db, season)?;
+    let complete_payload =
+        rebuild_complete_season_payload(db, season, &fetch.payload).map_err(|error| {
+            anyhow!(
+                "数据库更新成功，但本地快照更新失败：{}",
+                crate::redaction::redact_sensitive_text(&error.to_string())
+            )
+        })?;
+    write_season_payload(season_output_dir, season, &complete_payload).map_err(|error| {
+        anyhow!(
+            "数据库更新成功，但本地快照更新失败：{}",
+            crate::redaction::redact_sensitive_text(&error.to_string())
+        )
+    })?;
+    summary.list_entries_seen = fetch.entries;
+    summary.new_matches = selection.new_matches;
+    summary.missing_details = selection.missing_details;
+    summary.details_requested = fetch.details_requested;
+    summary.repaired_details = repaired_details;
+    summary.database_matches = database_matches;
+    summary.database_details = database_details;
+    summary.diagnostics = crate::models::SyncDiagnostics {
+        list_duration_ms: fetch.list_duration_ms,
+        detail_duration_ms: fetch.detail_duration_ms,
+        persist_duration_ms: persist_started.elapsed().as_millis() as u64,
+        pages: page_diagnostics,
+    };
     progress(SyncProgress {
         season,
-        phase: "完成".to_string(),
+        phase: "同步完成".to_string(),
         processed: summary.processed,
         total: summary.total,
         current_match_id: None,

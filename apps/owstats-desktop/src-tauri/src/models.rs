@@ -490,6 +490,28 @@ pub struct SyncRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncPageDiagnostic {
+    pub match_kind: String,
+    pub game_mode: String,
+    pub page: i64,
+    pub entries: usize,
+    pub new_matches: usize,
+    pub missing_details: usize,
+    pub earliest_begin_ts: Option<i64>,
+    pub latest_begin_ts: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDiagnostics {
+    pub list_duration_ms: u64,
+    pub detail_duration_ms: u64,
+    pub persist_duration_ms: u64,
+    pub pages: Vec<SyncPageDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncSummary {
     pub season: i64,
     pub phase: String,
@@ -502,6 +524,14 @@ pub struct SyncSummary {
     pub failed_details: usize,
     pub latest_errors: Vec<String>,
     pub import_summary: ImportSummary,
+    pub list_entries_seen: usize,
+    pub new_matches: usize,
+    pub missing_details: usize,
+    pub details_requested: usize,
+    pub repaired_details: usize,
+    pub database_matches: usize,
+    pub database_details: usize,
+    pub diagnostics: SyncDiagnostics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

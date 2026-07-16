@@ -580,6 +580,249 @@ async fn desktop_sync_uses_current_account_credentials_and_writes_explicit_seaso
     assert_eq!(summary.imported_matches, 3);
 }
 
+#[tokio::test]
+async fn desktop_sync_defaults_to_incremental_details() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: Some("Synthetic#1234".to_string()),
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let server = spawn_successful_desktop_sync_server(false);
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    let mut phases = Vec::new();
+
+    let first = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", server.base_url),
+        |progress| phases.push(progress.phase),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(first.list_entries_seen, 3);
+    assert_eq!(first.new_matches, 3);
+    assert_eq!(first.missing_details, 0);
+    assert_eq!(first.details_requested, 3);
+    assert_eq!(first.repaired_details, 0);
+    assert_eq!(first.database_matches, 3);
+    assert_eq!(first.database_details, 3);
+    assert!(!first.diagnostics.pages.is_empty());
+    assert!(first
+        .diagnostics
+        .pages
+        .iter()
+        .all(|page| page.earliest_begin_ts <= page.latest_begin_ts));
+    assert_eq!(
+        phases,
+        vec![
+            "正在检查本地数据",
+            "正在获取赛季对局列表",
+            "发现 3 场新对局，0 场缺少详情",
+            "正在获取详情 3 / 3",
+            "正在更新本地数据库",
+            "同步完成",
+        ]
+    );
+    let first_requests = server.requests.lock().unwrap().clone();
+    assert!(first_requests
+        .iter()
+        .any(|request| request.first_line.contains("/queryMatchList")));
+    assert_eq!(
+        first_requests
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchInfo"))
+            .count(),
+        3
+    );
+    server.requests.lock().unwrap().clear();
+
+    let second = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(second.list_entries_seen, 3);
+    assert_eq!(second.new_matches, 0);
+    assert_eq!(second.missing_details, 0);
+    assert_eq!(second.details_requested, 0);
+    assert_eq!(second.database_matches, 3);
+    assert_eq!(second.database_details, 3);
+    let second_requests = server.requests.lock().unwrap().clone();
+    assert!(
+        second_requests
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchList"))
+            .count()
+            > 0
+    );
+    assert_eq!(
+        second_requests
+            .iter()
+            .filter(|request| request.first_line.contains("/queryMatchInfo"))
+            .count(),
+        0
+    );
+    let snapshot: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(season_dir.join("local_s23_full_season.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snapshot["matches"]["entries"].as_array().unwrap().len(), 3);
+    assert_eq!(snapshot["matches"]["details"].as_array().unwrap().len(), 3);
+    let summary_text = serde_json::to_string(&second).unwrap();
+    for secret in [
+        "normal-one",
+        "normal-two",
+        "normal-three",
+        "Synthetic#1234",
+        "synthetic-player-key",
+        "synthetic-account-secret",
+    ] {
+        assert!(!summary_text.contains(secret));
+    }
+}
+
+#[tokio::test]
+async fn desktop_incremental_empty_fetch_preserves_database_and_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let season_dir = temp.path().join("seasons");
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    let populated = spawn_successful_desktop_sync_server(false);
+    sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", populated.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    let snapshot_path = season_dir.join("local_s23_full_season.json");
+    let before = std::fs::read(&snapshot_path).unwrap();
+
+    let empty = spawn_successful_desktop_sync_server(true);
+    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &season_dir,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", empty.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("未拉取到 S23 赛季对局"));
+    assert_eq!(std::fs::read(&snapshot_path).unwrap(), before);
+    let conn = db.connect().unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM matches WHERE season=23", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn desktop_incremental_snapshot_failure_reports_committed_database_boundary() {
+    let temp = tempfile::tempdir().unwrap();
+    let credential_path = temp.path().join("credentials.json");
+    let target_path = temp.path().join("target.json");
+    let blocked_output = temp.path().join("blocked-output");
+    std::fs::write(&blocked_output, b"not a directory").unwrap();
+    std::fs::write(
+        &credential_path,
+        r#"{"role_id":123,"token":"synthetic-account-secret","dts":2026,"server":1}"#,
+    )
+    .unwrap();
+    save_player_target_for_path(
+        &target_path,
+        &PlayerTarget {
+            input_bnet: "Synthetic#1234".to_string(),
+            resolved_bnet: None,
+            customer_token: "synthetic-player-key".to_string(),
+            bound_at: "2026-07-16T00:00:00Z".to_string(),
+            source_role_id: Some(123),
+        },
+    )
+    .unwrap();
+    let db = OwDatabase::new(temp.path().join("sync.sqlite3"));
+    let server = spawn_successful_desktop_sync_server(false);
+
+    let error = sync_season_with_credentials_and_target_paths_output_dir_base_url(
+        &db,
+        &blocked_output,
+        &credential_path,
+        &target_path,
+        23,
+        &format!("{}/customer", server.base_url),
+        |_| {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("数据库更新成功，但本地快照更新失败："));
+    assert!(!error.contains("synthetic-account-secret"));
+    assert!(!error.contains("synthetic-player-key"));
+    let conn = db.connect().unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM matches WHERE season=23", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        3
+    );
+}
+
 #[derive(Clone, Debug)]
 struct RecordedRequest {
     first_line: String,
@@ -812,6 +1055,65 @@ fn spawn_full_season_server() -> RecordingServer {
                 let (status, body) = full_season_response(&first_line);
                 let response = format!(
                     "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+        }
+    });
+    RecordingServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
+}
+
+fn spawn_successful_desktop_sync_server(empty: bool) -> RecordingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming().take(512) {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let captured = captured.clone();
+            thread::spawn(move || {
+                let mut buffer = [0_u8; 8192];
+                let Ok(read) = stream.read(&mut buffer) else {
+                    return;
+                };
+                if read == 0 {
+                    return;
+                }
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let first_line = request.lines().next().unwrap_or_default().to_string();
+                captured.lock().unwrap().push(RecordedRequest {
+                    first_line: first_line.clone(),
+                    headers: String::new(),
+                    body: String::new(),
+                });
+                let body = if first_line.contains("/queryCard") {
+                    r#"{"code":0,"data":{"level":42}}"#
+                } else if first_line.contains("/queryCountInfo") {
+                    r#"{"code":0,"data":{"total":3}}"#
+                } else if !empty
+                    && first_line.contains("/queryMatchList")
+                    && first_line.contains("gameMode=sport")
+                    && first_line.contains("page=1")
+                {
+                    r#"{"code":0,"data":{"matchList":[
+                        {"matchId":"normal-one","matchRet":1,"beginTs":1700000000000},
+                        {"matchId":"normal-two","matchRet":2,"beginTs":1699999900000},
+                        {"matchId":"normal-three","matchRet":1,"beginTs":1699999800000}
+                    ]}}"#
+                } else if first_line.contains("/queryMatchInfo") {
+                    r#"{"code":0,"data":{"matchRet":1,"duration":120}}"#
+                } else {
+                    r#"{"code":0,"data":{"matchList":[]}}"#
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());

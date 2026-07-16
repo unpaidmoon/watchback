@@ -137,6 +137,14 @@ pub fn sync_import_parts(
         failed_details: errors.len(),
         latest_errors,
         import_summary,
+        list_entries_seen: 0,
+        new_matches: 0,
+        missing_details: 0,
+        details_requested: 0,
+        repaired_details: 0,
+        database_matches: 0,
+        database_details: 0,
+        diagnostics: Default::default(),
     })
 }
 
@@ -196,6 +204,14 @@ pub(super) fn sync_import_incremental_parts(
         failed_details: errors.len(),
         latest_errors,
         import_summary,
+        list_entries_seen: 0,
+        new_matches: 0,
+        missing_details: 0,
+        details_requested: 0,
+        repaired_details: 0,
+        database_matches: 0,
+        database_details: 0,
+        diagnostics: Default::default(),
     })
 }
 

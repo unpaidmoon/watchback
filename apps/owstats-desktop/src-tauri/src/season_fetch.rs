@@ -394,7 +394,7 @@ fn build_payload(
     crate::redaction::sanitize_persisted_json(&payload)
 }
 
-fn extract_match_entries(payload: &Value) -> Vec<Value> {
+pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
     for container in [
         Some(payload),
         payload.get("data"),
