@@ -64,7 +64,9 @@ export function clearMatchesPageCache() {
 }
 
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {
-  return filterParamKeys.some((key) => Boolean(params.get(key)));
+  return filterParamKeys.some((key) =>
+    key === "favorite" ? params.get(key) === "1" : Boolean(params.get(key)),
+  );
 }
 
 export function chooseInitialMatchFilters(urlFilters: MatchFilters, cachedFilters: MatchFilters | undefined, hasExplicitFilters: boolean) {

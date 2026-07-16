@@ -116,6 +116,9 @@ assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("hero=ana")), true
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("playerName=是糖三分毒%235811")), true, "playerName query counts as explicit filters");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("season=21")), true, "S21 query counts as an explicit filter");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=1")), true, "favorite query counts as an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=true")), false, "favorite=true is not an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=0")), false, "favorite=0 is not an explicit filter");
+assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("favorite=")), false, "an empty favorite value is not an explicit filter");
 assert.equal(hasExplicitMatchFilterParams(new URLSearchParams("qa=1")), false, "qa query does not override cached filters");
 
 assert.deepEqual(
@@ -162,6 +165,19 @@ assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, tr
 updateMatchesPageCache({ loadedFilterKey: matchFiltersKey(cachedFilters), hasLoaded: true });
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, false), true, "cache hydrates normal route re-entry");
 assert.equal(canHydrateMatchesPageCache(getMatchesPageCache(), cachedFilters, true), true, "cache hydrates explicit filters when loaded key matches");
+
+for (const invalidFavorite of ["favorite=true", "favorite=0", "favorite="]) {
+  const params = new URLSearchParams(invalidFavorite);
+  const navigation = chooseMatchesPageNavigationState(
+    filtersFromParams(params),
+    null,
+    getMatchesPageCache(),
+    hasExplicitMatchFilterParams(params),
+  );
+  assert.deepEqual(navigation.filters, cachedFilters, `${invalidFavorite} does not replace cached filters`);
+  assert.equal(navigation.selectedMatchId, "cached-match", `${invalidFavorite} does not replace the cached selected match`);
+  assert.equal(navigation.canHydrateCache, true, `${invalidFavorite} keeps the existing cache hydratable`);
+}
 
 const explicitNavigation = chooseMatchesPageNavigationState({ season: 21 }, "url-match", getMatchesPageCache(), true);
 assert.deepEqual(explicitNavigation.filters, { season: 21 }, "an external explicit query replaces cached filters");

@@ -35,6 +35,10 @@ assert.deepEqual(clearVisibleMatchFilters({ season: 23, hero: "ana", result: "wi
 assert.deepEqual(clearVisibleMatchFilters({ season: 23, favoriteOnly: true }), { season: 23 });
 assert.deepEqual(removeMatchFilter({ season: 23, hero: "ana", result: "win" }, "hero"), { season: 23, result: "win" });
 assert.deepEqual(
+  removeMatchFilter({ season: 23, hero: "ana", favoriteOnly: true }, "favoriteOnly"),
+  { season: 23, hero: "ana" },
+);
+assert.deepEqual(
   activeMatchFilterChips(
     { favoriteOnly: true },
     { seasons: [], heroes: [], maps: [], results: [], modes: [] },
@@ -45,6 +49,21 @@ assert.deepEqual(filtersFromParams(new URLSearchParams("season=23&favorite=1")),
 assert.equal(paramsFromFilters({ season: 23, favoriteOnly: true }, "match-1").toString(), "matchId=match-1&season=23&favorite=1");
 assert.deepEqual(filtersFromParams(paramsFromFilters({ season: 23, favoriteOnly: true })), { season: 23, favoriteOnly: true });
 assert.equal(filtersFromParams(new URLSearchParams("favorite=true")).favoriteOnly, undefined);
+const allFilters = {
+  season: 23,
+  hero: "ana",
+  map: "ilios",
+  result: "win",
+  mode: "QuickPlay",
+  primaryTag: "尽力局",
+  playerName: "测试玩家",
+  dateFrom: "2026-07-01",
+  dateTo: "2026-07-16",
+  favoriteOnly: true,
+};
+const allFilterParams = paramsFromFilters(allFilters, "selected-match");
+assert.equal(allFilterParams.get("matchId"), "selected-match");
+assert.deepEqual(filtersFromParams(allFilterParams), allFilters);
 assert.deepEqual(
   activeMatchFilterChips(
     { hero: "ana", dateFrom: "2026-07-01" },
