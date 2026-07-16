@@ -3,8 +3,6 @@ use owstats_desktop_lib::{
     delete_match_favorite, get_match_favorite, save_match_favorite, OwDatabase,
 };
 use rusqlite::params;
-use std::thread;
-use std::time::Duration;
 
 fn database(filename: &str) -> Result<(tempfile::TempDir, OwDatabase)> {
     let temp = tempfile::tempdir()?;
@@ -34,9 +32,35 @@ fn seed_match(db: &OwDatabase, match_id: &str) -> Result<()> {
 }
 
 #[test]
-fn repeat_initialize_creates_schema_v8_once() -> Result<()> {
-    let (_temp, db) = database("schema.sqlite3")?;
+fn upgrades_schema_v7_to_v8_without_losing_matches_and_repeat_initialize_is_idempotent(
+) -> Result<()> {
+    let (_temp, db) = database("upgrade.sqlite3")?;
+    seed_match(&db, "match-before-upgrade")?;
+    let conn = db.connect()?;
+    conn.execute_batch(
+        r#"
+        DROP TABLE match_favorites;
+        PRAGMA user_version = 7;
+        "#,
+    )?;
+    let version_before_upgrade: i64 =
+        conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+    let favorites_before_upgrade: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'match_favorites'",
+        [],
+        |row| row.get(0),
+    )?;
+    let matches_before_upgrade: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM matches WHERE match_id = 'match-before-upgrade'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(version_before_upgrade, 7);
+    assert_eq!(favorites_before_upgrade, 0);
+    assert_eq!(matches_before_upgrade, 1);
+    drop(conn);
 
+    db.initialize()?;
     db.initialize()?;
 
     let conn = db.connect()?;
@@ -51,10 +75,29 @@ fn repeat_initialize_creates_schema_v8_once() -> Result<()> {
         [],
         |row| row.get(0),
     )?;
+    let preserved_matches: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM matches WHERE match_id = 'match-before-upgrade'",
+        [],
+        |row| row.get(0),
+    )?;
+    let cascade_foreign_keys: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM pragma_foreign_key_list('match_favorites')
+        WHERE "table" = 'matches'
+          AND "from" = 'match_id'
+          AND "to" = 'match_id'
+          AND on_delete = 'CASCADE'
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
 
     assert_eq!(version, 8);
+    assert_eq!(preserved_matches, 1);
     assert_eq!(table_count, 1);
     assert_eq!(index_count, 1);
+    assert_eq!(cascade_foreign_keys, 1);
     Ok(())
 }
 
@@ -70,8 +113,17 @@ fn saves_empty_note_and_updates_multiline_chinese_without_replacing_created_at()
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
+    assert_eq!(created_at, first_updated_at);
+    let timestamp_sentinel = "2000-01-01T00:00:00Z";
+    db.connect()?.execute(
+        r#"
+        UPDATE match_favorites
+        SET created_at = ?1, updated_at = ?1
+        WHERE match_id = 'match-save'
+        "#,
+        [timestamp_sentinel],
+    )?;
 
-    thread::sleep(Duration::from_millis(2));
     let note = "第一行：配合很好\n第二行：注意返场";
     let updated = save_match_favorite(&db, "match-save", note)?;
     assert_eq!(updated.note, note);
@@ -85,8 +137,8 @@ fn saves_empty_note_and_updates_multiline_chinese_without_replacing_created_at()
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
 
-    assert_eq!(created_after_update, created_at);
-    assert!(updated_at > first_updated_at);
+    assert_eq!(created_after_update, timestamp_sentinel);
+    assert_ne!(updated_at, timestamp_sentinel);
     Ok(())
 }
 
