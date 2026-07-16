@@ -510,24 +510,41 @@ async fn incremental_fetch_scans_past_known_pages_and_requests_only_missing_deta
     );
 
     let requests = server.requests.lock().unwrap();
-    assert!(requests.iter().any(|request| {
-        request.first_line.contains("/customer/queryMatchList")
-            && request.first_line.contains("gameMode=sport")
-            && request.first_line.contains("page=2")
-    }));
-    assert!(requests.iter().any(|request| {
-        request.first_line.contains("/customer/queryMatchList")
-            && request.first_line.contains("gameMode=sport")
-            && request.first_line.contains("page=3")
-    }));
-    assert!(requests.iter().any(|request| {
-        request.first_line.contains("/customer/queryMatchInfo")
-            && request.first_line.contains("matchId=synthetic-new")
-    }));
-    assert!(!requests.iter().any(|request| {
-        request.first_line.contains("/customer/queryMatchInfo")
-            && request.first_line.contains("matchId=synthetic-known")
-    }));
+    let detail_requests = requests
+        .iter()
+        .filter(|request| {
+            request_path(&request.first_line)
+                .map(|path| path.ends_with("/queryMatchInfo"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(detail_requests.len(), 1);
+    assert_eq!(
+        request_query_param(&detail_requests[0].first_line, "matchId"),
+        Some("synthetic-new")
+    );
+
+    let mut sport_pages = Vec::new();
+    let mut leisure_pages = Vec::new();
+    for request in requests.iter().filter(|request| {
+        request_path(&request.first_line)
+            .map(|path| path.ends_with("/queryMatchList"))
+            .unwrap_or(false)
+    }) {
+        let page = request_query_param(&request.first_line, "page")
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        match request_query_param(&request.first_line, "gameMode") {
+            Some("sport") => sport_pages.push(page),
+            Some("leisure") => leisure_pages.push(page),
+            mode => panic!("unexpected game mode: {mode:?}"),
+        }
+    }
+    sport_pages.sort_unstable();
+    leisure_pages.sort_unstable();
+    assert_eq!(sport_pages, vec![1, 2, 3]);
+    assert_eq!(leisure_pages, vec![1]);
 }
 
 #[tokio::test]
@@ -598,6 +615,22 @@ impl Drop for RequestCountingServer {
             let _ = handle.join();
         }
     }
+}
+
+fn request_path(first_line: &str) -> Option<&str> {
+    first_line
+        .split_whitespace()
+        .nth(1)?
+        .split_once('?')
+        .map(|(path, _)| path)
+}
+
+fn request_query_param<'a>(first_line: &'a str, name: &str) -> Option<&'a str> {
+    let (_, query) = first_line.split_whitespace().nth(1)?.split_once('?')?;
+    query.split('&').find_map(|part| {
+        let (key, value) = part.split_once('=')?;
+        (key == name).then_some(value)
+    })
 }
 
 fn spawn_request_counting_server() -> RequestCountingServer {
