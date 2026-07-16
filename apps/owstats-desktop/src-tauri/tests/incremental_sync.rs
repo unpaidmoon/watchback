@@ -201,7 +201,11 @@ fn page_diagnostics_are_sorted_aggregated_and_identity_free() {
             "page": 2,
             "payload": {"data": {"matchList": [
                 {"matchId": "new-two", "beginTs": 20},
-                {"matchId": "known-complete", "beginTs": 10}
+                {"matchId": "new-two", "beginTs": 19},
+                {"matchId": "known-complete", "beginTs": 10},
+                {"matchId": "known-complete", "beginTs": 9},
+                {"matchId": ""},
+                {"beginTs": 8}
             ]}}
         }),
         json!({
@@ -220,16 +224,34 @@ fn page_diagnostics_are_sorted_aggregated_and_identity_free() {
     assert_eq!(diagnostics[0].match_kind, "fight");
     assert_eq!(diagnostics[0].game_mode, "QuickFight");
     assert_eq!(diagnostics[0].entries, 1);
+    assert_eq!(diagnostics[0].unique_valid_entries, 1);
     assert_eq!(diagnostics[0].new_matches, 0);
     assert_eq!(diagnostics[0].missing_details, 1);
+    assert_eq!(diagnostics[0].existing_complete_matches, 0);
+    assert_eq!(
+        diagnostics[0].new_matches
+            + diagnostics[0].missing_details
+            + diagnostics[0].existing_complete_matches,
+        diagnostics[0].unique_valid_entries
+    );
     assert_eq!(diagnostics[0].earliest_begin_ts, Some(30));
     assert_eq!(diagnostics[0].latest_begin_ts, Some(30));
-    assert_eq!(diagnostics[1].entries, 2);
+    assert_eq!(diagnostics[1].entries, 6);
+    assert_eq!(diagnostics[1].unique_valid_entries, 2);
     assert_eq!(diagnostics[1].new_matches, 1);
     assert_eq!(diagnostics[1].missing_details, 0);
-    assert_eq!(diagnostics[1].earliest_begin_ts, Some(10));
+    assert_eq!(diagnostics[1].existing_complete_matches, 1);
+    assert_eq!(
+        diagnostics[1].new_matches
+            + diagnostics[1].missing_details
+            + diagnostics[1].existing_complete_matches,
+        diagnostics[1].unique_valid_entries
+    );
+    assert_eq!(diagnostics[1].earliest_begin_ts, Some(8));
     assert_eq!(diagnostics[1].latest_begin_ts, Some(20));
     let serialized = serde_json::to_string(&diagnostics).unwrap();
+    assert!(serialized.contains(r#""uniqueValidEntries":2"#));
+    assert!(serialized.contains(r#""existingCompleteMatches":1"#));
     for identity in ["new-two", "known-complete", "known-missing", "matchId"] {
         assert!(!serialized.contains(identity));
     }

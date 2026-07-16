@@ -395,6 +395,11 @@ fn build_payload(
 }
 
 pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
+    match_objects(&extract_raw_match_entries(payload)).unwrap_or_default()
+}
+
+pub(crate) fn extract_raw_match_entries(payload: &Value) -> Vec<Value> {
+    let mut first_candidate = None;
     for container in [
         Some(payload),
         payload.get("data"),
@@ -405,16 +410,19 @@ pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
     .into_iter()
     .flatten()
     {
-        if let Some(entries) = extract_match_entries_from_container(container) {
-            return entries;
+        if let Some(entries) = extract_raw_match_entries_from_container(container) {
+            first_candidate.get_or_insert(entries);
+            if match_objects(entries).is_some() {
+                return entries.to_vec();
+            }
         }
     }
-    Vec::new()
+    first_candidate.unwrap_or_default().to_vec()
 }
 
-fn extract_match_entries_from_container(container: &Value) -> Option<Vec<Value>> {
+fn extract_raw_match_entries_from_container(container: &Value) -> Option<&[Value]> {
     if let Some(items) = container.as_array() {
-        return match_objects(items);
+        return Some(items);
     }
     for key in [
         "matchList",
@@ -425,9 +433,7 @@ fn extract_match_entries_from_container(container: &Value) -> Option<Vec<Value>>
         "items",
     ] {
         if let Some(items) = container.get(key).and_then(Value::as_array) {
-            if let Some(entries) = match_objects(items) {
-                return Some(entries);
-            }
+            return Some(items);
         }
     }
     None

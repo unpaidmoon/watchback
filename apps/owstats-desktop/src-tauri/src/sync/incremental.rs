@@ -90,22 +90,27 @@ pub fn build_page_diagnostics(
     let mut diagnostics = list_pages
         .iter()
         .map(|list_page| {
-            let entries = list_page
+            let raw_entries = list_page
+                .get("payload")
+                .map(crate::season_fetch::extract_raw_match_entries)
+                .unwrap_or_default();
+            let valid_entries = list_page
                 .get("payload")
                 .map(crate::season_fetch::extract_match_entries)
                 .unwrap_or_default();
             let mut seen = HashSet::new();
             let mut new_matches = 0;
             let mut missing_details = 0;
-            let mut begin_timestamps = entries
+            let mut existing_complete_matches = 0;
+            let mut begin_timestamps = raw_entries
                 .iter()
                 .filter_map(|entry| entry.get("beginTs").and_then(Value::as_i64))
                 .collect::<Vec<_>>();
-            for entry in &entries {
+            for entry in &valid_entries {
                 let Some(match_id) = entry
                     .get("matchId")
                     .and_then(Value::as_str)
-                    .filter(|match_id| !match_id.is_empty())
+                    .filter(|match_id| !match_id.trim().is_empty())
                 else {
                     continue;
                 };
@@ -116,6 +121,8 @@ pub fn build_page_diagnostics(
                     new_matches += 1;
                 } else if !inventory.detail_ids.contains(match_id) {
                     missing_details += 1;
+                } else {
+                    existing_complete_matches += 1;
                 }
             }
             begin_timestamps.sort_unstable();
@@ -134,9 +141,11 @@ pub fn build_page_diagnostics(
                     .get("page")
                     .and_then(Value::as_i64)
                     .unwrap_or_default(),
-                entries: entries.len(),
+                entries: raw_entries.len(),
+                unique_valid_entries: seen.len(),
                 new_matches,
                 missing_details,
+                existing_complete_matches,
                 earliest_begin_ts: begin_timestamps.first().copied(),
                 latest_begin_ts: begin_timestamps.last().copied(),
             }

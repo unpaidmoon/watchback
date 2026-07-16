@@ -495,8 +495,10 @@ pub struct SyncPageDiagnostic {
     pub game_mode: String,
     pub page: i64,
     pub entries: usize,
+    pub unique_valid_entries: usize,
     pub new_matches: usize,
     pub missing_details: usize,
+    pub existing_complete_matches: usize,
     pub earliest_begin_ts: Option<i64>,
     pub latest_begin_ts: Option<i64>,
 }
