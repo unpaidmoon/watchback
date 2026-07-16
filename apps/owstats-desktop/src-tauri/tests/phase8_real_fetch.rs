@@ -903,7 +903,7 @@ async fn quick_fetch_preserves_unsafe_outcome_after_later_empty_or_watermark() {
 }
 
 #[tokio::test]
-async fn quick_fetch_reports_page_limit_when_current_candidate_stops_as_budget_expires() {
+async fn quick_fetch_trusts_fifth_page_empty_after_collecting_current_candidate_entries() {
     use owstats_desktop_lib::dashen_client::DashenCredentials;
     use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
 
@@ -942,8 +942,46 @@ async fn quick_fetch_reports_page_limit_when_current_candidate_stops_as_budget_e
     assert!(sport_requests
         .iter()
         .all(|request| !request.first_line.contains("season=23")));
-    assert_eq!(fetch.quick_scan_stop_reasons["normal:sport"], "page_limit");
+    assert_eq!(fetch.quick_scan_stop_reasons["normal:sport"], "empty");
+    assert!(!fetch.quick_scan_limited);
+}
+
+#[tokio::test]
+async fn quick_fetch_discards_valid_shaped_entries_from_business_error_pages() {
+    use owstats_desktop_lib::dashen_client::DashenCredentials;
+    use owstats_desktop_lib::season_fetch::fetch_quick_season_with_base_url;
+
+    let server = spawn_quick_scan_server(QuickScanScenario::BusinessErrorEntryThenKnown);
+    let fetch = fetch_quick_season_with_base_url(
+        quick_request(
+            &server,
+            DashenCredentials {
+                role_id: 123,
+                token: "synthetic-account-token".to_string(),
+                dts: Some(2026),
+                server: 1,
+            },
+            22,
+        ),
+        &quick_test_inventory(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(quick_list_pages(&server)["sport"], vec![1, 2]);
+    assert_eq!(fetch.details_requested, 0);
+    assert_eq!(
+        fetch.quick_scan_stop_reasons["normal:sport"],
+        "unsafe_response"
+    );
     assert!(fetch.quick_scan_limited);
+    let persisted = serde_json::to_string(&fetch.payload).unwrap();
+    assert!(!persisted.contains("poisoned-new-entry"));
+    assert!(fetch.payload["matches"]["list_pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|page| page["gameMode"] == "sport" && page["page"] == 1));
 }
 
 #[tokio::test]
@@ -1861,6 +1899,7 @@ enum QuickScanScenario {
     UnsafeThenEmpty,
     UnsafeThenKnown,
     CurrentEmptyAtBudget,
+    BusinessErrorEntryThenKnown,
 }
 
 struct QuickScanServer {
@@ -2028,6 +2067,20 @@ fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> Strin
         && page == 1
     {
         return r#"{"code":500,"data":{"matchList":[]}}"#.to_string();
+    }
+    if matches!(scenario, QuickScanScenario::BusinessErrorEntryThenKnown)
+        && mode == "sport"
+        && page == 1
+    {
+        return r#"{"code":500,"data":{"matchList":[{"matchId":"poisoned-new-entry","beginTs":1700000200}]}}"#
+            .to_string();
+    }
+    if matches!(scenario, QuickScanScenario::BusinessErrorEntryThenKnown)
+        && mode == "sport"
+        && page == 2
+    {
+        return r#"{"code":0,"data":{"matchList":[{"matchId":"known-sport","beginTs":1700000000}]}}"#
+            .to_string();
     }
     if matches!(scenario, QuickScanScenario::UnsafeThenEmpty) && mode == "sport" && page == 2 {
         return r#"{"code":0,"data":{"matchList":[]}}"#.to_string();

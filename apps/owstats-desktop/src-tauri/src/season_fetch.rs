@@ -573,26 +573,33 @@ async fn fetch_quick_history_for_mode(
                     .query_match_list(customer_token, mode, page, *request_season)
                     .await?
             };
-            all_pages.push(json!({
-                "kind": kind,
-                "gameMode": mode,
-                "requestSeason": request_season,
-                "page": page,
-                "payload": payload.clone(),
-            }));
-            let mut page_entries = extract_match_entries(&payload);
-            for entry in &mut page_entries {
-                entry["gameMode"] = Value::String(mode.to_string());
-                if fight {
-                    entry["match_kind"] = Value::String("fight".to_string());
-                }
-            }
-            candidate_entries.extend(page_entries);
             let decision = crate::sync::classify_quick_page(
                 &payload,
                 inventory.map_or(&empty_match_ids, |known| &known.match_ids),
                 inventory.and_then(|known| known.latest_begin_ts),
             );
+            let persisted_payload = if matches!(decision, crate::sync::QuickPageDecision::Unsafe) {
+                json!({"quickPageDecision": "unsafe"})
+            } else {
+                payload.clone()
+            };
+            all_pages.push(json!({
+                "kind": kind,
+                "gameMode": mode,
+                "requestSeason": request_season,
+                "page": page,
+                "payload": persisted_payload,
+            }));
+            if !matches!(decision, crate::sync::QuickPageDecision::Unsafe) {
+                let mut page_entries = extract_match_entries(&payload);
+                for entry in &mut page_entries {
+                    entry["gameMode"] = Value::String(mode.to_string());
+                    if fight {
+                        entry["match_kind"] = Value::String("fight".to_string());
+                    }
+                }
+                candidate_entries.extend(page_entries);
+            }
             match decision {
                 crate::sync::QuickPageDecision::Empty => {
                     reason = "empty";
@@ -612,7 +619,7 @@ async fn fetch_quick_history_for_mode(
             page += 1;
         }
         let has_fallback = candidate_index + 1 < season_candidates.len();
-        if remaining_pages == 0 && (!stopped || has_fallback) {
+        if remaining_pages == 0 && (!stopped || (has_fallback && candidate_entries.is_empty())) {
             final_entries = candidate_entries;
             final_reason = if unsafe_seen {
                 "unsafe_response".to_string()
