@@ -1,0 +1,964 @@
+use owstats_desktop_lib::{
+    build_page_diagnostics, import_incremental_payload_value_embedded,
+    import_payload_value_embedded, load_season_sync_inventory, rebuild_complete_season_payload,
+    select_detail_entries, write_season_payload, OwDatabase, SeasonSyncInventory,
+};
+use rusqlite::params;
+use serde_json::json;
+use std::collections::HashSet;
+
+#[test]
+fn inventory_is_scoped_to_the_requested_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+            begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+            mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+         ) VALUES (?1, ?2, 'preset', 'sport', 'normal', 'win', 'map', 'hero',
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, '{}', 'now')",
+        params!["s23-complete", 23],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+         VALUES ('s23-complete', 'normal',
+            '{\"match_id\":\"s23-complete\",\"match_kind\":\"normal\",\"payload\":{\"code\":0,\"data\":{}}}',
+            'now')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+            begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+            mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+         ) VALUES (?1, ?2, 'preset', 'sport', 'normal', 'win', 'map', 'hero',
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, '{}', 'now')",
+        params!["s22-complete", 22],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+         VALUES ('s22-complete', 'normal',
+            '{\"match_id\":\"s22-complete\",\"match_kind\":\"normal\",\"payload\":{\"code\":0,\"data\":{}}}',
+            'now')",
+        [],
+    )
+    .unwrap();
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+
+    assert_eq!(
+        inventory.match_ids,
+        ["s23-complete".to_string()].into_iter().collect()
+    );
+    assert_eq!(
+        inventory.detail_ids,
+        ["s23-complete".to_string()].into_iter().collect()
+    );
+}
+
+#[test]
+fn inventory_treats_only_valid_wrapped_details_as_complete() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    for match_id in [
+        "no-detail",
+        "valid-normal",
+        "valid-fight",
+        "empty-object",
+        "damaged-json",
+        "failed-payload",
+        "missing-kind",
+        "unknown-kind",
+        "mismatched-id",
+    ] {
+        conn.execute(
+            "INSERT INTO matches (
+                match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+                begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+                mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+             ) VALUES (?1, 23, 'preset', 'sport', 'normal', 'win', 'map', 'hero',
+                1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, '{}', 'now')",
+            params![match_id],
+        )
+        .unwrap();
+    }
+    for (match_id, match_kind, raw_detail_json) in [
+        (
+            "valid-normal",
+            "normal",
+            r#"{"match_id":"valid-normal","match_kind":"normal","payload":{"code":0,"data":{}}}"#,
+        ),
+        (
+            "valid-fight",
+            "fight",
+            r#"{"match_id":"valid-fight","match_kind":"fight","payload":{"data":{}}}"#,
+        ),
+        ("empty-object", "normal", "{}"),
+        ("damaged-json", "normal", "{not-json"),
+        (
+            "failed-payload",
+            "normal",
+            r#"{"match_id":"failed-payload","match_kind":"normal","payload":{"code":500,"data":{}}}"#,
+        ),
+        (
+            "missing-kind",
+            "normal",
+            r#"{"match_id":"missing-kind","payload":{"code":0,"data":{}}}"#,
+        ),
+        (
+            "unknown-kind",
+            "custom",
+            r#"{"match_id":"unknown-kind","match_kind":"custom","payload":{"code":0,"data":{}}}"#,
+        ),
+        (
+            "mismatched-id",
+            "normal",
+            r#"{"match_id":"different-id","match_kind":"normal","payload":{"code":0,"data":{}}}"#,
+        ),
+    ] {
+        conn.execute(
+            "INSERT INTO match_details (match_id, match_kind, raw_detail_json, updated_at)
+             VALUES (?1, ?2, ?3, 'now')",
+            params![match_id, match_kind, raw_detail_json],
+        )
+        .unwrap();
+    }
+
+    let inventory = load_season_sync_inventory(&db, 23).unwrap();
+
+    assert_eq!(
+        inventory.match_ids,
+        [
+            "no-detail",
+            "valid-normal",
+            "valid-fight",
+            "empty-object",
+            "damaged-json",
+            "failed-payload",
+            "missing-kind",
+            "unknown-kind",
+            "mismatched-id",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    );
+    assert_eq!(
+        inventory.detail_ids,
+        ["valid-normal", "valid-fight"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+}
+
+#[test]
+fn detail_selector_returns_only_new_or_missing_details() {
+    let mut inventory = SeasonSyncInventory::default();
+    inventory
+        .match_ids
+        .extend(["complete".to_string(), "missing".to_string()]);
+    inventory.detail_ids.insert("complete".to_string());
+    let entries = vec![
+        json!({"matchId":"complete","beginTs":3}),
+        json!({"matchId":"missing","beginTs":2}),
+        json!({"matchId":"new","beginTs":1}),
+        json!({"matchId":"new","beginTs":0}),
+        json!({"matchId":""}),
+        json!({"beginTs":0}),
+    ];
+
+    let selection = select_detail_entries(&entries, &inventory);
+    let ids = selection
+        .entries
+        .iter()
+        .filter_map(|entry| entry["matchId"].as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["missing", "new"]);
+    assert_eq!(selection.new_matches, 1);
+    assert_eq!(selection.missing_details, 1);
+}
+
+#[test]
+fn page_diagnostics_are_sorted_aggregated_and_identity_free() {
+    let inventory = SeasonSyncInventory {
+        match_ids: HashSet::from(["known-complete".to_string(), "known-missing".to_string()]),
+        detail_ids: HashSet::from(["known-complete".to_string()]),
+    };
+    let list_pages = vec![
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 2,
+            "payload": {"data": {"matchList": [
+                {"matchId": "new-two", "beginTs": 20},
+                {"matchId": "new-two", "beginTs": 19},
+                {"matchId": "known-complete", "beginTs": 10},
+                {"matchId": "known-complete", "beginTs": 9},
+                {"matchId": ""},
+                {"beginTs": 8}
+            ]}}
+        }),
+        json!({
+            "kind": "fight",
+            "gameMode": "QuickFight",
+            "page": 1,
+            "payload": {"data": {"matchList": [
+                {"matchId": "known-missing", "beginTs": 30}
+            ]}}
+        }),
+    ];
+
+    let diagnostics = build_page_diagnostics(&list_pages, &inventory);
+
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics[0].match_kind, "fight");
+    assert_eq!(diagnostics[0].game_mode, "QuickFight");
+    assert_eq!(diagnostics[0].entries, 1);
+    assert_eq!(diagnostics[0].unique_valid_entries, 1);
+    assert_eq!(diagnostics[0].new_matches, 0);
+    assert_eq!(diagnostics[0].missing_details, 1);
+    assert_eq!(diagnostics[0].existing_complete_matches, 0);
+    assert_eq!(
+        diagnostics[0].new_matches
+            + diagnostics[0].missing_details
+            + diagnostics[0].existing_complete_matches,
+        diagnostics[0].unique_valid_entries
+    );
+    assert_eq!(diagnostics[0].earliest_begin_ts, Some(30));
+    assert_eq!(diagnostics[0].latest_begin_ts, Some(30));
+    assert_eq!(diagnostics[1].entries, 6);
+    assert_eq!(diagnostics[1].unique_valid_entries, 2);
+    assert_eq!(diagnostics[1].new_matches, 1);
+    assert_eq!(diagnostics[1].missing_details, 0);
+    assert_eq!(diagnostics[1].existing_complete_matches, 1);
+    assert_eq!(
+        diagnostics[1].new_matches
+            + diagnostics[1].missing_details
+            + diagnostics[1].existing_complete_matches,
+        diagnostics[1].unique_valid_entries
+    );
+    assert_eq!(diagnostics[1].earliest_begin_ts, Some(8));
+    assert_eq!(diagnostics[1].latest_begin_ts, Some(20));
+    let serialized = serde_json::to_string(&diagnostics).unwrap();
+    assert!(serialized.contains(r#""uniqueValidEntries":2"#));
+    assert!(serialized.contains(r#""existingCompleteMatches":1"#));
+    for identity in ["new-two", "known-complete", "known-missing", "matchId"] {
+        assert!(!serialized.contains(identity));
+    }
+}
+
+#[test]
+fn page_diagnostics_skip_empty_or_invalid_candidates_before_valid_protocol_entries() {
+    let inventory = SeasonSyncInventory::default();
+    let list_pages = vec![
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 1,
+            "payload": {"data": {
+                "list": [],
+                "records": [{"matchId": "valid-after-empty", "beginTs": 30}]
+            }}
+        }),
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 2,
+            "payload": {"data": {
+                "list": [{"notMatchId": "invalid"}],
+                "records": [{"matchId": "valid-after-invalid", "beginTs": 20}]
+            }}
+        }),
+        json!({
+            "kind": "normal",
+            "gameMode": "sport",
+            "page": 3,
+            "payload": {"data": {
+                "list": [{"notMatchId": "still-invalid"}],
+                "records": []
+            }}
+        }),
+    ];
+
+    let diagnostics = build_page_diagnostics(&list_pages, &inventory);
+
+    assert_eq!(diagnostics.len(), 3);
+    assert_eq!(diagnostics[0].entries, 1);
+    assert_eq!(diagnostics[0].unique_valid_entries, 1);
+    assert_eq!(diagnostics[0].new_matches, 1);
+    assert_eq!(diagnostics[1].entries, 1);
+    assert_eq!(diagnostics[1].unique_valid_entries, 1);
+    assert_eq!(diagnostics[1].new_matches, 1);
+    assert_eq!(diagnostics[2].entries, 1);
+    assert_eq!(diagnostics[2].unique_valid_entries, 0);
+    assert_eq!(diagnostics[2].new_matches, 0);
+    let serialized = serde_json::to_string(&diagnostics).unwrap();
+    for raw_id in ["valid-after-empty", "valid-after-invalid", "still-invalid"] {
+        assert!(!serialized.contains(raw_id));
+    }
+}
+
+fn entry(match_id: &str, game_mode: &str, begin_ts: i64) -> serde_json::Value {
+    json!({
+        "matchId": match_id,
+        "gameMode": game_mode,
+        "matchRet": 1,
+        "beginTs": begin_ts
+    })
+}
+
+fn normal_detail(match_id: &str, duration: i64, player_id: &str) -> serde_json::Value {
+    json!({
+        "match_id": match_id,
+        "match_kind": "normal",
+        "payload": {
+            "code": 0,
+            "data": {
+                "gameTimeSec": duration,
+                "totalCount": {
+                    "teammateList": [{
+                        "bnetId": player_id,
+                        "name": format!("玩家-{player_id}"),
+                        "heroGuid": "hero"
+                    }],
+                    "enemyList": []
+                }
+            }
+        }
+    })
+}
+
+fn fight_detail(match_id: &str, duration: i64, player_id: &str) -> serde_json::Value {
+    json!({
+        "match_id": match_id,
+        "match_kind": "fight",
+        "payload": {
+            "code": 0,
+            "data": {
+                "gameTimeSec": duration,
+                "totalCount": {
+                    "teammateList": [{
+                        "bnetId": player_id,
+                        "name": format!("角斗玩家-{player_id}")
+                    }],
+                    "enemyList": []
+                }
+            }
+        }
+    })
+}
+
+fn payload(
+    season: i64,
+    entries: Vec<serde_json::Value>,
+    details: Vec<serde_json::Value>,
+    detail_errors: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    json!({
+        "season": season,
+        "matches": {
+            "entries": entries,
+            "details": details,
+            "detail_errors": detail_errors
+        }
+    })
+}
+
+#[test]
+fn incremental_import_preserves_unrefreshed_derivations_and_replaces_refreshed_index() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("first", "SportPreset", 1),
+                entry("second", "SportPreset", 2),
+            ],
+            vec![
+                normal_detail("first", 101, "first-old"),
+                normal_detail("second", 202, "second-old"),
+            ],
+            vec![],
+        ),
+    )
+    .unwrap();
+
+    let summary = import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("first", "QuickFight", 11),
+                entry("second", "SportPreset", 22),
+            ],
+            vec![
+                json!({
+                    "match_id": "first",
+                    "match_kind": "normal",
+                    "payload": {}
+                }),
+                normal_detail("second", 303, "second-new"),
+            ],
+            vec![],
+        ),
+        ["first".to_string(), "second".to_string()]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let first: (String, String, i64, i64, String) = conn
+        .query_row(
+            "SELECT match_kind, bucket, duration_sec, begin_ts,
+                    (SELECT group_concat(bnet_id, ',') FROM match_players WHERE match_id='first')
+             FROM matches WHERE match_id='first'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    let second: (i64, String) = conn
+        .query_row(
+            "SELECT duration_sec,
+                    (SELECT group_concat(bnet_id, ',') FROM match_players WHERE match_id='second')
+             FROM matches WHERE match_id='second'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(
+        first,
+        (
+            "normal".to_string(),
+            "preset".to_string(),
+            101,
+            11,
+            "first-old".to_string()
+        )
+    );
+    assert_eq!(second, (303, "second-new".to_string()));
+    assert_eq!(summary.details_seen, 1);
+}
+
+#[test]
+fn incremental_import_reconciles_only_attempted_detail_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    let initial_errors = ["unattempted", "recovered", "failed"]
+        .into_iter()
+        .map(|match_id| {
+            json!({
+                "match_id": match_id,
+                "error_type": "detail_fetch",
+                "message": format!("old-{match_id}")
+            })
+        })
+        .collect();
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("unattempted", "SportPreset", 1),
+                entry("recovered", "SportPreset", 2),
+                entry("failed", "SportPreset", 3),
+            ],
+            vec![],
+            initial_errors,
+        ),
+    )
+    .unwrap();
+
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![],
+            vec![normal_detail("recovered", 10, "player")],
+            vec![json!({
+                "match_id": "failed",
+                "error_type": "detail_fetch",
+                "message": "new-failed"
+            })],
+        ),
+        ["recovered".to_string(), "failed".to_string()]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let rows = {
+        let mut statement = conn
+            .prepare("SELECT match_id, message FROM sync_errors WHERE season=23 ORDER BY match_id")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    assert_eq!(
+        rows,
+        vec![
+            ("failed".to_string(), "new-failed".to_string()),
+            ("unattempted".to_string(), "old-unattempted".to_string())
+        ]
+    );
+}
+
+#[test]
+fn incremental_import_writes_season_totals_from_sqlite() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    let initial_entries = (0..10)
+        .map(|index| entry(&format!("old-{index}"), "SportPreset", index))
+        .collect::<Vec<_>>();
+    let initial_details = (0..10)
+        .map(|index| normal_detail(&format!("old-{index}"), 100 + index, "player"))
+        .collect::<Vec<_>>();
+    import_payload_value_embedded(&db, &payload(23, initial_entries, initial_details, vec![]))
+        .unwrap();
+
+    import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![entry("new", "SportPreset", 20)],
+            vec![normal_detail("new", 120, "player")],
+            vec![],
+        ),
+        HashSet::from(["new".to_string()]),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let totals: (i64, i64) = conn
+        .query_row(
+            "SELECT matches_count, details_count FROM seasons WHERE season=23",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(totals, (11, 11));
+}
+
+#[test]
+fn incremental_import_rejects_malformed_detail_identity_and_kind() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("missing-kind", "SportPreset", 1),
+                entry("empty-kind", "SportPreset", 2),
+                entry("unknown-kind", "SportPreset", 3),
+                entry("valid-normal", "SportPreset", 4),
+                entry("valid-fight", "QuickFight", 5),
+            ],
+            vec![
+                normal_detail("missing-kind", 10, "missing-kind-old"),
+                normal_detail("empty-kind", 20, "empty-kind-old"),
+                normal_detail("unknown-kind", 30, "unknown-kind-old"),
+                normal_detail("valid-normal", 40, "normal-old"),
+                fight_detail("valid-fight", 50, "fight-old"),
+            ],
+            vec![],
+        ),
+    )
+    .unwrap();
+
+    let summary = import_incremental_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![],
+            vec![
+                json!({
+                    "match_kind": "normal",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "   ",
+                    "match_kind": "fight",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "missing-kind",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "empty-kind",
+                    "match_kind": "   ",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                json!({
+                    "match_id": "unknown-kind",
+                    "match_kind": "custom",
+                    "payload": {"code": 0, "data": {}}
+                }),
+                normal_detail("valid-normal", 60, "normal-new"),
+                fight_detail("valid-fight", 70, "fight-new"),
+            ],
+            vec![],
+        ),
+        [
+            "missing-kind",
+            "empty-kind",
+            "unknown-kind",
+            "valid-normal",
+            "valid-fight",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
+    )
+    .unwrap();
+
+    let conn = db.connect().unwrap();
+    let preserved_kinds = {
+        let mut statement = conn
+            .prepare(
+                "SELECT match_id, match_kind
+                 FROM match_details
+                 WHERE match_id IN ('missing-kind', 'empty-kind', 'unknown-kind')
+                 ORDER BY match_id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let player_ids = |match_id: &str| -> Vec<String> {
+        let mut statement = conn
+            .prepare("SELECT bnet_id FROM match_players WHERE match_id=? ORDER BY bnet_id")
+            .unwrap();
+        statement
+            .query_map([match_id], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let fight_players = {
+        let mut statement = conn
+            .prepare(
+                "SELECT bnet_id FROM arena_match_players
+                 WHERE match_id='valid-fight' ORDER BY bnet_id",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .unwrap()
+    };
+
+    assert_eq!(summary.details_seen, 2);
+    assert_eq!(
+        preserved_kinds,
+        vec![
+            ("empty-kind".to_string(), "normal".to_string()),
+            ("missing-kind".to_string(), "normal".to_string()),
+            ("unknown-kind".to_string(), "normal".to_string()),
+        ]
+    );
+    assert_eq!(player_ids("missing-kind"), vec!["missing-kind-old"]);
+    assert_eq!(player_ids("empty-kind"), vec!["empty-kind-old"]);
+    assert_eq!(player_ids("unknown-kind"), vec!["unknown-kind-old"]);
+    assert_eq!(player_ids("valid-normal"), vec!["normal-new"]);
+    assert_eq!(fight_players, vec!["fight-new"]);
+}
+
+#[test]
+fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![
+                entry("snapshot-old", "SportPreset", 10),
+                entry("snapshot-new", "SportPreset", 20),
+            ],
+            vec![
+                normal_detail("snapshot-old", 100, "old-player"),
+                normal_detail("snapshot-new", 200, "new-player"),
+            ],
+            vec![json!({
+                "match_id": "snapshot-old",
+                "error_type": "detail_fetch",
+                "message": "synthetic failure"
+            })],
+        ),
+    )
+    .unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE matches
+         SET raw_entry_json = json_set(raw_entry_json, '$.nested.customerToken', 'db-secret')
+         WHERE match_id = 'snapshot-old'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE match_details
+         SET raw_detail_json = json_set(raw_detail_json, '$.payload.data.cookie', 'db-cookie')
+         WHERE match_id = 'snapshot-new'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE sync_errors
+         SET raw_json = json_set(
+             json_set(raw_json, '$.authorization', 'db-authorization'),
+             '$.message',
+             'Authorization: Bearer synthetic-bearer-secret'
+         )
+         WHERE season = 23",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let current_delta = json!({
+        "season": 23,
+        "profile_card": {"name": "synthetic-profile"},
+        "count_info": {"fetched": 1},
+        "list_pages": [{"page": 1}],
+        "customerToken": "current-secret",
+        "nested": {"credential": "current-credential"},
+        "matches": {
+            "total": 1,
+            "entries": [entry("snapshot-new", "SportPreset", 20)],
+            "details": [normal_detail("snapshot-new", 200, "new-player")],
+            "detail_errors": []
+        }
+    });
+
+    let rebuilt = rebuild_complete_season_payload(&db, 23, &current_delta).unwrap();
+    let entries = rebuilt["matches"]["entries"].as_array().unwrap();
+    let details = rebuilt["matches"]["details"].as_array().unwrap();
+    assert_eq!(rebuilt["matches"]["total"], 2);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(details.len(), 2);
+    assert_eq!(
+        rebuilt["matches"]["detail_errors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(rebuilt["matches"]["detail_errors"][0]
+        .get("authorization")
+        .is_none());
+    assert_eq!(entries[0]["matchId"], "snapshot-new");
+    assert_eq!(entries[1]["matchId"], "snapshot-old");
+    assert_eq!(rebuilt["profile_card"]["name"], "synthetic-profile");
+    assert_eq!(rebuilt["count_info"]["fetched"], 1);
+    assert_eq!(rebuilt["list_pages"][0]["page"], 1);
+
+    let serialized = serde_json::to_string(&rebuilt)
+        .unwrap()
+        .to_ascii_lowercase();
+    for sensitive in [
+        "token",
+        "customertoken",
+        "cookie",
+        "credential",
+        "db-secret",
+        "db-cookie",
+        "db-authorization",
+        "synthetic-bearer-secret",
+        "current-secret",
+        "current-credential",
+    ] {
+        assert!(
+            !serialized.contains(sensitive),
+            "rebuilt snapshot leaked {sensitive}"
+        );
+    }
+}
+
+#[test]
+fn rebuilt_snapshot_is_scoped_to_requested_season() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            22,
+            vec![entry("snapshot-s22", "SportPreset", 30)],
+            vec![normal_detail("snapshot-s22", 300, "s22-player")],
+            vec![json!({
+                "match_id": "snapshot-s22",
+                "error_type": "detail_fetch",
+                "message": "s22-only"
+            })],
+        ),
+    )
+    .unwrap();
+    import_payload_value_embedded(
+        &db,
+        &payload(
+            23,
+            vec![entry("snapshot-s23", "SportPreset", 20)],
+            vec![normal_detail("snapshot-s23", 200, "s23-player")],
+            vec![json!({
+                "match_id": "snapshot-s23",
+                "error_type": "detail_fetch",
+                "message": "s23-only"
+            })],
+        ),
+    )
+    .unwrap();
+
+    let rebuilt =
+        rebuild_complete_season_payload(&db, 23, &json!({"season": 23, "matches": {}})).unwrap();
+    let serialized = serde_json::to_string(&rebuilt).unwrap();
+    assert!(serialized.contains("snapshot-s23"));
+    assert!(serialized.contains("s23-only"));
+    assert!(!serialized.contains("snapshot-s22"));
+    assert!(!serialized.contains("s22-only"));
+}
+
+#[test]
+fn rebuilt_snapshot_malformed_database_json_is_safe_and_preserves_existing_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO matches (
+            match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid,
+            begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing,
+            mitigation, total_worth, duration_sec, raw_entry_json, updated_at
+         ) VALUES (
+            'snapshot-malformed', 23, 'preset', 'sport', 'normal', 'win', 'map', 'hero',
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
+            '{customerToken:private-malformed-secret', 'now'
+         )",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let output_dir = temp.path().join("seasons");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let existing_path = output_dir.join("local_s23_full_season.json");
+    let existing = br#"{"stable":"old-complete-snapshot"}"#;
+    std::fs::write(&existing_path, existing).unwrap();
+
+    let error = rebuild_complete_season_payload(&db, 23, &json!({"season": 23, "matches": {}}))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("match entry"));
+    assert!(!error.contains("customerToken"));
+    assert!(!error.contains("private-malformed-secret"));
+    assert_eq!(std::fs::read(&existing_path).unwrap(), existing);
+}
+
+#[test]
+fn atomic_snapshot_replaces_existing_json_without_temp_residue() {
+    let temp = tempfile::tempdir().unwrap();
+    let output_dir = temp.path().join("nested").join("seasons");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let path = output_dir.join("local_s23_full_season.json");
+    std::fs::write(&path, br#"{"state":"old"}"#).unwrap();
+    let replacement = json!({
+        "state": "complete",
+        "matches": {
+            "total": 2,
+            "entries": [{"matchId": "old"}, {"matchId": "new"}],
+            "details": [{"match_id": "old"}, {"match_id": "new"}],
+            "detail_errors": []
+        }
+    });
+
+    let written = write_season_payload(&output_dir, 23, &replacement).unwrap();
+
+    assert_eq!(written, path);
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&written).unwrap()).unwrap();
+    assert_eq!(parsed, replacement);
+    let remaining = std::fs::read_dir(&output_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining,
+        vec![std::ffi::OsString::from("local_s23_full_season.json")]
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn atomic_snapshot_persist_failure_preserves_existing_json_and_removes_temp_file() {
+    use std::io::{Read, Seek, SeekFrom};
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let output_dir = temp.path().join("seasons");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let path = output_dir.join("local_s23_full_season.json");
+    let existing = br#"{"state":"old-complete"}"#;
+    std::fs::write(&path, existing).unwrap();
+    let mut locked = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+
+    let error = write_season_payload(
+        &output_dir,
+        23,
+        &json!({"state": "replacement", "matches": {"total": 1}}),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("failed to replace season payload"));
+    locked.seek(SeekFrom::Start(0)).unwrap();
+    let mut preserved = Vec::new();
+    locked.read_to_end(&mut preserved).unwrap();
+    assert_eq!(preserved, existing);
+    drop(locked);
+    let remaining = std::fs::read_dir(&output_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining,
+        vec![std::ffi::OsString::from("local_s23_full_season.json")]
+    );
+}

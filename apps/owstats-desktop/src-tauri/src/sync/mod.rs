@@ -65,13 +65,14 @@ struct ModeFetchPages {
 mod client;
 mod facade;
 mod fetch;
+mod incremental;
 mod payload;
 mod persist;
+mod snapshot;
 
 use client::*;
 use fetch::*;
 use payload::*;
-use persist::*;
 
 pub use facade::{
     dump_season_json, dump_season_json_with_base_url, sync_season, sync_season_with_base_url,
@@ -81,4 +82,12 @@ pub use facade::{
     sync_season_with_current_account_credentials_path_output_dir_base_url,
     sync_season_with_progress,
 };
+pub use incremental::{
+    build_page_diagnostics, load_season_sync_inventory, select_detail_entries, DetailSelection,
+    SeasonSyncInventory,
+};
 pub use persist::sync_import_parts;
+#[doc(hidden)]
+pub use persist::write_season_payload;
+#[doc(hidden)]
+pub use snapshot::rebuild_complete_season_payload;

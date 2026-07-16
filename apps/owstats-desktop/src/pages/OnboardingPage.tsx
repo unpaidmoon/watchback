@@ -40,7 +40,7 @@ import type { BusyAccountAction, DashboardSnapshot } from "../features/command-c
 import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
-import { hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
+import { formatSyncNotice, hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
 import { clearMatchesPageCache } from "../shared/matchesPageCache";
 import { PageHeader } from "../shared/page-shell";
@@ -339,7 +339,7 @@ export function OnboardingPage() {
       const summary = await syncSeason(season);
       clearMatchesPageCache();
       await loadDashboard();
-      setSyncNotice(`S${season} 赛季同步完成：本次导入 ${summary.importedMatches} 场，对局详情 ${summary.importedDetails} 场。`);
+      setSyncNotice(formatSyncNotice(season, summary));
     } catch (err) {
       setSyncError(productErrorMessage(err));
     } finally {

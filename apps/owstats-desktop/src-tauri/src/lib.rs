@@ -33,20 +33,26 @@ mod sync_coordinator;
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use db::OwDatabase;
 pub use importer::{
-    import_full_season_payload, import_payload_value, import_payload_value_embedded,
+    import_full_season_payload, import_incremental_payload_value_embedded, import_payload_value,
+    import_payload_value_embedded,
 };
 pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSION};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
 pub use redaction::redact_sensitive_json;
 pub use review::{get_onboarding_status, get_personal_season_review};
+#[doc(hidden)]
+pub use sync::rebuild_complete_season_payload;
+#[doc(hidden)]
+pub use sync::write_season_payload;
 pub use sync::{
-    dump_season_json, dump_season_json_with_base_url, sync_import_parts, sync_season,
+    build_page_diagnostics, dump_season_json, dump_season_json_with_base_url,
+    load_season_sync_inventory, select_detail_entries, sync_import_parts, sync_season,
     sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_path_base_url, sync_season_with_credentials_path_progress,
     sync_season_with_current_account_credentials_path_output_dir_base_url,
-    sync_season_with_progress,
+    sync_season_with_progress, DetailSelection, SeasonSyncInventory,
 };
 
 pub fn run() {

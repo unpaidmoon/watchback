@@ -3,6 +3,7 @@ use anyhow::{anyhow, Result};
 use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::time::Instant;
 
 const NORMAL_MODES: &[&str] = &["sport", "leisure"];
 const FIGHT_MODES: &[&str] = &["QuickFight", "LeisureFight", "SportFight"];
@@ -25,8 +26,11 @@ pub struct FullSeasonRequest {
 pub struct FullSeasonFetch {
     pub payload: Value,
     pub entries: usize,
+    pub details_requested: usize,
     pub details: usize,
     pub failed_details: usize,
+    pub list_duration_ms: u64,
+    pub detail_duration_ms: u64,
 }
 
 pub async fn fetch_full_season_with_base_url(
@@ -37,6 +41,27 @@ pub async fn fetch_full_season_with_base_url(
 
 pub async fn fetch_full_season_with_rate_limit_base_url(
     request: FullSeasonRequest,
+    rate_limit: DashenRateLimitConfig,
+) -> Result<FullSeasonFetch> {
+    let known_detail_ids = HashSet::new();
+    fetch_season_with_rate_limit_base_url(request, &known_detail_ids, rate_limit).await
+}
+
+pub async fn fetch_season_increment_with_base_url(
+    request: FullSeasonRequest,
+    known_detail_ids: &HashSet<String>,
+) -> Result<FullSeasonFetch> {
+    fetch_season_with_rate_limit_base_url(
+        request,
+        known_detail_ids,
+        DashenRateLimitConfig::default(),
+    )
+    .await
+}
+
+async fn fetch_season_with_rate_limit_base_url(
+    request: FullSeasonRequest,
+    known_detail_ids: &HashSet<String>,
     rate_limit: DashenRateLimitConfig,
 ) -> Result<FullSeasonFetch> {
     if request.season <= 0 {
@@ -51,6 +76,7 @@ pub async fn fetch_full_season_with_rate_limit_base_url(
         request.customer_base_url.clone(),
         rate_limit,
     )?;
+    let list_started = Instant::now();
     let season_candidates = request_season_candidates(request.season);
     let (profile_card, sport_count, leisure_count) = tokio::join!(
         async {
@@ -106,13 +132,27 @@ pub async fn fetch_full_season_with_rate_limit_base_url(
     }
 
     let entries = dedupe_entries(entries, request.season);
+    let detail_entries = entries
+        .iter()
+        .filter(|entry| {
+            string_field(entry, "matchId")
+                .filter(|match_id| !match_id.is_empty())
+                .map(|match_id| !known_detail_ids.contains(&match_id))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let details_requested = detail_entries.len();
+    let list_duration_ms = list_started.elapsed().as_millis() as u64;
+    let detail_started = Instant::now();
     let (details, detail_errors) = fetch_details(
         &client,
         &request.customer_token,
-        &entries,
+        &detail_entries,
         request.detail_concurrency,
     )
     .await;
+    let detail_duration_ms = detail_started.elapsed().as_millis() as u64;
     let payload = build_payload(
         &request,
         profile_card,
@@ -139,8 +179,11 @@ pub async fn fetch_full_season_with_rate_limit_base_url(
     Ok(FullSeasonFetch {
         payload,
         entries: entries_count,
+        details_requested,
         details: details_count,
         failed_details,
+        list_duration_ms,
+        detail_duration_ms,
     })
 }
 
@@ -351,28 +394,30 @@ fn build_payload(
     crate::redaction::sanitize_persisted_json(&payload)
 }
 
-fn extract_match_entries(payload: &Value) -> Vec<Value> {
-    for container in [
-        Some(payload),
-        payload.get("data"),
-        payload.get("result"),
-        payload.pointer("/data/result"),
-        payload.pointer("/result/data"),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Some(entries) = extract_match_entries_from_container(container) {
-            return entries;
-        }
-    }
-    Vec::new()
+pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
+    match_objects(&extract_raw_match_entries(payload)).unwrap_or_default()
 }
 
-fn extract_match_entries_from_container(container: &Value) -> Option<Vec<Value>> {
+pub(crate) fn extract_raw_match_entries(payload: &Value) -> Vec<Value> {
+    let mut candidates = Vec::new();
+    collect_match_entry_candidates(payload, &mut candidates);
+    candidates
+        .iter()
+        .copied()
+        .find(|entries| match_objects(entries).is_some())
+        .or_else(|| candidates.first().copied())
+        .unwrap_or_default()
+        .to_vec()
+}
+
+fn collect_match_entry_candidates<'a>(container: &'a Value, candidates: &mut Vec<&'a [Value]>) {
     if let Some(items) = container.as_array() {
-        return match_objects(items);
+        candidates.push(items);
+        return;
     }
+    let Some(object) = container.as_object() else {
+        return;
+    };
     for key in [
         "matchList",
         "recentMatchList",
@@ -381,19 +426,27 @@ fn extract_match_entries_from_container(container: &Value) -> Option<Vec<Value>>
         "rows",
         "items",
     ] {
-        if let Some(items) = container.get(key).and_then(Value::as_array) {
-            if let Some(entries) = match_objects(items) {
-                return Some(entries);
-            }
+        if let Some(items) = object.get(key).and_then(Value::as_array) {
+            candidates.push(items);
         }
     }
-    None
+    for key in ["data", "result"] {
+        if let Some(nested) = object.get(key) {
+            collect_match_entry_candidates(nested, candidates);
+        }
+    }
 }
 
 fn match_objects(items: &[Value]) -> Option<Vec<Value>> {
     let entries = items
         .iter()
-        .filter(|item| item.is_object() && item.get("matchId").is_some())
+        .filter(|item| {
+            item.is_object()
+                && item
+                    .get("matchId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|match_id| !match_id.trim().is_empty())
+        })
         .cloned()
         .collect::<Vec<_>>();
     if entries.is_empty() {
