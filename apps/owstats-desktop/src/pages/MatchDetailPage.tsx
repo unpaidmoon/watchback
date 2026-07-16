@@ -16,6 +16,7 @@ import {
   type MatchFavoriteController,
 } from "../features/matches/useMatchFavoriteEditor";
 import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
+import { invalidateStandaloneMatchFavoritePersistence } from "../shared/matchesPageCache";
 
 export function MatchDetailPage() {
   const { matchId } = useParams();
@@ -26,6 +27,7 @@ export function MatchDetailPage() {
   const { register } = useUnsavedChangesGuard();
   const handleFavoritePersisted = useCallback(
     (favorite: MatchDetailView["favorite"]) => {
+      invalidateStandaloneMatchFavoritePersistence();
       setDetail((current) =>
         current ? { ...current, favorite } : current,
       );
@@ -39,12 +41,14 @@ export function MatchDetailPage() {
   );
 
   useEffect(() => {
-    register(favoriteController.dirty ? {
-      isDirty: true,
+    register(favoriteController.dirty || favoriteController.busy ? {
+      isDirty: favoriteController.dirty,
+      isBusy: favoriteController.busy,
       confirmDiscard: favoriteController.confirmDiscard,
     } : null);
     return () => register(null);
   }, [
+    favoriteController.busy,
     favoriteController.confirmDiscard,
     favoriteController.dirty,
     register,

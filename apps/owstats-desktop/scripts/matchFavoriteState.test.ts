@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  canDiscardMatchFavoriteChanges,
   createMatchFavoriteDraft,
   createMatchFavoriteMutationGate,
   favoriteCharacterCount,
@@ -7,6 +8,45 @@ import {
   normalizeMatchFavorite,
   shouldResetMatchFavoriteDraft,
 } from "../src/features/matches/matchFavoriteState";
+
+let busyConfirmCount = 0;
+assert.equal(
+  canDiscardMatchFavoriteChanges(
+    { busy: true, dirty: true },
+    () => {
+      busyConfirmCount += 1;
+      return true;
+    },
+  ),
+  false,
+);
+assert.equal(busyConfirmCount, 0, "busy favorite mutations block transitions without prompting");
+
+let cleanConfirmCount = 0;
+assert.equal(
+  canDiscardMatchFavoriteChanges(
+    { busy: false, dirty: false },
+    () => {
+      cleanConfirmCount += 1;
+      return false;
+    },
+  ),
+  true,
+);
+assert.equal(cleanConfirmCount, 0);
+
+let dirtyConfirmCount = 0;
+assert.equal(
+  canDiscardMatchFavoriteChanges(
+    { busy: false, dirty: true },
+    () => {
+      dirtyConfirmCount += 1;
+      return false;
+    },
+  ),
+  false,
+);
+assert.equal(dirtyConfirmCount, 1);
 
 const empty = createMatchFavoriteDraft(null);
 assert.deepEqual(empty, {

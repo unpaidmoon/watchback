@@ -90,6 +90,10 @@ export function clearMatchesPageCache() {
   preloadPromises.clear();
 }
 
+export function invalidateStandaloneMatchFavoritePersistence() {
+  clearMatchesPageCache();
+}
+
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {
   return filterParamKeys.some((key) =>
     key === "favorite" ? params.get(key) === "1" : Boolean(params.get(key)),
@@ -209,6 +213,17 @@ export function matchFiltersKey(filters: MatchFilters) {
         if (value !== undefined && value !== "") result[key] = value;
         return result;
       }, {}),
+  );
+}
+
+export function guardMatchFilterChange(
+  currentFilters: MatchFilters,
+  nextFilters: MatchFilters,
+  confirmDiscard: () => boolean,
+) {
+  return (
+    matchFiltersKey(currentFilters) === matchFiltersKey(nextFilters) ||
+    confirmDiscard()
   );
 }
 

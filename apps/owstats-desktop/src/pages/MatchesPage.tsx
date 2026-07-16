@@ -24,6 +24,7 @@ import {
   consumeMatchesSearchParamsNavigation,
   createMatchesPageLifetime,
   getMatchesPageCache,
+  guardMatchFilterChange,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
   matchFiltersKey,
@@ -122,12 +123,14 @@ export function MatchesPage() {
   );
 
   useEffect(() => {
-    register(favoriteController.dirty ? {
-      isDirty: true,
+    register(favoriteController.dirty || favoriteController.busy ? {
+      isDirty: favoriteController.dirty,
+      isBusy: favoriteController.busy,
       confirmDiscard: favoriteController.confirmDiscard,
     } : null);
     return () => register(null);
   }, [
+    favoriteController.busy,
     favoriteController.confirmDiscard,
     favoriteController.dirty,
     register,
@@ -165,7 +168,10 @@ export function MatchesPage() {
       getMatchesPageCache(),
       hasExplicitMatchFilterParams(searchParams),
     );
-    if (matchFiltersKey(navigation.filters) !== matchFiltersKey(filters)) setFilters(navigation.filters);
+    if (
+      matchFiltersKey(navigation.filters) !== matchFiltersKey(filters) &&
+      !setFilters(navigation.filters)
+    ) return;
     if (navigation.selectedMatchId !== selectedMatchId) setSelectedMatchIdSafely(navigation.selectedMatchId);
   }, [searchParamsKey]);
 
@@ -347,12 +353,14 @@ export function MatchesPage() {
   }
 
   function setFilters(nextFilters: MatchFilters) {
+    if (!guardMatchFilterChange(currentFiltersRef.current, nextFilters, favoriteController.confirmDiscard)) return false;
     currentFiltersRef.current = nextFilters;
     if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
       setBusy(true);
       setError(null);
     }
     setFiltersState(nextFilters);
+    return true;
   }
 
   function retryMatches() {

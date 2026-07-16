@@ -24,6 +24,7 @@ const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", i
 const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
+const favoriteEditorHookSource = readFileSync(new URL("../src/features/matches/useMatchFavoriteEditor.ts", import.meta.url), "utf8");
 const matchesCss = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 
 assert.match(guardSource, /register/);
@@ -36,11 +37,18 @@ assert.match(mainSource, /<HashRouter>[\s\S]*<UnsavedChangesProvider>[\s\S]*<App
 assert.match(appSource, /useUnsavedChangesGuard/);
 assert.match(appSource, /onClick=\{guardNavigation\}/);
 assert.match(matchesPageSource, /useMatchFavoriteEditor/);
-assert.match(matchesPageSource, /register\(favoriteController\.dirty\s*\?\s*\{/);
+assert.match(matchesPageSource, /register\(favoriteController\.dirty\s*\|\|\s*favoriteController\.busy\s*\?\s*\{/);
+assert.match(matchesPageSource, /isBusy:\s*favoriteController\.busy/);
 assert.match(matchesPageSource, /favoriteController\.confirmDiscard\(\)/);
 assert.match(detailPageSource, /useMatchFavoriteEditor/);
-assert.match(detailPageSource, /register\(favoriteController\.dirty\s*\?\s*\{/);
+assert.match(detailPageSource, /register\(favoriteController\.dirty\s*\|\|\s*favoriteController\.busy\s*\?\s*\{/);
+assert.match(detailPageSource, /isBusy:\s*favoriteController\.busy/);
 assert.match(detailPageSource, /favoriteController\.confirmDiscard\(\)/);
+assert.match(
+  favoriteEditorHookSource,
+  /const confirmDiscard = useCallback\(\(\) => \{\s*if \(!canDiscardMatchFavoriteChanges\(\s*\{ busy: state\.busy, dirty \},[\s\S]*?\)\) return false;\s*if \(!dirty\) return true;/,
+  "favorite, save-note, and delete mutations share one busy-aware controller transition guard",
+);
 assert.match(compactDetailSource, /favoriteController:\s*MatchFavoriteController/);
 assert.match(detailPaneSource, /favoriteController/);
 assert.doesNotMatch(compactDetailSource, /useMatchFavoriteEditor\s*\(/);
@@ -105,6 +113,29 @@ assert.equal(
 assert.equal(rejectedConfirmCount, 1);
 assert.equal(rejectedPreventDefaultCount, 1);
 
+let busyConfirmCount = 0;
+let busyPreventDefaultCount = 0;
+assert.equal(
+  guardUnsavedNavigation(
+    {
+      isDirty: false,
+      isBusy: true,
+      confirmDiscard: () => {
+        busyConfirmCount += 1;
+        return true;
+      },
+    },
+    {
+      preventDefault: () => {
+        busyPreventDefaultCount += 1;
+      },
+    },
+  ),
+  false,
+);
+assert.equal(busyConfirmCount, 0);
+assert.equal(busyPreventDefaultCount, 1);
+
 const cleanUnloadEvent = {
   preventDefaultCount: 0,
   returnValue: "unchanged",
@@ -132,6 +163,20 @@ guardUnsavedBeforeUnload(
 );
 assert.equal(dirtyUnloadEvent.preventDefaultCount, 1);
 assert.equal(dirtyUnloadEvent.returnValue, "");
+
+const busyUnloadEvent = {
+  preventDefaultCount: 0,
+  returnValue: "unchanged",
+  preventDefault() {
+    this.preventDefaultCount += 1;
+  },
+};
+guardUnsavedBeforeUnload(
+  { isDirty: false, isBusy: true, confirmDiscard: () => true },
+  busyUnloadEvent,
+);
+assert.equal(busyUnloadEvent.preventDefaultCount, 1);
+assert.equal(busyUnloadEvent.returnValue, "");
 
 function MissingProviderProbe() {
   useUnsavedChangesGuard();

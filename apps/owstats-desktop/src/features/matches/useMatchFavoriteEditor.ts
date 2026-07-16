@@ -11,6 +11,7 @@ import { deleteMatchFavorite, saveMatchFavorite } from "../../shared/api";
 import { productErrorMessage } from "../../shared/phase6Shell";
 import type { MatchFavoriteView } from "../../shared/types";
 import {
+  canDiscardMatchFavoriteChanges,
   createMatchFavoriteDraft,
   createMatchFavoriteMutationGate,
   favoriteCharacterCount,
@@ -214,14 +215,17 @@ export function useMatchFavoriteEditor(
   }, [matchId, mutationGate, onPersisted]);
 
   const confirmDiscard = useCallback(() => {
+    if (!canDiscardMatchFavoriteChanges(
+      { busy: state.busy, dirty },
+      () => window.confirm("备注尚未保存，是否放弃修改？"),
+    )) return false;
     if (!dirty) return true;
-    if (!window.confirm("备注尚未保存，是否放弃修改？")) return false;
     dispatch({
       type: "reset",
       favorite: { note: state.savedNote },
     });
     return true;
-  }, [dirty, state.savedNote]);
+  }, [dirty, state.busy, state.savedNote]);
 
   return {
     ...state,

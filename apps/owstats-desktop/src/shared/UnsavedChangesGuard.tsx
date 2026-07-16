@@ -10,6 +10,7 @@ import {
 
 export type UnsavedChangesGuardRegistration = {
   isDirty: boolean;
+  isBusy?: boolean;
   confirmDiscard: () => boolean;
 };
 
@@ -33,6 +34,10 @@ export function guardUnsavedNavigation(
   registration: UnsavedChangesGuardRegistration | null,
   event?: NavigationEvent,
 ) {
+  if (registration?.isBusy) {
+    event?.preventDefault();
+    return false;
+  }
   if (!registration?.isDirty || registration.confirmDiscard()) return true;
   event?.preventDefault();
   return false;
@@ -42,7 +47,7 @@ export function guardUnsavedBeforeUnload(
   registration: UnsavedChangesGuardRegistration | null,
   event: BeforeUnloadEventLike,
 ) {
-  if (!registration?.isDirty) return;
+  if (!registration?.isDirty && !registration?.isBusy) return;
   event.preventDefault();
   event.returnValue = "";
 }

@@ -13,8 +13,10 @@ import {
   consumeMatchesSearchParamsNavigation,
   computeMatchAnchorScrollTop,
   getMatchesPageCache,
+  guardMatchFilterChange,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
+  invalidateStandaloneMatchFavoritePersistence,
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
@@ -675,6 +677,63 @@ assert.deepEqual(
 );
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
+const matchDetailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
+
+updateMatchesPageCache({
+  filters: { favoriteOnly: true },
+  loadedFilterKey: matchFiltersKey({ favoriteOnly: true }),
+  hasLoaded: true,
+});
+invalidateStandaloneMatchFavoritePersistence();
+assert.equal(
+  getMatchesPageCache(),
+  null,
+  "standalone favorite persistence invalidates the hydrated timeline, including favorite-only results",
+);
+assert.match(
+  matchDetailPageSource,
+  /const handleFavoritePersisted[\s\S]*invalidateStandaloneMatchFavoritePersistence\(\);[\s\S]*setDetail/,
+  "the standalone persisted callback must use the tested cache invalidation helper before updating detail state",
+);
+
+let sameFilterConfirmCount = 0;
+assert.equal(
+  guardMatchFilterChange(
+    { season: 23, favoriteOnly: true },
+    { favoriteOnly: true, season: 23 },
+    () => {
+      sameFilterConfirmCount += 1;
+      return false;
+    },
+  ),
+  true,
+);
+assert.equal(sameFilterConfirmCount, 0, "an equivalent filter key does not prompt");
+
+let rejectedFilterConfirmCount = 0;
+assert.equal(
+  guardMatchFilterChange({ season: 22 }, { season: 23 }, () => {
+    rejectedFilterConfirmCount += 1;
+    return false;
+  }),
+  false,
+);
+assert.equal(rejectedFilterConfirmCount, 1);
+
+let acceptedFilterConfirmCount = 0;
+assert.equal(
+  guardMatchFilterChange({ season: 22 }, { season: 23 }, () => {
+    acceptedFilterConfirmCount += 1;
+    return true;
+  }),
+  true,
+);
+assert.equal(acceptedFilterConfirmCount, 1);
+assert.match(
+  matchesPageSource,
+  /function setFilters\(nextFilters: MatchFilters\) \{\s*if \(!guardMatchFilterChange\(currentFiltersRef\.current, nextFilters, favoriteController\.confirmDiscard\)\) return false;/,
+  "the central setFilters path must reject changed filters before mutating refs or state",
+);
 const favoritePersistedSource = matchesPageSource.slice(
   matchesPageSource.indexOf("const handleFavoritePersisted"),
   matchesPageSource.indexOf("const favoriteController"),
@@ -758,7 +817,7 @@ assert.match(
 assert.equal(matchesPageSource.includes("const searchParamsKey = searchParams.toString();"), true, "MatchesPage tracks same-instance URL changes");
 assert.match(
   matchesPageSource,
-  /useEffect\(\(\) => \{\s*const navigationDecision = consumeMatchesSearchParamsNavigation\(\s*searchParamsKey,\s*lastWrittenSearchParamsKeyRef\.current,\s*\);\s*lastWrittenSearchParamsKeyRef\.current = navigationDecision\.nextLastWrittenSearchParamsKey;\s*if \(!navigationDecision\.shouldApplyNavigation\) return;\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\)\) setFilters\(navigation\.filters\);[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
+  /useEffect\(\(\) => \{\s*const navigationDecision = consumeMatchesSearchParamsNavigation\(\s*searchParamsKey,\s*lastWrittenSearchParamsKeyRef\.current,\s*\);\s*lastWrittenSearchParamsKeyRef\.current = navigationDecision\.nextLastWrittenSearchParamsKey;\s*if \(!navigationDecision\.shouldApplyNavigation\) return;\s*const navigation = chooseMatchesPageNavigationState\([\s\S]*?if \(\s*matchFiltersKey\(navigation\.filters\) !== matchFiltersKey\(filters\) &&\s*!setFilters\(navigation\.filters\)\s*\) return;[\s\S]*?if \(navigation\.selectedMatchId !== selectedMatchId\) setSelectedMatchIdSafely\(navigation\.selectedMatchId\);[\s\S]*?\}, \[searchParamsKey\]\);/,
   "URL navigation consumes local echoes while external navigation still updates filters and selection",
 );
 assert.equal(

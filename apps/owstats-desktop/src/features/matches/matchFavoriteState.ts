@@ -41,6 +41,15 @@ export function favoriteCharacterCount(value: string): number {
   return Array.from(value).length;
 }
 
+export function canDiscardMatchFavoriteChanges(
+  state: Pick<MatchFavoriteDraft, "busy"> & { dirty: boolean },
+  confirmDiscard: () => boolean,
+) {
+  if (state.busy) return false;
+  if (!state.dirty) return true;
+  return confirmDiscard();
+}
+
 export function matchFavoriteDraftReducer(
   state: MatchFavoriteDraft,
   action: MatchFavoriteDraftAction,
