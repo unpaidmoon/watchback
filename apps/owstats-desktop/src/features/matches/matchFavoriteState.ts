@@ -86,9 +86,42 @@ export function shouldResetMatchFavoriteDraft({
   );
 }
 
-export function isCurrentMatchFavoriteMutation(
-  requestMatchId: string,
-  currentMatchId: string | null | undefined,
+export type MatchFavoriteMutationGeneration = {
+  matchId: string | null;
+  generation: number;
+};
+
+export type MatchFavoriteMutationToken = MatchFavoriteMutationGeneration & {
+  requestId: number;
+};
+
+export function advanceMatchFavoriteMutationGeneration(
+  current: MatchFavoriteMutationGeneration,
+  matchId: string | null | undefined,
+): MatchFavoriteMutationGeneration {
+  const normalizedMatchId = matchId ?? null;
+  if (current.matchId === normalizedMatchId) return current;
+  return {
+    matchId: normalizedMatchId,
+    generation: current.generation + 1,
+  };
+}
+
+export function createMatchFavoriteMutationToken(
+  current: MatchFavoriteMutationGeneration,
+  requestId: number,
+): MatchFavoriteMutationToken {
+  return { ...current, requestId };
+}
+
+export function isCurrentMatchFavoriteMutationToken(
+  token: MatchFavoriteMutationToken,
+  current: MatchFavoriteMutationGeneration,
+  currentRequestId: number,
 ): boolean {
-  return requestMatchId === currentMatchId;
+  return (
+    token.matchId === current.matchId &&
+    token.generation === current.generation &&
+    token.requestId === currentRequestId
+  );
 }

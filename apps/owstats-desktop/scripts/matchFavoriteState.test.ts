@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  advanceMatchFavoriteMutationGeneration,
+  createMatchFavoriteMutationToken,
   createMatchFavoriteDraft,
   favoriteCharacterCount,
-  isCurrentMatchFavoriteMutation,
+  isCurrentMatchFavoriteMutationToken,
   matchFavoriteDraftReducer,
   normalizeMatchFavorite,
   shouldResetMatchFavoriteDraft,
@@ -106,9 +108,40 @@ assert.equal(
   "same-match external updates synchronize when the draft is clean",
 );
 
-assert.equal(isCurrentMatchFavoriteMutation("match-a", "match-a"), true);
+const cleanedAfterExternalUpdate = matchFavoriteDraftReducer(edited, {
+  type: "edit",
+  note: "原备注",
+});
 assert.equal(
-  isCurrentMatchFavoriteMutation("match-a", "match-b"),
+  shouldResetMatchFavoriteDraft({
+    previousMatchId: "match-a",
+    matchId: "match-a",
+    favorite: { note: "外部更新" },
+    state: cleanedAfterExternalUpdate,
+  }),
+  true,
+  "a pending external favorite synchronizes after the dirty draft becomes clean",
+);
+
+let generation = { matchId: "match-a" as string | null, generation: 0 };
+const oldMatchAToken = createMatchFavoriteMutationToken(generation, 1);
+generation = advanceMatchFavoriteMutationGeneration(generation, "match-b");
+generation = advanceMatchFavoriteMutationGeneration(generation, "match-a");
+assert.equal(generation.generation, 2);
+assert.equal(
+  isCurrentMatchFavoriteMutationToken(oldMatchAToken, generation, 1),
   false,
-  "an async completion for the previous match is stale",
+  "A -> B -> A invalidates the request from the first A generation",
+);
+
+const firstSameMatchToken = createMatchFavoriteMutationToken(generation, 2);
+const secondSameMatchToken = createMatchFavoriteMutationToken(generation, 3);
+assert.equal(
+  isCurrentMatchFavoriteMutationToken(firstSameMatchToken, generation, 3),
+  false,
+  "a newer request on the same match invalidates the older request",
+);
+assert.equal(
+  isCurrentMatchFavoriteMutationToken(secondSameMatchToken, generation, 3),
+  true,
 );
