@@ -139,7 +139,7 @@ pub(super) async fn get_json_with_retry(
             Ok(response) => response,
             Err(error) => {
                 if attempt == MAX_HTTP_ATTEMPTS {
-                    return Err(anyhow!("{context}: {error}"));
+                    return Err(original_request_error(context, error));
                 }
                 tokio::time::sleep(retry_delay(attempt)).await;
                 continue;
@@ -151,13 +151,12 @@ pub(super) async fn get_json_with_retry(
             continue;
         }
         if !status.is_success() {
-            let error = response.error_for_status_ref().unwrap_err();
-            return Err(anyhow!("{context}: {error}"));
+            return Err(non_success_response_error(context, &response));
         }
         let payload = response
             .json()
             .await
-            .with_context(|| format!("{context} response was not valid JSON"))?;
+            .map_err(|error| original_request_error(context, error))?;
         if should_throttle_remote(endpoint) {
             tokio::time::sleep(std::time::Duration::from_millis(REMOTE_REQUEST_SPACING_MS)).await;
         }
@@ -175,4 +174,76 @@ pub(super) fn should_throttle_remote(endpoint: &str) -> bool {
         || endpoint.starts_with("http://localhost:")
         || endpoint.starts_with("https://127.0.0.1:")
         || endpoint.starts_with("https://localhost:"))
+}
+
+fn original_request_error(context: &str, error: reqwest::Error) -> anyhow::Error {
+    let message = format!("{context}: {error}");
+    anyhow::Error::new(error).context(message)
+}
+
+fn non_success_response_error(context: &str, response: &reqwest::Response) -> anyhow::Error {
+    match response.error_for_status_ref() {
+        Err(error) => original_request_error(context, error),
+        Ok(_) => anyhow!("{context}: unexpected HTTP status {}", response.status()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn spawn_response_server(status: &str, body: &str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let status = status.to_string();
+        let body = body.to_string();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).unwrap();
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        format!("http://{address}/synthetic")
+    }
+
+    #[tokio::test]
+    async fn unexpected_redirect_returns_context_and_status_without_panicking() {
+        let endpoint = spawn_response_server("302 Found", "");
+        let error = get_json_with_retry(
+            &reqwest::Client::new(),
+            &endpoint,
+            &[],
+            "synthetic sync redirect",
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("synthetic sync redirect"));
+        assert!(error.contains("unexpected HTTP status 302 Found"));
+    }
+
+    #[tokio::test]
+    async fn malformed_json_error_includes_context_and_original_decode_display() {
+        let endpoint = spawn_response_server("200 OK", "not-json");
+        let error = get_json_with_retry(
+            &reqwest::Client::new(),
+            &endpoint,
+            &[],
+            "synthetic malformed JSON",
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("synthetic malformed JSON"));
+        assert!(error.contains("error decoding response body"));
+    }
 }

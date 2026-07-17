@@ -449,6 +449,39 @@ async fn full_season_fetch_preserves_naturally_occurring_upstream_fields() {
 }
 
 #[tokio::test]
+async fn dashen_client_returns_unexpected_redirect_status_without_panicking() {
+    use owstats_desktop_lib::dashen_client::{DashenClient, DashenCredentials};
+
+    let server = spawn_status_server("302 Found", 2);
+    let client = DashenClient::new(
+        DashenCredentials {
+            role_id: 123,
+            token: "synthetic-account-token".to_string(),
+            dts: Some(2026),
+            server: 1,
+        },
+        format!("{}/customer", server.base_url),
+    )
+    .unwrap();
+
+    let get_error = client
+        .query_match_list("synthetic-player-token", "sport", 1, Some(23))
+        .await
+        .unwrap_err()
+        .to_string();
+    let post_error = client
+        .search_bnet_account("Synthetic#1234")
+        .await
+        .unwrap_err()
+        .to_string();
+
+    for error in [get_error, post_error] {
+        assert!(error.contains("unexpected HTTP status 302 Found"));
+        assert_ne!(error, "unexpected HTTP status 302 Found");
+    }
+}
+
+#[tokio::test]
 async fn full_season_fetch_fetches_details_with_configured_concurrency() {
     use owstats_desktop_lib::dashen_client::DashenCredentials;
     use owstats_desktop_lib::season_fetch::{fetch_full_season_with_base_url, FullSeasonRequest};
@@ -2100,6 +2133,37 @@ fn spawn_recording_server(routes: Vec<(&'static str, &'static str)>) -> Recordin
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    RecordingServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
+}
+
+fn spawn_status_server(status: &'static str, requests_to_serve: usize) -> RecordingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming().take(requests_to_serve) {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let mut buffer = [0_u8; 8192];
+            let Ok(read) = stream.read(&mut buffer) else {
+                continue;
+            };
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            captured.lock().unwrap().push(RecordedRequest {
+                first_line: request.lines().next().unwrap_or_default().to_string(),
+                headers: String::new(),
+                body: String::new(),
+            });
+            let response =
+                format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             let _ = stream.write_all(response.as_bytes());
         }
     });

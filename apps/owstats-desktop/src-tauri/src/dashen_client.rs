@@ -202,7 +202,7 @@ impl DashenClient {
                 .query(params)
                 .send()
                 .await
-                .map_err(|error| anyhow!("{context}: {error}"))?;
+                .map_err(|error| original_request_error(context, error))?;
             let status = response.status();
             if status == StatusCode::TOO_MANY_REQUESTS
                 && attempt < self.request_gate.max_http_attempts()
@@ -211,13 +211,12 @@ impl DashenClient {
                 continue;
             }
             if !status.is_success() {
-                let error = response.error_for_status_ref().unwrap_err();
-                return Err(anyhow!("{context}: {error}"));
+                return Err(non_success_response_error(context, &response));
             }
             return response
                 .json::<Value>()
                 .await
-                .map_err(|error| anyhow!("{context}: {error}"));
+                .map_err(|error| original_request_error(context, error));
         }
         Err(anyhow!("{context} 请求失败"))
     }
@@ -231,7 +230,7 @@ impl DashenClient {
                 .json(payload)
                 .send()
                 .await
-                .map_err(|error| anyhow!("{context}: {error}"))?;
+                .map_err(|error| original_request_error(context, error))?;
             let status = response.status();
             if status == StatusCode::TOO_MANY_REQUESTS
                 && attempt < self.request_gate.max_http_attempts()
@@ -240,13 +239,12 @@ impl DashenClient {
                 continue;
             }
             if !status.is_success() {
-                let error = response.error_for_status_ref().unwrap_err();
-                return Err(anyhow!("{context}: {error}"));
+                return Err(non_success_response_error(context, &response));
             }
             return response
                 .json::<Value>()
                 .await
-                .map_err(|error| anyhow!("{context}: {error}"));
+                .map_err(|error| original_request_error(context, error));
         }
         Err(anyhow!("{context} 请求失败"))
     }
@@ -400,4 +398,16 @@ fn auth_headers(credentials: &DashenCredentials) -> Result<HeaderMap> {
     headers.insert("Referer", HeaderValue::from_static(REFERER));
     headers.insert("User-Agent", HeaderValue::from_static(USER_AGENT));
     Ok(headers)
+}
+
+fn original_request_error(context: &str, error: reqwest::Error) -> anyhow::Error {
+    let message = format!("{context}: {error}");
+    anyhow::Error::new(error).context(message)
+}
+
+fn non_success_response_error(context: &str, response: &reqwest::Response) -> anyhow::Error {
+    match response.error_for_status_ref() {
+        Err(error) => original_request_error(context, error),
+        Ok(_) => anyhow!("{context}: unexpected HTTP status {}", response.status()),
+    }
 }
