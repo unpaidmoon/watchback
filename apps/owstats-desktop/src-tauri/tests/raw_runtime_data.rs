@@ -146,7 +146,9 @@ fn benchmark_snapshot_reports_only_aggregate_snapshot_metrics() -> Result<()> {
     assert_eq!(benchmark.entries, 1);
     assert_eq!(benchmark.details, 1);
     assert_eq!(benchmark.errors, 1);
-    assert_eq!(benchmark.output_bytes, std::fs::metadata(output)?.len());
+    assert_eq!(benchmark.output_bytes, std::fs::metadata(&output)?.len());
+    let serialized_snapshot = std::fs::read_to_string(&output)?;
+    assert!(serialized_snapshot.contains(sentinel));
     let serialized_benchmark = serde_json::to_string(&benchmark)?;
     let benchmark_keys = serde_json::from_str::<Value>(&serialized_benchmark)?
         .as_object()

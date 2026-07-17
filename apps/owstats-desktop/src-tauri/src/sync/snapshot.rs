@@ -133,9 +133,8 @@ where
         .parent()
         .ok_or_else(|| anyhow!("season snapshot destination has no parent"))?;
     std::fs::create_dir_all(parent)?;
-    let sanitized = sanitize_snapshot_value(&payload);
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(temporary.as_file_mut(), &sanitized)?;
+    serde_json::to_writer_pretty(temporary.as_file_mut(), &payload)?;
     temporary.as_file_mut().flush()?;
     temporary.as_file().sync_all()?;
 
@@ -238,7 +237,7 @@ fn rebuild_complete_season_payload_initialized(
     matches.insert("details".to_string(), Value::Array(details));
     matches.insert("detail_errors".to_string(), Value::Array(detail_errors));
 
-    Ok(sanitize_snapshot_value(&rebuilt))
+    Ok(rebuilt)
 }
 
 fn benchmark_output_parent(output: &Path) -> &Path {
@@ -254,23 +253,6 @@ fn snapshot_array_count(payload: &Value, field: &str) -> Result<usize> {
         .and_then(Value::as_array)
         .map(Vec::len)
         .ok_or_else(|| anyhow!("rebuilt snapshot matches.{field} must be an array"))
-}
-
-fn sanitize_snapshot_value(value: &Value) -> Value {
-    redact_snapshot_strings(&crate::redaction::sanitize_persisted_json(value))
-}
-
-fn redact_snapshot_strings(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(key, child)| (key.clone(), redact_snapshot_strings(child)))
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.iter().map(redact_snapshot_strings).collect()),
-        Value::String(text) => Value::String(crate::redaction::redact_sensitive_text(text)),
-        _ => value.clone(),
-    }
 }
 
 fn parse_rows(
