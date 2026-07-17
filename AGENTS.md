@@ -30,16 +30,14 @@
 - 同步产品方向以 `docs/superpowers/specs/2026-07-03-phase-8-login-account-season-sync-design.md` 为准：仅同步当前浏览器登录账号的数据，BattleTag 绑定与 `searchBnetAccount` 属于旧流程，除非用户明确要求，不要恢复或扩展它。
 - `data/players/5479_s22_full_season.json` 是原始匿名完整赛季 fixture；不得把真实用户数据、凭据或浏览器 profile 加入提示词、提交或文档。
 
-## 隐私与数据安全
+## 原始运行时数据与发布边界
 
-绝不打印、提交或暴露：
-
-- `OW_DASHEN_TOKEN`、`token`、`customerToken`、cookie、authorization、credential。
-- `data/.dashen_credentials.json`、浏览器 profile、原始玩家隐私 ID、真实数据 dump。
-
-- UI、错误消息、日志、测试输出、诊断 JSON 和会返回给前端的 raw JSON 都必须递归脱敏 token-like 字段。
-- 任何新增的持久化 payload 或 SQLite raw JSON 都要先确认不会保留敏感字段；仅 Git 忽略不足以构成安全边界。
-- 显示名、英雄、地图等 fallback 不得直接向发布 UI 泄露原始 GUID 或隐私 ID；使用中文稳定兜底。角斗详情的 `traitGuids` 与 `modGuids` 是资产校对例外：无法映射时必须向发布 UI 显示原始 GUID，不能显示“待补充”文本；此例外不得扩展到玩家、英雄、地图、凭据或其他隐私标识。
+- 同步、导入、SQLite、赛季快照、查询 raw JSON 和既有错误面原样保留上游自然出现的字段与错误文本；不得新增运行时递归脱敏、遮盖、清理、空操作或功能开关。
+- 不得主动把凭据文件中的 `token`、`customerToken`、cookie、authorization 或 credential 复制到原本不包含它们的 DTO、账号索引、登录进度或后台事件、日志及其他 payload；既有账号与事件 schema 的字段最小化边界继续有效。
+- 构建资源、共享运行时配置、账号索引、提交内容和安装包仍须拒绝主动加入的 `token`、`customerToken`、cookie、authorization、credential、真实凭据、浏览器 profile、真实用户数据 dump 或本地 SQLite；仅 Git 忽略不足以构成安全边界。
+- 测试只能使用合成值；诊断和性能计时只能输出阶段、匿名计数、耗时与文件大小，不得打印 ID、路径、行、payload 或凭据。临时副本和输出由操作者负责清理。
+- 历史隐私迁移已停用：初始化不得重写旧 SQLite 或赛季 JSON；不得删除既有 privacy backup、marker 或数据，也不得重抓或恢复历史已脱敏值。
+- 显示名、英雄、地图等 fallback 与账号、事件字段最小化属于产品/schema 决策，不是运行时脱敏。显示名、英雄、地图等 fallback 不得向发布 UI 泄露原始 GUID 或隐私 ID；使用中文稳定兜底。角斗详情的 `traitGuids` 与 `modGuids` 是资产校对例外：无法映射时必须向发布 UI 显示原始 GUID，不能显示“待补充”文本；此例外不得扩展到玩家、英雄、地图、凭据或其他隐私标识。
 
 ## 资源与安装版要求
 
@@ -60,7 +58,7 @@
 - SQLite schema 改动必须有前向兼容、幂等迁移和升级库测试；新投影或索引要考虑历史数据回填及逐赛季行为。
 - 多赛季查询、缓存、详情定位和聚合都必须带上或明确选择 season，避免混读。
 - 重复同步同一赛季必须保持对局、详情、投影和错误记录的可控幂等性。
-- 使用真实上游接口时保留限速、429 重试和脱敏错误；不要在人工审查中读取本机真实凭据。
+- 使用真实上游接口时保留限速、429 重试和原始错误传播；不要在人工审查中读取本机真实凭据。
 
 ## 验证与交付
 
