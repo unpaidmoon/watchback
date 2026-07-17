@@ -1419,7 +1419,7 @@ fn filters_matches_by_season_result_mode_hero_map_and_date_range() {
 }
 
 #[test]
-fn detail_exposes_teammates_enemies_and_redacted_raw_json() {
+fn detail_exposes_teammates_enemies_and_unmodified_raw_json() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
     import_synthetic_season(&db);
@@ -1431,8 +1431,8 @@ fn detail_exposes_teammates_enemies_and_redacted_raw_json() {
     assert_eq!(detail.teammates.len(), 2);
     assert_eq!(detail.enemies.len(), 1);
     assert_eq!(detail.teammates[0].hero_name, "安娜");
-    assert!(!raw.contains("detail-secret"));
-    assert!(!raw.contains("entry-secret"));
+    assert!(raw.contains("detail-secret"));
+    assert!(raw.contains("entry-secret"));
     assert!(raw.contains("customerToken"));
     assert!(raw.contains("token\""));
 }

@@ -132,7 +132,3 @@ fn is_windows_reparse(metadata: &std::fs::Metadata) -> bool {
 fn is_windows_reparse(_metadata: &std::fs::Metadata) -> bool {
     false
 }
-
-pub fn redact_sensitive_text(message: &str) -> String {
-    crate::redaction::redact_sensitive_text(message)
-}

@@ -1,5 +1,5 @@
 use crate::account_store::AccountId;
-use crate::credential_store::{redact_sensitive_text, DashenCredentials};
+use crate::credential_store::DashenCredentials;
 use crate::dashen_client::{DashenClient, DashenCredentials as ClientCredentials};
 use crate::models::{LoginTargetStatus, PlayerTargetStatus};
 use crate::player_target::{
@@ -218,7 +218,7 @@ impl LoginTargetCoordinator {
                 "bindFailed",
                 Some(detected_bnet),
                 None,
-                &format!("自动绑定失败：{}", redact_sensitive_text(message)),
+                &format!("自动绑定失败：{message}"),
                 false,
                 false,
                 true,
@@ -404,10 +404,7 @@ impl LoginTargetCoordinator {
             return stale_operation_status();
         }
         if let Err(error) = save_target_atomic(target_path, target) {
-            let failed = bind_failed_status(
-                &ticket.detected_bnet,
-                &redact_sensitive_text(&error.to_string()),
-            );
+            let failed = bind_failed_status(&ticket.detected_bnet, &error.to_string());
             let generation = self.next_generation();
             guard.insert(
                 ticket.account_id.clone(),
@@ -441,10 +438,7 @@ impl LoginTargetCoordinator {
         if !self.ticket_matches(ticket, guard.get(&ticket.account_id)) {
             return stale_operation_status();
         }
-        let failed = bind_failed_status(
-            &ticket.detected_bnet,
-            &redact_sensitive_text(&error.to_string()),
-        );
+        let failed = bind_failed_status(&ticket.detected_bnet, &error.to_string());
         let generation = self.next_generation();
         guard.insert(
             ticket.account_id.clone(),
@@ -763,7 +757,7 @@ fn bind_failed_status(detected_bnet: &str, message: &str) -> LoginTargetStatus {
         "bindFailed",
         Some(detected_bnet),
         None,
-        &format!("自动绑定失败：{}", redact_sensitive_text(message)),
+        &format!("自动绑定失败：{message}"),
         false,
         false,
         true,

@@ -17,9 +17,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 pub use crate::browser_session::{select_browser, BrowserCandidate};
-pub use crate::credential_store::{
-    credential_status_for_path, redact_sensitive_text as redacted_login_error, DashenCredentials,
-};
+pub use crate::credential_store::{credential_status_for_path, DashenCredentials};
 
 const LOGIN_URL: &str =
     "https://pay.ds.163.com/activity/ld5?addSkeleton=1&channel=yydc_cps10.cczx&setId=67b466a5b8cf7e3576aa3521";
@@ -196,7 +194,7 @@ pub(crate) async fn capture_dashen_login(
 
     emit_login_progress(&app, LoginPhase::OpeningBrowser, "正在打开网易大神登录页。");
     launch_browser(&browser, LOGIN_URL, port, &profile_dir)
-        .map_err(|error| anyhow!(redacted_login_error(&error.to_string())))?;
+        .map_err(|error| anyhow!(error.to_string()))?;
 
     wait_for_debug_endpoint(port, Duration::from_secs(20)).await?;
     emit_login_progress(
@@ -213,9 +211,7 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<BrowserLoginOutcome>>,
 {
-    let outcome = runner()
-        .await
-        .map_err(|error| anyhow!(redacted_login_error(&error.to_string())))?;
+    let outcome = runner().await.map_err(|error| anyhow!(error.to_string()))?;
     if outcome.credentials.role_id <= 0 || outcome.credentials.token.trim().is_empty() {
         return Err(anyhow!("登录凭证不完整，请重新登录。"));
     }
@@ -380,7 +376,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                 emit_login_progress(
                     app,
                     LoginPhase::TokenPending,
-                    &format!("凭证暂未就绪：{}", redacted_login_error(detail)),
+                    &format!("凭证暂未就绪：{detail}"),
                 );
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
@@ -479,14 +475,13 @@ mod tests {
         assert_eq!(captured.detected_battle_tag, "Synthetic#1011");
         assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
 
-        let cancelled = capture_dashen_login_with(|| async {
-            Err(anyhow::anyhow!("cancelled token=synthetic-secret"))
-        })
-        .await
-        .err()
-        .unwrap()
-        .to_string();
-        assert!(!cancelled.contains("synthetic-secret"));
+        let source = "cancelled token=synthetic-secret Authorization: Bearer synthetic-header cookie=synthetic-cookie";
+        let cancelled = capture_dashen_login_with(|| async { Err(anyhow::anyhow!(source)) })
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(cancelled, source);
         assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
 
         let invalid = capture_dashen_login_with(|| async {

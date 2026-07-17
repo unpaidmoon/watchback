@@ -109,7 +109,7 @@ pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<M
     let raw_json = if match_kind == "fight" {
         Value::Null
     } else {
-        redact_sensitive_json(&json!({ "entry": entry, "detail": detail }))
+        json!({ "entry": entry, "detail": detail })
     };
     Ok(MatchDetailView {
         match_id: match_id.to_string(),

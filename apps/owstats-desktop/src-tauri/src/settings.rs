@@ -1,7 +1,5 @@
 use crate::db::OwDatabase;
 use crate::models::{PlayerProfile, UpdateCheckResult, UserSettings};
-#[cfg(test)]
-use crate::redaction::redact_sensitive_json;
 use anyhow::Result;
 #[cfg(test)]
 use chrono::Utc;
@@ -154,7 +152,6 @@ fn upsert_player_profile(db: &OwDatabase, profile: &PlayerProfile, raw: &Value) 
     let conn = db.connect()?;
     let bnet_id = role_id.to_string();
     let display_name = profile.player_id.clone().unwrap_or_else(|| bnet_id.clone());
-    let redacted = redact_sensitive_json(raw);
     conn.execute(
         r#"
         INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at)
@@ -169,7 +166,7 @@ fn upsert_player_profile(db: &OwDatabase, profile: &PlayerProfile, raw: &Value) 
             bnet_id,
             bnet_id,
             display_name,
-            serde_json::to_string(&redacted)?,
+            serde_json::to_string(raw)?,
             Utc::now().to_rfc3339()
         ],
     )?;
@@ -455,5 +452,51 @@ mod tests {
             )
             .unwrap();
         assert_eq!(saved, 1);
+    }
+
+    #[test]
+    fn project_profile_raw_payload_is_persisted_verbatim() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temp.path().join("owstats.db"));
+        db.initialize().unwrap();
+        let project_root = temp.path().join("project");
+        let player_dir = project_root.join("data").join("players");
+        std::fs::create_dir_all(&player_dir).unwrap();
+        std::fs::write(
+            player_dir.join("synthetic.json"),
+            r#"{
+              "profile_card": {
+                "data": {
+                  "bnetId": 595945364,
+                  "name": "Synthetic#5479",
+                  "customerToken": "synthetic-profile-token"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let profile = get_player_profile_with_project_root(
+            &db,
+            &temp.path().join("profile.json"),
+            Some(595945364),
+            &project_root,
+        )
+        .unwrap();
+        let raw_json: String = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT raw_json FROM players WHERE player_id = '595945364'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(profile.player_id.as_deref(), Some("Synthetic#5479"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&raw_json).unwrap()["customerToken"],
+            "synthetic-profile-token"
+        );
     }
 }
