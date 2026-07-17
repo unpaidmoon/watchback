@@ -1,5 +1,104 @@
 use super::*;
+use chrono::Utc;
 use rusqlite::params;
+use std::io::Write;
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotOutcome {
+    Unchanged,
+    Replaced,
+    StaleRevision,
+}
+
+pub fn rebuild_snapshot_for_revision(
+    db: &OwDatabase,
+    season: i64,
+    target_revision: i64,
+    destination: &Path,
+) -> Result<SnapshotOutcome> {
+    rebuild_snapshot_for_revision_with_hook(db, season, target_revision, destination, || Ok(()))
+}
+
+#[doc(hidden)]
+pub fn rebuild_snapshot_for_revision_with_hook<F>(
+    db: &OwDatabase,
+    season: i64,
+    target_revision: i64,
+    destination: &Path,
+    before_revision_check: F,
+) -> Result<SnapshotOutcome>
+where
+    F: FnOnce() -> Result<()>,
+{
+    db.initialize()?;
+    let revisions = db.connect()?.query_row(
+        "SELECT season_revision, snapshot_revision FROM season_sync_state WHERE season=?1",
+        [season],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?;
+    if revisions.1 >= target_revision {
+        return Ok(SnapshotOutcome::Unchanged);
+    }
+    if revisions.0 != target_revision {
+        return Ok(SnapshotOutcome::StaleRevision);
+    }
+
+    let payload = rebuild_complete_season_payload(
+        db,
+        season,
+        &json!({
+            "season": season,
+            "matches": {},
+        }),
+    )?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow!("season snapshot destination has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let sanitized = sanitize_snapshot_value(&payload);
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    serde_json::to_writer_pretty(temporary.as_file_mut(), &sanitized)?;
+    temporary.as_file_mut().flush()?;
+    temporary.as_file().sync_all()?;
+
+    before_revision_check()?;
+
+    // BEGIN IMMEDIATE prevents list/detail writers from changing the revision
+    // between the final check, filesystem replacement, and revision commit.
+    let mut conn = db.connect()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let current = tx.query_row(
+        "SELECT season_revision, snapshot_revision FROM season_sync_state WHERE season=?1",
+        [season],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?;
+    if current.1 >= target_revision {
+        tx.rollback()?;
+        return Ok(SnapshotOutcome::Unchanged);
+    }
+    if current.0 != target_revision {
+        tx.rollback()?;
+        return Ok(SnapshotOutcome::StaleRevision);
+    }
+
+    temporary
+        .persist(destination)
+        .map_err(|error| error.error)?;
+    let updated = tx.execute(
+        r#"
+        UPDATE season_sync_state
+        SET snapshot_revision=?2, updated_at=?3
+        WHERE season=?1 AND season_revision=?2 AND snapshot_revision < ?2
+        "#,
+        params![season, target_revision, Utc::now().to_rfc3339()],
+    )?;
+    if updated != 1 {
+        return Err(anyhow!("season snapshot revision changed before commit"));
+    }
+    tx.commit()?;
+    Ok(SnapshotOutcome::Replaced)
+}
 
 pub fn rebuild_complete_season_payload(
     db: &OwDatabase,

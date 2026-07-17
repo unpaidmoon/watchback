@@ -91,76 +91,96 @@ async fn run_claimed_job(
 
     set_job_phase(store, &job.job_id, job.season, "fetchDetails")?;
     let candidates = pending_detail_entries(store, &job.job_id)?;
-    let attempted = candidates
-        .iter()
-        .map(|(match_id, _, _)| match_id.clone())
-        .collect::<HashSet<_>>();
-    let results = stream::iter(candidates.into_iter().map(|(match_id, match_kind, entry)| {
-        let client = &client;
-        let token = &request.customer_token;
-        async move {
-            let result = if match_kind == "fight" {
-                client.fight_query_match_info(token, &match_id).await
-            } else {
-                client.query_match_info(token, &match_id).await
-            };
+    let mut result_batches =
+        stream::iter(candidates.into_iter().map(|(match_id, match_kind, entry)| {
+            let client = &client;
+            let token = &request.customer_token;
+            async move {
+                let result = if match_kind == "fight" {
+                    client.fight_query_match_info(token, &match_id).await
+                } else {
+                    client.query_match_info(token, &match_id).await
+                };
+                match result {
+                    Ok(payload) => Ok(json!({
+                        "match_id": match_id,
+                        "match_kind": match_kind,
+                        "source_match": entry,
+                        "payload": payload,
+                    })),
+                    Err(_) => Err(json!({
+                        "match_id": match_id,
+                        "error_type": "DetailFetchError",
+                        "message": "详情请求失败",
+                    })),
+                }
+            }
+        }))
+        .buffer_unordered(2)
+        .chunks(10);
+    let mut had_failures = false;
+    while let Some(results) = result_batches.next().await {
+        let mut details = Vec::new();
+        let mut failures = Vec::new();
+        let mut attempted = HashSet::new();
+        for result in results {
             match result {
-                Ok(payload) => Ok(json!({
-                    "match_id": match_id,
-                    "match_kind": match_kind,
-                    "source_match": entry,
-                    "payload": payload,
-                })),
-                Err(_) => Err(json!({
-                    "match_id": match_id,
-                    "error_type": "DetailFetchError",
-                    "message": "详情请求失败",
-                })),
+                Ok(detail) => {
+                    if let Some(match_id) = detail.get("match_id").and_then(Value::as_str) {
+                        attempted.insert(match_id.to_string());
+                    }
+                    details.push(detail);
+                }
+                Err(error) => {
+                    if let Some(match_id) = error.get("match_id").and_then(Value::as_str) {
+                        attempted.insert(match_id.to_string());
+                    }
+                    failures.push(error);
+                }
             }
         }
-    }))
-    .buffer_unordered(2)
-    .collect::<Vec<_>>()
-    .await;
-    let mut details = Vec::new();
-    let mut failures = Vec::new();
-    for result in results {
-        match result {
-            Ok(detail) => details.push(detail),
-            Err(error) => failures.push(error),
+        if !attempted.is_empty() {
+            super::persist::sync_import_incremental_parts(
+                store.database(),
+                job.season,
+                &json!({}),
+                vec![],
+                details.clone(),
+                failures.clone(),
+                attempted,
+            )?;
+            update_detail_job_rows(store, &job.job_id, &details, &failures)?;
         }
+        summary.details_written += details.len();
+        summary.failed_details += failures.len();
+        had_failures |= !failures.is_empty();
     }
-    if !attempted.is_empty() {
-        super::persist::sync_import_incremental_parts(
-            store.database(),
-            job.season,
-            &json!({}),
-            vec![],
-            details.clone(),
-            failures.clone(),
-            attempted,
-        )?;
-    }
-    summary.details_written = details.len();
-    summary.failed_details = failures.len();
-    update_detail_job_rows(store, &job.job_id, &details, &failures)?;
 
     set_job_phase(store, &job.job_id, job.season, "rebuildSnapshot")?;
     let target_revision = current_season_revision(store, job.season)?;
-    let base = json!({"season": job.season, "matches": {}});
-    let payload =
-        super::snapshot::rebuild_complete_season_payload(store.database(), job.season, &base)?;
-    if current_season_revision(store, job.season)? != target_revision {
-        mark_job_queued(store, &job.job_id, target_revision)?;
-        return Ok(summary);
+    let destination = season_output_dir.join(format!("local_s{}_full_season.json", job.season));
+    match super::snapshot::rebuild_snapshot_for_revision(
+        store.database(),
+        job.season,
+        target_revision,
+        &destination,
+    )? {
+        super::snapshot::SnapshotOutcome::StaleRevision => {
+            mark_job_queued(
+                store,
+                &job.job_id,
+                current_season_revision(store, job.season)?,
+            )?;
+            return Ok(summary);
+        }
+        super::snapshot::SnapshotOutcome::Replaced => summary.snapshot_rebuilt = true,
+        super::snapshot::SnapshotOutcome::Unchanged => {}
     }
-    super::persist::write_season_payload(season_output_dir, job.season, &payload)?;
-    if failures.is_empty() {
+    if !had_failures {
         complete_job(store, &job.job_id, job.season, target_revision)?;
     } else {
         finish_snapshot_with_retryable_details(store, &job.job_id, job.season, target_revision)?;
     }
-    summary.snapshot_rebuilt = true;
     Ok(summary)
 }
 
@@ -168,16 +188,15 @@ fn pending_detail_entries(
     store: &SeasonSyncStore,
     job_id: &str,
 ) -> Result<Vec<(String, String, Value)>> {
-    let conn = store.database().connect()?;
+    let mut conn = store.database().connect()?;
     let mut statement = conn.prepare(
         r#"
-        SELECT m.match_id, m.match_kind, m.raw_entry_json
+        SELECT m.match_id, m.match_kind, m.raw_entry_json, d.raw_detail_json
         FROM season_sync_job_matches j
         JOIN matches m ON m.match_id=j.match_id
         LEFT JOIN match_details d ON d.match_id=m.match_id
         WHERE j.job_id=?1
           AND j.detail_status IN ('queued','retryable')
-          AND d.match_id IS NULL
         ORDER BY m.begin_ts DESC
         "#,
     )?;
@@ -186,12 +205,45 @@ fn pending_detail_entries(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
     let mut result = Vec::new();
+    let mut already_complete = Vec::new();
     for row in rows {
-        let (match_id, match_kind, raw) = row?;
+        let (match_id, match_kind, raw, existing_detail) = row?;
+        if existing_detail
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<Value>(value).ok())
+            .is_some_and(|value| crate::importer::is_valid_match_detail_for(&value, &match_id))
+        {
+            already_complete.push(match_id);
+            continue;
+        }
         result.push((match_id, match_kind, serde_json::from_str(&raw)?));
+    }
+    drop(statement);
+    if !already_complete.is_empty() {
+        let tx = conn.transaction()?;
+        let now = Utc::now().to_rfc3339();
+        for match_id in already_complete {
+            tx.execute(
+                "UPDATE season_sync_job_matches SET detail_status='completed', error_class=NULL, updated_at=?3 WHERE job_id=?1 AND match_id=?2",
+                params![job_id, match_id, now],
+            )?;
+        }
+        tx.execute(
+            r#"
+            UPDATE season_sync_state
+            SET pending_detail_count=(
+                SELECT COUNT(*) FROM season_sync_job_matches
+                WHERE job_id=?1 AND detail_status IN ('queued','retryable')
+            ), updated_at=?2
+            WHERE season=(SELECT season FROM season_sync_jobs WHERE job_id=?1)
+            "#,
+            params![job_id, now],
+        )?;
+        tx.commit()?;
     }
     Ok(result)
 }
@@ -232,8 +284,12 @@ fn update_detail_job_rows(
         |row| row.get(0),
     )?;
     tx.execute(
-        "UPDATE season_sync_state SET pending_detail_count=?2, updated_at=?3 WHERE season=?1",
+        "UPDATE season_sync_state SET season_revision=season_revision+1, pending_detail_count=?2, updated_at=?3 WHERE season=?1",
         params![season, pending, now],
+    )?;
+    tx.execute(
+        "UPDATE season_sync_jobs SET target_revision=(SELECT season_revision FROM season_sync_state WHERE season=?2), updated_at=?3 WHERE job_id=?1",
+        params![job_id, season, now],
     )?;
     tx.commit()?;
     Ok(())

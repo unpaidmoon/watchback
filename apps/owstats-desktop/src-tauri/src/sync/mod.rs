@@ -99,7 +99,10 @@ pub use persist::sync_import_parts;
 pub use persist::write_season_payload;
 pub use quick_list::commit_quick_list_probe;
 #[doc(hidden)]
-pub use snapshot::rebuild_complete_season_payload;
+pub use snapshot::{
+    rebuild_complete_season_payload, rebuild_snapshot_for_revision,
+    rebuild_snapshot_for_revision_with_hook, SnapshotOutcome,
+};
 pub use state::{
     ClaimedSeasonJob, ModeWork, RequestShape, SeasonBackgroundStatus, SeasonSyncStore,
 };

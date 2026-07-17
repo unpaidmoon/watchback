@@ -1,8 +1,9 @@
 use owstats_desktop_lib::{
     build_page_diagnostics, classify_quick_page, import_incremental_payload_value_embedded,
     import_payload_value_embedded, load_season_sync_inventory, rebuild_complete_season_payload,
-    select_detail_entries, write_season_payload, OwDatabase, QuickPageDecision, SeasonModeKey,
-    SeasonSyncInventory,
+    rebuild_snapshot_for_revision, rebuild_snapshot_for_revision_with_hook, select_detail_entries,
+    write_season_payload, OwDatabase, QuickPageDecision, SeasonModeKey, SeasonSyncInventory,
+    SnapshotOutcome,
 };
 use rusqlite::params;
 use serde_json::json;
@@ -1242,6 +1243,69 @@ fn atomic_snapshot_replaces_existing_json_without_temp_residue() {
         remaining,
         vec![std::ffi::OsString::from("local_s23_full_season.json")]
     );
+}
+
+#[test]
+fn snapshot_replace_requires_stable_revision() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    db.connect()
+        .unwrap()
+        .execute(
+            "INSERT INTO season_sync_state (season, season_revision, snapshot_revision, updated_at) VALUES (22, 7, 6, 'now')",
+            [],
+        )
+        .unwrap();
+    let destination = temp.path().join("local_s22_full_season.json");
+    let old_bytes = br#"{"stable":"old-complete-snapshot"}"#;
+    std::fs::write(&destination, old_bytes).unwrap();
+
+    let race_db = db.clone();
+    let outcome = rebuild_snapshot_for_revision_with_hook(&db, 22, 7, &destination, move || {
+        race_db.connect()?.execute(
+            "UPDATE season_sync_state SET season_revision=8 WHERE season=22",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(outcome, SnapshotOutcome::StaleRevision);
+    assert_eq!(std::fs::read(&destination).unwrap(), old_bytes);
+    assert_eq!(
+        db.connect()
+            .unwrap()
+            .query_row(
+                "SELECT snapshot_revision FROM season_sync_state WHERE season=22",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        6
+    );
+}
+
+#[test]
+fn snapshot_equal_revision_does_not_touch_existing_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    db.initialize().unwrap();
+    db.connect()
+        .unwrap()
+        .execute(
+            "INSERT INTO season_sync_state (season, season_revision, snapshot_revision, updated_at) VALUES (22, 7, 7, 'now')",
+            [],
+        )
+        .unwrap();
+    let destination = temp.path().join("local_s22_full_season.json");
+    let old_bytes = br#"{"stable":"already-current"}"#;
+    std::fs::write(&destination, old_bytes).unwrap();
+
+    let outcome = rebuild_snapshot_for_revision(&db, 22, 7, &destination).unwrap();
+
+    assert_eq!(outcome, SnapshotOutcome::Unchanged);
+    assert_eq!(std::fs::read(&destination).unwrap(), old_bytes);
 }
 
 #[cfg(windows)]

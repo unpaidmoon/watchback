@@ -5,6 +5,7 @@ use owstats_desktop_lib::{
     SeasonSyncResult, SeasonSyncStore,
 };
 use rusqlite::{params, Connection};
+use std::time::{Duration, Instant};
 
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(conn.query_row(
@@ -219,6 +220,98 @@ fn foreground_commit_inserts_new_lists_without_details_or_snapshot_work() -> Res
         1
     );
     assert_eq!(store_active_jobs(&conn, 22)?, 1);
+    Ok(())
+}
+
+#[test]
+fn foreground_local_commit_stays_below_250_ms_on_s22_scale_fixture() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let db = OwDatabase::new(temp.path().join("foreground-performance.sqlite3"));
+    db.initialize()?;
+    let mut conn = db.connect()?;
+    let tx = conn.transaction()?;
+    for index in 0..1_000 {
+        insert_match(
+            &tx,
+            &format!("known-{index}"),
+            22,
+            "normal",
+            "sport",
+            1_720_000_000 + index,
+        )?;
+    }
+    tx.commit()?;
+    let new_entries = (0..20)
+        .map(|index| {
+            serde_json::json!({
+                "matchId": format!("new-{index}"),
+                "beginTs": 1_730_000_000 + index,
+                "gameMode": "sport",
+                "matchRet": 1
+            })
+        })
+        .collect::<Vec<_>>();
+    let probe = QuickListProbe {
+        season: 22,
+        list_duration_ms: 0,
+        modes: vec![quick_mode(
+            "normal",
+            "sport",
+            serde_json::json!({"code":0,"data":{"matchList":new_entries}}),
+        )],
+    };
+
+    let started = Instant::now();
+    let summary = commit_quick_list_probe(&db, probe)?;
+    let elapsed = started.elapsed();
+
+    assert_eq!(summary.new_list_matches, 20);
+    assert!(
+        elapsed <= Duration::from_millis(250),
+        "anonymous foreground SQLite commit took {elapsed:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn foreground_partial_failure_preserves_cursor_and_queues_only_failed_mode() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let db = OwDatabase::new(temp.path().join("partial-failure.sqlite3"));
+    db.initialize()?;
+    db.connect()?.execute(
+        "INSERT INTO season_sync_cursors (season, match_kind, game_mode, request_shape, latest_begin_ts, last_checked_at, last_stop_reason) VALUES (22, 'normal', 'sport', 'explicitSeason', 1720000200, 'old-check', 'watermarkReached')",
+        [],
+    )?;
+    let probe = QuickListProbe {
+        season: 22,
+        list_duration_ms: 0,
+        modes: vec![QuickListModeProbe {
+            match_kind: "normal".to_string(),
+            game_mode: "sport".to_string(),
+            request_shape: RequestShape::ExplicitSeason,
+            payload: None,
+            error_class: Some("network".to_string()),
+        }],
+    };
+
+    let summary = commit_quick_list_probe(&db, probe)?;
+
+    assert!(summary.partial_failure);
+    assert!(!summary.data_changed);
+    let conn = db.connect()?;
+    assert_eq!(
+        conn.query_row(
+            "SELECT latest_begin_ts FROM season_sync_cursors WHERE season=22 AND match_kind='normal' AND game_mode='sport'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?,
+        1_720_000_200
+    );
+    assert_eq!(
+        conn.query_row("SELECT next_page FROM season_sync_job_modes", [], |row| row
+            .get::<_, i64>(0))?,
+        1
+    );
     Ok(())
 }
 

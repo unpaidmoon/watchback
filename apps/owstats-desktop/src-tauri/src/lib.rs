@@ -46,8 +46,6 @@ pub use queries::{get_match_detail, list_filter_options, list_matches, search_ma
 pub use redaction::redact_sensitive_json;
 pub use review::{get_onboarding_status, get_personal_season_review};
 #[doc(hidden)]
-pub use sync::rebuild_complete_season_payload;
-#[doc(hidden)]
 pub use sync::write_season_payload;
 pub use sync::{
     build_page_diagnostics, classify_quick_page, commit_quick_list_probe, dump_season_json,
@@ -64,6 +62,11 @@ pub use sync::{
     sync_season_with_progress, BackgroundRunSummary, ClaimedSeasonJob, DetailSelection,
     ModeSyncInventory, ModeWork, QuickPageDecision, RequestShape, SeasonBackgroundStatus,
     SeasonModeKey, SeasonSyncInventory, SeasonSyncStore,
+};
+#[doc(hidden)]
+pub use sync::{
+    rebuild_complete_season_payload, rebuild_snapshot_for_revision,
+    rebuild_snapshot_for_revision_with_hook, SnapshotOutcome,
 };
 
 pub fn run() {

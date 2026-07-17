@@ -325,3 +325,51 @@ fn emit(
         events(event, payload);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::BackgroundEvent;
+
+    #[test]
+    fn event_payloads_are_anonymous_and_bounded() {
+        let value = serde_json::to_value(BackgroundEvent {
+            account_scope: "anonymous-account-scope".to_string(),
+            season: 22,
+            phase: "fetchDetails".to_string(),
+            status: "running".to_string(),
+            new_matches: 3,
+            pending_details: 2,
+        })
+        .unwrap();
+        let keys = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            vec![
+                "accountScope",
+                "newMatches",
+                "pendingDetails",
+                "phase",
+                "season",
+                "status"
+            ]
+        );
+        let serialized = value.to_string().to_ascii_lowercase();
+        for forbidden in [
+            "matchid",
+            "playerid",
+            "bnet",
+            "token",
+            "authorization",
+            "cookie",
+            "raw",
+            "url",
+        ] {
+            assert!(!serialized.contains(forbidden));
+        }
+    }
+}
