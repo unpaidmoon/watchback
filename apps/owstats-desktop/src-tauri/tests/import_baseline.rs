@@ -2,8 +2,8 @@
 
 use owstats_desktop_lib::{
     get_friend_analytics, get_match_detail, get_match_favorite, import_payload_value,
-    list_filter_options, list_matches, redact_sensitive_json, save_match_favorite,
-    search_match_players, sync_import_parts, FriendAnalyticsFilters, MatchFilters, OwDatabase,
+    list_filter_options, list_matches, save_match_favorite, search_match_players,
+    sync_import_parts, FriendAnalyticsFilters, MatchFilters, OwDatabase,
 };
 use serde_json::{json, Value};
 
@@ -1433,8 +1433,8 @@ fn detail_exposes_teammates_enemies_and_redacted_raw_json() {
     assert_eq!(detail.teammates[0].hero_name, "安娜");
     assert!(!raw.contains("detail-secret"));
     assert!(!raw.contains("entry-secret"));
-    assert!(!raw.contains("customerToken"));
-    assert!(!raw.contains("token\""));
+    assert!(raw.contains("customerToken"));
+    assert!(raw.contains("token\""));
 }
 
 #[test]
@@ -1554,20 +1554,76 @@ fn imports_negative_match_ret_as_loss() {
 }
 
 #[test]
-fn redaction_removes_token_values_recursively() {
-    let redacted = redact_sensitive_json(&json!({
-        "token": "secret-a",
-        "payload": {
-            "customerToken": "secret-b",
-            "players": [{"nestedToken": "secret-c", "name": "visible"}]
-        }
-    }));
-    let text = serde_json::to_string(&redacted).unwrap();
+fn import_preserves_natural_raw_json_for_entries_details_errors_and_profile() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    import_payload_value(
+        &db,
+        &json!({
+            "season": 22,
+            "profile_card": {"data": {
+                "bnetId": "synthetic-profile",
+                "name": "Synthetic#1000",
+                "customerToken": "synthetic-profile-token"
+            }},
+            "matches": {
+                "entries": [{
+                    "matchId": "raw-storage-match",
+                    "gameMode": "SportPreset",
+                    "beginTs": 1_700_000_000_000_i64,
+                    "token": "synthetic-entry-token"
+                }],
+                "details": [{
+                    "match_id": "raw-storage-match",
+                    "match_kind": "normal",
+                    "payload": {"code": 0, "data": {"cookie": "synthetic-detail-cookie"}}
+                }],
+                "detail_errors": [{
+                    "match_id": "raw-storage-error",
+                    "error_type": "DetailFetchError",
+                    "message": "synthetic failure",
+                    "authorization": "synthetic-error-authorization"
+                }]
+            }
+        }),
+        temp.path(),
+    )
+    .unwrap();
 
-    assert!(!text.contains("secret-a"));
-    assert!(!text.contains("secret-b"));
-    assert!(!text.contains("secret-c"));
-    assert!(text.contains("visible"));
+    let conn = db.connect().unwrap();
+    let entry: String = conn
+        .query_row(
+            "SELECT raw_entry_json FROM matches WHERE match_id='raw-storage-match'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let detail: String = conn
+        .query_row(
+            "SELECT raw_detail_json FROM match_details WHERE match_id='raw-storage-match'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let error: String = conn
+        .query_row(
+            "SELECT raw_json FROM sync_errors WHERE match_id='raw-storage-error'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let profile: String = conn
+        .query_row(
+            "SELECT raw_json FROM players WHERE player_id='synthetic-profile'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    assert!(entry.contains("synthetic-entry-token"));
+    assert!(detail.contains("synthetic-detail-cookie"));
+    assert!(error.contains("synthetic-error-authorization"));
+    assert!(profile.contains("synthetic-profile-token"));
 }
 
 #[test]
@@ -1605,7 +1661,7 @@ fn import_rebuilds_match_players_for_preset_matches_only() {
     assert_eq!(player_rows, 6);
     assert_eq!(stadium_rows, 0);
     assert_eq!(friend_rows, 2);
-    assert!(!projection_raw.contains("customerToken"));
+    assert!(projection_raw.contains("customerToken"));
 }
 
 #[test]
@@ -1624,8 +1680,8 @@ fn import_persists_profile_card_for_command_center() {
         .unwrap();
 
     assert!(raw_json.contains("\"name\":\"Current#1000\""));
-    assert!(!raw_json.contains("customerToken"));
-    assert!(!raw_json.contains("customer-secret"));
+    assert!(raw_json.contains("customerToken"));
+    assert!(raw_json.contains("customer-secret"));
 }
 
 #[test]
@@ -1815,7 +1871,7 @@ fn friend_boards_use_review_names_and_return_only_two_friends() {
 }
 
 #[test]
-fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
+fn sync_import_parts_is_idempotent_and_preserves_detail_errors() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.db"));
     let project_root = temp.path();
@@ -1939,13 +1995,13 @@ fn sync_import_parts_is_idempotent_and_sanitizes_detail_errors() {
     assert_eq!(details_count, 1);
     assert_eq!(player_rows, 3);
     assert_eq!(error_rows, 1);
-    assert!(!errors_text.contains("token-secret"));
-    assert!(!errors_text.contains("customer-secret"));
-    assert!(!errors_text.contains("session-secret"));
-    assert!(!entry_text.contains("entry-auth-secret"));
-    assert!(!detail_text.contains("detail-customer-secret"));
-    assert!(!error_message.contains("token-secret"));
-    assert!(!first.latest_errors.join(" ").contains("token-secret"));
+    assert!(errors_text.contains("token-secret"));
+    assert!(errors_text.contains("customer-secret"));
+    assert!(errors_text.contains("session-secret"));
+    assert!(entry_text.contains("entry-auth-secret"));
+    assert!(detail_text.contains("detail-customer-secret"));
+    assert!(error_message.contains("token-secret"));
+    assert!(first.latest_errors.join(" ").contains("token-secret"));
 
     drop(conn);
     let recovered = sync_import_parts(

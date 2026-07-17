@@ -8,40 +8,39 @@ pub(super) fn build_full_season_payload(
     detail_errors: Vec<Value>,
     list_pages: Vec<Value>,
 ) -> Value {
-    let safe_detail_errors = sanitize_detail_errors(detail_errors);
+    let detail_errors = normalize_detail_errors(detail_errors);
     json!({
-        "input_bnet": strip_sensitive_fields(cached_player.get("input_bnet").cloned().unwrap_or(Value::Null)),
-        "resolved_bnet": strip_sensitive_fields(cached_player.get("resolved_bnet").cloned().unwrap_or(Value::Null)),
-        "profile_card": strip_sensitive_fields(cached_player.get("profile_card").cloned().unwrap_or(Value::Null)),
+        "input_bnet": cached_player.get("input_bnet").cloned().unwrap_or(Value::Null),
+        "resolved_bnet": cached_player.get("resolved_bnet").cloned().unwrap_or(Value::Null),
+        "profile_card": cached_player.get("profile_card").cloned().unwrap_or(Value::Null),
         "fetch_mode": "rust_sync",
         "season": season,
         "matches": {
             "total": entries.len(),
-            "entries": strip_sensitive_fields(Value::Array(entries)),
-            "details": strip_sensitive_fields(Value::Array(details)),
-            "detail_errors": strip_sensitive_fields(Value::Array(safe_detail_errors)),
-            "list_pages": strip_sensitive_fields(Value::Array(list_pages)),
+            "entries": entries,
+            "details": details,
+            "detail_errors": detail_errors,
+            "list_pages": list_pages,
         }
     })
 }
 
-pub(super) fn strip_sensitive_fields(value: Value) -> Value {
-    crate::redaction::sanitize_persisted_json(&value)
-}
-
-pub(super) fn sanitize_detail_errors(detail_errors: Vec<Value>) -> Vec<Value> {
+pub(super) fn normalize_detail_errors(detail_errors: Vec<Value>) -> Vec<Value> {
     detail_errors
         .into_iter()
-        .map(|error| {
-            json!({
-                "match_id": string_field(&error, "match_id"),
-                "error_type": string_field(&error, "error_type").unwrap_or_else(|| "DetailFetchError".to_string()),
-                "message": safe_error_message(
-                    &string_field(&error, "message")
-                        .or_else(|| string_field(&error, "error"))
-                        .unwrap_or_else(|| "detail fetch failed".to_string())
-                ),
-            })
+        .map(|mut error| {
+            let Some(object) = error.as_object_mut() else {
+                return error;
+            };
+            object
+                .entry("error_type".to_string())
+                .or_insert_with(|| Value::String("DetailFetchError".to_string()));
+            if !object.contains_key("message") {
+                if let Some(message) = object.get("error").cloned() {
+                    object.insert("message".to_string(), message);
+                }
+            }
+            error
         })
         .collect()
 }
@@ -114,13 +113,6 @@ pub(super) fn dedupe_entries(entries: Vec<Value>, season: i64) -> Vec<Value> {
     deduped
 }
 
-pub(super) fn safe_error_message(message: &str) -> String {
-    crate::redaction::redact_sensitive_text(message)
-        .chars()
-        .take(240)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,15 +127,16 @@ mod tests {
     }
 
     #[test]
-    fn safe_error_message_redacts_token_cookie_fragments() {
-        let message = safe_error_message(
-            "failed token=token-secret customerToken=customer-secret cookie=session-secret visible",
-        );
+    fn normalizes_detail_errors_without_removing_existing_fields() {
+        let errors = normalize_detail_errors(vec![json!({
+            "match_id": "synthetic-match",
+            "error": "token=synthetic-token",
+            "authorization": "synthetic-authorization"
+        })]);
 
-        assert!(!message.contains("token-secret"));
-        assert!(!message.contains("customer-secret"));
-        assert!(!message.contains("session-secret"));
-        assert!(message.contains("visible"));
+        assert_eq!(errors[0]["error_type"], "DetailFetchError");
+        assert_eq!(errors[0]["message"], "token=synthetic-token");
+        assert_eq!(errors[0]["authorization"], "synthetic-authorization");
     }
 
     #[test]

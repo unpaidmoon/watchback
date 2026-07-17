@@ -1,13 +1,12 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
-    benchmark_snapshot, import_payload_value_embedded, rebuild_complete_season_payload,
-    write_season_payload, OwDatabase,
+    benchmark_snapshot, import_payload_value_embedded, write_season_payload, OwDatabase,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 #[test]
-fn importer_snapshot_and_season_file_preserve_natural_fields() -> Result<()> {
+fn importer_and_direct_season_file_preserve_natural_fields() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
     let payload = json!({
@@ -67,6 +66,11 @@ fn importer_snapshot_and_season_file_preserve_natural_fields() -> Result<()> {
         [],
         |row| row.get(0),
     )?;
+    let raw_profile_json: String = conn.query_row(
+        "SELECT raw_json FROM players WHERE player_id='synthetic-player'",
+        [],
+        |row| row.get(0),
+    )?;
     drop(conn);
 
     assert_eq!(
@@ -81,16 +85,12 @@ fn importer_snapshot_and_season_file_preserve_natural_fields() -> Result<()> {
         serde_json::from_str::<Value>(&raw_error_json)?["authorization"],
         "synthetic-error-authorization"
     );
+    assert_eq!(
+        serde_json::from_str::<Value>(&raw_profile_json)?["customerToken"],
+        "synthetic-profile-token"
+    );
 
-    let rebuilt = rebuild_complete_season_payload(
-        &db,
-        22,
-        &json!({
-            "season": 22,
-            "matches": {}
-        }),
-    )?;
-    let written = write_season_payload(temp.path().join("seasons").as_path(), 22, &rebuilt)?;
+    let written = write_season_payload(temp.path().join("seasons").as_path(), 22, &payload)?;
     let written_payload: Value = serde_json::from_str(&std::fs::read_to_string(written)?)?;
 
     assert_eq!(

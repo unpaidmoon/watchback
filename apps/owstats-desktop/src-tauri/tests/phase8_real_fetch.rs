@@ -9,7 +9,8 @@ use owstats_desktop_lib::{
     sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
-    sync_season_with_current_account_credentials_path_output_dir_base_url, OwDatabase, SyncMode,
+    sync_season_with_current_account_credentials_path_output_dir_base_url, write_season_payload,
+    OwDatabase, SyncMode,
 };
 use rusqlite::params;
 use std::io::{Read, Write};
@@ -365,7 +366,7 @@ async fn dashen_client_retries_http_429_with_backoff() {
 }
 
 #[tokio::test]
-async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
+async fn full_season_fetch_preserves_naturally_occurring_upstream_fields() {
     use owstats_desktop_lib::dashen_client::DashenCredentials;
     use owstats_desktop_lib::season_fetch::{fetch_full_season_with_base_url, FullSeasonRequest};
 
@@ -390,6 +391,10 @@ async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
     .await
     .unwrap();
 
+    let temp = tempfile::tempdir().unwrap();
+    let written = write_season_payload(temp.path(), 23, &fetch.payload).unwrap();
+    let written_payload: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(written).unwrap()).unwrap();
     let text = serde_json::to_string(&fetch.payload).unwrap();
     assert_eq!(fetch.entries, 3);
     assert_eq!(fetch.details, 2);
@@ -425,9 +430,16 @@ async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
         .as_array()
         .unwrap()
         .is_empty());
+    assert_eq!(
+        fetch.payload["matches"]["details"][0]["payload"]["data"]["customerToken"],
+        "detail-secret"
+    );
+    assert_eq!(
+        written_payload["matches"]["details"][0]["payload"]["data"]["customerToken"],
+        "detail-secret"
+    );
     assert!(fetch.payload.get("customer_token").is_none());
     assert!(!text.contains("player-customer-token"));
-    assert!(!text.contains("detail-secret"));
     assert!(!text.contains("account-auth-token"));
 }
 

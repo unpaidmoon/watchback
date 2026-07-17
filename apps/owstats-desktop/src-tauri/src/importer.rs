@@ -1,7 +1,6 @@
 use crate::db::OwDatabase;
 use crate::match_evaluation::refresh_match_evaluations_conn;
 use crate::models::ImportSummary;
-use crate::redaction::{redact_sensitive_json, redact_sensitive_text, sanitize_persisted_json};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -81,8 +80,6 @@ fn import_payload_value_with_lookups(
     lookups: Lookups,
     behavior: ImportBehavior,
 ) -> Result<ImportSummary> {
-    let sanitized_payload = sanitize_persisted_json(payload);
-    let payload = &sanitized_payload;
     db.initialize()?;
     let conn = db.connect()?;
     let season = payload.get("season").and_then(Value::as_i64).unwrap_or(0);
@@ -291,8 +288,7 @@ fn import_payload_value_with_lookups(
                 string_field(error, "match_id"),
                 string_field(error, "error_type"),
                 string_field(error, "error")
-                    .or_else(|| string_field(error, "message"))
-                    .map(|message| redact_sensitive_text(&message)),
+                    .or_else(|| string_field(error, "message")),
                 serde_json::to_string(error)?,
                 now,
             ],
@@ -668,7 +664,6 @@ fn upsert_profile_card(tx: &rusqlite::Transaction<'_>, payload: &Value, now: &st
         return Ok(());
     }
     let display_name = string_field(profile, "name").unwrap_or_else(|| bnet_id.clone());
-    let redacted = redact_sensitive_json(profile);
     tx.execute(
         r#"
         INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at)
@@ -683,7 +678,7 @@ fn upsert_profile_card(tx: &rusqlite::Transaction<'_>, payload: &Value, now: &st
             bnet_id,
             bnet_id,
             display_name,
-            serde_json::to_string(&redacted)?,
+            serde_json::to_string(profile)?,
             now
         ],
     )?;
@@ -811,7 +806,7 @@ fn insert_player_rows(
                 int_field(item, "finalHit"),
                 int_field(item, "targetCompetingTime"),
                 role_type,
-                serde_json::to_string(&strip_sensitive_json(item))?,
+                serde_json::to_string(item)?,
                 now,
             ],
         )?;
@@ -1048,24 +1043,6 @@ fn value_to_string(item: &Value) -> Option<String> {
     } else {
         None
     }
-}
-
-fn strip_sensitive_json(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .filter(|(key, _)| !is_sensitive_key(key))
-                .map(|(key, value)| (key.clone(), strip_sensitive_json(value)))
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.iter().map(strip_sensitive_json).collect()),
-        _ => value.clone(),
-    }
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-    let lowered = key.to_ascii_lowercase();
-    lowered.contains("token") || lowered.contains("cookie")
 }
 
 #[allow(clippy::items_after_test_module)] // Public importer helpers intentionally follow lookup unit tests.

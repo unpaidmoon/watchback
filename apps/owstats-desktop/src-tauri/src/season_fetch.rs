@@ -562,7 +562,7 @@ async fn fetch_details(
             Err(error) => Err(json!({
                 "match_id": match_id,
                 "error_type": "DetailFetchError",
-                "message": safe_error_message(&error.to_string()),
+                "message": error.to_string(),
             })),
         })
     }))
@@ -610,7 +610,7 @@ fn build_payload(
             "list_pages": list_pages,
         }
     });
-    crate::redaction::sanitize_persisted_json(&payload)
+    payload
 }
 
 pub(crate) fn extract_match_entries(payload: &Value) -> Vec<Value> {
@@ -822,11 +822,4 @@ fn is_fight_match(entry: &Value) -> bool {
 
 fn string_field(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_string)
-}
-
-fn safe_error_message(message: &str) -> String {
-    crate::redaction::redact_sensitive_text(message)
-        .chars()
-        .take(240)
-        .collect()
 }
