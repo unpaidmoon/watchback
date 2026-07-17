@@ -479,6 +479,11 @@ async fn dashen_client_returns_unexpected_redirect_status_without_panicking() {
         assert!(error.contains("unexpected HTTP status 302 Found"));
         assert_ne!(error, "unexpected HTTP status 302 Found");
     }
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests
+        .iter()
+        .any(|request| request.body.contains(r#""name":"Synthetic#1234""#)));
 }
 
 #[tokio::test]
@@ -2156,11 +2161,16 @@ fn spawn_status_server(status: &'static str, requests_to_serve: usize) -> Record
             let Ok(read) = stream.read(&mut buffer) else {
                 continue;
             };
-            let request = String::from_utf8_lossy(&buffer[..read]);
+            let mut request_bytes = buffer[..read].to_vec();
+            read_remaining_body(&mut stream, &mut request_bytes);
+            let request = String::from_utf8_lossy(&request_bytes);
             captured.lock().unwrap().push(RecordedRequest {
                 first_line: request.lines().next().unwrap_or_default().to_string(),
                 headers: String::new(),
-                body: String::new(),
+                body: request
+                    .split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_string())
+                    .unwrap_or_default(),
             });
             let response =
                 format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
