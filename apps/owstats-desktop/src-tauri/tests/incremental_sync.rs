@@ -1103,9 +1103,10 @@ fn rebuilt_snapshot_contains_complete_unmodified_sqlite_history() {
             .len(),
         1
     );
-    assert!(rebuilt["matches"]["detail_errors"][0]
-        .get("authorization")
-        .is_none());
+    assert_eq!(
+        rebuilt["matches"]["detail_errors"][0]["authorization"],
+        "db-authorization"
+    );
     assert_eq!(entries[0]["matchId"], "snapshot-new");
     assert_eq!(entries[1]["matchId"], "snapshot-old");
     assert_eq!(rebuilt["profile_card"]["name"], "synthetic-profile");

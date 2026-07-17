@@ -4,6 +4,7 @@ use owstats_desktop_lib::{
     write_season_payload, OwDatabase,
 };
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 #[test]
 fn importer_snapshot_and_season_file_preserve_natural_fields() -> Result<()> {
@@ -112,6 +113,7 @@ fn importer_snapshot_and_season_file_preserve_natural_fields() -> Result<()> {
 fn benchmark_snapshot_reports_only_aggregate_snapshot_metrics() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
+    let sentinel = "benchmark-sentinel-not-in-report";
     import_payload_value_embedded(
         &db,
         &json!({
@@ -120,7 +122,8 @@ fn benchmark_snapshot_reports_only_aggregate_snapshot_metrics() -> Result<()> {
                 "entries": [{
                     "matchId": "benchmark-match",
                     "gameMode": "sport",
-                    "beginTs": 1720000000
+                    "beginTs": 1720000000,
+                    "benchmarkSentinel": sentinel
                 }],
                 "details": [{
                     "match_id": "benchmark-match",
@@ -144,5 +147,27 @@ fn benchmark_snapshot_reports_only_aggregate_snapshot_metrics() -> Result<()> {
     assert_eq!(benchmark.details, 1);
     assert_eq!(benchmark.errors, 1);
     assert_eq!(benchmark.output_bytes, std::fs::metadata(output)?.len());
+    let serialized_benchmark = serde_json::to_string(&benchmark)?;
+    let benchmark_keys = serde_json::from_str::<Value>(&serialized_benchmark)?
+        .as_object()
+        .expect("benchmark must serialize as an object")
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        benchmark_keys,
+        BTreeSet::from([
+            "season".to_string(),
+            "entries".to_string(),
+            "details".to_string(),
+            "errors".to_string(),
+            "assembleMs".to_string(),
+            "serializeMs".to_string(),
+            "writeAndSyncMs".to_string(),
+            "totalMs".to_string(),
+            "outputBytes".to_string(),
+        ])
+    );
+    assert!(!serialized_benchmark.contains(sentinel));
     Ok(())
 }

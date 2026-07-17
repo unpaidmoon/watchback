@@ -26,6 +26,19 @@ pub struct SnapshotBenchmark {
     pub output_bytes: u64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_output_parent_uses_current_directory_for_bare_filename() {
+        assert_eq!(
+            benchmark_output_parent(Path::new("benchmark.json")),
+            Path::new(".")
+        );
+    }
+}
+
 pub fn benchmark_snapshot(
     db: &OwDatabase,
     season: i64,
@@ -35,7 +48,7 @@ pub fn benchmark_snapshot(
     let total_started = Instant::now();
 
     let assemble_started = Instant::now();
-    let payload = rebuild_complete_season_payload(
+    let payload = rebuild_complete_season_payload_initialized(
         db,
         season,
         &json!({
@@ -44,27 +57,16 @@ pub fn benchmark_snapshot(
         }),
     )?;
     let assemble_ms = assemble_started.elapsed().as_millis() as u64;
-    let entries = payload
-        .pointer("/matches/entries")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let details = payload
-        .pointer("/matches/details")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let errors = payload
-        .pointer("/matches/detail_errors")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
+    let entries = snapshot_array_count(&payload, "entries")?;
+    let details = snapshot_array_count(&payload, "details")?;
+    let errors = snapshot_array_count(&payload, "detail_errors")?;
 
     let serialize_started = Instant::now();
     let bytes = serde_json::to_vec_pretty(&payload)?;
     let serialize_ms = serialize_started.elapsed().as_millis() as u64;
 
     let write_and_sync_started = Instant::now();
-    let parent = output
-        .parent()
-        .ok_or_else(|| anyhow!("benchmark snapshot destination has no parent"))?;
+    let parent = benchmark_output_parent(output);
     std::fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(&bytes)?;
@@ -181,6 +183,14 @@ pub fn rebuild_complete_season_payload(
     current_fetch_payload: &Value,
 ) -> Result<Value> {
     db.initialize()?;
+    rebuild_complete_season_payload_initialized(db, season, current_fetch_payload)
+}
+
+fn rebuild_complete_season_payload_initialized(
+    db: &OwDatabase,
+    season: i64,
+    current_fetch_payload: &Value,
+) -> Result<Value> {
     let conn = db.connect()?;
     let transaction = conn.unchecked_transaction()?;
 
@@ -229,6 +239,21 @@ pub fn rebuild_complete_season_payload(
     matches.insert("detail_errors".to_string(), Value::Array(detail_errors));
 
     Ok(sanitize_snapshot_value(&rebuilt))
+}
+
+fn benchmark_output_parent(output: &Path) -> &Path {
+    output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn snapshot_array_count(payload: &Value, field: &str) -> Result<usize> {
+    payload
+        .pointer(&format!("/matches/{field}"))
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .ok_or_else(|| anyhow!("rebuilt snapshot matches.{field} must be an array"))
 }
 
 fn sanitize_snapshot_value(value: &Value) -> Value {
