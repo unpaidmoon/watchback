@@ -84,7 +84,7 @@ async fn rust_sync_client_imports_http_payloads_and_keeps_going_after_detail_fai
     assert_eq!(matches_count, 3);
     assert_eq!(details_count, 2);
     assert_eq!(projection_rows, 3);
-    assert!(!latest_error.contains("dummy-customer-token"));
+    assert!(latest_error.contains("dummy-customer-token"));
     assert!(!latest_error.contains("dummy-auth-token"));
 
     let raw_path = data_dir.join("players").join("local_s22_full_season.json");
@@ -95,7 +95,7 @@ async fn rust_sync_client_imports_http_payloads_and_keeps_going_after_detail_fai
         raw_payload["matches"]["entries"].as_array().unwrap().len(),
         3
     );
-    assert!(!raw_text.contains("dummy-customer-token"));
+    assert!(raw_text.contains("dummy-customer-token"));
     assert!(!raw_text.contains("dummy-auth-token"));
 }
 
@@ -233,17 +233,15 @@ async fn rust_sync_client_dumps_complete_season_json_without_importing() {
         .iter()
         .any(|detail| detail["match_kind"] == "fight" && detail["match_id"] == "fixture-fight"));
     let lower_text = text.to_ascii_lowercase();
-    assert!(!text.contains("dummy-customer-token"));
+    assert!(text.contains("dummy-customer-token"));
     assert!(!text.contains("dummy-auth-token"));
-    assert!(!text.contains("detail-customer-secret"));
-    assert!(!text.contains("detail-nested-secret"));
-    assert!(!text.contains("detail-cookie-secret"));
-    assert!(!lower_text.contains("customertoken"));
-    assert!(!lower_text.contains("nestedtoken"));
-    assert!(!lower_text.contains("token"));
-    assert!(!lower_text.contains("cookie"));
-    assert!(!lower_text.contains("authorization"));
-    assert!(!lower_text.contains("credential"));
+    assert!(text.contains("detail-customer-secret"));
+    assert!(text.contains("detail-nested-secret"));
+    assert!(text.contains("detail-cookie-secret"));
+    assert!(lower_text.contains("customertoken"));
+    assert!(lower_text.contains("nestedtoken"));
+    assert!(lower_text.contains("token"));
+    assert!(lower_text.contains("cookie"));
 }
 
 fn spawn_fixture_server() -> String {

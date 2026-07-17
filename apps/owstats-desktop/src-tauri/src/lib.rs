@@ -24,7 +24,6 @@ mod models;
 pub mod player_target;
 mod queries;
 pub mod ranking;
-mod redaction;
 mod review;
 pub mod season_fetch;
 mod settings;
@@ -43,7 +42,6 @@ pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSIO
 pub use match_favorites::{delete_match_favorite, get_match_favorite, save_match_favorite};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
-pub use redaction::redact_sensitive_json;
 pub use review::{get_onboarding_status, get_personal_season_review};
 #[doc(hidden)]
 pub use sync::write_season_payload;

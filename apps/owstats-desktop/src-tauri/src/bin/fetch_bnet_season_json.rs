@@ -375,7 +375,7 @@ fn search_payload_diagnostic(payload: &serde_json::Value) -> String {
         .get("message")
         .or_else(|| payload.get("msg"))
         .and_then(serde_json::Value::as_str)
-        .map(redact_fragment)
+        .map(str::to_owned)
         .unwrap_or_else(|| "missing".to_string());
     let data = payload.get("data");
     let data_kind = match data {
@@ -390,11 +390,7 @@ fn search_payload_diagnostic(payload: &serde_json::Value) -> String {
     let data_keys = data
         .and_then(serde_json::Value::as_object)
         .map(|map| {
-            let mut keys = map
-                .keys()
-                .filter(|key| !is_sensitive_key(key))
-                .cloned()
-                .collect::<Vec<_>>();
+            let mut keys = map.keys().cloned().collect::<Vec<_>>();
             keys.sort();
             keys.join(",")
         })
@@ -403,40 +399,13 @@ fn search_payload_diagnostic(payload: &serde_json::Value) -> String {
     let top_keys = payload
         .as_object()
         .map(|map| {
-            let mut keys = map
-                .keys()
-                .filter(|key| !is_sensitive_key(key))
-                .cloned()
-                .collect::<Vec<_>>();
+            let mut keys = map.keys().cloned().collect::<Vec<_>>();
             keys.sort();
             keys.join(",")
         })
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "-".to_string());
     format!("search payload summary: code={code} message={message} top_keys={top_keys} data_kind={data_kind} data_keys={data_keys}")
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    key.contains("token")
-        || key.contains("cookie")
-        || key.contains("authorization")
-        || key.contains("credential")
-}
-
-fn redact_fragment(value: &str) -> String {
-    value
-        .split_whitespace()
-        .map(|part| {
-            let lower = part.to_ascii_lowercase();
-            if lower.contains("token") || lower.contains("cookie") {
-                "[REDACTED]".to_string()
-            } else {
-                part.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn project_root() -> Result<PathBuf> {
@@ -520,5 +489,24 @@ mod tests {
         assert_eq!(args.max_http_attempts, 3);
         assert_eq!(args.retry_base_ms, 5000);
         assert!(args.include_fight);
+    }
+
+    #[test]
+    fn search_payload_diagnostic_preserves_message_and_schema_keys() {
+        let payload = serde_json::json!({
+            "code": 401,
+            "message": "token=synthetic-diagnostic-value",
+            "customer_token": "synthetic-customer-value",
+            "data": {
+                "cookie": "synthetic-cookie-value",
+                "safe": true
+            }
+        });
+
+        let diagnostic = search_payload_diagnostic(&payload);
+
+        assert!(diagnostic.contains("token=synthetic-diagnostic-value"));
+        assert!(diagnostic.contains("customer_token"));
+        assert!(diagnostic.contains("cookie,safe"));
     }
 }
