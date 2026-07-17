@@ -7,7 +7,6 @@ const ignoredTestPaths = ["/tests/", ".test.", "/fixtures/", "/docs/superpowers/
 const knownSafeSourcePaths = new Set([
   "apps/owstats-desktop/scripts/prepareAssets.mjs",
   "apps/owstats-desktop/scripts/verifyDistPaths.mjs",
-  "apps/owstats-desktop/src-tauri/src/redaction.rs",
 ]);
 const textExtensions = new Set([".cjs", ".css", ".html", ".json", ".js", ".md", ".mjs", ".ps1", ".rs", ".toml", ".ts", ".tsx", ".yml", ".yaml"]);
 

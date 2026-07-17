@@ -317,7 +317,7 @@ mod tests {
                 "payload": {
                     "code": 0,
                     "data": [],
-                    "customerToken": "private-token"
+                    "customerToken": "synthetic-private-token"
                 }
             })],
             vec![],
@@ -328,7 +328,7 @@ mod tests {
         let (details_count, message, raw_json, errors_count) = persisted_error_state(&db);
         assert_eq!(details_count, 0);
         assert_eq!(message, "详情响应无有效数据");
-        assert!(!raw_json.contains("private-token"));
+        assert!(!raw_json.contains("synthetic-private-token"));
         assert_eq!(summary.failed_details, 1);
         assert_eq!(summary.latest_errors, vec!["详情响应无有效数据"]);
         assert_eq!(errors_count, 1);
