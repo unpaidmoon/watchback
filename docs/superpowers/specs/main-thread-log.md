@@ -36,10 +36,9 @@ details. Execution threads bring back concise evidence instead.
 - Confirm commands run from `D:\Codex\OW_data\owstats-local` or a deliberate
   subdirectory under it.
 - All user-facing frontend text must be Chinese.
-- Never print, commit, or expose `OW_DASHEN_TOKEN`, `customerToken`,
-  `data/.dashen_credentials.json`, cookies or browser storage under
-  `data/chrome-dashen-profile/`, or raw player privacy identifiers from local
-  API dumps.
+- 不得主动把 `OW_DASHEN_TOKEN`、`customerToken`、
+  `data/.dashen_credentials.json`、cookie、`data/chrome-dashen-profile/`
+  下的浏览器存储或本地 API dump 的玩家私密标识复制到日志、提交、发布包、共享配置、账号/event 表面或新的 DTO/payload。上游自然出现的运行时 raw JSON 与错误文本仍按 2026-07-18 设计原样通过。
 - 正常对局的既有 raw JSON 查看面按存储内容原样返回；不得为显示重新加入运行时脱敏。战斗对局 raw JSON 为 `Null` 以及显示名/GUID 兜底仍是产品/schema 决策。
 - Do not touch generated artifacts, build output, `node_modules`, `target`,
   browser profiles, or local data dumps.
