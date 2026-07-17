@@ -379,6 +379,11 @@ assertEqual(
   "empty errors use the stable product fallback",
 );
 assertEqual(
+  productErrorMessage([]),
+  "请求失败，请稍后重新加载。",
+  "values with an empty string representation use the stable product fallback",
+);
+assertEqual(
   /function runAddAccount\(\)\s*\{\s*if \(!hasDesktopBackend\(\)\) \{\s*setError\(browserPreviewLoginHint\);\s*return Promise\.resolve\(false\);\s*\}[\s\S]*?invoke: addAccount/.test(onboardingSource),
   true,
   "add-account browser preview selects its hint before invoking the backend",

@@ -451,7 +451,7 @@ pub fn publish_add_account(
     manager: &AccountContextManager,
     capture: LoginCapture,
 ) -> Result<AccountLoginResult> {
-    let mut result = publish_add_account_inner(manager, capture).map_err(publication_error)?;
+    let mut result = publish_add_account_inner(manager, capture)?;
     if let Some(account_id) = result
         .account_id
         .as_deref()
@@ -517,11 +517,7 @@ pub fn publish_relogin_account(
     expected_account_id: &AccountId,
     capture: LoginCapture,
 ) -> Result<AccountLoginResult> {
-    publish_relogin_account_inner(manager, expected_account_id, capture).map_err(publication_error)
-}
-
-fn publication_error(error: anyhow::Error) -> anyhow::Error {
-    error
+    publish_relogin_account_inner(manager, expected_account_id, capture)
 }
 
 pub(crate) async fn capture_and_publish_relogin<F, Fut, R, C>(
@@ -537,7 +533,7 @@ where
     R: LoginProgressReporter,
     C: FnOnce() -> bool,
 {
-    manager.prepare_login_capture().map_err(publication_error)?;
+    manager.prepare_login_capture()?;
     let capture = match capture().await {
         Ok(capture) => capture,
         Err(_) if was_cancelled() => {
@@ -578,7 +574,7 @@ where
     R: LoginProgressReporter,
     C: FnOnce() -> bool,
 {
-    manager.prepare_login_capture().map_err(publication_error)?;
+    manager.prepare_login_capture()?;
     let capture = match capture().await {
         Ok(capture) => capture,
         Err(_) if was_cancelled() => {

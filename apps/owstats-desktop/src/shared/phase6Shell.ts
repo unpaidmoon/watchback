@@ -127,10 +127,11 @@ export function commandCenterMetrics(status: OnboardingStatus | null): CommandMe
 }
 
 export function productErrorMessage(error: unknown): string {
-  if (error === null || error === undefined || error === "") {
+  if (error === null || error === undefined) {
     return "请求失败，请稍后重新加载。";
   }
-  return String(error);
+  const message = String(error);
+  return message === "" ? "请求失败，请稍后重新加载。" : message;
 }
 
 export function hasDesktopBackend(host: unknown = globalThis): boolean {
