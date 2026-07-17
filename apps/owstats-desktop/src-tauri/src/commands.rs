@@ -655,8 +655,12 @@ fn active_account(
     accounts.active_snapshot().map_err(to_message)
 }
 
+pub fn runtime_error_message(error: impl std::fmt::Display) -> String {
+    error.to_string()
+}
+
 fn to_message(error: impl std::fmt::Display) -> String {
-    crate::redaction::safe_error_message(error)
+    runtime_error_message(error)
 }
 
 #[cfg(test)]

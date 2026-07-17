@@ -34,6 +34,7 @@ mod sync_coordinator;
 
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use background_sync::{BackgroundEventSink, BackgroundSeasonSyncManager};
+pub use commands::runtime_error_message;
 pub use db::OwDatabase;
 pub use importer::{
     import_full_season_payload, import_incremental_payload_value_embedded, import_payload_value,

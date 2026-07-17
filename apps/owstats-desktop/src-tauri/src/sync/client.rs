@@ -139,7 +139,7 @@ pub(super) async fn get_json_with_retry(
             Ok(response) => response,
             Err(error) => {
                 if attempt == MAX_HTTP_ATTEMPTS {
-                    return Err(anyhow!(safe_request_error(context, &error)));
+                    return Err(anyhow!("{context}: {error}"));
                 }
                 tokio::time::sleep(retry_delay(attempt)).await;
                 continue;
@@ -151,7 +151,8 @@ pub(super) async fn get_json_with_retry(
             continue;
         }
         if !status.is_success() {
-            return Err(anyhow!(safe_status_error(context, status)));
+            let error = response.error_for_status_ref().unwrap_err();
+            return Err(anyhow!("{context}: {error}"));
         }
         let payload = response
             .json()
@@ -174,20 +175,4 @@ pub(super) fn should_throttle_remote(endpoint: &str) -> bool {
         || endpoint.starts_with("http://localhost:")
         || endpoint.starts_with("https://127.0.0.1:")
         || endpoint.starts_with("https://localhost:"))
-}
-
-pub(super) fn safe_status_error(context: &str, status: StatusCode) -> String {
-    format!("{context} request returned HTTP {}", status.as_u16())
-}
-
-pub(super) fn safe_request_error(context: &str, error: &reqwest::Error) -> String {
-    if error.is_timeout() {
-        format!("{context} request timed out")
-    } else if error.is_connect() {
-        format!("{context} request could not connect")
-    } else if error.is_decode() {
-        format!("{context} response could not be decoded")
-    } else {
-        format!("{context} request failed")
-    }
 }

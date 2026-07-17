@@ -1,7 +1,7 @@
 use super::{ClaimedSeasonJob, RequestShape, SeasonSyncStore};
 use crate::dashen_client::DashenClient;
 use crate::season_fetch::FullSeasonRequest;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use chrono::Utc;
 use futures_util::{stream, StreamExt};
 use rusqlite::{params, OptionalExtension};
@@ -34,7 +34,7 @@ pub async fn run_background_job_once(
         Ok(summary) => Ok(summary),
         Err(error) => {
             mark_job_retryable(store, &job.job_id, "background")?;
-            Err(anyhow!(crate::redaction::safe_error_message(error)))
+            Err(error)
         }
     }
 }
@@ -108,10 +108,10 @@ async fn run_claimed_job(
                         "source_match": entry,
                         "payload": payload,
                     })),
-                    Err(_) => Err(json!({
+                    Err(error) => Err(json!({
                         "match_id": match_id,
                         "error_type": "DetailFetchError",
-                        "message": "详情请求失败",
+                        "message": error.to_string(),
                     })),
                 }
             }

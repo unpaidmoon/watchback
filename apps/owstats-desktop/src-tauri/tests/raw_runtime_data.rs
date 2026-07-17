@@ -1,9 +1,18 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
-    benchmark_snapshot, import_payload_value_embedded, write_season_payload, OwDatabase,
+    benchmark_snapshot, import_payload_value_embedded, runtime_error_message, write_season_payload,
+    OwDatabase,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+
+#[test]
+fn command_error_conversion_preserves_original_text() {
+    let source =
+        "request failed token=synthetic-error-token Authorization: Bearer synthetic-header";
+
+    assert_eq!(runtime_error_message(anyhow::anyhow!(source)), source,);
+}
 
 #[test]
 fn importer_and_direct_season_file_preserve_natural_fields() -> Result<()> {

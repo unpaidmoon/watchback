@@ -325,7 +325,7 @@ async fn background_job_fetches_missing_detail_and_rebuilds_snapshot() -> Result
 }
 
 #[tokio::test]
-async fn failed_detail_keeps_job_retryable_and_pending_count() -> Result<()> {
+async fn failed_detail_preserves_original_error_and_keeps_job_retryable() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let db = OwDatabase::new(temp.path().join("retryable.sqlite3"));
     seed_list_match(&db)?;
@@ -375,6 +375,13 @@ async fn failed_detail_keeps_job_retryable_and_pending_count() -> Result<()> {
         1
     );
     assert_eq!(store.season_status(22)?.retryable, true);
+    let message: String = conn.query_row(
+        "SELECT message FROM sync_errors WHERE season=22 AND match_id='background-new'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(message.contains("HTTP status server error (503 Service Unavailable)"));
+    assert!(message.contains("token=synthetic-player-key"));
     Ok(())
 }
 

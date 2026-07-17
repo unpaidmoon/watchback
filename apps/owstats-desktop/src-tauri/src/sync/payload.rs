@@ -118,15 +118,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_errors_do_not_include_request_urls_or_tokens() {
-        let message = safe_status_error("match list", StatusCode::TOO_MANY_REQUESTS);
-
-        assert_eq!(message, "match list request returned HTTP 429");
-        assert!(!message.contains("http"));
-        assert!(!message.contains("token"));
-    }
-
-    #[test]
     fn normalizes_detail_errors_without_removing_existing_fields() {
         let errors = normalize_detail_errors(vec![json!({
             "match_id": "synthetic-match",

@@ -426,6 +426,11 @@ async fn full_season_fetch_preserves_naturally_occurring_upstream_fields() {
             .len(),
         1
     );
+    let detail_error = fetch.payload["matches"]["detail_errors"][0]["message"]
+        .as_str()
+        .expect("detail fetch error has a message");
+    assert!(detail_error.contains("HTTP status server error (500 Internal Server Error)"));
+    assert!(detail_error.contains("token=player-customer-token"));
     assert!(!fetch.payload["matches"]["list_pages"]
         .as_array()
         .unwrap()
@@ -439,7 +444,7 @@ async fn full_season_fetch_preserves_naturally_occurring_upstream_fields() {
         "detail-secret"
     );
     assert!(fetch.payload.get("customer_token").is_none());
-    assert!(!text.contains("player-customer-token"));
+    assert!(text.contains("player-customer-token"));
     assert!(!text.contains("account-auth-token"));
 }
 
@@ -1529,17 +1534,21 @@ async fn quick_budget_defers_deep_history_until_full_fetch_and_rebuilds_a_safe_s
     let snapshot = std::fs::read_to_string(season_dir.join("local_s23_full_season.json")).unwrap();
     assert!(snapshot.contains("known-sport"));
     assert!(snapshot.contains("deep-late-match"));
-    for sensitive in [
-        "synthetic-account-secret",
-        "synthetic-player-key",
+    for credential_from_request in ["synthetic-account-secret", "synthetic-player-key"] {
+        assert!(
+            !snapshot.contains(credential_from_request),
+            "rebuilt snapshot must not append {credential_from_request} from the request"
+        );
+    }
+    for upstream_detail_field in [
         "synthetic-detail-token",
         "synthetic-authorization-secret",
         "customerToken",
         "authorization",
     ] {
         assert!(
-            !snapshot.contains(sensitive),
-            "rebuilt snapshot leaked {sensitive}"
+            snapshot.contains(upstream_detail_field),
+            "rebuilt snapshot must preserve {upstream_detail_field} from the upstream detail"
         );
     }
 }
@@ -1930,13 +1939,14 @@ async fn full_fetch_invalid_refresh_preserves_old_detail_and_player_index_and_re
             |row| row.get(0),
         )
         .unwrap();
+    assert!(error_message.contains("HTTP status server error (500 Internal Server Error)"));
+    assert!(error_message.contains("token=synthetic-player-key"));
     assert!(!error_message.contains("synthetic-account-secret"));
-    assert!(!error_message.contains("synthetic-player-key"));
     let snapshot = std::fs::read_to_string(season_dir.join("local_s23_full_season.json")).unwrap();
     assert!(snapshot.contains("metric-invalid"));
     assert!(snapshot.contains("old-player"));
     assert!(!snapshot.contains("synthetic-account-secret"));
-    assert!(!snapshot.contains("synthetic-player-key"));
+    assert!(snapshot.contains("synthetic-player-key"));
 }
 
 #[derive(Clone, Debug)]
