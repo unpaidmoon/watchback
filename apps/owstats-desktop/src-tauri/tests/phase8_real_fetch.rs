@@ -5,6 +5,7 @@ use owstats_desktop_lib::player_target::{
     PlayerTarget,
 };
 use owstats_desktop_lib::{
+    quick_list_update_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
@@ -1358,22 +1359,20 @@ async fn unchanged_quick_update_uses_one_list_request_per_canonical_mode_and_no_
     seed_complete_canonical_mode_watermarks(&db);
     let server = spawn_quick_scan_server(QuickScanScenario::Known);
 
-    let summary = sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+    let summary = quick_list_update_with_credentials_and_target_paths_base_url(
         &db,
-        &season_dir,
         &credential_path,
         &target_path,
         23,
-        SyncMode::QuickUpdate,
         &format!("{}/customer", server.base_url),
-        |_| {},
     )
     .await
     .unwrap();
 
-    assert_eq!(summary.mode, SyncMode::QuickUpdate);
-    assert!(!summary.quick_scan_limited);
-    assert_eq!(summary.details_requested, 0);
+    assert!(!summary.data_changed);
+    assert_eq!(summary.new_list_matches, 0);
+    assert_eq!(summary.pending_details, 0);
+    assert!(!season_dir.exists());
     let pages = quick_list_pages(&server);
     assert_eq!(
         pages.len(),
@@ -1413,6 +1412,11 @@ async fn unchanged_quick_update_uses_one_list_request_per_canonical_mode_and_no_
             .filter(|request| request.first_line.contains("/queryMatchInfo"))
             .count(),
         0
+    );
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        5,
+        "quick foreground must issue only five page-one list requests"
     );
 }
 

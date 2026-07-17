@@ -7,7 +7,7 @@ use std::time::Instant;
 
 const NORMAL_MODES: &[&str] = &["sport", "leisure"];
 const FIGHT_MODES: &[&str] = &["QuickFight", "LeisureFight", "SportFight"];
-const DASHEN_CURRENT_SEASON: i64 = 23;
+pub(crate) const DASHEN_CURRENT_SEASON: i64 = 23;
 pub const QUICK_UPDATE_MAX_PAGES_PER_MODE: i64 = 5;
 
 #[derive(Debug, Clone)]
@@ -34,6 +34,88 @@ pub struct FullSeasonFetch {
     pub detail_duration_ms: u64,
     pub quick_scan_limited: bool,
     pub quick_scan_stop_reasons: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickListModeProbe {
+    pub match_kind: String,
+    pub game_mode: String,
+    pub request_shape: crate::sync::RequestShape,
+    pub payload: Option<Value>,
+    pub error_class: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickListProbe {
+    pub season: i64,
+    pub modes: Vec<QuickListModeProbe>,
+    pub list_duration_ms: u64,
+}
+
+pub async fn fetch_quick_list_pages(request: &FullSeasonRequest) -> Result<QuickListProbe> {
+    if request.season <= 0 {
+        return Err(anyhow!("season must be greater than 0"));
+    }
+    if request.customer_token.trim().is_empty() {
+        return Err(anyhow!("请先绑定目标玩家"));
+    }
+    let client = DashenClient::new_with_rate_limit(
+        request.credentials.clone(),
+        request.customer_base_url.clone(),
+        DashenRateLimitConfig::default(),
+    )?;
+    let started = Instant::now();
+    let shape = crate::sync::RequestShape::for_season(request.season);
+    let request_season = match shape {
+        crate::sync::RequestShape::ImplicitCurrentSeason => None,
+        crate::sync::RequestShape::ExplicitSeason => Some(request.season),
+    };
+    let modes = [
+        ("normal".to_string(), "sport".to_string(), false),
+        ("normal".to_string(), "leisure".to_string(), false),
+        ("fight".to_string(), "QuickFight".to_string(), true),
+        ("fight".to_string(), "LeisureFight".to_string(), true),
+        ("fight".to_string(), "SportFight".to_string(), true),
+    ];
+    let results = stream::iter(modes.into_iter().map(|(kind, mode, fight)| {
+        let client = &client;
+        let token = &request.customer_token;
+        async move {
+            let result = if fight {
+                client
+                    .fight_query_match_list(token, &mode, 1, request_season)
+                    .await
+            } else {
+                client
+                    .query_match_list(token, &mode, 1, request_season)
+                    .await
+            };
+            match result {
+                Ok(payload) => QuickListModeProbe {
+                    match_kind: kind,
+                    game_mode: mode,
+                    request_shape: shape,
+                    payload: Some(payload),
+                    error_class: None,
+                },
+                Err(_) => QuickListModeProbe {
+                    match_kind: kind,
+                    game_mode: mode,
+                    request_shape: shape,
+                    payload: None,
+                    error_class: Some("network".to_string()),
+                },
+            }
+        }
+    }))
+    .buffer_unordered(5)
+    .collect::<Vec<_>>()
+    .await;
+    Ok(QuickListProbe {
+        season: request.season,
+        modes: results,
+        list_duration_ms: started.elapsed().as_millis() as u64,
+    })
 }
 
 pub async fn fetch_full_season_with_base_url(
@@ -619,9 +701,7 @@ async fn fetch_quick_history_for_mode(
                     break;
                 }
                 crate::sync::QuickPageDecision::Continue => {}
-                crate::sync::QuickPageDecision::Unsafe => {
-                    unsafe_seen = true;
-                }
+                crate::sync::QuickPageDecision::Unsafe => unsafe_seen = true,
             }
             page += 1;
         }

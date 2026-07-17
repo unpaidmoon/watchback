@@ -3,6 +3,7 @@ use crate::importer::existing_import_summary;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
+    quick_list_update_with_credentials_and_target_paths_base_url,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
     AccountLoginResult, ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus,
@@ -10,9 +11,10 @@ use crate::{
     LoginTargetStatus, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView, MatchFilters,
     MatchSummary, OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest,
     PersonalSeasonReview, PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse,
-    SeasonAnalysis, SyncRequest, SyncSummary, UpdateCheckResult, UserSettings,
+    SeasonAnalysis, SeasonSyncResult, SyncRequest, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 const DASHEN_ROOT_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool";
@@ -275,17 +277,19 @@ pub fn switch_account(
 }
 
 #[tauri::command]
-pub fn remove_account(
+pub async fn remove_account(
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
     account_id: String,
 ) -> Result<crate::RemoveAccountResult, String> {
+    let account_id = crate::account_store::AccountId::parse(&account_id)
+        .map_err(|_| "账号标识无效。".to_string())?;
+    background_sync.stop_account(account_id.as_str()).await;
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
-    let account_id = crate::account_store::AccountId::parse(&account_id)
-        .map_err(|_| "账号标识无效。".to_string())?;
     let result = accounts
         .remove_account(&account_id, &chrono::Utc::now().to_rfc3339())
         .map_err(to_message)?;
@@ -541,7 +545,8 @@ pub async fn sync_season(
     request: SyncRequest,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<SyncSummary, String> {
+    background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
+) -> Result<SeasonSyncResult, String> {
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
@@ -559,21 +564,89 @@ pub async fn sync_season(
     )
     .map_err(to_message)?;
     let db = account.database();
+    let store = crate::SeasonSyncStore::new(db.clone());
+    if store.active_job_count(request.season).map_err(to_message)? > 0 {
+        return Err("该赛季仍在后台处理中，请等待完成后再试。".to_string());
+    }
     let emit_app = app.clone();
-    sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
-        &db,
-        &root,
-        &credential_path,
-        &target_path,
-        request.season,
-        request.mode,
-        "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
-        move |progress| {
-            let _ = emit_app.emit("sync-progress", progress);
-        },
-    )
-    .await
-    .map_err(to_message)
+    match request.mode {
+        crate::SyncMode::QuickUpdate => {
+            let summary = quick_list_update_with_credentials_and_target_paths_base_url(
+                &db,
+                &credential_path,
+                &target_path,
+                request.season,
+                "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
+            )
+            .await
+            .map_err(to_message)?;
+            drop(_permit);
+            background_sync.wake(
+                account.account_id().as_str(),
+                account.paths().clone(),
+                request.season,
+                background_event_sink(&app),
+            );
+            Ok(SeasonSyncResult::QuickList(summary))
+        }
+        crate::SyncMode::FullFetch => {
+            sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+                &db,
+                &root,
+                &credential_path,
+                &target_path,
+                request.season,
+                request.mode,
+                "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
+                move |progress| {
+                    let _ = emit_app.emit("sync-progress", progress);
+                },
+            )
+            .await
+            .map(SeasonSyncResult::Full)
+            .map_err(to_message)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn season_sync_status(
+    accounts: State<'_, AccountContextManager>,
+    season: i64,
+) -> Result<crate::SeasonBackgroundStatus, String> {
+    let account = active_account(&accounts)?;
+    crate::SeasonSyncStore::new(account.database())
+        .season_status(season)
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn retry_season_background_sync(
+    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
+    background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
+    season: i64,
+) -> Result<bool, String> {
+    let account = active_account(&accounts)?;
+    let queued = crate::SeasonSyncStore::new(account.database())
+        .retry_season(season)
+        .map_err(to_message)?;
+    if queued {
+        background_sync.wake(
+            account.account_id().as_str(),
+            account.paths().clone(),
+            season,
+            background_event_sink(&app),
+        );
+    }
+    Ok(queued)
+}
+
+fn background_event_sink(app: &AppHandle) -> crate::BackgroundEventSink {
+    let app = app.clone();
+    Arc::new(move |event, payload| {
+        let _ = app.emit(event, payload);
+    })
 }
 
 fn active_account(

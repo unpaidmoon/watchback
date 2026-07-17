@@ -1,4 +1,4 @@
-import type { OnboardingStatus, SyncProgress, SyncSummary } from "./types";
+import type { OnboardingStatus, SeasonSyncResult, SyncProgress } from "./types";
 
 export type StatusTone = "neutral" | "good" | "warn" | "bad";
 
@@ -66,7 +66,17 @@ export function readableSyncProgress(progress: SyncProgress | null): string {
   return `${progress.phase}：${progress.processed}/${progress.total}，失败详情 ${progress.failedDetails}`;
 }
 
-export function formatSyncNotice(season: number, summary: SyncSummary): string {
+export function formatSyncNotice(season: number, result: SeasonSyncResult): string {
+  if (result.kind === "quickList") {
+    if (result.partialFailure) {
+      return `S${season} 已保存成功获取的数据；部分模式检查失败，正在后台重试。`;
+    }
+    if (!result.dataChanged) {
+      return `S${season} 已检查最新一页，没有发现新对局。`;
+    }
+    return `S${season} 已新增 ${result.newListMatches} 场对局，详情正在后台处理中。`;
+  }
+  const summary = result;
   const quickScanUnsafe = summary.diagnostics.pages.some((page) => page.stopReason === "unsafe_response");
   if (summary.mode === "quickUpdate" && quickScanUnsafe) {
     return `S${season} 快速更新遇到页面异常，无法确认已到达完整边界；已保留本地数据，如需完整校验请使用全量抓取。`;

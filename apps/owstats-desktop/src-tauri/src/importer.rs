@@ -819,7 +819,7 @@ fn insert_player_rows(
     Ok(())
 }
 
-fn bucket_for(mode: &str, match_kind: &str) -> &'static str {
+pub(crate) fn bucket_for(mode: &str, match_kind: &str) -> &'static str {
     if match_kind == "normal" || PRESET_MODES.contains(&mode) {
         "preset"
     } else if match_kind == "fight" || mode.ends_with("Fight") {
@@ -829,7 +829,7 @@ fn bucket_for(mode: &str, match_kind: &str) -> &'static str {
     }
 }
 
-fn normalized_game_mode(entry: &Value) -> String {
+pub(crate) fn normalized_game_mode(entry: &Value) -> String {
     let mode = string_field(entry, "gameMode").unwrap_or_default();
     let instance_type = string_field(entry, "instanceType")
         .unwrap_or_default()
@@ -843,7 +843,7 @@ fn normalized_game_mode(entry: &Value) -> String {
     }
 }
 
-fn result_label(value: i64) -> &'static str {
+pub(crate) fn result_label(value: i64) -> &'static str {
     match value {
         1 => "win",
         -1 | 2 => "loss",

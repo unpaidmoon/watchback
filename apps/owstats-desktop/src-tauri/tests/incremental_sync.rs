@@ -496,14 +496,14 @@ fn quick_page_unrecognized_or_error_shell_is_unsafe() {
 }
 
 #[test]
-fn quick_page_without_watermark_is_unsafe() {
+fn quick_page_without_watermark_continues_to_establish_a_boundary() {
     assert_eq!(
         classify_quick_page(
             &match_list_payload(vec![json!({"matchId": "known", "beginTs": 10})]),
             &HashSet::from(["known".to_string()]),
             None
         ),
-        QuickPageDecision::Unsafe
+        QuickPageDecision::Continue
     );
 }
 

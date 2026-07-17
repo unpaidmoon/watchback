@@ -154,9 +154,9 @@ assertEqual(onboardingSource.includes("targetSyncAllowed={Boolean(targetStatus?.
 assertEqual(onboardingSource.includes("accountOperationBusy={accountOperationBusy}"), true, "season workbench receives the account operation state separately");
 assertEqual(onboardingSource.includes("credentialReady={syncTargetReady}"), false, "season workbench never receives a mixed gate disguised as credential state");
 assertEqual(
-  /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null\}/.test(seasonWorkbenchSource),
+  /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null \|\| selectedBackgroundBusy\}/.test(seasonWorkbenchSource),
   true,
-  "season sync button combines credential, target, account-operation and sync gates",
+  "season sync button combines credential, target, account-operation, foreground and background sync gates",
 );
 assertEqual(onboardingSource.includes("const accountOperationBusy = busyAccountAction !== null || targetAction !== null"), true, "account actions share one busy gate");
 assertEqual(seasonWorkbenchSource.includes("seasonSyncGateCopy("), true, "account actions use the shared season gate copy without changing credential semantics");
@@ -219,7 +219,7 @@ assertEqual(seasonWorkbenchSource.includes('onFullFetch: (season: number) => voi
 assertEqual(seasonWorkbenchSource.includes('onQuickUpdate: (season: number) => void'), true, "workbench exposes an explicit row update action");
 assertEqual(seasonWorkbenchSource.includes('"全量抓取"'), true, "selected-season primary action is named full fetch");
 assertEqual(seasonWorkbenchSource.includes('"更新"'), true, "synced-season rows expose a compact update action");
-assertEqual(/onClick=\{\(\) => runSeasonQuickUpdate\(seasonStatus\.season, onQuickUpdate\)\}/.test(seasonWorkbenchSource), true, "row update uses its own season through the tested handler");
+assertEqual(/runSeasonQuickUpdate\(seasonStatus\.season, onQuickUpdate\)/.test(seasonWorkbenchSource), true, "row update uses its own season through the tested handler");
 assertEqual(/<button[^>]*className=.*syncedSeasonLedgerRow[\s\S]*?<button/.test(seasonWorkbenchSource), false, "season rows do not nest buttons");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
 assertEqual(onboardingSource.includes("status.currentSeason"), true, "command center consumes the backend current season without global state");

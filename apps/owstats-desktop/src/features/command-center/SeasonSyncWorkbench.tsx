@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { readableSyncProgress } from "../../shared/phase6Shell";
-import type { SeasonDataStatus, SyncMode, SyncProgress } from "../../shared/types";
+import { backgroundStatusLabel } from "../../shared/seasonSyncEvents";
+import type { SeasonBackgroundStatus, SeasonDataStatus, SyncMode, SyncProgress } from "../../shared/types";
 import { formatCompactTimestamp, seasonSyncGateCopy } from "./SeasonHealthPanel";
 
 export type SeasonSyncWorkbenchProps = {
@@ -16,9 +17,11 @@ export type SeasonSyncWorkbenchProps = {
   progress: SyncProgress | null;
   syncError: string | null;
   syncNotice: string | null;
+  backgroundStatuses: Record<number, SeasonBackgroundStatus>;
   onSelectSeason: (season: number) => void;
   onFullFetch: (season: number) => void;
   onQuickUpdate: (season: number) => void;
+  onRetryBackground: (season: number) => void;
 };
 
 export function resolveCommandCenterSeason(
@@ -49,13 +52,17 @@ export function SeasonSyncWorkbench({
   progress,
   syncError,
   syncNotice,
+  backgroundStatuses,
   onSelectSeason,
   onFullFetch,
   onQuickUpdate,
+  onRetryBackground,
 }: SeasonSyncWorkbenchProps) {
   const sortedStatuses = [...seasonStatuses].sort((left, right) => right.season - left.season);
   const isSyncing = syncingSeason === selectedSeason;
   const isSelectedFullFetch = isSyncing && syncingMode === "fullFetch";
+  const selectedBackground = backgroundStatuses[selectedSeason];
+  const selectedBackgroundBusy = selectedBackground?.status === "queued" || selectedBackground?.status === "running";
   const selectedHasData = seasonStatuses.some((item) => item.season === selectedSeason && item.matchCount > 0);
   const gateCopy = seasonSyncGateCopy(
     credentialReady,
@@ -91,7 +98,7 @@ export function SeasonSyncWorkbench({
           className="primaryButton seasonSyncButton"
           type="button"
           onClick={() => onFullFetch(selectedSeason)}
-          disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
+          disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null || selectedBackgroundBusy}
         >
           <RefreshCw size={18} />
           {isSelectedFullFetch ? "全量抓取中…" : "全量抓取"}
@@ -125,6 +132,8 @@ export function SeasonSyncWorkbench({
             </div>
             {sortedStatuses.map((seasonStatus) => {
               const rowSyncing = syncingSeason === seasonStatus.season;
+              const background = backgroundStatuses[seasonStatus.season];
+              const backgroundBusy = background?.status === "queued" || background?.status === "running";
               return (
                 <div
                   key={seasonStatus.season}
@@ -149,6 +158,11 @@ export function SeasonSyncWorkbench({
                       </span>
                       <span>{seasonStatus.coveragePercent}%</span>
                     </span>
+                    {background ? (
+                      <small className={background.status === "failed" ? "error" : "syncedSeasonBackgroundStatus"}>
+                        {backgroundStatusLabel(background)}
+                      </small>
+                    ) : null}
                   </div>
                   <div className="syncedSeasonMatchCountCell" role="cell">
                     {seasonStatus.matchCount} 场
@@ -161,10 +175,12 @@ export function SeasonSyncWorkbench({
                       className="ghostButton syncedSeasonUpdateButton"
                       type="button"
                       aria-label={`更新 S${seasonStatus.season}`}
-                      onClick={() => runSeasonQuickUpdate(seasonStatus.season, onQuickUpdate)}
-                      disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null}
+                      onClick={() => background?.retryable
+                        ? onRetryBackground(seasonStatus.season)
+                        : runSeasonQuickUpdate(seasonStatus.season, onQuickUpdate)}
+                      disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null || backgroundBusy}
                     >
-                      {rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : "更新"}
+                      {background?.retryable ? "重试" : rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : backgroundBusy ? "后台处理中" : "更新"}
                     </button>
                   </div>
                 </div>

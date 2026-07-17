@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { formatSyncNotice } from "../src/shared/phase6Shell.ts";
-import type { SyncSummary } from "../src/shared/types.ts";
+import { quickListRefreshScope } from "../src/shared/seasonSyncEvents.ts";
+import type { QuickListCommitSummary, SeasonSyncResult, SyncSummary } from "../src/shared/types.ts";
 
 const baseSummary: SyncSummary = {
   season: 23,
@@ -110,8 +111,42 @@ const cases: Array<{ name: string; summary: SyncSummary; expected: string }> = [
 ];
 
 for (const testCase of cases) {
-  assert.equal(formatSyncNotice(23, testCase.summary), testCase.expected, testCase.name);
+  assert.equal(formatSyncNotice(23, { kind: "full", ...testCase.summary }), testCase.expected, testCase.name);
 }
+
+const unchangedQuick: SeasonSyncResult = {
+  kind: "quickList",
+  season: 22,
+  newListMatches: 0,
+  dataChanged: false,
+  partialFailure: false,
+  pendingDetails: 0,
+  backgroundStatus: "idle",
+  checkedAt: "2026-07-17T00:00:00Z",
+  modes: [],
+};
+assert.equal(quickListRefreshScope("account-a", unchangedQuick), null, "unchanged quick update performs no list refresh");
+assert.equal(
+  formatSyncNotice(22, unchangedQuick),
+  "S22 已检查最新一页，没有发现新对局。",
+  "unchanged quick update returns immediately with list-first copy",
+);
+const changedQuick: SeasonSyncResult = {
+  ...unchangedQuick,
+  newListMatches: 3,
+  dataChanged: true,
+  pendingDetails: 3,
+  backgroundStatus: "queued",
+};
+assert.deepEqual(
+  quickListRefreshScope("account-a", changedQuick),
+  { accountScope: "account-a", season: 22 },
+  "changed quick update invalidates only its account and season",
+);
+assert.equal(
+  formatSyncNotice(22, changedQuick),
+  "S22 已新增 3 场对局，详情正在后台处理中。",
+);
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
@@ -131,17 +166,17 @@ assert.match(
 );
 assert.match(
   apiSource,
-  /invoke\s*<\s*SyncSummary\s*>\s*\(\s*"sync_season"\s*,\s*\{\s*request\s*:\s*\{\s*season\s*,\s*mode\s*\}\s*\}\s*\)/,
+  /invoke\s*<\s*SeasonSyncResult\s*>\s*\(\s*"sync_season"\s*,\s*\{\s*request\s*:\s*\{\s*season\s*,\s*mode\s*\}\s*\}\s*\)/,
   "syncSeason forwards season and mode in the invoke request",
 );
 assert.match(
   onboardingSource,
-  /async function runSeasonSync\(season: number, mode: SyncMode\)[\s\S]*?const summary = await syncSeason\(season, mode\);\s*clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
-  "successful sync preserves sync, cache clear, dashboard reload order",
+  /summary\.kind === "full"[\s\S]*?clearMatchesPageCache\(\);\s*await loadDashboard\(\);[\s\S]*?else if \(refreshScope\)[\s\S]*?clearMatchesPageCacheForSeason\(refreshScope\.accountScope, refreshScope\.season\);/s,
+  "full fetch keeps the full refresh while quick update targets one account and season",
 );
 assert.match(onboardingSource, /onFullFetch=\{\(season\) => void runSeasonSync\(season, "fullFetch"\)\}/, "full-fetch control passes the explicit mode");
 assert.match(onboardingSource, /onQuickUpdate=\{\(season\) => void runSeasonSync\(season, "quickUpdate"\)\}/, "row update passes the explicit quick mode");
-assert.match(workbenchSource, /disabled=\{!credentialReady \|\| !targetSyncAllowed \|\| accountOperationBusy \|\| syncingSeason !== null\}/, "all sync controls share the busy gate");
+assert.match(workbenchSource, /backgroundBusy/, "season rows expose independent background processing state");
 assert.match(
   onboardingSource,
   /setSyncNotice\(formatSyncNotice\(season, summary\)\);/,

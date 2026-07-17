@@ -90,6 +90,14 @@ export function clearMatchesPageCache() {
   preloadPromises.clear();
 }
 
+export function clearMatchesPageCacheForSeason(_accountScope: string, season: number) {
+  if (!matchesPageCache) return;
+  const cachedSeason = matchesPageCache.filters.season;
+  if (cachedSeason === undefined || cachedSeason === season) {
+    clearMatchesPageCache();
+  }
+}
+
 export function invalidateStandaloneMatchFavoritePersistence() {
   clearMatchesPageCache();
 }

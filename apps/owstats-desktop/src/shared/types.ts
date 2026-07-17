@@ -441,6 +441,47 @@ export type SyncSummary = {
   importSummary: ImportSummary;
 };
 
+export type QuickModeResult = {
+  matchKind: string;
+  gameMode: string;
+  outcome: "unchangedBoundary" | "emptyBoundary" | "newEntries" | "unsafe" | "failed";
+  newMatches: number;
+  errorClass: string | null;
+};
+
+export type QuickListCommitSummary = {
+  season: number;
+  newListMatches: number;
+  dataChanged: boolean;
+  partialFailure: boolean;
+  pendingDetails: number;
+  backgroundStatus: string;
+  checkedAt: string;
+  modes: QuickModeResult[];
+};
+
+export type SeasonSyncResult =
+  | ({ kind: "quickList" } & QuickListCommitSummary)
+  | ({ kind: "full" } & SyncSummary);
+
+export type SeasonBackgroundStatus = {
+  season: number;
+  phase: string;
+  status: string;
+  pendingDetails: number;
+  retryable: boolean;
+  updatedAt: string;
+};
+
+export type SeasonBackgroundEvent = {
+  accountScope: string;
+  season: number;
+  phase: string;
+  status: string;
+  newMatches: number;
+  pendingDetails: number;
+};
+
 export type SyncProgress = {
   season: number;
   phase: string;

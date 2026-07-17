@@ -32,6 +32,8 @@ import type {
   RemoveAccountResult,
   SeasonAnalysis,
   SyncMode,
+  SeasonBackgroundStatus,
+  SeasonSyncResult,
   SyncSummary,
   UpdateCheckResult,
   UserSettings,
@@ -91,7 +93,15 @@ export function getFriendDetails(bnetId: string, filters: FriendAnalyticsFilters
 }
 
 export function syncSeason(season: number, mode: SyncMode) {
-  return invoke<SyncSummary>("sync_season", { request: { season, mode } });
+  return invoke<SeasonSyncResult>("sync_season", { request: { season, mode } });
+}
+
+export function getSeasonSyncStatus(season: number) {
+  return invoke<SeasonBackgroundStatus>("season_sync_status", { season });
+}
+
+export function retrySeasonBackgroundSync(season: number) {
+  return invoke<boolean>("retry_season_background_sync", { season });
 }
 
 export function getOnboardingStatus(season?: number) {

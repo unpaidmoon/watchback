@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 8;
+pub const CURRENT_SCHEMA_VERSION: i64 = 9;
 
 struct Migration {
     version: i64,
@@ -51,6 +51,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 8,
         name: "match favorites and notes",
         apply: migrate_v8,
+    },
+    Migration {
+        version: 9,
+        name: "durable season sync state",
+        apply: migrate_v9,
     },
 ];
 
@@ -279,6 +284,125 @@ fn migrate_v8(transaction: &Transaction<'_>) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_match_favorites_updated
             ON match_favorites(updated_at DESC);
         "#,
+    )?;
+    Ok(())
+}
+
+fn migrate_v9(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS season_sync_state (
+            season INTEGER PRIMARY KEY,
+            season_revision INTEGER NOT NULL DEFAULT 0,
+            snapshot_revision INTEGER NOT NULL DEFAULT 0,
+            last_checked_at TEXT,
+            background_status TEXT NOT NULL DEFAULT 'idle',
+            pending_detail_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS season_sync_cursors (
+            season INTEGER NOT NULL,
+            match_kind TEXT NOT NULL,
+            game_mode TEXT NOT NULL,
+            request_shape TEXT NOT NULL CHECK(request_shape IN ('implicitCurrentSeason', 'explicitSeason')),
+            latest_begin_ts INTEGER,
+            empty_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(empty_confirmed IN (0, 1)),
+            last_checked_at TEXT,
+            last_full_fetch_at TEXT,
+            last_stop_reason TEXT,
+            PRIMARY KEY (season, match_kind, game_mode)
+        );
+
+        CREATE TABLE IF NOT EXISTS season_sync_jobs (
+            job_id TEXT PRIMARY KEY,
+            season INTEGER NOT NULL,
+            target_revision INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            status TEXT NOT NULL,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            next_retry_at TEXT,
+            error_class TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_season_sync_one_active_job
+            ON season_sync_jobs(season)
+            WHERE status IN ('queued', 'running', 'retryable');
+
+        CREATE TABLE IF NOT EXISTS season_sync_job_modes (
+            job_id TEXT NOT NULL REFERENCES season_sync_jobs(job_id) ON DELETE CASCADE,
+            match_kind TEXT NOT NULL,
+            game_mode TEXT NOT NULL,
+            request_shape TEXT NOT NULL CHECK(request_shape IN ('implicitCurrentSeason', 'explicitSeason')),
+            next_page INTEGER NOT NULL,
+            max_page INTEGER NOT NULL DEFAULT 5,
+            stop_reason TEXT,
+            status TEXT NOT NULL,
+            PRIMARY KEY (job_id, match_kind, game_mode)
+        );
+
+        CREATE TABLE IF NOT EXISTS season_sync_job_matches (
+            job_id TEXT NOT NULL REFERENCES season_sync_jobs(job_id) ON DELETE CASCADE,
+            match_id TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
+            detail_status TEXT NOT NULL,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            error_class TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (job_id, match_id)
+        );
+        "#,
+    )?;
+
+    let now = Utc::now().to_rfc3339();
+    transaction.execute(
+        r#"
+        INSERT INTO season_sync_state (
+            season, season_revision, snapshot_revision, background_status,
+            pending_detail_count, updated_at
+        )
+        SELECT season, 0, 0, 'idle', 0, ?1
+        FROM matches
+        GROUP BY season
+        ON CONFLICT(season) DO NOTHING
+        "#,
+        [&now],
+    )?;
+    transaction.execute(
+        r#"
+        INSERT INTO season_sync_cursors (
+            season, match_kind, game_mode, request_shape,
+            latest_begin_ts, empty_confirmed, last_stop_reason
+        )
+        SELECT
+            season,
+            CASE
+                WHEN game_mode IN ('sport', 'SportPreset', 'SportOpen') THEN 'normal'
+                WHEN game_mode IN ('leisure', 'LeisurePreset', 'Leisure6v6') THEN 'normal'
+                ELSE match_kind
+            END,
+            CASE
+                WHEN game_mode IN ('sport', 'SportPreset', 'SportOpen') THEN 'sport'
+                WHEN game_mode IN ('leisure', 'LeisurePreset', 'Leisure6v6') THEN 'leisure'
+                ELSE game_mode
+            END,
+            CASE WHEN season = ?1 THEN 'implicitCurrentSeason' ELSE 'explicitSeason' END,
+            MAX(begin_ts),
+            0,
+            'migratedWatermark'
+        FROM matches
+        WHERE game_mode IN (
+            'sport', 'SportPreset', 'SportOpen',
+            'leisure', 'LeisurePreset', 'Leisure6v6',
+            'QuickFight', 'LeisureFight', 'SportFight'
+        )
+        GROUP BY season, 2, 3
+        ON CONFLICT(season, match_kind, game_mode) DO UPDATE SET
+            latest_begin_ts = MAX(season_sync_cursors.latest_begin_ts, excluded.latest_begin_ts)
+        "#,
+        [crate::season_fetch::DASHEN_CURRENT_SEASON],
     )?;
     Ok(())
 }

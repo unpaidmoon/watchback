@@ -83,6 +83,11 @@ npm run tauri build
 - 所有文件数据库连接使用 WAL、`synchronous=NORMAL` 和 5 秒 `busy_timeout`。不要绕过 `OwDatabase::connect` 直接打开产品数据库。
 - `sync_errors` 表示某赛季最近一次同步未完成详情的快照，而不是无限历史。导入目标赛季时先清旧错误，成功重试会清零该赛季错误；其他赛季必须保持不变。
 - 桌面同步由全局 `SyncCoordinator` 串行化。不要在 command、后台任务或新 UI 入口绕过该 guard 并行写同一个 SQLite/app-data 目录。
+- 赛季行的“更新”是列表优先路径：前台严格并发请求 `sport`、`leisure`、`QuickFight`、`LeisureFight`、`SportFight` 五个模式的第一页，并在一个短事务内提交新列表、游标和后台任务后立即返回。前台不得请求详情、继续分页、重建快照或全量刷新指挥台。
+- `season_sync_jobs` 是可恢复后台账本。后台按账号和赛季去重，继续第 2～5 页、以并发 2 补详情并更新投影，最后在 `season_revision` 稳定时重建快照；详情失败必须保留 `pending_detail_count` 并进入 `retryable`，不能伪装成完成。
+- 无新增的“更新”只写检查时间和可靠游标，不清比赛缓存、不重建快照。新增列表只失效当前账号和赛季的列表缓存；SQLite 始终是查询事实来源，快照落后不得阻止用户查询。
+- “全量抓取”继续扫描完整历史并刷新全部详情。开始前拒绝同赛季活动后台任务；成功后对齐 `season_revision`/`snapshot_revision`，并把遗留快速任务标记为 `superseded`。
+- 后台事件与状态 DTO 只允许账号内部作用域、赛季、阶段、匿名计数、时间和错误分类；不得加入请求 URL、match/player id、raw JSON 或任何 token-like 字段。
 
 ## Module Boundaries
 

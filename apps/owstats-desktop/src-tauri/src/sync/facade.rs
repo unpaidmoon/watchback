@@ -1,5 +1,37 @@
 use super::*;
 
+pub async fn quick_list_update_with_credentials_and_target_paths_base_url(
+    db: &OwDatabase,
+    credential_path: &Path,
+    target_path: &Path,
+    season: i64,
+    customer_base_url: &str,
+) -> Result<crate::models::QuickListCommitSummary> {
+    let credentials = read_credentials(credential_path)?;
+    let target = crate::player_target::read_player_target_for_path(target_path)?;
+    if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
+        return Err(anyhow!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR));
+    }
+    let request = crate::season_fetch::FullSeasonRequest {
+        credentials: crate::dashen_client::DashenCredentials {
+            role_id: credentials.role_id,
+            token: credentials.token,
+            dts: credentials.dts,
+            server: credentials.server.unwrap_or(1),
+        },
+        customer_token: target.customer_token,
+        input_bnet: target.input_bnet,
+        resolved_bnet: target.resolved_bnet,
+        season,
+        customer_base_url: customer_base_url.to_string(),
+        pages_per_batch: 5,
+        detail_concurrency: 2,
+        include_fight: true,
+    };
+    let probe = crate::season_fetch::fetch_quick_list_pages(&request).await?;
+    super::commit_quick_list_probe(db, probe)
+}
+
 pub async fn sync_season(db: &OwDatabase, project_root: &Path, season: i64) -> Result<SyncSummary> {
     sync_season_with_progress(db, project_root, season, |_| {}).await
 }
@@ -544,6 +576,11 @@ fn finalize_fetched_season(
         .map_err(committed_snapshot_update_error)?;
     write_season_payload(season_output_dir, season, &complete_payload)
         .map_err(committed_snapshot_update_error)?;
+    if mode == crate::models::SyncMode::FullFetch {
+        super::SeasonSyncStore::new(db.clone())
+            .reconcile_full_fetch(season)
+            .map_err(committed_snapshot_update_error)?;
+    }
     summary.mode = mode;
     summary.list_entries_seen = fetch.entries;
     summary.new_matches = selection.new_matches;

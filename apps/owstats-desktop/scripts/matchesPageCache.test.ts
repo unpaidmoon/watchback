@@ -1072,6 +1072,11 @@ assert.match(
 );
 assert.match(
   onboardingSource,
-  /const summary = await syncSeason\(season, mode\);\s*clearMatchesPageCache\(\);/s,
-  "a completed season sync invalidates the cached match list before reloading dashboard data",
+  /summary\.kind === "full"[\s\S]*?clearMatchesPageCache\(\);\s*await loadDashboard\(\);/s,
+  "a completed full fetch invalidates the cached match list before reloading dashboard data",
+);
+assert.match(
+  onboardingSource,
+  /else if \(refreshScope\)[\s\S]*?clearMatchesPageCacheForSeason\(refreshScope\.accountScope, refreshScope\.season\);/s,
+  "a quick update invalidates only the affected account and season",
 );

@@ -17,6 +17,7 @@ import {
   checkAppUpdate,
   confirmLoginTargetSwitch,
   getOnboardingStatus,
+  getSeasonSyncStatus,
   getPlayerProfile,
   getLoginTargetStatus,
   listAccounts,
@@ -25,6 +26,7 @@ import {
   reloginAccount,
   removeAccount,
   retryLoginTargetBinding,
+  retrySeasonBackgroundSync,
   switchAccount,
   syncSeason,
 } from "../shared/api";
@@ -42,9 +44,10 @@ import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/com
 import { QaRegion } from "../shared/QaFeedbackLayer";
 import { formatSyncNotice, hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
-import { clearMatchesPageCache } from "../shared/matchesPageCache";
+import { clearMatchesPageCache, clearMatchesPageCacheForSeason } from "../shared/matchesPageCache";
+import { isCurrentSeasonEvent, quickListRefreshScope } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
-import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SyncMode, SyncProgress } from "../shared/types";
+import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress } from "../shared/types";
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 
@@ -68,6 +71,7 @@ export function OnboardingPage() {
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [backgroundStatuses, setBackgroundStatuses] = useState<Record<number, SeasonBackgroundStatus>>({});
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
   const [syncingMode, setSyncingMode] = useState<SyncMode | null>(null);
@@ -83,14 +87,21 @@ export function OnboardingPage() {
   const cancelLoginLockRef = useRef(false);
   const primaryTargetActionRef = useRef<HTMLButtonElement | null>(null);
   const previousPrimaryTargetStateRef = useRef<string | null>(null);
+  const activeAccountScopeRef = useRef<string | null>(null);
+  const seasonRefreshTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       dashboardRequestGenerationRef.current += 1;
+      Object.values(seasonRefreshTimersRef.current).forEach(clearTimeout);
     };
   }, []);
+
+  useEffect(() => {
+    activeAccountScopeRef.current = accountStatus?.activeAccountId ?? null;
+  }, [accountStatus?.activeAccountId]);
 
   useEffect(() => {
     if (!hasDesktopBackend()) {
@@ -100,6 +111,7 @@ export function OnboardingPage() {
     let disposed = false;
     let unlistenSync: (() => void) | undefined;
     let unlistenLogin: (() => void) | undefined;
+    const backgroundUnlisteners: Array<() => void> = [];
     void listen<SyncProgress>("sync-progress", (event) => {
       if (!disposed) {
         setSyncProgress(event.payload);
@@ -122,16 +134,65 @@ export function OnboardingPage() {
       }
       unlistenLogin = handler;
     });
+    for (const eventName of [
+      "season-background-progress",
+      "season-list-updated",
+      "season-detail-updated",
+      "season-background-completed",
+    ]) {
+      void listen<SeasonBackgroundEvent>(eventName, (event) => {
+        if (disposed || !isCurrentSeasonEvent(event.payload, activeAccountScopeRef.current)) {
+          return;
+        }
+        const nextStatus: SeasonBackgroundStatus = {
+          season: event.payload.season,
+          phase: event.payload.phase,
+          status: event.payload.status,
+          pendingDetails: event.payload.pendingDetails,
+          retryable: event.payload.status === "failed",
+          updatedAt: new Date().toISOString(),
+        };
+        setBackgroundStatuses((current) => ({ ...current, [event.payload.season]: nextStatus }));
+        if (eventName === "season-list-updated") {
+          clearMatchesPageCacheForSeason(event.payload.accountScope, event.payload.season);
+          scheduleSeasonStatusRefresh(event.payload.season);
+        }
+      }).then((handler) => {
+        if (disposed) {
+          handler();
+          return;
+        }
+        backgroundUnlisteners.push(handler);
+      });
+    }
     return () => {
       disposed = true;
       unlistenSync?.();
       unlistenLogin?.();
+      backgroundUnlisteners.forEach((unlisten) => unlisten());
     };
   }, []);
 
   useEffect(() => {
     void loadDashboard();
   }, []);
+
+  useEffect(() => {
+    const seasons = status?.seasonStatuses.map((item) => item.season) ?? [];
+    if (!accountStatus?.activeAccountId || seasons.length === 0 || !hasDesktopBackend()) {
+      setBackgroundStatuses({});
+      return;
+    }
+    let disposed = false;
+    void Promise.all(seasons.map((season) => getSeasonSyncStatus(season))).then((items) => {
+      if (!disposed) {
+        setBackgroundStatuses(Object.fromEntries(items.map((item) => [item.season, item])));
+      }
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [accountStatus?.activeAccountId, status?.seasonStatuses]);
 
   async function loadDashboard(rethrow = false) {
     const requestGeneration = ++dashboardRequestGenerationRef.current;
@@ -183,6 +244,27 @@ export function OnboardingPage() {
         throw err;
       }
     }
+  }
+
+  async function refreshSeasonStatus(season: number) {
+    try {
+      const nextStatus = await getOnboardingStatus(season);
+      if (!mountedRef.current) return;
+      setStatus((current) => current ? {
+        ...current,
+        seasonStatuses: nextStatus.seasonStatuses,
+      } : nextStatus);
+    } catch {
+      // 后台刷新失败不阻断已经可查询的本地对局。
+    }
+  }
+
+  function scheduleSeasonStatusRefresh(season: number) {
+    clearTimeout(seasonRefreshTimersRef.current[season]);
+    seasonRefreshTimersRef.current[season] = setTimeout(() => {
+      delete seasonRefreshTimersRef.current[season];
+      void refreshSeasonStatus(season);
+    }, 250);
   }
 
   function applyDashboardSnapshot(snapshot: DashboardSnapshot) {
@@ -340,8 +422,27 @@ export function OnboardingPage() {
     setSyncProgress(null);
     try {
       const summary = await syncSeason(season, mode);
-      clearMatchesPageCache();
-      await loadDashboard();
+      const refreshScope = quickListRefreshScope(accountStatus?.activeAccountId, summary);
+      if (summary.kind === "full") {
+        clearMatchesPageCache();
+        await loadDashboard();
+      } else if (refreshScope) {
+        clearMatchesPageCacheForSeason(refreshScope.accountScope, refreshScope.season);
+        scheduleSeasonStatusRefresh(refreshScope.season);
+      }
+      if (summary.kind === "quickList") {
+        setBackgroundStatuses((current) => ({
+          ...current,
+          [season]: {
+            season,
+            phase: summary.backgroundStatus === "queued" ? "continuePages" : "completed",
+            status: summary.backgroundStatus,
+            pendingDetails: summary.pendingDetails,
+            retryable: false,
+            updatedAt: summary.checkedAt,
+          },
+        }));
+      }
       setSyncNotice(formatSyncNotice(season, summary));
     } catch (err) {
       setSyncError(productErrorMessage(err));
@@ -349,6 +450,18 @@ export function OnboardingPage() {
       setSyncingSeason(null);
       setSyncingMode(null);
       releaseOperationLock();
+    }
+  }
+
+  async function retryBackgroundSync(season: number) {
+    try {
+      const queued = await retrySeasonBackgroundSync(season);
+      if (queued) {
+        const next = await getSeasonSyncStatus(season);
+        setBackgroundStatuses((current) => ({ ...current, [season]: next }));
+      }
+    } catch (err) {
+      setSyncError(productErrorMessage(err));
     }
   }
 
@@ -609,9 +722,11 @@ export function OnboardingPage() {
                   progress={syncProgress}
                   syncError={syncError}
                   syncNotice={syncNotice}
+                  backgroundStatuses={backgroundStatuses}
                   onSelectSeason={selectSyncSeason}
                   onFullFetch={(season) => void runSeasonSync(season, "fullFetch")}
                   onQuickUpdate={(season) => void runSeasonSync(season, "quickUpdate")}
+                  onRetryBackground={(season) => void retryBackgroundSync(season)}
                 />
               ) : (
                 <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>

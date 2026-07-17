@@ -567,6 +567,37 @@ pub struct SyncSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct QuickModeResult {
+    pub match_kind: String,
+    pub game_mode: String,
+    pub outcome: String,
+    pub new_matches: usize,
+    pub error_class: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickListCommitSummary {
+    pub season: i64,
+    pub new_list_matches: usize,
+    pub data_changed: bool,
+    pub partial_failure: bool,
+    pub pending_details: usize,
+    pub background_status: String,
+    pub checked_at: String,
+    pub modes: Vec<QuickModeResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
+pub enum SeasonSyncResult {
+    QuickList(QuickListCommitSummary),
+    Full(SyncSummary),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncProgress {
     pub season: i64,
     pub phase: String,

@@ -135,9 +135,8 @@ pub fn classify_quick_page(
     if raw_entries.is_empty() {
         return QuickPageDecision::Empty;
     }
-    let Some(watermark) = watermark else {
-        return QuickPageDecision::Unsafe;
-    };
+    let no_watermark = watermark.is_none();
+    let watermark = watermark.unwrap_or_default();
     let mut should_continue = false;
     for entry in &raw_entries {
         let Some(match_id) = entry
@@ -157,7 +156,7 @@ pub fn classify_quick_page(
         let begin_ts = crate::importer::normalize_timestamp(begin_ts);
         should_continue |= !known_match_ids.contains(match_id) || begin_ts > watermark;
     }
-    if should_continue {
+    if should_continue || no_watermark {
         QuickPageDecision::Continue
     } else {
         QuickPageDecision::WatermarkReached

@@ -86,6 +86,10 @@ impl AccountContextManager {
         })
     }
 
+    pub(crate) fn account_paths(&self, account_id: &AccountId) -> AccountPaths {
+        self.shared.account(account_id)
+    }
+
     pub fn list_accounts(&self) -> Result<Vec<AccountSummary>> {
         self.ensure_deletion_ready()?;
         let registry = self.registry_snapshot()?;

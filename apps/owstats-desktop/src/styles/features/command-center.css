@@ -256,6 +256,18 @@
   min-width: 0;
 }
 
+.syncedSeasonBackgroundStatus {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+
+.syncedSeasonCoverageCell .error {
+  display: block;
+  margin-top: 6px;
+}
+
+
 .syncedSeasonUpdateCell {
   min-width: 0;
 }
