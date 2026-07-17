@@ -1,7 +1,7 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
-    benchmark_snapshot, import_payload_value_embedded, runtime_error_message, write_season_payload,
-    OwDatabase,
+    account_store::AccountId, app_paths::SharedAppPaths, benchmark_snapshot,
+    import_payload_value_embedded, runtime_error_message, write_season_payload, OwDatabase,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -115,6 +115,44 @@ fn importer_and_direct_season_file_preserve_natural_fields() -> Result<()> {
         "synthetic-error-authorization"
     );
 
+    Ok(())
+}
+
+#[test]
+fn database_initialize_does_not_rewrite_existing_raw_json_or_season_files() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let shared = SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111")?;
+    let account = shared.account(&account_id);
+    std::fs::create_dir_all(account.seasons())?;
+
+    let db = OwDatabase::for_account(&account);
+    db.initialize()?;
+    let raw_entry_json = r#"{"matchId":"legacy-raw-match","token":"synthetic-legacy-token"}"#;
+    let season_payload = r#"{"season":22,"cookie":"synthetic-legacy-cookie"}"#;
+    let conn = db.connect()?;
+    conn.execute(
+        "INSERT INTO matches (match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid, begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at) VALUES ('legacy-raw-match', 22, 'preset', 'SportPreset', 'normal', 'win', 'map', 'hero', 100, 1, 0, 0, 0, 0, 0, 0, 0, 0, 600, ?1, 'now')",
+        [raw_entry_json],
+    )?;
+    // Databases created before the retired migration have no completion marker.
+    conn.execute(
+        "DELETE FROM app_settings WHERE key = 'privacy_sanitization_v1'",
+        [],
+    )?;
+    drop(conn);
+    let season_file = account.seasons().join("local_s22_full_season.json");
+    std::fs::write(&season_file, season_payload)?;
+
+    db.initialize()?;
+
+    let persisted_raw_entry_json: String = db.connect()?.query_row(
+        "SELECT raw_entry_json FROM matches WHERE match_id = 'legacy-raw-match'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(persisted_raw_entry_json, raw_entry_json);
+    assert_eq!(std::fs::read_to_string(season_file)?, season_payload);
     Ok(())
 }
 

@@ -7,7 +7,6 @@ use std::time::Duration;
 pub struct OwDatabase {
     path: PathBuf,
     backups: Option<PathBuf>,
-    seasons: Option<PathBuf>,
 }
 
 impl OwDatabase {
@@ -15,7 +14,6 @@ impl OwDatabase {
         Self {
             path: path.as_ref().to_path_buf(),
             backups: None,
-            seasons: None,
         }
     }
 
@@ -23,7 +21,6 @@ impl OwDatabase {
         Self {
             path: paths.database(),
             backups: Some(paths.backups()),
-            seasons: Some(paths.seasons()),
         }
     }
 
@@ -69,21 +66,6 @@ impl OwDatabase {
             }
         }
         initialize_connection(&conn)?;
-        match (self.seasons.as_ref(), self.backups.as_ref()) {
-            (Some(seasons), Some(backups)) => crate::privacy_migration::migrate_legacy_persistence(
-                &conn, &self.path, seasons, backups,
-            )?,
-            _ => {
-                if let Some(app_data_dir) = self.path.parent() {
-                    crate::privacy_migration::migrate_legacy_persistence(
-                        &conn,
-                        &self.path,
-                        &app_data_dir.join("seasons"),
-                        &app_data_dir.join("privacy-backups"),
-                    )?;
-                }
-            }
-        }
         Ok(())
     }
 }

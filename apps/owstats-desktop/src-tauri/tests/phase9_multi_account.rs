@@ -1902,14 +1902,14 @@ fn switching_active_context_routes_queries_to_separate_databases() {
 }
 
 #[test]
-fn account_database_privacy_migration_uses_explicit_seasons_and_backups_paths() {
+fn account_database_initialization_does_not_create_privacy_backups() {
     let temp = tempfile::tempdir().unwrap();
     let shared = SharedAppPaths::from_app_data_dir(temp.path());
     let account_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
     let account = shared.account(&account_id);
     fs::create_dir_all(account.seasons()).unwrap();
     fs::write(
-        account.seasons().join("22.json"),
+        account.seasons().join("local_s22_full_season.json"),
         r#"{"safe":"ok","token":"synthetic-season-secret"}"#,
     )
     .unwrap();
@@ -1918,19 +1918,13 @@ fn account_database_privacy_migration_uses_explicit_seasons_and_backups_paths() 
     db.initialize().unwrap();
 
     assert!(
-        !account.root().join("privacy-backups").exists(),
-        "account initialization must not derive a privacy-backups sibling"
+        !account.backups().exists(),
+        "new account initialization must not create a privacy-* backup"
     );
-    let backup_dirs = fs::read_dir(account.backups())
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-    assert_eq!(backup_dirs.len(), 1);
-    assert!(backup_dirs[0].join("seasons").join("22.json").is_file());
-
-    let sanitized = fs::read_to_string(account.seasons().join("22.json")).unwrap();
-    assert!(!sanitized.contains("synthetic-season-secret"));
+    assert_eq!(
+        fs::read_to_string(account.seasons().join("local_s22_full_season.json")).unwrap(),
+        r#"{"safe":"ok","token":"synthetic-season-secret"}"#
+    );
 }
 
 #[test]

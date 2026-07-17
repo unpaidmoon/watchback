@@ -22,7 +22,6 @@ mod match_evaluation;
 mod match_favorites;
 mod models;
 pub mod player_target;
-mod privacy_migration;
 mod queries;
 pub mod ranking;
 mod redaction;
