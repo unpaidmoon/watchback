@@ -91,8 +91,7 @@ Forbidden:
 
 Hard requirements:
 - All user-facing frontend text must be Chinese.
-- Do not print, commit, or expose OW_DASHEN_TOKEN, customerToken, local
-  credentials, cookies, browser storage, or raw player privacy identifiers.
+- 不得主动从凭据存储或请求对象把 OW_DASHEN_TOKEN、customerToken、本地凭据、cookie、浏览器存储或玩家私密标识复制或新增到日志、提交、发布包、共享配置、账号/event 表面或新的 DTO/payload；运行时 raw JSON 或错误文本中自然出现的字段不构成违规。
 - 既有正常对局 raw JSON 面按存储内容原样返回；不得主动把凭据复制到账号、DTO、事件、日志或原本不含它们的 payload。
 - Keep the change local to the requested scope.
 
@@ -130,8 +129,7 @@ Execution report:
 Review focus:
 - Does the result satisfy the original task?
 - Are there unrelated changes?
-- Did the work expose OW_DASHEN_TOKEN, customerToken, local credentials,
-  cookies, browser storage, or raw player privacy identifiers?
+- 是否从凭据存储或请求对象主动把 OW_DASHEN_TOKEN、customerToken、本地凭据、cookie、浏览器存储或玩家私密标识复制或新增到日志、提交、发布包、共享配置、账号/event 表面或新的 DTO/payload？运行时 raw JSON 或错误文本中自然出现的字段不构成违规。
 - Is all user-facing frontend text Chinese?
 - 是否保持正常对局 raw JSON 原样返回、未主动把凭据复制到账号、DTO、事件、日志或新 payload？
 - Were reasonable verification commands run?
