@@ -3,12 +3,87 @@ use chrono::Utc;
 use rusqlite::params;
 use std::io::Write;
 use std::path::Path;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotOutcome {
     Unchanged,
     Replaced,
     StaleRevision,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotBenchmark {
+    pub season: i64,
+    pub entries: usize,
+    pub details: usize,
+    pub errors: usize,
+    pub assemble_ms: u64,
+    pub serialize_ms: u64,
+    pub write_and_sync_ms: u64,
+    pub total_ms: u64,
+    pub output_bytes: u64,
+}
+
+pub fn benchmark_snapshot(
+    db: &OwDatabase,
+    season: i64,
+    output: &Path,
+) -> Result<SnapshotBenchmark> {
+    db.initialize()?;
+    let total_started = Instant::now();
+
+    let assemble_started = Instant::now();
+    let payload = rebuild_complete_season_payload(
+        db,
+        season,
+        &json!({
+            "season": season,
+            "matches": {},
+        }),
+    )?;
+    let assemble_ms = assemble_started.elapsed().as_millis() as u64;
+    let entries = payload
+        .pointer("/matches/entries")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let details = payload
+        .pointer("/matches/details")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let errors = payload
+        .pointer("/matches/detail_errors")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+
+    let serialize_started = Instant::now();
+    let bytes = serde_json::to_vec_pretty(&payload)?;
+    let serialize_ms = serialize_started.elapsed().as_millis() as u64;
+
+    let write_and_sync_started = Instant::now();
+    let parent = output
+        .parent()
+        .ok_or_else(|| anyhow!("benchmark snapshot destination has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(&bytes)?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(output).map_err(|error| error.error)?;
+    let write_and_sync_ms = write_and_sync_started.elapsed().as_millis() as u64;
+
+    Ok(SnapshotBenchmark {
+        season,
+        entries,
+        details,
+        errors,
+        assemble_ms,
+        serialize_ms,
+        write_and_sync_ms,
+        total_ms: total_started.elapsed().as_millis() as u64,
+        output_bytes: bytes.len() as u64,
+    })
 }
 
 pub fn rebuild_snapshot_for_revision(

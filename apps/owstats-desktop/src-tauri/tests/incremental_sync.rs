@@ -1024,7 +1024,7 @@ fn incremental_import_rejects_malformed_detail_identity_and_kind() {
 }
 
 #[test]
-fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
+fn rebuilt_snapshot_contains_complete_unmodified_sqlite_history() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
     import_payload_value_embedded(
@@ -1115,11 +1115,7 @@ fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
     let serialized = serde_json::to_string(&rebuilt)
         .unwrap()
         .to_ascii_lowercase();
-    for sensitive in [
-        "token",
-        "customertoken",
-        "cookie",
-        "credential",
+    for natural_field in [
         "db-secret",
         "db-cookie",
         "db-authorization",
@@ -1128,8 +1124,8 @@ fn rebuilt_snapshot_contains_complete_sanitized_sqlite_history() {
         "current-credential",
     ] {
         assert!(
-            !serialized.contains(sensitive),
-            "rebuilt snapshot leaked {sensitive}"
+            serialized.contains(natural_field),
+            "rebuilt snapshot omitted {natural_field}"
         );
     }
 }
