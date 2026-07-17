@@ -11,7 +11,7 @@ data/players/5479_s22_full_season.json
 - `profile_card`: current player profile payload.
 - `matches.entries[]`: season match summaries.
 - `matches.details[]`: per-match detail payloads.
-- `matches.detail_errors[]`: detail fetch failures; must not contain token-like values.
+- `matches.detail_errors[]`: detail fetch failures; raw JSON and error text retain naturally occurring upstream content.
 - `friendBnetIds`: friend identity source. Do not infer friends from repeated teammates.
 
 ## Field Dictionary Reference
@@ -90,13 +90,8 @@ Stadium/fight modes are excluded from phase-2 friend analytics.
 - Enemy rows never enter friend boards.
 - Raw detail JSON remains the source of truth for projection repairs.
 
-## Sensitive Fields
+## 原始 JSON 与凭据边界
 
-Never display or log:
-
-- `token`
-- `customerToken`
-- cookie values
-- local credential cache content
-
-Raw JSON display must redact token-like keys before rendering.
+- 正常对局的 raw JSON 查看面直接返回数据库中存储的 entry 与 detail JSON，不执行递归脱敏、遮盖或重写；详情抓取错误的原始 JSON 与错误文本同样按既有错误面保留。
+- 战斗/角斗对局的 raw JSON 继续为 `Null`；显示名、英雄和地图的 GUID 兜底继续遵循产品/schema 规则，不能借由原始 JSON 直通改变这些显示决策。
+- 不主动把本地凭据缓存中的 `token`、`customerToken`、cookie 或 authorization 复制到账号索引、DTO、登录/后台事件、日志或原本不含它们的 payload。

@@ -34,7 +34,7 @@
 
 - 同步、导入、SQLite、赛季快照、查询 raw JSON 和既有错误面原样保留上游自然出现的字段与错误文本；不得新增运行时递归脱敏、遮盖、清理、空操作或功能开关。
 - 不得主动把凭据文件中的 `token`、`customerToken`、cookie、authorization 或 credential 复制到原本不包含它们的 DTO、账号索引、登录进度或后台事件、日志及其他 payload；既有账号与事件 schema 的字段最小化边界继续有效。
-- 构建资源、共享运行时配置、账号索引、提交内容和安装包仍须拒绝主动加入的 `token`、`customerToken`、cookie、authorization、credential、真实凭据、浏览器 profile、真实用户数据 dump 或本地 SQLite；仅 Git 忽略不足以构成安全边界。
+- 构建资源、共享运行时配置、账号索引、登录进度、后台事件、提交内容和安装包中不得出现任何真实凭据或私密数据；无论其来自主动复制还是被动带入，都必须拒绝 `token`、`customerToken`、cookie、authorization、credential、浏览器 profile、真实用户数据 dump 和本地 SQLite。仅 Git 忽略不足以构成安全边界。
 - 测试只能使用合成值；诊断和性能计时只能输出阶段、匿名计数、耗时与文件大小，不得打印 ID、路径、行、payload 或凭据。临时副本和输出由操作者负责清理。
 - 历史隐私迁移已停用：初始化不得重写旧 SQLite 或赛季 JSON；不得删除既有 privacy backup、marker 或数据，也不得重抓或恢复历史已脱敏值。
 - 显示名、英雄、地图等 fallback 与账号、事件字段最小化属于产品/schema 决策，不是运行时脱敏。显示名、英雄、地图等 fallback 不得向发布 UI 泄露原始 GUID 或隐私 ID；使用中文稳定兜底。角斗详情的 `traitGuids` 与 `modGuids` 是资产校对例外：无法映射时必须向发布 UI 显示原始 GUID，不能显示“待补充”文本；此例外不得扩展到玩家、英雄、地图、凭据或其他隐私标识。
