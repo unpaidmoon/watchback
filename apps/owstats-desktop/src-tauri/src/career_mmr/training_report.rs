@@ -15,7 +15,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const ALGORITHM: &str = "career-role-mmr-hierarchical-logit-v1";
 const FEATURE_VERSION: &str = "role-features-and-resource-debt-v1";
 const MAD_SCALE: f64 = 0.6745;
@@ -48,7 +48,7 @@ pub struct HierarchicalModelArtifact {
     pub final_hit_multiplier: Option<f64>,
     pub lambda_core: Option<f64>,
     pub lambda_cohort: Option<f64>,
-    pub calibration_p95_abs_effect: Option<f64>,
+    pub calibration_p95_abs_probability_effect: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -68,6 +68,7 @@ pub struct CellArtifact {
     pub role_model_ref: String,
     pub model_spec_id: Option<ModelSpecId>,
     pub performance_enabled: bool,
+    pub calibration_p95_abs_logit_effect: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -264,7 +265,7 @@ pub fn build_training_outputs(
     }
     let normalization = build_normalization(rows);
     let roles = build_role_artifacts(rows, evaluation)?;
-    let cells = build_cell_artifacts(evaluation, &roles);
+    let cells = build_cell_artifacts(rows, evaluation, &roles, &normalization);
     let report_cells = build_cell_reports(rows, evaluation, &roles)?;
     let caps = PerformanceCaps::default();
     let training_config = training_config(evaluation);
@@ -314,8 +315,10 @@ pub fn build_training_outputs(
 }
 
 fn build_cell_artifacts(
+    rows: &[TrainingRow],
     evaluation: &StabilityEvaluation,
     roles: &BTreeMap<Role, HierarchicalModelArtifact>,
+    normalization: &NormalizationArtifact,
 ) -> Vec<CellArtifact> {
     let mut cells = evaluation
         .cells
@@ -334,11 +337,40 @@ fn build_cell_artifacts(
                     role_model,
                     &evaluation.config,
                 ),
+                calibration_p95_abs_logit_effect: cell_logit_p95(
+                    rows,
+                    cell.role,
+                    cell.mode,
+                    role_model,
+                    normalization,
+                ),
             }
         })
         .collect::<Vec<_>>();
     cells.sort_by_key(|cell| (cell.role, cell.mode));
     cells
+}
+
+fn cell_logit_p95(
+    rows: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    model: &HierarchicalModelArtifact,
+    normalization: &NormalizationArtifact,
+) -> f64 {
+    let mut effects = rows
+        .iter()
+        .filter(|row| row.role == role_name(role) && row.mode_family == mode)
+        .filter_map(|row| super::shadow::artifact_logit_effect(row, role, model, normalization))
+        .filter(|value| value.is_finite())
+        .map(f64::abs)
+        .collect::<Vec<_>>();
+    effects.sort_by(f64::total_cmp);
+    effects
+        .get(((effects.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or(1.0)
+        .max(f64::EPSILON)
 }
 
 fn build_role_artifacts(
@@ -906,7 +938,7 @@ fn refit_artifact(
         final_hit_multiplier: Some(model.final_multiplier),
         lambda_core: Some(config.lambda_core),
         lambda_cohort: Some(config.lambda_cohort),
-        calibration_p95_abs_effect: Some(calibration.p95_abs_effect),
+        calibration_p95_abs_probability_effect: Some(calibration.p95_abs_effect),
     })
 }
 

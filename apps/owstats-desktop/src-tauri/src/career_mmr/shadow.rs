@@ -2,6 +2,8 @@
 
 use super::{
     input::{ModeFamily, Role},
+    performance::{BaselineLevel, FeatureName, FeatureValues, HealingTakenStrategy, MatrixRow},
+    performance_forward::{role_vector_with_multiplier, ModelVariant},
     rating::{
         bounded_performance_adjustment, update_rating_for_expected, RatingInput, RoleRatingState,
         INITIAL_MU,
@@ -255,15 +257,19 @@ fn requested_adjustment(group: &ReplayGroup<'_>, artifact: &PerformanceModelArti
     let Some(model) = artifact.roles.get(&group.role) else {
         return 0.0;
     };
-    let p95 = model
-        .calibration_p95_abs_effect
+    let p95 = artifact
+        .cells
+        .iter()
+        .find(|cell| cell.role == group.role && cell.mode == group.mode)
+        .map(|cell| cell.calibration_p95_abs_logit_effect)
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or(1.0);
     let mut weighted = 0.0;
     let mut duration = 0.0;
     for row in &group.rows {
         let d = row.hero_duration_sec.unwrap_or(0.0);
-        if let Some(effect) = artifact_logit_effect(row, group.role, model, artifact) {
+        if let Some(effect) = artifact_logit_effect(row, group.role, model, &artifact.normalization)
+        {
             weighted += effect * d;
             duration += d;
         }
@@ -274,120 +280,24 @@ fn requested_adjustment(group: &ReplayGroup<'_>, artifact: &PerformanceModelArti
     (weighted / duration / p95).clamp(-1.0, 1.0)
 }
 
-fn artifact_logit_effect(
+pub(crate) fn artifact_logit_effect(
     row: &TrainingRow,
     role: Role,
     model: &HierarchicalModelArtifact,
-    artifact: &PerformanceModelArtifact,
+    normalization: &super::training_report::NormalizationArtifact,
 ) -> Option<f64> {
-    let strategy = model.selected_strategy.as_deref()?;
-    let variant = model.selected_variant.as_deref()?;
-    let mut z = BTreeMap::<&str, f64>::new();
-    let mut per_ten = BTreeMap::<&str, f64>::new();
-    for (name, value) in raw_features(row) {
-        if let Some(raw) = value.filter(|v| v.is_finite()) {
-            let d = row.hero_duration_sec?;
-            if d <= 0.0 {
-                return None;
-            }
-            let value = raw * 600.0 / d;
-            per_ten.insert(name, value);
-            if let Some(b) = choose_baseline(
-                row,
-                name,
-                &artifact.normalization.baselines,
-                artifact.normalization.minimum_hero_samples,
-            ) {
-                z.insert(
-                    name,
-                    (artifact.normalization.mad_scale * (value - b.median_per_ten)
-                        / b.mad_per_ten.max(artifact.normalization.mad_floor_absolute))
-                    .clamp(
-                        -artifact.normalization.z_clip,
-                        artifact.normalization.z_clip,
-                    ),
-                );
-            }
-        }
-    }
-    let final_z = *z.get("final_hit").unwrap_or(&0.0);
-    let nonfinal_z = *z.get("non_final_eliminations").unwrap_or(&0.0);
-    let assist_z = *z.get("assist").unwrap_or(&0.0);
-    let death_z = *z.get("death").unwrap_or(&0.0);
-    let damage_taken = *z.get("damage_taken").unwrap_or(&0.0);
-    let objective = *z.get("objective_time").unwrap_or(&0.0);
+    let strategy = parse_strategy(model.selected_strategy.as_deref()?)?;
+    let variant = parse_variant(model.selected_variant.as_deref()?)?;
+    let matrix = matrix_row_from_artifact(row, strategy, normalization)?;
     let final_mult = model.final_hit_multiplier.unwrap_or(1.0);
-    let damage_conversion = {
-        let damage = *per_ten.get("damage").unwrap_or(&0.0);
-        let median = choose_baseline(
-            row,
-            "damage",
-            &artifact.normalization.baselines,
-            artifact.normalization.minimum_hero_samples,
-        )
-        .map_or(0.0, |b| b.median_per_ten);
-        (per_ten.get("final_hit").copied().unwrap_or(0.0) * final_mult
-            + per_ten
-                .get("non_final_eliminations")
-                .copied()
-                .unwrap_or(0.0))
-            / damage.max(0.25 * median).max(f64::EPSILON)
-    };
-    let frontline = damage_taken.max(0.0)
-        * (0.5 + 0.5 * (-death_z / 3.0).clamp(0.0, 1.0))
-        * ([
-            final_z.max(0.0),
-            nonfinal_z.max(0.0),
-            assist_z.max(0.0),
-            objective.max(0.0),
-        ]
-        .iter()
-        .sum::<f64>()
-            / 4.0);
-    let abnormal = damage_taken.max(0.0) * death_z.max(0.0);
-    let survival = (-death_z).clamp(-3.0, 3.0);
-    let mut values = BTreeMap::from([
-        ("final", final_z),
-        ("nonfinal", nonfinal_z),
-        ("assist", assist_z),
-        ("death", death_z),
-    ]);
-    if variant == "role_full" {
-        match role {
-            Role::Tank => {
-                values.insert("frontline_conversion", frontline);
-                values.insert("mitigation", *z.get("mitigation").unwrap_or(&0.0));
-                values.insert("abnormal_damage_taken", abnormal);
-            }
-            Role::Damage => {
-                values.insert("damage_conversion", damage_conversion);
-            }
-            Role::Support => {
-                values.insert("healing", *z.get("healing").unwrap_or(&0.0));
-                values.insert("damage", *z.get("damage").unwrap_or(&0.0));
-                values.insert("survival", survival);
-                values.insert("abnormal_damage_taken", abnormal);
-            }
-        }
-    }
-    if strategy != "none" {
-        values.insert(
-            "debt",
-            healing_debt(
-                row,
-                strategy,
-                &z,
-                &per_ten,
-                &artifact.normalization.healing_expectations,
-                artifact,
-            ),
-        );
-    }
+    let vector = role_vector_with_multiplier(&matrix, role, variant, strategy, final_mult);
     let offsets = model
         .training_cohort_offsets
         .get(&row.mode_family.training_cohort());
-    let effect = values
+    let effect = vector
+        .names
         .into_iter()
+        .zip(vector.values)
         .map(|(name, value)| {
             (model.feature_weights.get(name).copied().unwrap_or(0.0)
                 + offsets.and_then(|o| o.get(name)).copied().unwrap_or(0.0))
@@ -397,130 +307,278 @@ fn artifact_logit_effect(
     effect.is_finite().then_some(effect)
 }
 
-fn raw_features(row: &TrainingRow) -> [(&'static str, Option<f64>); 11] {
-    [
-        ("final_hit", row.final_hit),
-        (
-            "non_final_eliminations",
-            row.kill.zip(row.final_hit).map(|(k, f)| (k - f).max(0.0)),
-        ),
-        ("assist", row.assist),
-        ("death", row.death),
-        ("damage", row.damage),
-        ("healing", row.healing),
-        ("healing_taken", row.healing_taken),
-        ("mitigation", row.mitigation),
-        ("damage_taken", row.damage_taken),
-        ("objective_time", row.objective_time_sec),
-        ("available_team_healing", row.available_team_healing),
-    ]
-}
-
-fn choose_baseline<'a>(
+pub fn matrix_row_from_artifact(
     row: &TrainingRow,
-    feature: &str,
-    all: &'a [BaselineArtifact],
-    min: usize,
-) -> Option<&'a BaselineArtifact> {
-    let env = environment(row.environment);
-    let hero = row.hero_group.as_deref();
-    let candidates = [
-        (hero, Some(row.mode_family), Some(row.season), true),
-        (hero, Some(row.mode_family), None, true),
-        (hero, None, None, true),
-        (None, Some(row.mode_family), None, false),
-        (None, None, None, false),
-    ];
-    candidates.into_iter().find_map(|(h, m, s, needs)| {
-        all.iter().find(|b| {
-            b.role == row.role
-                && b.feature == feature
-                && b.environment == env
-                && b.hero.as_deref() == h
-                && b.mode == m
-                && b.season == s
-                && (!needs || b.sample_count >= min)
-                && b.median_per_ten.is_finite()
-                && b.mad_per_ten.is_finite()
-                && b.mad_per_ten > 0.0
-        })
+    strategy: HealingTakenStrategy,
+    normalization: &super::training_report::NormalizationArtifact,
+) -> Option<MatrixRow> {
+    if !row.allow_performance || row.outcome_only || !row.mode_family.trains_performance() {
+        return None;
+    }
+    let hero = row.hero_group.as_deref()?;
+    let duration = row
+        .hero_duration_sec
+        .filter(|value| value.is_finite() && *value > 0.0)?;
+    let scale = 600.0 / duration;
+    let scaled = |value: Option<f64>| {
+        value
+            .filter(|v| v.is_finite())
+            .map(|v| v * scale)
+            .filter(|v| v.is_finite())
+    };
+    let raw = BTreeMap::from([
+        (FeatureName::FinalHit, scaled(row.final_hit)),
+        (
+            FeatureName::NonFinalEliminations,
+            row.kill
+                .zip(row.final_hit)
+                .filter(|(k, f)| k.is_finite() && f.is_finite())
+                .map(|(k, f)| (k - f).max(0.0) * scale)
+                .filter(|v| v.is_finite()),
+        ),
+        (FeatureName::Assist, scaled(row.assist)),
+        (FeatureName::Death, scaled(row.death)),
+        (FeatureName::Damage, scaled(row.damage)),
+        (FeatureName::Healing, scaled(row.healing)),
+        (FeatureName::HealingTaken, scaled(row.healing_taken)),
+        (FeatureName::Mitigation, scaled(row.mitigation)),
+        (FeatureName::DamageTaken, scaled(row.damage_taken)),
+        (FeatureName::ObjectiveTime, scaled(row.objective_time_sec)),
+        (
+            FeatureName::AvailableTeamHealing,
+            scaled(row.available_team_healing),
+        ),
+    ]);
+    let mut standardized = BTreeMap::new();
+    let mut levels = BTreeMap::new();
+    for (&feature, &value) in &raw {
+        let (baseline, level) = choose_feature_baseline(row, feature, normalization);
+        let z = value.zip(baseline).map(|(value, baseline)| {
+            (normalization.mad_scale * (value - baseline.median_per_ten) / baseline.mad_per_ten)
+                .clamp(-normalization.z_clip, normalization.z_clip)
+        });
+        standardized.insert(feature, z);
+        levels.insert(feature, level);
+    }
+    let safe = row.usable_for_resource_debt;
+    let healing_raw = raw[&FeatureName::HealingTaken];
+    let healing_z = standardized[&FeatureName::HealingTaken];
+    let expected_healing = choose_expectation_for_level(
+        row,
+        levels[&FeatureName::HealingTaken],
+        &normalization.healing_expectations,
+    )
+    .map(|expectation| {
+        expectation
+            .coefficients
+            .map_or(expectation.fallback_median_per_ten, |beta| {
+                let x = [
+                    (row.duration_sec / 600.0).max(0.0),
+                    standardized[&FeatureName::DamageTaken].unwrap_or(0.0),
+                    standardized[&FeatureName::Death].unwrap_or(0.0),
+                    standardized[&FeatureName::AvailableTeamHealing].unwrap_or(0.0),
+                ];
+                beta[0] + beta[1] * x[0] + beta[2] * x[1] + beta[3] * x[2] + beta[4] * x[3]
+            })
+    });
+    let excess = healing_raw
+        .zip(expected_healing)
+        .map(|(actual, expected)| (actual - expected).max(0.0));
+    let conversion = [
+        FeatureName::FinalHit,
+        FeatureName::NonFinalEliminations,
+        FeatureName::Assist,
+        FeatureName::ObjectiveTime,
+    ]
+    .into_iter()
+    .map(|feature| standardized[&feature].map(|v| v.max(0.0)))
+    .collect::<Option<Vec<_>>>()
+    .map(|values| values.into_iter().sum::<f64>() / 12.0);
+    let healing_taken_derived = match strategy {
+        HealingTakenStrategy::None => None,
+        HealingTakenStrategy::DirectNegative if safe => healing_raw,
+        HealingTakenStrategy::HeroNormalized if safe => healing_z,
+        HealingTakenStrategy::ExcessHealing if safe => excess,
+        HealingTakenStrategy::ResourceConversionDebt if safe => excess
+            .zip(conversion)
+            .map(|(excess, conversion)| excess * (1.0 - conversion.clamp(0.0, 1.0)).max(0.0)),
+        _ => None,
+    };
+    let make_values = |source: &BTreeMap<FeatureName, Option<f64>>, derived: bool| {
+        let death = source[&FeatureName::Death];
+        let damage_taken = source[&FeatureName::DamageTaken];
+        let outputs = [
+            FeatureName::FinalHit,
+            FeatureName::NonFinalEliminations,
+            FeatureName::Assist,
+            FeatureName::ObjectiveTime,
+        ];
+        let frontline_conversion = derived
+            .then(|| {
+                Some(
+                    damage_taken?.max(0.0)
+                        * (0.5 + 0.5 * (-death? / 3.0).clamp(0.0, 1.0))
+                        * (outputs
+                            .into_iter()
+                            .map(|f| source[&f].map(|v| v.max(0.0)))
+                            .collect::<Option<Vec<_>>>()?
+                            .into_iter()
+                            .sum::<f64>()
+                            / 4.0),
+                )
+            })
+            .flatten()
+            .filter(|_| row.role == "tank");
+        let survival = derived
+            .then(|| death.map(|v| (-v).clamp(-3.0, 3.0)))
+            .flatten()
+            .filter(|_| row.role == "support");
+        let abnormal_damage_taken = derived
+            .then(|| {
+                damage_taken
+                    .zip(death)
+                    .map(|(d, x)| d.max(0.0) * x.max(0.0))
+            })
+            .flatten();
+        FeatureValues {
+            final_hit: source[&FeatureName::FinalHit],
+            non_final_eliminations: source[&FeatureName::NonFinalEliminations],
+            assist: source[&FeatureName::Assist],
+            death,
+            damage: source[&FeatureName::Damage],
+            healing: source[&FeatureName::Healing],
+            mitigation: source[&FeatureName::Mitigation],
+            damage_taken,
+            objective_time: source[&FeatureName::ObjectiveTime],
+            frontline_conversion,
+            survival,
+            abnormal_damage_taken,
+        }
+    };
+    let damage_baseline_median_per_ten =
+        choose_feature_baseline(row, FeatureName::Damage, normalization)
+            .0
+            .map(|b| b.median_per_ten);
+    Some(MatrixRow {
+        match_group: row.match_group.clone(),
+        hero_group: hero.into(),
+        role: row.role.clone(),
+        season: row.season,
+        begin_ts: row.begin_ts,
+        result: row.result,
+        expected_win_rate: row.expected_win_rate,
+        data_quality: row.data_quality,
+        mode_family: row.mode_family,
+        per_ten: make_values(&raw, false),
+        standardized: make_values(&standardized, true),
+        baselines: levels,
+        healing_taken_derived,
+        damage_baseline_median_per_ten,
     })
 }
 
-fn healing_debt(
-    row: &TrainingRow,
-    strategy: &str,
-    z: &BTreeMap<&str, f64>,
-    raw: &BTreeMap<&str, f64>,
-    expectations: &[HealingExpectationArtifact],
-    artifact: &PerformanceModelArtifact,
-) -> f64 {
-    if !row.usable_for_resource_debt {
-        return 0.0;
+fn parse_strategy(value: &str) -> Option<HealingTakenStrategy> {
+    match value {
+        "none" => Some(HealingTakenStrategy::None),
+        "directnegative" => Some(HealingTakenStrategy::DirectNegative),
+        "heronormalized" => Some(HealingTakenStrategy::HeroNormalized),
+        "excesshealing" => Some(HealingTakenStrategy::ExcessHealing),
+        "resourceconversiondebt" => Some(HealingTakenStrategy::ResourceConversionDebt),
+        _ => None,
     }
-    let actual = raw.get("healing_taken").copied().unwrap_or(0.0);
-    if strategy == "directnegative" {
-        return (actual / 10_000.0).clamp(0.0, 3.0);
-    }
-    if strategy == "heronormalized" {
-        return z.get("healing_taken").copied().unwrap_or(0.0).max(0.0);
-    }
-    let expectation = choose_expectation(
-        row,
-        expectations,
-        artifact.normalization.minimum_hero_samples,
-    );
-    let expected = expectation.map_or(0.0, |e| {
-        e.coefficients.map_or(e.fallback_median_per_ten, |beta| {
-            let x = [
-                (row.duration_sec / 600.0).max(0.0),
-                z.get("damage_taken").copied().unwrap_or(0.0),
-                z.get("death").copied().unwrap_or(0.0),
-                z.get("available_team_healing").copied().unwrap_or(0.0),
-            ];
-            beta[0] + beta[1] * x[0] + beta[2] * x[1] + beta[3] * x[2] + beta[4] * x[3]
-        })
-    });
-    let excess = (actual - expected).max(0.0);
-    if strategy == "excesshealing" {
-        return excess;
-    }
-    let conversion = [
-        "final_hit",
-        "non_final_eliminations",
-        "assist",
-        "objective_time",
-    ]
-    .iter()
-    .map(|n| z.get(n).copied().unwrap_or(0.0).max(0.0))
-    .sum::<f64>()
-        / 12.0;
-    excess * (1.0 - conversion.clamp(0.0, 1.0)).max(0.0)
 }
-fn choose_expectation<'a>(
+fn parse_variant(value: &str) -> Option<ModelVariant> {
+    match value {
+        "core" => Some(ModelVariant::Core),
+        "role_full" => Some(ModelVariant::RoleFull),
+        _ => None,
+    }
+}
+fn feature_name(feature: FeatureName) -> &'static str {
+    match feature {
+        FeatureName::FinalHit => "final_hit",
+        FeatureName::NonFinalEliminations => "non_final_eliminations",
+        FeatureName::Assist => "assist",
+        FeatureName::Death => "death",
+        FeatureName::Damage => "damage",
+        FeatureName::Healing => "healing",
+        FeatureName::HealingTaken => "healing_taken",
+        FeatureName::Mitigation => "mitigation",
+        FeatureName::DamageTaken => "damage_taken",
+        FeatureName::ObjectiveTime => "objective_time",
+        FeatureName::AvailableTeamHealing => "available_team_healing",
+    }
+}
+fn choose_feature_baseline<'a>(
     row: &TrainingRow,
-    all: &'a [HealingExpectationArtifact],
-    min: usize,
-) -> Option<&'a HealingExpectationArtifact> {
-    let env = environment(row.environment);
+    feature: FeatureName,
+    normalization: &'a super::training_report::NormalizationArtifact,
+) -> (Option<&'a BaselineArtifact>, BaselineLevel) {
     let hero = row.hero_group.as_deref();
-    [
-        (hero, Some(row.mode_family), Some(row.season), true),
-        (hero, Some(row.mode_family), None, true),
-        (hero, None, None, true),
-        (None, Some(row.mode_family), None, false),
-        (None, None, None, false),
-    ]
-    .into_iter()
-    .find_map(|(h, m, s, needs)| {
-        all.iter().find(|e| {
-            e.role == row.role
-                && e.environment == env
-                && e.hero.as_deref() == h
-                && e.mode == m
-                && e.season == s
-                && (!needs || e.sample_count >= min)
-        })
+    let candidates = [
+        (
+            hero,
+            Some(row.mode_family),
+            Some(row.season),
+            true,
+            BaselineLevel::HeroModeSeason,
+        ),
+        (
+            hero,
+            Some(row.mode_family),
+            None,
+            true,
+            BaselineLevel::HeroMode,
+        ),
+        (hero, None, None, true, BaselineLevel::HeroEnvironment),
+        (
+            None,
+            Some(row.mode_family),
+            None,
+            false,
+            BaselineLevel::RoleMode,
+        ),
+        (None, None, None, false, BaselineLevel::RoleEnvironment),
+    ];
+    for (h, m, s, needs, level) in candidates {
+        if let Some(b) = normalization.baselines.iter().find(|b| {
+            b.role == row.role
+                && b.feature == feature_name(feature)
+                && b.environment == environment(row.environment)
+                && b.hero.as_deref() == h
+                && b.mode == m
+                && b.season == s
+                && (!needs || b.sample_count >= normalization.minimum_hero_samples)
+                && b.median_per_ten.is_finite()
+                && b.mad_per_ten.is_finite()
+                && b.mad_per_ten > 0.0
+        }) {
+            return (Some(b), level);
+        }
+    }
+    (None, BaselineLevel::Unavailable)
+}
+
+fn choose_expectation_for_level<'a>(
+    row: &TrainingRow,
+    level: BaselineLevel,
+    all: &'a [HealingExpectationArtifact],
+) -> Option<&'a HealingExpectationArtifact> {
+    let hero = row.hero_group.as_deref();
+    let (hero, mode, season) = match level {
+        BaselineLevel::HeroModeSeason => (hero, Some(row.mode_family), Some(row.season)),
+        BaselineLevel::HeroMode => (hero, Some(row.mode_family), None),
+        BaselineLevel::HeroEnvironment => (hero, None, None),
+        BaselineLevel::RoleMode => (None, Some(row.mode_family), None),
+        BaselineLevel::RoleEnvironment => (None, None, None),
+        BaselineLevel::Unavailable => return None,
+    };
+    all.iter().find(|expectation| {
+        expectation.role == row.role
+            && expectation.environment == environment(row.environment)
+            && expectation.hero.as_deref() == hero
+            && expectation.mode == mode
+            && expectation.season == season
     })
 }
 fn environment(value: TrainingEnvironment) -> &'static str {

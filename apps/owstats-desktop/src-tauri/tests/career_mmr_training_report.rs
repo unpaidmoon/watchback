@@ -224,7 +224,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
 
     let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
 
-    assert_eq!(artifact.schema_version, 2);
+    assert_eq!(artifact.schema_version, 3);
     assert!(!artifact.algorithm.is_empty());
     assert!(!artifact.feature_version.is_empty());
     assert_eq!(artifact.seed, 0x5eed);
@@ -324,6 +324,65 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
         recompute_config_hash(&artifact).unwrap(),
         artifact.config_hash
     );
+}
+
+#[test]
+fn each_actual_cell_stores_its_own_training_logit_effect_p95() {
+    let (mut rows, audit, mut evaluation) = eligible_evaluation(73);
+    let quick = evaluation
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleQuick)
+        .unwrap();
+    mark_cell_eligible(quick, 0);
+    rows.retain(|row| row.role != "tank");
+    for index in 0..40 {
+        let mut competitive = row(1_000 + index, "tank", ModeFamily::RoleCompetitive);
+        competitive.hero_group = Some("same_tank".into());
+        competitive.final_hit = Some(2.0 + index as f64 * 0.2);
+        competitive.kill = competitive.final_hit.map(|v| v + 2.0);
+        rows.push(competitive);
+        let mut quick = row(2_000 + index, "tank", ModeFamily::RoleQuick);
+        quick.hero_group = Some("same_tank".into());
+        quick.final_hit = Some(if index < 38 {
+            5.0
+        } else {
+            100.0 + index as f64
+        });
+        quick.kill = quick.final_hit.map(|v| v + 2.0);
+        rows.push(quick);
+    }
+    let artifact = build_training_outputs(&rows, &audit, &evaluation, 73)
+        .unwrap()
+        .0;
+    let competitive = artifact
+        .cells
+        .iter()
+        .find(|c| c.role == Role::Tank && c.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    let quick = artifact
+        .cells
+        .iter()
+        .find(|c| c.role == Role::Tank && c.mode == ModeFamily::RoleQuick)
+        .unwrap();
+    assert!(competitive.calibration_p95_abs_logit_effect.is_finite());
+    assert!(quick.calibration_p95_abs_logit_effect.is_finite());
+    assert_ne!(
+        competitive.calibration_p95_abs_logit_effect,
+        quick.calibration_p95_abs_logit_effect
+    );
+    let decoded: owstats_desktop_lib::career_mmr::training_report::PerformanceModelArtifact =
+        serde_json::from_str(&serde_json::to_string(&artifact).unwrap()).unwrap();
+    assert_eq!(decoded.cells, artifact.cells);
+    let original_hash = artifact.config_hash.clone();
+    let mut changed = artifact;
+    changed
+        .cells
+        .iter_mut()
+        .find(|c| c.role == Role::Tank && c.mode == ModeFamily::RoleQuick)
+        .unwrap()
+        .calibration_p95_abs_logit_effect += 0.5;
+    assert_ne!(recompute_config_hash(&changed).unwrap(), original_hash);
 }
 
 #[test]
