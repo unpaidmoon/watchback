@@ -60,6 +60,7 @@ apps/owstats-desktop/public/assets.backup-*/
 
 # Test artifacts
 .playwright-cli/
+.worktrees/
 test-results/
 court_image_*.png
 court_result.json
