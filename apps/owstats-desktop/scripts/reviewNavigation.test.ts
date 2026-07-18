@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   buildFriendDetailState,
   buildAchievementsHref,
@@ -9,6 +10,9 @@ import {
   reviewScrollKey,
   scheduleReviewScrollRestore,
 } from "../src/features/review/reviewNavigation";
+
+const reviewPageSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
+assert.match(reviewPageSource, /if \(!Number\.isFinite\(scrollY\)\) \{ sessionStorage\.removeItem\(reviewScrollKey\(href\)\); return; \}/, "invalid persisted review scroll values must be cleared");
 
 assert.equal(buildReviewHref(23), "/review?season=23");
 assert.equal(buildAchievementsHref(23), "/achievements?season=23");
