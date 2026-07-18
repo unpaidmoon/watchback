@@ -8,8 +8,11 @@ export const careerRoleLabels: Record<CareerRole, string> = {
 
 export const careerModeLabels: Record<string, string> = {
   role_competitive: "职责竞技",
+  role_quick: "职责快速",
   open_competitive: "开放竞技",
+  open_quick: "开放快速",
   stadium_competitive: "角斗竞技",
+  stadium_quick: "角斗快速",
   quick_play: "快速比赛",
 };
 

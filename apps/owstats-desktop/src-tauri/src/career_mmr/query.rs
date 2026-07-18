@@ -449,15 +449,7 @@ pub fn get_recent_mmr_explanations(
     })
 }
 fn mode_family(value: &str) -> Result<ModeFamily> {
-    match value {
-        "role_competitive" => Ok(ModeFamily::RoleCompetitive),
-        "role_quick" | "quick_play" => Ok(ModeFamily::RoleQuick),
-        "open_competitive" => Ok(ModeFamily::OpenCompetitive),
-        "open_quick" => Ok(ModeFamily::OpenQuick),
-        "stadium_competitive" => Ok(ModeFamily::StadiumCompetitive),
-        "stadium_quick" => Ok(ModeFamily::StadiumQuick),
-        _ => bail!("模式数据无效"),
-    }
+    ModeFamily::from_stored_str(value).ok_or_else(|| anyhow::anyhow!("模式数据无效"))
 }
 
 #[cfg(test)]
@@ -476,8 +468,10 @@ mod mode_family_tests {
             ("stadium_quick", ModeFamily::StadiumQuick),
             ("quick_play", ModeFamily::RoleQuick),
         ] {
+            assert_eq!(ModeFamily::from_stored_str(value), Some(expected));
             assert_eq!(mode_family(value).unwrap(), expected);
         }
+        assert_eq!(ModeFamily::from_stored_str("unknown"), None);
     }
 }
 pub fn get_career_mmr_build_status(db: &OwDatabase) -> Result<CareerMmrBuildStatus> {

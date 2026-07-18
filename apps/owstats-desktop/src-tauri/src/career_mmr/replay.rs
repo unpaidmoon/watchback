@@ -13,9 +13,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-pub const BASELINE_MODEL_VERSION: i64 = 1;
-const ALGORITHM: &str = "role_bayesian_outcome_v1";
-const CONFIG_JSON: &str = r#"{"performanceWeight":0.0}"#;
+pub const BASELINE_MODEL_VERSION: i64 = 2;
+const ALGORITHM: &str = "role_bayesian_outcome_six_mode_v2";
+const CONFIG_JSON: &str = r#"{"performanceWeight":0.0,"trainingCohorts":{"role_competitive":"role_queue","role_quick":"role_queue","open_competitive":"open_queue","open_quick":"open_queue","stadium_competitive":"stadium_competitive","stadium_quick":"outcome_only"},"modeWeights":{"role_competitive":1.0,"role_quick":0.3,"open_competitive":1.0,"open_quick":0.3,"stadium_competitive":0.5,"stadium_quick":0.1},"modeCaps":{"competitive":30.0,"quick":10.0}}"#;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

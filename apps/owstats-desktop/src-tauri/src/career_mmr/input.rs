@@ -44,6 +44,18 @@ impl ModeFamily {
         }
     }
 
+    pub fn from_stored_str(value: &str) -> Option<Self> {
+        match value {
+            "role_competitive" => Some(Self::RoleCompetitive),
+            "role_quick" | "quick_play" => Some(Self::RoleQuick),
+            "open_competitive" => Some(Self::OpenCompetitive),
+            "open_quick" => Some(Self::OpenQuick),
+            "stadium_competitive" => Some(Self::StadiumCompetitive),
+            "stadium_quick" => Some(Self::StadiumQuick),
+            _ => None,
+        }
+    }
+
     pub fn training_cohort(self) -> TrainingCohort {
         match self {
             Self::RoleCompetitive | Self::RoleQuick => TrainingCohort::RoleQueue,

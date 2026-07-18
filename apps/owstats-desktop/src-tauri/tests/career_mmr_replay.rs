@@ -1,5 +1,6 @@
 use owstats_desktop_lib::{
-    career_mmr::replay::rebuild_career_mmr, import_payload_value_embedded, OwDatabase,
+    career_mmr::replay::{rebuild_career_mmr, BASELINE_MODEL_VERSION},
+    import_payload_value_embedded, OwDatabase,
 };
 use rusqlite::{params, Connection};
 use tempfile::tempdir;
@@ -113,10 +114,12 @@ fn dynamically_discovers_seasons_and_orders_by_time_then_season_then_stable_hash
     let conn = db.connect().unwrap();
     let rows = conn
         .prepare(
-            "SELECT begin_ts, season FROM career_mmr_events WHERE model_version=1 ORDER BY rowid",
+            "SELECT begin_ts, season FROM career_mmr_events WHERE model_version=?1 ORDER BY rowid",
         )
         .unwrap()
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+        .query_map([BASELINE_MODEL_VERSION], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
@@ -146,6 +149,53 @@ fn dynamically_discovers_seasons_and_orders_by_time_then_season_then_stable_hash
         .unwrap(),
         1
     );
+}
+
+#[test]
+fn rebuild_creates_v2_without_mutating_the_legacy_v1_definition() {
+    let (_dir, db) = database();
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO mmr_model_versions(version,algorithm,config_json,is_active,created_at) VALUES(1,'role_bayesian_outcome_v1','{\"performanceWeight\":0.0}',1,'legacy')",
+        [],
+    )
+    .unwrap();
+    insert_match(&conn, "v2-match", 23, 100, "tank", "win");
+    drop(conn);
+
+    let summary = rebuild_career_mmr(&db).unwrap();
+    assert_eq!(summary.model_version, 2);
+    assert_eq!(BASELINE_MODEL_VERSION, 2);
+
+    let conn = db.connect().unwrap();
+    let legacy: (String, String, i64) = conn
+        .query_row(
+            "SELECT algorithm,config_json,is_active FROM mmr_model_versions WHERE version=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        legacy,
+        (
+            "role_bayesian_outcome_v1".into(),
+            r#"{"performanceWeight":0.0}"#.into(),
+            0,
+        )
+    );
+    let current: (String, String, i64) = conn
+        .query_row(
+            "SELECT algorithm,config_json,is_active FROM mmr_model_versions WHERE version=2",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(current.0, "role_bayesian_outcome_six_mode_v2");
+    assert_eq!(
+        current.1,
+        r#"{"performanceWeight":0.0,"trainingCohorts":{"role_competitive":"role_queue","role_quick":"role_queue","open_competitive":"open_queue","open_quick":"open_queue","stadium_competitive":"stadium_competitive","stadium_quick":"outcome_only"},"modeWeights":{"role_competitive":1.0,"role_quick":0.3,"open_competitive":1.0,"open_quick":0.3,"stadium_competitive":0.5,"stadium_quick":0.1},"modeCaps":{"competitive":30.0,"quick":10.0}}"#
+    );
+    assert_eq!(current.2, 1);
 }
 
 #[test]
@@ -236,16 +286,16 @@ fn conflicting_model_version_is_rejected_without_mutating_the_existing_row() {
     let conn = db.connect().unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT is_active FROM mmr_model_versions WHERE version=1",
-            [],
+            "SELECT is_active FROM mmr_model_versions WHERE version=?1",
+            [BASELINE_MODEL_VERSION],
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
         1
     );
     conn.execute(
-        "UPDATE mmr_model_versions SET algorithm='conflicting_algorithm' WHERE version=1",
-        [],
+        "UPDATE mmr_model_versions SET algorithm='conflicting_algorithm' WHERE version=?1",
+        [BASELINE_MODEL_VERSION],
     )
     .unwrap();
     drop(conn);
@@ -253,8 +303,8 @@ fn conflicting_model_version_is_rejected_without_mutating_the_existing_row() {
     let conn = db.connect().unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT algorithm FROM mmr_model_versions WHERE version=1",
-            [],
+            "SELECT algorithm FROM mmr_model_versions WHERE version=?1",
+            [BASELINE_MODEL_VERSION],
             |r| r.get::<_, String>(0)
         )
         .unwrap(),

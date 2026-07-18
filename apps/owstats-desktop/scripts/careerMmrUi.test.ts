@@ -4,9 +4,24 @@ import {
   buildCareerMmrChart,
   buildCareerMmrChartSummary,
   buildCareerMmrYAxisTicks,
+  careerModeLabels,
   createCareerMmrRequestGuard,
   formatCareerMmrTooltip,
 } from "../src/shared/careerMmrFormat";
+
+assert.deepEqual(
+  careerModeLabels,
+  {
+    role_competitive: "职责竞技",
+    role_quick: "职责快速",
+    open_competitive: "开放竞技",
+    open_quick: "开放快速",
+    stadium_competitive: "角斗竞技",
+    stadium_quick: "角斗快速",
+    quick_play: "快速比赛",
+  },
+  "六种实际模式必须有差异化中文标签，并保留旧 quick_play 显示兼容",
+);
 
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("../src/shared/phase6Shell.ts", import.meta.url), "utf8");
