@@ -1,6 +1,5 @@
 import { CircleDot, Sparkles } from "lucide-react";
 import { Navigate, NavLink, Route, Routes, useSearchParams } from "react-router-dom";
-import { FriendAnalyticsPage } from "./pages/FriendAnalyticsPage";
 import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
 import { MatchDetailPage } from "./pages/MatchDetailPage";
@@ -14,12 +13,18 @@ import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
 import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
 import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
-import { legacyReviewRedirectHref } from "./features/review/reviewNavigation";
+import { buildReviewHref, legacyReviewRedirectHref, parsePositiveSeasonParam } from "./features/review/reviewNavigation";
 
 function PersonalReviewRoute() {
   const [params] = useSearchParams();
   const redirect = legacyReviewRedirectHref(params);
   return redirect ? <Navigate to={redirect} replace /> : <PersonalReviewPage />;
+}
+
+function FriendAnalyticsRoute() {
+  const [params] = useSearchParams();
+  const season = parsePositiveSeasonParam(params.get("season"));
+  return <Navigate to={season === undefined ? "/review" : buildReviewHref(season)} replace />;
 }
 
 export function App() {
@@ -68,7 +73,7 @@ export function App() {
             <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />
-            <Route path="/analytics/friends" element={<FriendAnalyticsPage />} />
+            <Route path="/analytics/friends" element={<FriendAnalyticsRoute />} />
             <Route path="/analytics/friends/detail" element={<FriendDetailPage />} />
           </Routes>
         </div>
