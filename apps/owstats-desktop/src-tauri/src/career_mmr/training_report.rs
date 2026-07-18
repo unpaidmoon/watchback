@@ -439,7 +439,7 @@ fn cell_validates_report(
         && complete_strategy_identities(cell)
         && cell.nested_validation.role == cell.role
         && cell.nested_validation.mode == cell.mode
-        && !cell.nested_validation.selection_degraded
+        && nested_degraded_state_is_valid(cell, config)
         && cell.nested_validation.selected_strategy == report.strategy
         && cell.nested_validation.selected_variant == report.forward.variant
         && model_spec_id_from_values(
@@ -544,6 +544,7 @@ fn finite_forward_evidence(report: &StabilityReport, config: &StabilityConfigSna
         && (!config.require_account_coverage
             || (report.leave_one_account_out.candidate_groups > 0
                 && report.leave_one_account_out.evaluated_groups > 0
+                && report.leave_one_account_out.coverage_limited_groups == 0
                 && option_finite(report.leave_one_account_out.mean_brier_delta)
                 && option_finite(report.leave_one_account_out.worst_brier_delta)))
         && report.bootstrap.requested_iterations > 0
@@ -559,19 +560,7 @@ fn finite_forward_evidence(report: &StabilityReport, config: &StabilityConfigSna
         && option_finite(report.bootstrap.mean_auc)
         && option_finite(report.bootstrap.mean_ece)
         && bootstrap_model_spec_id(report, config) == model_spec_id(report, config)
-        && report.bootstrap.coefficients.iter().all(|coefficient| {
-            coefficient.direction_stability.is_finite()
-                && coefficient.ci95_low.is_finite()
-                && coefficient.ci95_high.is_finite()
-                && (!coefficient.critical_constraint
-                    || coefficient.direction_stability
-                        >= config.minimum_critical_direction_stability)
-                && (!config.require_critical_ci_excludes_zero
-                    || !coefficient.critical_constraint
-                    || coefficient.ci95_low > 0.0
-                    || coefficient.ci95_high < 0.0)
-                && (!config.require_nonzero_reference_coefficients || coefficient.reference_nonzero)
-        })
+        && coefficients_are_complete(report, config)
 }
 
 fn loo_is_complete(
@@ -600,20 +589,113 @@ fn finite_nested_evidence(cell: &CellEvaluation, config: &StabilityConfigSnapsho
         && candidate.ece <= baseline.ece + config.max_ece_worsening
         && !cell.nested_validation.folds.is_empty()
         && cell.nested_validation.folds.iter().all(|fold| {
-            !fold.selection_degraded
-                && model_spec_id_from_values(
-                    &fold.strategy,
-                    fold.variant,
-                    fold.final_multiplier,
-                    fold.lambda_core,
-                    fold.lambda_cohort,
-                    config,
-                )
-                .is_some()
+            model_spec_id_from_values(
+                &fold.strategy,
+                fold.variant,
+                fold.final_multiplier,
+                fold.lambda_core,
+                fold.lambda_cohort,
+                config,
+            )
+            .is_some()
+                && (!fold.selection_degraded
+                    || is_fallback_spec(
+                        &fold.strategy,
+                        fold.variant,
+                        fold.final_multiplier,
+                        fold.lambda_core,
+                        fold.lambda_cohort,
+                        config,
+                    ))
                 && fold.metrics.as_ref().is_some_and(metric_is_finite)
                 && option_finite(fold.baseline_brier)
                 && option_finite(fold.brier_delta)
         })
+}
+
+fn nested_degraded_state_is_valid(cell: &CellEvaluation, config: &StabilityConfigSnapshot) -> bool {
+    let any_fold_degraded = cell
+        .nested_validation
+        .folds
+        .iter()
+        .any(|fold| fold.selection_degraded);
+    (!any_fold_degraded || cell.nested_validation.selection_degraded)
+        && (!cell.nested_validation.selection_degraded
+            || is_fallback_spec(
+                &cell.nested_validation.selected_strategy,
+                cell.nested_validation.selected_variant,
+                cell.nested_validation.selected_final_multiplier,
+                cell.nested_validation.selected_lambda_core,
+                cell.nested_validation.selected_lambda_cohort,
+                config,
+            ))
+}
+
+fn is_fallback_spec(
+    strategy: &str,
+    variant: ModelVariant,
+    multiplier: f64,
+    lambda_core: f64,
+    lambda_cohort: f64,
+    config: &StabilityConfigSnapshot,
+) -> bool {
+    let Some(fallback_regularization) = config.regularization_candidates.first() else {
+        return false;
+    };
+    strategy == "none"
+        && variant == ModelVariant::Core
+        && multiplier == 1.25
+        && lambda_core == fallback_regularization[0]
+        && lambda_cohort == fallback_regularization[1]
+}
+
+fn coefficients_are_complete(report: &StabilityReport, config: &StabilityConfigSnapshot) -> bool {
+    let coefficients = &report.bootstrap.coefficients;
+    let unique_weights = coefficients
+        .iter()
+        .map(|coefficient| &coefficient.weight)
+        .collect::<BTreeSet<_>>();
+    if unique_weights.len() != coefficients.len()
+        || coefficients.iter().any(|coefficient| {
+            !coefficient.direction_stability.is_finite()
+                || !coefficient.ci95_low.is_finite()
+                || !coefficient.ci95_high.is_finite()
+        })
+    {
+        return false;
+    }
+    for (weight, positive) in [("final", true), ("nonfinal", true), ("death", false)] {
+        if !one_valid_critical_coefficient(coefficients, weight, positive, config) {
+            return false;
+        }
+    }
+    report.strategy != "resourceconversiondebt"
+        || one_valid_critical_coefficient(coefficients, "debt", false, config)
+}
+
+fn one_valid_critical_coefficient(
+    coefficients: &[super::performance_stability::CoefficientStability],
+    weight: &str,
+    positive: bool,
+    config: &StabilityConfigSnapshot,
+) -> bool {
+    let matching = coefficients
+        .iter()
+        .filter(|coefficient| coefficient.weight == weight)
+        .collect::<Vec<_>>();
+    if matching.len() != 1 {
+        return false;
+    }
+    let coefficient = matching[0];
+    coefficient.scope == "core"
+        && coefficient.critical_constraint
+        && coefficient.direction_stability >= config.minimum_critical_direction_stability
+        && coefficient.reference_nonzero
+        && if positive {
+            coefficient.ci95_low > 0.0
+        } else {
+            coefficient.ci95_high < 0.0
+        }
 }
 
 fn bootstrap_model_spec_id(

@@ -3,7 +3,9 @@ use owstats_desktop_lib::career_mmr::{
     performance::{build_feature_matrix, HealingTakenStrategy},
     performance_forward::{MetricReport, NestedFoldReport},
     performance_model::{fit_model, FitConfig},
-    performance_stability::{evaluate_stability, CellDecision, StabilityConfig},
+    performance_stability::{
+        evaluate_stability, CellDecision, CoefficientStability, StabilityConfig,
+    },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
     training_report::{build_training_outputs, recompute_config_hash, validate_report_boundary},
 };
@@ -124,6 +126,22 @@ fn mark_cell_eligible(
     report.bootstrap.brier_delta_ci95_high = Some(-0.001);
     report.bootstrap.mean_auc = Some(0.6);
     report.bootstrap.mean_ece = Some(0.02);
+    report.bootstrap.coefficients = [
+        ("final", 0.10, 0.20),
+        ("nonfinal", 0.10, 0.20),
+        ("death", -0.20, -0.10),
+    ]
+    .into_iter()
+    .map(|(weight, low, high)| CoefficientStability {
+        weight: weight.into(),
+        scope: "core".into(),
+        direction_stability: 1.0,
+        ci95_low: low,
+        ci95_high: high,
+        critical_constraint: true,
+        reference_nonzero: true,
+    })
+    .collect();
     cell.selected = Some(report.strategy.clone());
     cell.decision = CellDecision::Eligible;
     cell.rejected_reasons.clear();
@@ -779,4 +797,226 @@ fn model_spec_id_is_canonical_and_rejects_adjacent_or_ambiguous_candidates() {
     let mut ambiguous = evaluation;
     ambiguous.config.final_hit_multipliers.push(1.0);
     assert!(build_training_outputs(&rows, &audit, &ambiguous, 41).is_err());
+}
+
+#[test]
+fn canonical_degraded_fallback_from_real_evaluation_can_be_eligible() {
+    let rows = synthetic_rows();
+    let audit = TrainingAudit {
+        source_accounts: 2,
+        projected_rows: rows.len(),
+        ..Default::default()
+    };
+    let mut evaluation = evaluate_stability(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 10,
+            seed: 43,
+            ..Default::default()
+        },
+    );
+    let cell = evaluation
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    assert!(cell.nested_validation.selection_degraded);
+    assert_eq!(cell.nested_validation.selected_strategy, "none");
+    assert_eq!(
+        cell.nested_validation.selected_variant,
+        owstats_desktop_lib::career_mmr::performance_forward::ModelVariant::Core
+    );
+    assert_eq!(cell.nested_validation.selected_final_multiplier, 1.25);
+    mark_cell_eligible(cell, 0);
+    cell.nested_validation.selection_degraded = true;
+    for fold in &mut cell.nested_validation.folds {
+        fold.selection_degraded = true;
+    }
+
+    let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 43).unwrap();
+    assert!(artifact.cells.iter().any(|cell| cell.role == Role::Tank
+        && cell.mode == ModeFamily::RoleCompetitive
+        && cell.performance_enabled));
+    assert!(report.cells.iter().any(|cell| cell.role == Role::Tank
+        && cell.mode == ModeFamily::RoleCompetitive
+        && cell.decision == CellDecision::Eligible));
+}
+
+#[test]
+fn degraded_complex_spec_is_shadowed() {
+    let (rows, audit, mut evaluation) = eligible_evaluation(47);
+    let cell = evaluation
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    cell.nested_validation.selection_degraded = true;
+    cell.nested_validation.selected_variant =
+        owstats_desktop_lib::career_mmr::performance_forward::ModelVariant::RoleFull;
+    cell.reports[0].forward.variant =
+        owstats_desktop_lib::career_mmr::performance_forward::ModelVariant::RoleFull;
+    cell.reports[0].bootstrap.fixed_variant =
+        Some(owstats_desktop_lib::career_mmr::performance_forward::ModelVariant::RoleFull);
+    for fold in &mut cell.nested_validation.folds {
+        fold.selection_degraded = true;
+        fold.variant = owstats_desktop_lib::career_mmr::performance_forward::ModelVariant::RoleFull;
+    }
+    let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 47).unwrap();
+    assert_shadow(&artifact, &report, Role::Tank, ModeFamily::RoleCompetitive);
+}
+
+#[test]
+fn incomplete_duplicate_or_wrong_scope_critical_coefficients_are_shadowed() {
+    for case in [
+        "missing",
+        "duplicate",
+        "duplicate_noncritical",
+        "wrong_scope",
+        "cross_zero",
+    ] {
+        let (rows, audit, mut evaluation) = eligible_evaluation(53);
+        let report = &mut evaluation
+            .cells
+            .iter_mut()
+            .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+            .unwrap()
+            .reports[0];
+        match case {
+            "missing" => report
+                .bootstrap
+                .coefficients
+                .retain(|coefficient| coefficient.weight != "final"),
+            "duplicate" => report
+                .bootstrap
+                .coefficients
+                .push(report.bootstrap.coefficients[0].clone()),
+            "duplicate_noncritical" => {
+                for scope in ["core", "cohort"] {
+                    report.bootstrap.coefficients.push(CoefficientStability {
+                        weight: "assist".into(),
+                        scope: scope.into(),
+                        direction_stability: 0.8,
+                        ci95_low: -0.1,
+                        ci95_high: 0.2,
+                        critical_constraint: false,
+                        reference_nonzero: false,
+                    });
+                }
+            }
+            "wrong_scope" => {
+                report
+                    .bootstrap
+                    .coefficients
+                    .iter_mut()
+                    .find(|coefficient| coefficient.weight == "final")
+                    .unwrap()
+                    .scope = "cohort".into()
+            }
+            "cross_zero" => {
+                let coefficient = report
+                    .bootstrap
+                    .coefficients
+                    .iter_mut()
+                    .find(|coefficient| coefficient.weight == "death")
+                    .unwrap();
+                coefficient.ci95_low = -0.1;
+                coefficient.ci95_high = 0.1;
+            }
+            _ => unreachable!(),
+        }
+        let (artifact, training_report) =
+            build_training_outputs(&rows, &audit, &evaluation, 53).unwrap();
+        assert_shadow(
+            &artifact,
+            &training_report,
+            Role::Tank,
+            ModeFamily::RoleCompetitive,
+        );
+    }
+}
+
+#[test]
+fn resource_debt_requires_one_negative_core_debt_coefficient() {
+    for case in ["missing", "wrong_scope", "nonnegative_ci"] {
+        let rows = synthetic_rows();
+        let audit = TrainingAudit {
+            source_accounts: 2,
+            projected_rows: rows.len(),
+            ..Default::default()
+        };
+        let mut evaluation = evaluate_stability(
+            &[],
+            StabilityConfig {
+                bootstrap_iterations: 10,
+                seed: 59,
+                ..Default::default()
+            },
+        );
+        let cell = evaluation
+            .cells
+            .iter_mut()
+            .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+            .unwrap();
+        mark_cell_eligible(cell, 4);
+        if case != "missing" {
+            cell.reports[4]
+                .bootstrap
+                .coefficients
+                .push(CoefficientStability {
+                    weight: "debt".into(),
+                    scope: if case == "wrong_scope" {
+                        "cohort".into()
+                    } else {
+                        "core".into()
+                    },
+                    direction_stability: 1.0,
+                    ci95_low: if case == "nonnegative_ci" { -0.1 } else { -0.2 },
+                    ci95_high: if case == "nonnegative_ci" { 0.1 } else { -0.1 },
+                    critical_constraint: true,
+                    reference_nonzero: true,
+                });
+        }
+        let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 59).unwrap();
+        assert_shadow(&artifact, &report, Role::Tank, ModeFamily::RoleCompetitive);
+    }
+}
+
+#[test]
+fn account_coverage_limited_group_is_shadowed() {
+    let (rows, audit, mut evaluation) = eligible_evaluation(61);
+    evaluation
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap()
+        .reports[0]
+        .leave_one_account_out
+        .coverage_limited_groups = 1;
+    let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 61).unwrap();
+    assert_shadow(&artifact, &report, Role::Tank, ModeFamily::RoleCompetitive);
+}
+
+fn assert_shadow(
+    artifact: &owstats_desktop_lib::career_mmr::training_report::PerformanceModelArtifact,
+    report: &owstats_desktop_lib::career_mmr::training_report::TrainingReport,
+    role: Role,
+    mode: ModeFamily,
+) {
+    assert!(
+        !artifact
+            .cells
+            .iter()
+            .find(|cell| cell.role == role && cell.mode == mode)
+            .unwrap()
+            .performance_enabled
+    );
+    let cell = report
+        .cells
+        .iter()
+        .find(|cell| cell.role == role && cell.mode == mode)
+        .unwrap();
+    assert_eq!(cell.decision, CellDecision::Shadow);
+    assert!(cell
+        .rejected_reasons
+        .contains(&"invalid_validation_evidence".to_string()));
 }
