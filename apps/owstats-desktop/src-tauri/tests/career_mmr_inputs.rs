@@ -257,6 +257,47 @@ fn stadium_missing_current_player_rounds_never_borrows_previous_performance() {
 }
 
 #[test]
+fn stadium_duplicate_current_player_markers_fail_closed() {
+    let (_dir, conn) = database();
+    install_stadium_roles(&conn);
+    insert_stadium(
+        &conn,
+        "stadium-duplicate-current",
+        serde_json::json!({"roleType":"tank"}),
+        serde_json::json!({
+            "roundCountList":[{
+                "roundIndex":1,
+                "teammateList":[
+                    {"bnetId":"current-local","heroGuid":"support-hero","finalHit":7},
+                    {"bnetId":"duplicate-current","heroGuid":"damage-hero","finalHit":99}
+                ],
+                "enemyList":[]
+            }]
+        }),
+    );
+    insert_player(
+        &conn,
+        "stadium-duplicate-current",
+        23,
+        "duplicate-current",
+        "damage-hero",
+        Some("damage"),
+        0,
+        99,
+    );
+
+    let context = ExtractionContext::build(&conn).unwrap();
+    assert!(
+        extract_stadium_match_with_context(&conn, "stadium-duplicate-current", &context)
+            .unwrap()
+            .is_none()
+    );
+    assert!(extract_stadium_match(&conn, "stadium-duplicate-current")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
 fn stadium_structurally_valid_final_round_without_current_player_does_not_borrow_previous_round() {
     let (_dir, conn) = database();
     install_stadium_roles(&conn);

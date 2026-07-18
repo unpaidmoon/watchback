@@ -276,22 +276,16 @@ pub fn extract_stadium_match_with_context(
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let current_player_key: Option<String> = conn
-        .query_row(
-            "SELECT bnet_id FROM match_players WHERE match_id=?1 AND is_current_player=1 LIMIT 1",
-            [&match_id],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let Some(current_player_key) = unique_current_player_key(conn, &match_id)? else {
+        return Ok(None);
+    };
     let entry_role = entry
         .get("roleType")
         .and_then(Value::as_str)
         .and_then(|value| normalize_role(Some(value)));
     let (team_strength, opponent_strength, rank_coverage) = stadium_strengths(data, &entry);
 
-    let selected = current_player_key
-        .as_deref()
-        .and_then(|key| stadium_final_snapshot(rounds, key, context));
+    let selected = stadium_final_snapshot(rounds, &current_player_key, context);
     let (role, role_source, data_quality, performance_features) = if let Some(snapshot) = selected {
         (
             snapshot.role,
@@ -372,6 +366,14 @@ fn normalize_result(result: &str) -> Option<f64> {
         "draw" => Some(0.5),
         _ => None,
     }
+}
+
+fn unique_current_player_key(conn: &Connection, match_id: &str) -> Result<Option<String>> {
+    Ok(conn.query_row(
+        "SELECT CASE WHEN COUNT(*)=1 THEN MIN(bnet_id) END FROM match_players WHERE match_id=?1 AND is_current_player=1",
+        [match_id],
+        |row| row.get(0),
+    )?)
 }
 
 fn last_structurally_valid_stadium_round(rounds: &[Value]) -> Option<&Value> {
