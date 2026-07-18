@@ -8,4 +8,5 @@ pub mod query;
 pub mod rating;
 pub mod replay;
 pub mod training;
+pub mod training_report;
 pub mod training_sources;
