@@ -527,7 +527,7 @@ pub fn evaluate_stability_with_progress(
     let started = std::time::Instant::now();
     on_progress(aggregate_progress_event(stage, 0, total, 0));
     let source = eligible_performance_rows(source);
-    let (mut reports, worker_errors) = std::thread::scope(|scope| {
+    let (mut reports, mut worker_errors) = std::thread::scope(|scope| {
         let source = &source;
         let (progress_tx, progress_rx) = mpsc::channel::<usize>();
         let handles = [Role::Tank, Role::Damage, Role::Support].map(|role| {
@@ -638,95 +638,27 @@ pub fn evaluate_stability_with_progress(
         )
     });
     reports.sort_by_key(|report| (report.role, report.mode, strategy_order(&report.strategy)));
-    let reports_ref = &reports;
-    let source_ref = &source;
-    let cells = [Role::Tank, Role::Damage, Role::Support]
-        .into_iter()
-        .flat_map(|role| {
-            VALIDATION_MODES.into_iter().map(move |mode| {
-                let items = reports_ref
-                    .iter()
-                    .filter(|report| report.role == role && report.mode == mode)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let role_core_rows = source_ref
-                    .iter()
-                    .filter(|row| row.role == role_name(role))
-                    .count();
-                let nested_validation = if role_core_rows < 500 {
-                    evaluate_nested_cell_shadow(source_ref, role, mode)
-                } else {
-                    evaluate_nested_cell(source_ref, role, mode)
-                };
-                let mut selected = items
-                    .iter()
-                    .find(|report| {
-                        report.eligible
-                            && report.strategy == nested_validation.selected_strategy
-                            && report.forward.variant == nested_validation.selected_variant
-                            && report.forward.final_multiplier
-                                == nested_validation.selected_final_multiplier
-                            && report.forward.lambda_core == nested_validation.selected_lambda_core
-                            && report.forward.lambda_cohort
-                                == nested_validation.selected_lambda_cohort
-                    })
-                    .map(|report| report.strategy.clone());
-                let nested_passes = nested_validation.improved_folds >= 4
-                    && nested_validation
-                        .metrics
-                        .as_ref()
-                        .zip(nested_validation.baseline_metrics.as_ref())
-                        .is_none_or(|(candidate, baseline)| candidate.ece <= baseline.ece + 0.005);
-                if !nested_passes {
-                    selected = None;
-                }
-                let decision = if selected.is_some() {
-                    CellDecision::Eligible
-                } else {
-                    CellDecision::Shadow
-                };
-                let mut rejected_reasons = if let Some(selected_strategy) = selected.as_deref() {
-                    items
-                        .iter()
-                        .find(|report| report.strategy == selected_strategy && report.eligible)
-                        .map(|report| report.rejected_reasons.clone())
-                        .unwrap_or_default()
-                } else {
-                    items
-                        .iter()
-                        .flat_map(|report| report.rejected_reasons.iter().cloned())
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .collect::<Vec<_>>()
-                };
-                if rejected_reasons.is_empty() && selected.is_none() {
-                    rejected_reasons.push("no_eligible_strategy".into());
-                }
-                if nested_validation.improved_folds < 4 {
-                    push_once(&mut rejected_reasons, "improved_folds_below_4");
-                }
-                if nested_validation
-                    .metrics
-                    .as_ref()
-                    .zip(nested_validation.baseline_metrics.as_ref())
-                    .is_some_and(|(candidate, baseline)| candidate.ece > baseline.ece + 0.005)
-                {
-                    push_once(&mut rejected_reasons, "ece_worse_than_0_005");
-                }
-                CellEvaluation {
-                    role,
-                    mode,
-                    training_cohort: mode.training_cohort(),
-                    shared_parameter_version: shared_parameter_version(mode.training_cohort()),
-                    selected,
-                    decision,
-                    rejected_reasons,
-                    nested_validation,
-                    reports: items,
-                }
-            })
-        })
-        .collect::<Vec<_>>();
+    let nested_started = std::time::Instant::now();
+    let mut cells = Vec::new();
+    if worker_errors.is_empty() {
+        let (completed_cells, failed) = run_nested_sequence(
+            |role, mode| Ok(evaluate_nested_cell_report(&source, &reports, role, mode)),
+            |completed| {
+                on_progress(nested_progress_event(
+                    stage,
+                    bootstrap_total,
+                    completed,
+                    total,
+                    started.elapsed().as_millis(),
+                    nested_started.elapsed().as_millis(),
+                ));
+            },
+        );
+        cells = completed_cells;
+        if failed {
+            worker_errors.push("nested_cell_worker_failed".into());
+        }
+    }
     let roles = [Role::Tank, Role::Damage, Role::Support]
         .into_iter()
         .map(|role| {
@@ -750,17 +682,142 @@ pub fn evaluate_stability_with_progress(
         cells,
         worker_errors,
     };
-    if evaluation.worker_errors.is_empty() && evaluation.cells.len() == 15 {
-        for cell in 1..=15 {
-            on_progress(aggregate_progress_event(
-                stage,
-                bootstrap_total + cell,
-                total,
-                started.elapsed().as_millis(),
-            ));
+    evaluation
+}
+
+fn run_nested_sequence<T>(
+    mut evaluator: impl FnMut(Role, ModeFamily) -> Result<T, ()>,
+    mut on_complete: impl FnMut(usize),
+) -> (Vec<T>, bool) {
+    let mut completed = Vec::new();
+    for role in [Role::Tank, Role::Damage, Role::Support] {
+        for mode in VALIDATION_MODES {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| evaluator(role, mode)));
+            match result {
+                Ok(Ok(value)) => {
+                    completed.push(value);
+                    on_complete(completed.len());
+                }
+                Ok(Err(())) | Err(_) => return (completed, true),
+            }
         }
     }
-    evaluation
+    (completed, false)
+}
+
+fn nested_progress_event(
+    stage: TrainingStage,
+    bootstrap_total: usize,
+    completed_cells: usize,
+    total: usize,
+    elapsed_ms: u128,
+    nested_elapsed_ms: u128,
+) -> ProgressEvent {
+    let remaining_cells = 15usize.saturating_sub(completed_cells);
+    let eta_ms = if remaining_cells == 0 {
+        Some(0)
+    } else {
+        Some(
+            nested_elapsed_ms
+                .max(1)
+                .saturating_mul(remaining_cells as u128)
+                / completed_cells.max(1) as u128,
+        )
+    };
+    ProgressEvent {
+        stage,
+        completed: bootstrap_total + completed_cells,
+        total,
+        elapsed_ms,
+        eta_ms,
+    }
+}
+
+fn evaluate_nested_cell_report(
+    source: &[TrainingRow],
+    reports: &[StabilityReport],
+    role: Role,
+    mode: ModeFamily,
+) -> CellEvaluation {
+    let items = reports
+        .iter()
+        .filter(|report| report.role == role && report.mode == mode)
+        .cloned()
+        .collect::<Vec<_>>();
+    let role_core_rows = source
+        .iter()
+        .filter(|row| row.role == role_name(role))
+        .count();
+    let nested_validation = if role_core_rows < 500 {
+        evaluate_nested_cell_shadow(source, role, mode)
+    } else {
+        evaluate_nested_cell(source, role, mode)
+    };
+    let mut selected = items
+        .iter()
+        .find(|report| {
+            report.eligible
+                && report.strategy == nested_validation.selected_strategy
+                && report.forward.variant == nested_validation.selected_variant
+                && report.forward.final_multiplier == nested_validation.selected_final_multiplier
+                && report.forward.lambda_core == nested_validation.selected_lambda_core
+                && report.forward.lambda_cohort == nested_validation.selected_lambda_cohort
+        })
+        .map(|report| report.strategy.clone());
+    let nested_passes = nested_validation.improved_folds >= 4
+        && nested_validation
+            .metrics
+            .as_ref()
+            .zip(nested_validation.baseline_metrics.as_ref())
+            .is_none_or(|(candidate, baseline)| candidate.ece <= baseline.ece + 0.005);
+    if !nested_passes {
+        selected = None;
+    }
+    let decision = if selected.is_some() {
+        CellDecision::Eligible
+    } else {
+        CellDecision::Shadow
+    };
+    let mut rejected_reasons = if let Some(selected_strategy) = selected.as_deref() {
+        items
+            .iter()
+            .find(|report| report.strategy == selected_strategy && report.eligible)
+            .map(|report| report.rejected_reasons.clone())
+            .unwrap_or_default()
+    } else {
+        items
+            .iter()
+            .flat_map(|report| report.rejected_reasons.iter().cloned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+    };
+    if rejected_reasons.is_empty() && selected.is_none() {
+        rejected_reasons.push("no_eligible_strategy".into());
+    }
+    if nested_validation.improved_folds < 4 {
+        push_once(&mut rejected_reasons, "improved_folds_below_4");
+    }
+    if nested_validation
+        .metrics
+        .as_ref()
+        .zip(nested_validation.baseline_metrics.as_ref())
+        .is_some_and(|(candidate, baseline)| candidate.ece > baseline.ece + 0.005)
+    {
+        push_once(&mut rejected_reasons, "ece_worse_than_0_005");
+    }
+    CellEvaluation {
+        role,
+        mode,
+        training_cohort: mode.training_cohort(),
+        shared_parameter_version: shared_parameter_version(mode.training_cohort()),
+        selected,
+        decision,
+        rejected_reasons,
+        nested_validation,
+        reports: items,
+    }
 }
 
 fn shared_parameter_version(cohort: TrainingCohort) -> String {
@@ -1372,6 +1429,7 @@ mod hierarchical_bootstrap_tests {
         input::ModeFamily,
         training::{TrainingEnvironment, TrainingRow},
     };
+    use std::cell::RefCell;
 
     fn row(index: usize, mode_family: ModeFamily) -> TrainingRow {
         let positive = index % 2 == 0;
@@ -1587,6 +1645,56 @@ mod hierarchical_bootstrap_tests {
         assert_eq!(valid.len(), 1);
         assert_eq!(valid[0].account_group, "held-account");
         assert_eq!(valid[0].mode_family, ModeFamily::RoleCompetitive);
+    }
+
+    #[test]
+    fn nested_progress_is_emitted_before_the_next_cell_starts_and_finishes_once() {
+        let events = RefCell::new(Vec::<String>::new());
+        let mut executions = 0usize;
+        let (values, failed) = run_nested_sequence(
+            |_, _| {
+                executions += 1;
+                if executions > 1 {
+                    assert_eq!(
+                        events.borrow().last().cloned(),
+                        Some(format!("progress-{}", executions - 1))
+                    );
+                }
+                events.borrow_mut().push(format!("execute-{executions}"));
+                Ok(executions)
+            },
+            |completed| events.borrow_mut().push(format!("progress-{completed}")),
+        );
+        assert!(!failed);
+        assert_eq!(values.len(), 15);
+        assert_eq!(
+            events
+                .borrow()
+                .iter()
+                .filter(|event| *event == "progress-15")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn nested_failure_stops_without_emitting_completion_for_the_failed_cell() {
+        let progress = RefCell::new(Vec::new());
+        let mut executions = 0usize;
+        let (values, failed) = run_nested_sequence(
+            |_, _| {
+                executions += 1;
+                if executions == 3 {
+                    Err(())
+                } else {
+                    Ok(executions)
+                }
+            },
+            |completed| progress.borrow_mut().push(completed),
+        );
+        assert!(failed);
+        assert_eq!(values, vec![1, 2]);
+        assert_eq!(*progress.borrow(), vec![1, 2]);
     }
 
     #[test]
