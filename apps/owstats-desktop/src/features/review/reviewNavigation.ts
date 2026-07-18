@@ -19,11 +19,17 @@ export function buildAchievementsHref(season: number) {
   return `/achievements?season=${season}`;
 }
 
+export function parsePositiveSeasonParam(value: string | null) {
+  if (!value) return undefined;
+  const season = Number(value);
+  return Number.isInteger(season) && season > 0 ? season : undefined;
+}
+
 export function legacyReviewRedirectHref(params: URLSearchParams) {
   const view = params.get("view");
   if (view === null) return null;
-  const season = params.get("season");
-  const suffix = season ? `?season=${encodeURIComponent(season)}` : "";
+  const season = parsePositiveSeasonParam(params.get("season"));
+  const suffix = season === undefined ? "" : `?season=${season}`;
   return view === "achievements" ? `/achievements${suffix}` : `/review${suffix}`;
 }
 

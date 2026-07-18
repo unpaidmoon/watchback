@@ -21,6 +21,7 @@ import {
   normalizeFriendAnalysisRequestedSeason,
   parseFriendAnalysisSeasonParam,
 } from "../src/pages/FriendAnalyticsPage";
+import { legacyReviewRedirectHref } from "../src/features/review/reviewNavigation";
 
 const reviewSource = `${readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8")}\n${readFileSync(new URL("../src/features/review/usePersonalSeasonReview.ts", import.meta.url), "utf8")}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
@@ -63,23 +64,27 @@ assert.equal(parseReviewSeasonParam("-1"), undefined, "review page should reject
 assert.equal(parseReviewSeasonParam("15.5"), undefined, "review page should reject a fractional URL season");
 assert.equal(parseReviewSeasonParam("abc"), undefined, "review page should reject a non-numeric URL season");
 
-const currentReviewParams = new URLSearchParams("season=999&view=friends&keep=1");
+const currentReviewParams = new URLSearchParams("season=999&keep=1");
 const fallbackReviewParams = buildReviewSeasonFallbackParams(currentReviewParams, 23);
 assert.equal(fallbackReviewParams.get("season"), "23", "review fallback should write the backend season");
-assert.equal(fallbackReviewParams.get("view"), "friends", "review fallback should preserve the latest selected tab");
 assert.equal(fallbackReviewParams.get("keep"), "1", "review fallback should preserve unrelated URL state");
-assert.equal(currentReviewParams.toString(), "season=999&view=friends&keep=1", "review fallback should not mutate the current URL params");
+assert.equal(currentReviewParams.toString(), "season=999&keep=1", "review fallback should not mutate the current URL params");
 
-const latestReviewParams = { current: new URLSearchParams("season=999&view=overview") };
+const latestReviewParams = { current: new URLSearchParams("season=999") };
 const fallbackReviewReady = deferred<void>();
 const pendingLatestFallback = fallbackReviewReady.promise.then(() => buildReviewSeasonFallbackFromLatest(latestReviewParams, 23));
-latestReviewParams.current = new URLSearchParams("season=999&view=friends&keep=1");
+latestReviewParams.current = new URLSearchParams("season=999&keep=1");
 fallbackReviewReady.resolve();
 const latestFallbackReviewParams = await pendingLatestFallback;
 assert.equal(latestFallbackReviewParams.get("season"), "23", "async review fallback should write the backend season");
-assert.equal(latestFallbackReviewParams.get("view"), "friends", "async review fallback should read the latest selected tab");
 assert.equal(latestFallbackReviewParams.get("keep"), "1", "async review fallback should read the latest unrelated URL state");
-assert.equal(latestReviewParams.current.toString(), "season=999&view=friends&keep=1", "async review fallback should not mutate the latest URL params");
+assert.equal(latestReviewParams.current.toString(), "season=999&keep=1", "async review fallback should not mutate the latest URL params");
+
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements?season=23");
+for (const view of ["overview", "roles", "maps", "unknown"]) {
+  assert.equal(legacyReviewRedirectHref(new URLSearchParams(`season=23&view=${view}`)), "/review?season=23");
+}
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23")), null);
 
 const coalescedReview = {} as PersonalSeasonReview;
 let coalescedReviewLoads = 0;

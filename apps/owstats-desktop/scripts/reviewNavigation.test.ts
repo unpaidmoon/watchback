@@ -15,6 +15,10 @@ assert.equal(buildAchievementsHref(23), "/achievements?season=23");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements?season=23");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=friends")), "/review?season=23");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=unknown")), "/review?season=23");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=abc&view=achievements")), "/achievements");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=0&view=friends")), "/review");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=-1&view=overview")), "/review");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23.5&view=maps")), "/review");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23")), null);
 assert.equal(buildReviewRankingHref(22), "/ranking?tab=maps&season=22");
 
