@@ -773,6 +773,8 @@ export type CareerMmrSeasonBreakdown = { role: CareerRole; items: CareerMmrSeaso
 
 export type CareerMmrBuildStatus = {
   modelVersion: number | null;
+  targetModelVersion: number;
+  needsRebuild: boolean;
   summaryCount: number;
   isBuilt: boolean;
 };

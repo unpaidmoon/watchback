@@ -1,4 +1,6 @@
-use super::{input::ModeFamily, rating::outcome_delta_for_expected};
+use super::{
+    input::ModeFamily, rating::outcome_delta_for_expected, replay::BASELINE_MODEL_VERSION,
+};
 use crate::{
     CareerMmrBuildStatus, CareerMmrExplanationFactor, CareerMmrHistory, CareerMmrHistoryPoint,
     CareerMmrHistoryRequest, CareerMmrMatchExplanation, CareerMmrModeBreakdown, CareerMmrModeItem,
@@ -487,9 +489,14 @@ pub fn get_career_mmr_build_status(db: &OwDatabase) -> Result<CareerMmrBuildStat
     } else {
         0
     };
+    let needs_rebuild = v
+        .map(|version| version < BASELINE_MODEL_VERSION)
+        .unwrap_or(true);
     Ok(CareerMmrBuildStatus {
         model_version: v,
+        target_model_version: BASELINE_MODEL_VERSION,
+        needs_rebuild,
         summary_count: count,
-        is_built: v.is_some() && count == 3,
+        is_built: v == Some(BASELINE_MODEL_VERSION) && count == 3,
     })
 }

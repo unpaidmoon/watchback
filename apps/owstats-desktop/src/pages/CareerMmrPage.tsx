@@ -59,7 +59,7 @@ export function CareerMmrPage() {
     setOverviewError(null);
     Promise.all([getCareerMmrOverview(), getCareerMmrBuildStatus()])
       .then(async ([nextOverview, nextStatus]) => {
-        if (nextStatus.modelVersion === null) {
+        if (nextStatus.needsRebuild) {
           await rebuildCareerMmr();
           [nextOverview, nextStatus] = await Promise.all([
             getCareerMmrOverview(),

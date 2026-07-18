@@ -471,6 +471,8 @@ export const fixtureCareerSeasons = {
 
 export const fixtureCareerBuildStatus = {
   modelVersion: 2,
+  targetModelVersion: 2,
+  needsRebuild: false,
   summaryCount: 3,
   isBuilt: true,
 } satisfies CareerMmrBuildStatus;

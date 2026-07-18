@@ -19,12 +19,30 @@ fn database() -> Result<(TempDir, OwDatabase)> {
 }
 
 fn seed_model(conn: &Connection) -> Result<()> {
-    conn.execute("INSERT INTO mmr_model_versions(version,algorithm,config_json,is_active,created_at) VALUES(1,'test','{}',1,'now')", [])?;
+    seed_model_version(conn, 1)
+}
+
+fn seed_model_version(conn: &Connection, version: i64) -> Result<()> {
+    conn.execute("UPDATE mmr_model_versions SET is_active=0", [])?;
+    conn.execute(
+        "INSERT INTO mmr_model_versions(version,algorithm,config_json,is_active,created_at) VALUES(?1,'test','{}',1,'now')",
+        [version],
+    )?;
     Ok(())
 }
 
 fn seed_role(conn: &Connection, role: &str, mmr: i64, confidence: f64) -> Result<()> {
-    conn.execute("INSERT INTO career_role_mmr(model_version,role,mmr,mu,sigma,confidence,effective_matches,effective_hours,peak_mmr,peak_at,last_played_at,updated_at) VALUES(1,?1,?2,?2,100,?3,12.5,2.0,?4,200,200,'now')", params![role, mmr, confidence, mmr + 50])?;
+    seed_role_version(conn, 1, role, mmr, confidence)
+}
+
+fn seed_role_version(
+    conn: &Connection,
+    version: i64,
+    role: &str,
+    mmr: i64,
+    confidence: f64,
+) -> Result<()> {
+    conn.execute("INSERT INTO career_role_mmr(model_version,role,mmr,mu,sigma,confidence,effective_matches,effective_hours,peak_mmr,peak_at,last_played_at,updated_at) VALUES(?1,?2,?3,?3,100,?4,12.5,2.0,?5,200,200,'now')", params![version, role, mmr, confidence, mmr + 50])?;
     Ok(())
 }
 
@@ -221,6 +239,8 @@ fn missing_explanation_is_chinese_and_build_status_is_derived() -> Result<()> {
         .to_string();
     assert!(error.contains("未找到"));
     let status = get_career_mmr_build_status(&db)?;
+    assert_eq!(status.target_model_version, 2);
+    assert!(status.needs_rebuild);
     assert_eq!(status.summary_count, 0);
     assert!(!status.is_built);
     let conn = db.connect()?;
@@ -231,7 +251,35 @@ fn missing_explanation_is_chinese_and_build_status_is_derived() -> Result<()> {
     assert!(!partial.is_built);
     seed_role(&conn, "damage", 2500, 0.8)?;
     seed_role(&conn, "support", 2500, 0.8)?;
+    let legacy_complete = get_career_mmr_build_status(&db)?;
+    assert_eq!(legacy_complete.model_version, Some(1));
+    assert_eq!(legacy_complete.target_model_version, 2);
+    assert!(legacy_complete.needs_rebuild);
+    assert_eq!(legacy_complete.summary_count, 3);
+    assert!(!legacy_complete.is_built);
+
+    seed_model_version(&conn, 2)?;
+    let current_empty = get_career_mmr_build_status(&db)?;
+    assert_eq!(current_empty.model_version, Some(2));
+    assert_eq!(current_empty.target_model_version, 2);
+    assert!(!current_empty.needs_rebuild);
+    assert_eq!(current_empty.summary_count, 0);
+    assert!(!current_empty.is_built);
+    for role in ["tank", "damage", "support"] {
+        seed_role_version(&conn, 2, role, 2500, 0.8)?;
+    }
     assert!(get_career_mmr_build_status(&db)?.is_built);
+
+    seed_model_version(&conn, 3)?;
+    for role in ["tank", "damage", "support"] {
+        seed_role_version(&conn, 3, role, 2500, 0.8)?;
+    }
+    let future_complete = get_career_mmr_build_status(&db)?;
+    assert_eq!(future_complete.model_version, Some(3));
+    assert_eq!(future_complete.target_model_version, 2);
+    assert!(!future_complete.needs_rebuild);
+    assert_eq!(future_complete.summary_count, 3);
+    assert!(!future_complete.is_built);
     assert_private(&status);
     Ok(())
 }
