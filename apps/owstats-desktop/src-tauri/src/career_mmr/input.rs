@@ -81,6 +81,13 @@ pub enum StadiumStatShape {
     Ambiguous,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StadiumFinalSnapshot {
+    pub role: Role,
+    pub hero_guid: String,
+    pub statistics: Value,
+}
+
 pub struct ExtractionContext {
     summary_roles: HashMap<String, Role>,
     hero_roles: HashMap<String, Role>,
@@ -282,47 +289,16 @@ pub fn extract_stadium_match_with_context(
         .and_then(|value| normalize_role(Some(value)));
     let (team_strength, opponent_strength, rank_coverage) = stadium_strengths(data, &entry);
 
-    let selected = last_structurally_valid_stadium_round(rounds).and_then(|round| {
-        current_player_key
-            .as_deref()
-            .and_then(|key| current_player_row(round, key).map(|player| (round, player)))
-    });
-    let (role, role_source, data_quality, performance_features) = if let Some((_round, player)) =
-        selected
-    {
-        let hero = scalar_text(player.get("heroGuid"));
-        let Some(role) = hero
-            .as_deref()
-            .and_then(|hero| context.hero_roles.get(hero).copied())
-        else {
-            return Ok(entry_role.map(|role| {
-                stadium_outcome_only(
-                    match_id,
-                    season,
-                    begin_ts,
-                    result,
-                    duration_sec,
-                    mode_family,
-                    role,
-                    team_strength,
-                    opponent_strength,
-                    rank_coverage,
-                )
-            }));
-        };
-        let shape =
-            classify_stadium_stat_shape(rounds, current_player_key.as_deref().unwrap_or_default());
-        let features = if shape == StadiumStatShape::Ambiguous {
-            Value::Object(Default::default())
-        } else {
-            stadium_performance_features(player)
-        };
-        let quality = if shape == StadiumStatShape::Ambiguous {
-            0.6
-        } else {
-            0.9
-        };
-        (role, "stadium_last_round", quality, features)
+    let selected = current_player_key
+        .as_deref()
+        .and_then(|key| stadium_final_snapshot(rounds, key, context));
+    let (role, role_source, data_quality, performance_features) = if let Some(snapshot) = selected {
+        (
+            snapshot.role,
+            "stadium_last_round",
+            0.9,
+            snapshot.statistics,
+        )
     } else {
         let Some(role) = entry_role else {
             return Ok(None);
@@ -400,6 +376,24 @@ fn normalize_result(result: &str) -> Option<f64> {
 
 fn last_structurally_valid_stadium_round(rounds: &[Value]) -> Option<&Value> {
     ordered_structurally_valid_stadium_rounds(rounds).pop()
+}
+
+pub(crate) fn stadium_final_snapshot(
+    rounds: &[Value],
+    current_player_key: &str,
+    context: &ExtractionContext,
+) -> Option<StadiumFinalSnapshot> {
+    let player = current_player_row(
+        last_structurally_valid_stadium_round(rounds)?,
+        current_player_key,
+    )?;
+    let hero_guid = scalar_text(player.get("heroGuid"))?;
+    let role = context.hero_roles.get(&hero_guid).copied()?;
+    Some(StadiumFinalSnapshot {
+        role,
+        hero_guid,
+        statistics: stadium_performance_features(player),
+    })
 }
 
 fn structurally_valid_stadium_round(round: &Value) -> bool {

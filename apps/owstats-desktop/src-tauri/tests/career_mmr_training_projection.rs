@@ -1,5 +1,6 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
+    career_mmr::input::ModeFamily,
     career_mmr::training::{build_training_projection, RoleTrainingAudit},
     OwDatabase,
 };
@@ -24,6 +25,40 @@ fn fixture() -> Result<(TempDir, Connection)> {
         params!["private-match", r#"{"finalHit":6,"healingTaken":2000,"damageTaken":7000,"targetCompetingTime":45,"selfHealing":500}"#],
     )?;
     Ok((dir, conn))
+}
+
+fn insert_stadium_match(
+    conn: &Connection,
+    match_id: &str,
+    game_mode: &str,
+    role_type: &str,
+    rounds: serde_json::Value,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO hero_dict(guid,name,role,updated_at) VALUES('support-hero','safe','support','now') ON CONFLICT(guid) DO NOTHING",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,23,'stadium',?2,'arena','win','map','entry-hero',200,1,0,0,0,0,0,0,0,0,600,?3,'now')",
+        params![match_id, game_mode, serde_json::json!({"roleType": role_type}).to_string()],
+    )?;
+    conn.execute(
+        "INSERT INTO match_players(match_id,season,side,bnet_id,player_name,hero_guid,is_current_player,raw_json,updated_at) VALUES(?1,23,'teammate','current-local','safe','entry-hero',1,'{}','now')",
+        [match_id],
+    )?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES(?1,'arena',?2,'now')",
+        params![match_id, serde_json::json!({"payload":{"data":{"roundCountList":rounds}}}).to_string()],
+    )?;
+    Ok(())
+}
+
+fn insert_ordinary_mode(conn: &Connection, match_id: &str, game_mode: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,23,'preset',?2,'normal','win','map','hero-a',300,1,0,0,0,0,0,0,0,0,600,'{\"roleType\":\"damage\"}','now')",
+        params![match_id, game_mode],
+    )?;
+    Ok(())
 }
 
 #[test]
@@ -64,7 +99,7 @@ fn projects_exact_hero_segments_and_external_healing_for_ordinary_matches() -> R
 }
 
 #[test]
-fn excludes_stadium_and_reports_role_coverage() -> Result<()> {
+fn excludes_unrecognized_stadium_and_reports_role_coverage() -> Result<()> {
     let (_dir, conn) = fixture()?;
     conn.execute(
         "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES('stadium-private',22,'stadium','Stadium','fight','win','map','hero-a',200,1,0,1,1,1,1,1,1,0,100,'{}','now')",
@@ -80,6 +115,163 @@ fn excludes_stadium_and_reports_role_coverage() -> Result<()> {
             role: "damage".into(),
             samples: 1
         }]
+    );
+    Ok(())
+}
+
+#[test]
+fn stadium_competitive_projects_only_the_final_snapshot() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match(
+        &conn,
+        "stadium-competitive",
+        "SportFight",
+        "tank",
+        serde_json::json!([
+            {
+                "roundIndex": 1,
+                "startTime": 100,
+                "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":99}],
+                "enemyList": []
+            },
+            "malformed",
+            {
+                "roundIndex": 2,
+                "startTime": 200,
+                "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":7}],
+                "enemyList": []
+            }
+        ]),
+    )?;
+
+    let projection = build_training_projection(&conn)?;
+    let stadium_rows = projection
+        .rows
+        .iter()
+        .filter(|row| {
+            row.mode_family
+                == owstats_desktop_lib::career_mmr::input::ModeFamily::StadiumCompetitive
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(stadium_rows.len(), 1);
+    let row = stadium_rows[0];
+    assert_eq!(row.role, "support");
+    assert_eq!(row.final_hit, Some(7.0));
+    assert_ne!(row.final_hit, Some(99.0));
+    assert_eq!(row.duration_sec, 600.0);
+    assert_eq!(row.hero_duration_sec, Some(600.0));
+    assert!(!row.outcome_only);
+    assert!(row.allow_performance);
+    assert!(row.allow_performance_by_hero);
+    assert_eq!(projection.audit.stadium_competitive_candidates, 1);
+    assert_eq!(projection.audit.stadium_performance_eligible_rows, 1);
+    assert_eq!(projection.audit.stadium_quick_outcome_only_rows, 0);
+    Ok(())
+}
+
+#[test]
+fn stadium_quick_keeps_outcome_row_but_never_trains_performance() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match(
+        &conn,
+        "stadium-quick",
+        "LeisureFight",
+        "support",
+        serde_json::json!([{
+            "roundIndex": 1,
+            "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":7}],
+            "enemyList": []
+        }]),
+    )?;
+
+    let projection = build_training_projection(&conn)?;
+    let row = projection
+        .rows
+        .iter()
+        .find(|row| {
+            row.mode_family == owstats_desktop_lib::career_mmr::input::ModeFamily::StadiumQuick
+        })
+        .expect("LeisureFight should remain as an outcome-only training row");
+    assert_eq!(row.role, "support");
+    assert!(row.outcome_only);
+    assert!(!row.allow_performance);
+    assert!(!row.allow_performance_by_hero);
+    assert_eq!(row.final_hit, None);
+    assert_eq!(row.duration_sec, 600.0);
+    assert_eq!(row.hero_duration_sec, Some(600.0));
+    assert_eq!(projection.audit.stadium_competitive_candidates, 0);
+    assert_eq!(projection.audit.stadium_performance_eligible_rows, 0);
+    assert_eq!(projection.audit.stadium_quick_outcome_only_rows, 1);
+    Ok(())
+}
+
+#[test]
+fn legacy_ambiguous_shape_is_diagnostic_only_for_stadium_competitive() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match(
+        &conn,
+        "stadium-single-round",
+        "SportFight",
+        "tank",
+        serde_json::json!([{
+            "roundIndex": 1,
+            "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":7}],
+            "enemyList": []
+        }]),
+    )?;
+
+    let projection = build_training_projection(&conn)?;
+    let row = projection
+        .rows
+        .iter()
+        .find(|row| row.mode_family == ModeFamily::StadiumCompetitive)
+        .unwrap();
+    assert!(row.allow_performance);
+    assert_eq!(row.final_hit, Some(7.0));
+    assert_eq!(projection.audit.stadium_ambiguous_excluded, 0);
+    Ok(())
+}
+
+#[test]
+fn all_six_mode_families_reach_the_training_projection() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_ordinary_mode(&conn, "role-quick", "LeisurePreset")?;
+    insert_ordinary_mode(&conn, "open-competitive", "SportOpen")?;
+    insert_ordinary_mode(&conn, "open-quick", "Leisure6v6")?;
+    for (match_id, game_mode) in [
+        ("stadium-competitive", "SportFight"),
+        ("stadium-quick", "QuickFight"),
+    ] {
+        insert_stadium_match(
+            &conn,
+            match_id,
+            game_mode,
+            "support",
+            serde_json::json!([{
+                "roundIndex": 1,
+                "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":7}],
+                "enemyList": []
+            }]),
+        )?;
+    }
+
+    let families = build_training_projection(&conn)?
+        .rows
+        .into_iter()
+        .map(|row| row.mode_family)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        families,
+        [
+            ModeFamily::RoleCompetitive,
+            ModeFamily::RoleQuick,
+            ModeFamily::OpenCompetitive,
+            ModeFamily::OpenQuick,
+            ModeFamily::StadiumCompetitive,
+            ModeFamily::StadiumQuick,
+        ]
+        .into_iter()
+        .collect()
     );
     Ok(())
 }
