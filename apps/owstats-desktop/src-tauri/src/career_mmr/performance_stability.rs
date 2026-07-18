@@ -2,14 +2,15 @@ use super::{
     input::{ModeFamily, TrainingCohort},
     performance::{build_feature_matrix, eligible_performance_rows, HealingTakenStrategy},
     performance_forward::{
-        evaluate_cell_strategy, evaluate_nested_cell, evaluate_nested_cell_shadow,
+        evaluate_cell_strategy, evaluate_cell_strategy_fixed, evaluate_nested_cell,
+        evaluate_nested_cell_fixed, evaluate_nested_cell_shadow,
         fit_hierarchical_model_regularized, metrics, select_candidate_detailed, CalibrationScale,
         CandidateSelection, MetricReport, ModelVariant, NestedCellReport, Role, StrategyReport,
     },
     performance_model::{predict_probability, FitConfig, HierarchicalModel, MODEL_FIT_STEPS},
     training::TrainingRow,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc;
 
@@ -48,6 +49,28 @@ pub enum TrainingStage {
     Candidate1000,
     Final10000,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromotedCandidate {
+    pub role: Role,
+    pub strategy: String,
+    pub variant: ModelVariant,
+    pub final_multiplier: f64,
+    pub lambda_core: f64,
+    pub lambda_cohort: f64,
+}
+
+impl PromotedCandidate {
+    fn selection(&self) -> CandidateSelection {
+        CandidateSelection {
+            variant: self.variant,
+            multiplier: self.final_multiplier,
+            lambda_core: self.lambda_core,
+            lambda_cohort: self.lambda_cohort,
+            degraded: false,
+        }
+    }
+}
 impl TrainingStage {
     pub fn bootstrap_iterations(self) -> usize {
         match self {
@@ -79,7 +102,7 @@ fn aggregate_progress_event(
     } else if completed == total {
         Some(0)
     } else {
-        Some(elapsed_ms.saturating_mul((total - completed) as u128) / completed as u128)
+        Some((elapsed_ms.saturating_mul((total - completed) as u128) / completed as u128).max(1))
     };
     ProgressEvent {
         stage,
@@ -137,6 +160,7 @@ pub struct StabilityConfig {
     pub seed: u64,
     pub max_loo_worsened_fraction: f64,
     pub max_abs_average_adjustment: f64,
+    pub promoted_candidates: Option<Vec<PromotedCandidate>>,
 }
 impl Default for StabilityConfig {
     fn default() -> Self {
@@ -145,6 +169,7 @@ impl Default for StabilityConfig {
             seed: 0x5eed,
             max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
             max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
+            promoted_candidates: None,
         }
     }
 }
@@ -185,6 +210,7 @@ impl StabilityConfig {
             require_account_coverage: true,
             require_critical_ci_excludes_zero: true,
             require_nonzero_reference_coefficients: true,
+            promoted_candidates: self.promoted_candidates.clone(),
         }
     }
 }
@@ -217,6 +243,7 @@ pub struct StabilityConfigSnapshot {
     pub require_account_coverage: bool,
     pub require_critical_ci_excludes_zero: bool,
     pub require_nonzero_reference_coefficients: bool,
+    pub promoted_candidates: Option<Vec<PromotedCandidate>>,
 }
 
 fn stage_for_iterations(iterations: usize) -> TrainingStage {
@@ -590,10 +617,8 @@ pub fn evaluate_stability_with_progress(
 ) -> StabilityEvaluation {
     let config_snapshot = config.snapshot();
     let stage = config_snapshot.stage;
-    let bootstrap_total = config
-        .bootstrap_iterations
-        .saturating_mul(3)
-        .saturating_mul(5);
+    let candidate_count = config.promoted_candidates.as_ref().map_or(15, Vec::len);
+    let bootstrap_total = config.bootstrap_iterations.saturating_mul(candidate_count);
     let total = bootstrap_total.saturating_add(15);
     let started = std::time::Instant::now();
     on_progress(aggregate_progress_event(stage, 0, total, 0));
@@ -612,19 +637,48 @@ pub fn evaluate_stability_with_progress(
                     .collect::<Vec<_>>();
                 let role_core_rows = role_rows_all.len();
                 let mut reports = Vec::new();
-                for strategy in [
-                    HealingTakenStrategy::None,
-                    HealingTakenStrategy::DirectNegative,
-                    HealingTakenStrategy::HeroNormalized,
-                    HealingTakenStrategy::ExcessHealing,
-                    HealingTakenStrategy::ResourceConversionDebt,
-                ] {
+                let candidates = config
+                    .promoted_candidates
+                    .as_ref()
+                    .map(|all| {
+                        all.iter()
+                            .filter(|candidate| candidate.role == role)
+                            .filter_map(|candidate| {
+                                let strategy = parse_strategy_checked(&candidate.strategy)?;
+                                Some((strategy, Some(candidate.selection())))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| {
+                        [
+                            HealingTakenStrategy::None,
+                            HealingTakenStrategy::DirectNegative,
+                            HealingTakenStrategy::HeroNormalized,
+                            HealingTakenStrategy::ExcessHealing,
+                            HealingTakenStrategy::ResourceConversionDebt,
+                        ]
+                        .into_iter()
+                        .map(|strategy| (strategy, None))
+                        .collect()
+                    });
+                for (strategy, fixed) in candidates {
                     let forwards = VALIDATION_MODES
                         .into_iter()
                         .map(|mode| {
                             (
                                 mode,
-                                evaluate_cell_strategy(&role_rows_all, role, mode, strategy),
+                                fixed.map_or_else(
+                                    || evaluate_cell_strategy(&role_rows_all, role, mode, strategy),
+                                    |selected| {
+                                        evaluate_cell_strategy_fixed(
+                                            &role_rows_all,
+                                            role,
+                                            mode,
+                                            strategy,
+                                            selected,
+                                        )
+                                    },
+                                ),
                             )
                         })
                         .collect::<Vec<_>>();
@@ -648,9 +702,9 @@ pub fn evaluate_stability_with_progress(
                     );
                     for (mode, forward) in forwards {
                         let cohort = mode.training_cohort();
-                        let season = loo_season(&role_rows_all, role, mode, strategy);
-                        let hero = loo_hero(&role_rows_all, role, mode, strategy);
-                        let account = loo_account(&role_rows_all, role, mode, strategy);
+                        let season = loo_season(&role_rows_all, role, mode, strategy, fixed);
+                        let hero = loo_hero(&role_rows_all, role, mode, strategy, fixed);
+                        let account = loo_account(&role_rows_all, role, mode, strategy, fixed);
                         let bootstrap = bootstraps.remove(&mode).unwrap_or_default();
                         let mut report = StabilityReport {
                             role,
@@ -714,7 +768,15 @@ pub fn evaluate_stability_with_progress(
     let mut cells = Vec::new();
     if worker_errors.is_empty() {
         let (completed_cells, failed) = run_nested_sequence(
-            |role, mode| Ok(evaluate_nested_cell_report(&source, &reports, role, mode)),
+            |role, mode| {
+                Ok(evaluate_nested_cell_report(
+                    &source,
+                    &reports,
+                    role,
+                    mode,
+                    config.promoted_candidates.as_deref(),
+                ))
+            },
             |completed| {
                 on_progress(nested_progress_event(
                     stage,
@@ -797,6 +859,7 @@ fn nested_progress_event(
                 .saturating_mul(remaining_cells as u128)
                 / completed_cells.max(1) as u128,
         )
+        .map(|eta| eta.max(1))
     };
     ProgressEvent {
         stage,
@@ -812,17 +875,78 @@ fn evaluate_nested_cell_report(
     reports: &[StabilityReport],
     role: Role,
     mode: ModeFamily,
+    promoted: Option<&[PromotedCandidate]>,
 ) -> CellEvaluation {
     let items = reports
         .iter()
         .filter(|report| report.role == role && report.mode == mode)
         .cloned()
         .collect::<Vec<_>>();
+    if promoted.is_some() && items.is_empty() {
+        return CellEvaluation {
+            role,
+            mode,
+            training_cohort: mode.training_cohort(),
+            shared_parameter_version: shared_parameter_version(mode.training_cohort()),
+            selected: None,
+            decision: CellDecision::Shadow,
+            rejected_reasons: vec!["no_promoted_candidate".into()],
+            nested_validation: NestedCellReport {
+                role,
+                mode,
+                folds: vec![],
+                improved_folds: 0,
+                metrics: None,
+                baseline_metrics: None,
+                selection_degraded: true,
+                selected_strategy: "none".into(),
+                selected_variant: ModelVariant::Core,
+                selected_final_multiplier: 1.25,
+                selected_lambda_core: 0.02,
+                selected_lambda_cohort: 0.05,
+            },
+            reports: vec![],
+        };
+    }
     let role_core_rows = source
         .iter()
         .filter(|row| row.role == role_name(role))
         .count();
-    let nested_validation = if role_core_rows < 500 {
+    let fixed = promoted.and_then(|_| {
+        items
+            .iter()
+            .min_by(|left, right| {
+                left.forward
+                    .metrics
+                    .as_ref()
+                    .map(|metrics| metrics.brier)
+                    .unwrap_or(f64::INFINITY)
+                    .total_cmp(
+                        &right
+                            .forward
+                            .metrics
+                            .as_ref()
+                            .map(|metrics| metrics.brier)
+                            .unwrap_or(f64::INFINITY),
+                    )
+                    .then(left.strategy.cmp(&right.strategy))
+            })
+            .and_then(|report| {
+                Some((
+                    parse_strategy_checked(&report.strategy)?,
+                    CandidateSelection {
+                        variant: report.forward.variant,
+                        multiplier: report.forward.final_multiplier,
+                        lambda_core: report.forward.lambda_core,
+                        lambda_cohort: report.forward.lambda_cohort,
+                        degraded: false,
+                    },
+                ))
+            })
+    });
+    let nested_validation = if let Some((strategy, selected)) = fixed {
+        evaluate_nested_cell_fixed(source, role, mode, strategy, selected)
+    } else if role_core_rows < 500 {
         evaluate_nested_cell_shadow(source, role, mode)
     } else {
         evaluate_nested_cell(source, role, mode)
@@ -964,6 +1088,7 @@ fn loo_season(
     role: Role,
     mode: ModeFamily,
     strategy: HealingTakenStrategy,
+    fixed: Option<CandidateSelection>,
 ) -> LooReport {
     let groups = source
         .iter()
@@ -975,7 +1100,7 @@ fn loo_season(
         .map(|held| {
             let (train, valid) = season_loo_split(source, held, mode);
             let candidate = valid.len();
-            let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
+            let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, fixed);
             (delta, candidate, evaluated)
         })
         .collect::<Vec<_>>();
@@ -1006,6 +1131,7 @@ fn loo_hero(
     role: Role,
     mode: ModeFamily,
     strategy: HealingTakenStrategy,
+    fixed: Option<CandidateSelection>,
 ) -> LooReport {
     let groups = source
         .iter()
@@ -1017,7 +1143,7 @@ fn loo_hero(
         .map(|held| {
             let (train, valid) = hero_loo_split(source, &held, mode);
             let candidate = valid.len();
-            let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
+            let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, fixed);
             (delta, candidate, evaluated)
         })
         .collect::<Vec<_>>();
@@ -1059,6 +1185,7 @@ fn loo_account(
     role: Role,
     mode: ModeFamily,
     strategy: HealingTakenStrategy,
+    fixed: Option<CandidateSelection>,
 ) -> AccountLooReport {
     let groups = source
         .iter()
@@ -1070,7 +1197,7 @@ fn loo_account(
     let mut coverage_limited_groups = 0;
     for held in groups {
         let (train, valid) = account_loo_split(source, &held, mode);
-        let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
+        let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, fixed);
         if delta.is_none() || evaluated < valid.len() {
             coverage_limited_groups += 1;
         }
@@ -1478,6 +1605,16 @@ fn parse_strategy(s: &str) -> HealingTakenStrategy {
         "excesshealing" => HealingTakenStrategy::ExcessHealing,
         "resourceconversiondebt" => HealingTakenStrategy::ResourceConversionDebt,
         _ => HealingTakenStrategy::None,
+    }
+}
+fn parse_strategy_checked(s: &str) -> Option<HealingTakenStrategy> {
+    match s {
+        "none" => Some(HealingTakenStrategy::None),
+        "directnegative" => Some(HealingTakenStrategy::DirectNegative),
+        "heronormalized" => Some(HealingTakenStrategy::HeroNormalized),
+        "excesshealing" => Some(HealingTakenStrategy::ExcessHealing),
+        "resourceconversiondebt" => Some(HealingTakenStrategy::ResourceConversionDebt),
+        _ => None,
     }
 }
 fn strategy_order(s: &str) -> usize {

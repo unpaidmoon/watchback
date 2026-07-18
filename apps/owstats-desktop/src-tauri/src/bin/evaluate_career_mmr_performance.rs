@@ -23,6 +23,8 @@ struct AlgorithmConfig {
 #[derive(Serialize)]
 struct EvaluationReport<'a> {
     audit: &'a TrainingAudit,
+    dataset_scope: &'static str,
+    account_loo_status: &'static str,
     algorithm_config: AlgorithmConfig,
     elapsed_ms: u128,
     #[serde(flatten)]
@@ -81,6 +83,8 @@ fn run() -> Result<String, &'static str> {
     let evaluation = evaluate_stability(&projection.rows, config);
     let report = EvaluationReport {
         audit: projection.public_audit(),
+        dataset_scope: "single_dataset_research",
+        account_loo_status: "coverage_limited_not_formal_multi_account",
         algorithm_config,
         elapsed_ms: started.elapsed().as_millis(),
         evaluation,

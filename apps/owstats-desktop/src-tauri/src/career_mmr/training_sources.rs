@@ -40,6 +40,12 @@ impl TrainingSourceSpec {
     pub(crate) fn database_path(&self) -> &Path {
         &self.database_path
     }
+
+    pub fn conflicts_with_output(&self, output: &Path) -> bool {
+        output == self.database_path
+            || (output.exists()
+                && fs::canonicalize(output).ok() == fs::canonicalize(&self.database_path).ok())
+    }
 }
 
 pub struct QueryOnlyConnection {

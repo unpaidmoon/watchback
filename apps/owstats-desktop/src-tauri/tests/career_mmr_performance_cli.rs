@@ -1,9 +1,512 @@
 use owstats_desktop_lib::career_mmr::performance_stability::{
     aggregate_progress_schedule, aggregate_progress_schedule_with_outcome, TrainingStage,
 };
+use owstats_desktop_lib::{
+    account_store::{
+        write_manifest_atomic, write_registry_atomic, AccountId, AccountManifest, AccountRegistry,
+        AccountRegistryEntry,
+    },
+    app_paths::SharedAppPaths,
+};
+use std::fs;
 use std::process::Command;
 
 const SOURCE: &str = include_str!("../src/bin/evaluate_career_mmr_performance.rs");
+
+fn run_trainer(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .args(args)
+        .output()
+        .expect("run staged trainer")
+}
+
+#[test]
+fn staged_trainer_rejects_missing_promotion_and_never_echoes_values() {
+    let secret = "Z:\\synthetic-secret-player-guid\\app-data";
+    let output = run_trainer(&[
+        "--app-data-dir",
+        secret,
+        "--stage",
+        "candidate",
+        "--report",
+        "synthetic-report.json",
+        "--artifact",
+        "synthetic-artifact.json",
+    ]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr,
+        "错误：candidate 和 final 阶段必须提供上一阶段报告\n"
+    );
+    assert!(!stderr.contains(secret));
+}
+
+#[test]
+fn staged_trainer_missing_account_store_is_nonzero_and_does_not_echo_path() {
+    let holder = tempfile::tempdir().unwrap();
+    let secret = holder.path().join("synthetic-private-guid-app-data");
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(&secret)
+        .args(["--stage", "screen", "--report"])
+        .arg(holder.path().join("report.json"))
+        .arg("--artifact")
+        .arg(holder.path().join("artifact.json"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr, "错误：无法发现训练账号数据库\n");
+    assert!(!stderr.contains(secret.to_str().unwrap()));
+    assert!(!stderr.to_ascii_lowercase().contains("guid"));
+}
+
+#[test]
+fn staged_trainer_has_strict_fixed_chinese_argument_errors() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["--unknown", "value"], "错误：存在无法识别的命令行选项\n"),
+        (&["--stage"], "错误：命令行选项缺少数值\n"),
+        (
+            &["--stage", "screen", "--stage", "final"],
+            "错误：命令行选项不能重复\n",
+        ),
+        (
+            &["--seed", "not-a-number"],
+            "错误：随机种子必须是非负整数\n",
+        ),
+        (&["--stage", "--report"], "错误：命令行选项缺少数值\n"),
+        (
+            &["--stage", "invalid"],
+            "错误：训练阶段必须是 screen、candidate 或 final\n",
+        ),
+    ];
+    for (args, expected) in cases {
+        let output = run_trainer(args);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert_eq!(String::from_utf8(output.stderr).unwrap(), *expected);
+    }
+}
+
+fn synthetic_app_data() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let shared = SharedAppPaths::from_app_data_dir(dir.path());
+    fs::create_dir_all(shared.accounts_root()).unwrap();
+    let ids = [
+        AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap(),
+        AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap(),
+    ];
+    let tags = ["SyntheticAlpha#1000", "SyntheticBeta#2000"];
+    let entries = ids
+        .iter()
+        .zip(tags)
+        .map(|(id, tag)| {
+            let paths = shared.account(id);
+            fs::create_dir_all(paths.root()).unwrap();
+            write_manifest_atomic(
+                &paths.manifest(),
+                &AccountManifest {
+                    version: 1,
+                    account_id: id.clone(),
+                    role_id: 1,
+                    battle_tag: tag.into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    updated_at: "2026-01-01T00:00:00Z".into(),
+                },
+            )
+            .unwrap();
+            let conn = rusqlite::Connection::open(paths.database()).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE matches(match_id TEXT, season INTEGER, begin_ts INTEGER, hero_guid TEXT, result TEXT, game_mode TEXT, duration_sec INTEGER, raw_entry_json TEXT, bucket TEXT);
+                 CREATE TABLE hero_dict(guid TEXT, role TEXT);
+                 CREATE TABLE match_players(match_id TEXT, is_current_player INTEGER, raw_json TEXT);
+                 CREATE TABLE match_details(match_id TEXT, raw_detail_json TEXT);",
+            )
+            .unwrap();
+            AccountRegistryEntry {
+                account_id: id.clone(),
+                battle_tag: tag.into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                last_used_at: "2026-01-01T00:00:00Z".into(),
+                credential_state: "ready".into(),
+            }
+        })
+        .collect();
+    write_registry_atomic(
+        &shared.registry(),
+        &AccountRegistry {
+            version: 1,
+            active_account_id: Some(ids[0].clone()),
+            accounts: entries,
+        },
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn screen_stage_runs_multi_account_pipeline_with_safe_aggregate_outputs() {
+    let app = synthetic_app_data();
+    let report = app.path().join("screen-report.json");
+    let artifact = app.path().join("screen-artifact.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "screen", "--report"])
+        .arg(&report)
+        .arg("--artifact")
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    for field in [
+        "stage=screen",
+        "completed=",
+        "total=",
+        "elapsed_ms=",
+        "eta_ms=",
+    ] {
+        assert!(stderr.contains(field), "missing {field}: {stderr}");
+    }
+    for line in stderr
+        .lines()
+        .filter(|line| !line.contains("completed=1515 "))
+    {
+        assert!(!line.ends_with("eta_ms=0"), "premature zero ETA: {line}");
+    }
+    let report_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+    let artifact_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact).unwrap()).unwrap();
+    assert_eq!(
+        report_json["training_config"]["validation"]["bootstrap_iterations"],
+        100
+    );
+    assert_eq!(
+        artifact_json["training_config"]["validation"]["bootstrap_iterations"],
+        100
+    );
+    assert_eq!(report_json["dataset"]["account_datasets"], 2);
+    assert!(report_json["shadow"].is_array());
+    let combined = format!("{report_json}{artifact_json}{stderr}").to_ascii_lowercase();
+    for forbidden in [
+        "syntheticalpha",
+        "syntheticbeta",
+        "11111111-1111",
+        "22222222-2222",
+        "match_id",
+        "app-data",
+    ] {
+        assert!(!combined.contains(forbidden), "leaked {forbidden}");
+    }
+}
+
+fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value {
+    let cells = ["tank", "damage", "support"]
+        .into_iter()
+        .map(|role| {
+            serde_json::json!({
+                "role": role,
+                "eligible": eligible,
+                "model_spec_id": {
+                    "strategy_index": 0,
+                    "variant_index": 0,
+                    "multiplier_index": 1,
+                    "regularization_index": 0
+                },
+                "metrics": {"strategy_reports": [{
+                    "eligible": eligible,
+                    "strategy": "none",
+                    "forward": {
+                        "variant": "core",
+                        "final_multiplier": 1.25,
+                        "lambda_core": 0.02,
+                        "lambda_cohort": 0.05
+                    }
+                }]}
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "schema_version": 3,
+        "seed": seed,
+        "config_hash": "a".repeat(64),
+        "training_config": {
+            "validation": {"stage": stage},
+            "fit": {
+                "variants": ["core", "role_full"],
+                "final_hit_multipliers": [1.0, 1.25, 1.5, 1.75, 2.0],
+                "regularization_candidates": [
+                    {"lambda_core": 0.02, "lambda_cohort": 0.05},
+                    {"lambda_core": 0.05, "lambda_cohort": 0.10}
+                ]
+            }
+        },
+        "cells": cells
+    })
+}
+
+#[test]
+fn candidate_stage_validates_promotion_and_reduces_actual_evaluation_work() {
+    let app = synthetic_app_data();
+    let promotion = app.path().join("promotion.json");
+    fs::write(
+        &promotion,
+        serde_json::to_vec(&promotion_report("screen_100", 0x5eed, true)).unwrap(),
+    )
+    .unwrap();
+    let report = app.path().join("candidate-report.json");
+    let artifact = app.path().join("candidate-artifact.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "candidate", "--promote-from"])
+        .arg(&promotion)
+        .arg("--report")
+        .arg(&report)
+        .arg("--artifact")
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("stage=candidate"));
+    assert!(stderr.contains("total=3015"), "{stderr}");
+    let report_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+    assert_eq!(
+        report_json["training_config"]["validation"]["bootstrap_iterations"],
+        1_000
+    );
+    assert_eq!(report_json["promotion"]["candidate_count"], 3);
+    let artifact_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact).unwrap()).unwrap();
+    let promoted = artifact_json["training_config"]["fit"]["promoted_candidates"]
+        .as_array()
+        .unwrap();
+    assert_eq!(promoted.len(), 3);
+    assert!(promoted.iter().all(|candidate| {
+        candidate["strategy"] == "none"
+            && candidate["variant"] == "core"
+            && candidate["final_multiplier"] == 1.25
+            && candidate["lambda_core"] == 0.02
+            && candidate["lambda_cohort"] == 0.05
+    }));
+}
+
+#[test]
+fn final_stage_uses_ten_thousand_bootstraps_only_for_promoted_candidates() {
+    let app = synthetic_app_data();
+    let promotion = app.path().join("promotion.json");
+    fs::write(
+        &promotion,
+        serde_json::to_vec(&promotion_report("candidate_1000", 0x5eed, true)).unwrap(),
+    )
+    .unwrap();
+    let report = app.path().join("final-report.json");
+    let artifact = app.path().join("final-artifact.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "final", "--promote-from"])
+        .arg(&promotion)
+        .arg("--report")
+        .arg(&report)
+        .arg("--artifact")
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("stage=final"));
+    assert!(stderr.contains("total=30015"), "{stderr}");
+    let artifact: serde_json::Value = serde_json::from_slice(&fs::read(artifact).unwrap()).unwrap();
+    assert_eq!(
+        artifact["training_config"]["validation"]["bootstrap_iterations"],
+        10_000
+    );
+    assert_eq!(
+        artifact["training_config"]["fit"]["promoted_candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() {
+    for (name, value) in [
+        ("stage", promotion_report("candidate_1000", 0x5eed, true)),
+        ("seed", promotion_report("screen_100", 9, true)),
+        ("empty", promotion_report("screen_100", 0x5eed, false)),
+        ("hash", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["config_hash"] = serde_json::json!("bad");
+            value
+        }),
+        ("schema", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["schema_version"] = serde_json::json!(2);
+            value
+        }),
+        ("spec", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["cells"][0]["model_spec_id"]["multiplier_index"] = serde_json::json!(4);
+            value
+        }),
+    ] {
+        let app = synthetic_app_data();
+        let promotion = app.path().join(format!("{name}.json"));
+        fs::write(&promotion, serde_json::to_vec(&value).unwrap()).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+            .arg("--app-data-dir")
+            .arg(app.path())
+            .args(["--stage", "candidate", "--promote-from"])
+            .arg(&promotion)
+            .arg("--report")
+            .arg(app.path().join("report.json"))
+            .arg("--artifact")
+            .arg(app.path().join("artifact.json"))
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{name}");
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            "错误：上一阶段报告无效\n"
+        );
+    }
+}
+
+#[test]
+fn existing_output_pair_is_replaced_without_leaving_transaction_files() {
+    let app = synthetic_app_data();
+    let report = app.path().join("report.json");
+    let artifact = app.path().join("artifact.json");
+    fs::write(&report, b"old-report").unwrap();
+    fs::write(&artifact, b"old-artifact").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "screen", "--report"])
+        .arg(&report)
+        .arg("--artifact")
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice::<serde_json::Value>(&fs::read(report).unwrap()).unwrap();
+    serde_json::from_slice::<serde_json::Value>(&fs::read(artifact).unwrap()).unwrap();
+    let leftovers = fs::read_dir(app.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with(".career-mmr-"))
+        .collect::<Vec<_>>();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn locked_second_target_rolls_back_first_target_and_cleans_transaction_files() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let app = synthetic_app_data();
+    let report = app.path().join("report.json");
+    let artifact = app.path().join("artifact.json");
+    fs::write(&report, b"old-report").unwrap();
+    fs::write(&artifact, b"old-artifact").unwrap();
+    let _locked_report = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1)
+        .open(&report)
+        .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "screen", "--report"])
+        .arg(&report)
+        .arg("--artifact")
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.ends_with("错误：无法准备训练报告原子替换\n"));
+    assert!(!stderr.contains(app.path().to_str().unwrap()));
+    assert_eq!(fs::read(&report).unwrap(), b"old-report");
+    assert_eq!(fs::read(&artifact).unwrap(), b"old-artifact");
+    assert!(fs::read_dir(app.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .all(|name| !name.starts_with(".career-mmr-")));
+}
+
+#[test]
+fn trainer_rejects_output_aliases_before_opening_sources() {
+    let app = synthetic_app_data();
+    let same = app.path().join("same.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "screen", "--report"])
+        .arg(&same)
+        .arg("--artifact")
+        .arg(&same)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "错误：报告和模型产物不能使用同一路径\n"
+    );
+}
+
+#[test]
+fn trainer_refuses_to_overwrite_a_source_database() {
+    let app = synthetic_app_data();
+    let database = app
+        .path()
+        .join("accounts/11111111-1111-4111-8111-111111111111/owstats.sqlite3");
+    let before = fs::read(&database).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "screen", "--report"])
+        .arg(app.path().join("report.json"))
+        .arg("--artifact")
+        .arg(&database)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "错误：输入输出不能覆盖训练源数据库\n"
+    );
+    assert_eq!(fs::read(database).unwrap(), before);
+}
 
 #[test]
 fn cli_source_uses_read_only_query_only_and_safe_aggregate_output() {
@@ -104,6 +607,11 @@ fn serialized_json_contains_only_aggregate_audit_and_keeps_performance_zero() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["algorithm_config"]["bootstrap_iterations"], 0);
     assert_eq!(json["algorithm_config"]["seed"], 7);
+    assert_eq!(json["dataset_scope"], "single_dataset_research");
+    assert_eq!(
+        json["account_loo_status"],
+        "coverage_limited_not_formal_multi_account"
+    );
     assert_eq!(json["audit"]["ordinary_candidates"], 0);
     assert!(json["elapsed_ms"].is_u64());
     assert!(json["worker_errors"].as_array().is_some());

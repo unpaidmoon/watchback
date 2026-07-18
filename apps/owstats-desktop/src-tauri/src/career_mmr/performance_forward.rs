@@ -7,7 +7,7 @@ use super::{
     performance_model::{fit_model, predict_probability, FitConfig, HierarchicalModel},
     training::TrainingRow,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 pub use super::performance::HealingTakenStrategy;
@@ -19,7 +19,7 @@ const MAX_DIRECT_EXPOSURE: f64 = 3.0;
 
 pub use super::input::Role;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelVariant {
     Core,
@@ -808,7 +808,7 @@ pub fn evaluate_forward(source: &[TrainingRow]) -> Vec<StrategyReport> {
                     .filter(|r| r.role == role_name)
                     .cloned()
                     .collect::<Vec<_>>();
-                evaluate_raw_strategy(&role_rows, role, strategy, None)
+                evaluate_raw_strategy(&role_rows, role, strategy, None, None)
             })
         })
         .collect()
@@ -875,7 +875,26 @@ pub fn evaluate_cell_strategy(
         .into_iter()
         .filter(|row| row.role == role_name)
         .collect::<Vec<_>>();
-    evaluate_raw_strategy(&rows, role, strategy, Some(mode))
+    evaluate_raw_strategy(&rows, role, strategy, Some(mode), None)
+}
+
+pub(crate) fn evaluate_cell_strategy_fixed(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: MatrixStrategy,
+    selected: CandidateSelection,
+) -> StrategyReport {
+    let role_name = match role {
+        Role::Tank => "tank",
+        Role::Damage => "damage",
+        Role::Support => "support",
+    };
+    let rows = eligible_performance_rows(source)
+        .into_iter()
+        .filter(|row| row.role == role_name)
+        .collect::<Vec<_>>();
+    evaluate_raw_strategy(&rows, role, strategy, Some(mode), Some(selected))
 }
 
 pub fn fit_formal_validation_adjustments(
@@ -1111,7 +1130,7 @@ pub fn evaluate_nested_cell(
     role: Role,
     mode: ModeFamily,
 ) -> NestedCellReport {
-    evaluate_nested_cell_impl(source, role, mode, false)
+    evaluate_nested_cell_impl(source, role, mode, false, None)
 }
 
 pub(crate) fn evaluate_nested_cell_shadow(
@@ -1119,7 +1138,27 @@ pub(crate) fn evaluate_nested_cell_shadow(
     role: Role,
     mode: ModeFamily,
 ) -> NestedCellReport {
-    evaluate_nested_cell_impl(source, role, mode, true)
+    evaluate_nested_cell_impl(source, role, mode, true, None)
+}
+
+pub(crate) fn evaluate_nested_cell_fixed(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: MatrixStrategy,
+    hyperparameters: CandidateSelection,
+) -> NestedCellReport {
+    evaluate_nested_cell_impl(
+        source,
+        role,
+        mode,
+        false,
+        Some(CompleteCandidate {
+            strategy,
+            hyperparameters,
+            inner_validation_rows: 0,
+        }),
+    )
 }
 
 fn evaluate_nested_cell_impl(
@@ -1127,6 +1166,7 @@ fn evaluate_nested_cell_impl(
     role: Role,
     mode: ModeFamily,
     force_degraded: bool,
+    fixed: Option<CompleteCandidate>,
 ) -> NestedCellReport {
     let role_name = match role {
         Role::Tank => "tank",
@@ -1157,7 +1197,12 @@ fn evaluate_nested_cell_impl(
         if valid.is_empty() {
             continue;
         }
-        let selected = select_complete_candidate(&train, role, mode, force_degraded);
+        let mut selected =
+            fixed.unwrap_or_else(|| select_complete_candidate(&train, role, mode, force_degraded));
+        selected.inner_validation_rows = raw_folds(&train, 3)
+            .iter()
+            .map(|fold| fold.validation.len())
+            .sum();
         let matrix = build_feature_matrix(&train, &valid, selected.strategy);
         let training = matrix
             .training_by_role
@@ -1216,7 +1261,8 @@ fn evaluate_nested_cell_impl(
             brier_delta,
         });
     }
-    let final_selection = select_complete_candidate(&rows, role, mode, force_degraded);
+    let final_selection =
+        fixed.unwrap_or_else(|| select_complete_candidate(&rows, role, mode, force_degraded));
     NestedCellReport {
         role,
         mode,
@@ -1242,6 +1288,7 @@ fn evaluate_raw_strategy(
     role: Role,
     strategy: MatrixStrategy,
     validation_mode: Option<ModeFamily>,
+    fixed: Option<CandidateSelection>,
 ) -> StrategyReport {
     let role_name = match role {
         Role::Tank => "tank",
@@ -1284,7 +1331,7 @@ fn evaluate_raw_strategy(
         if train_rows.is_empty() || valid_rows.is_empty() {
             continue;
         }
-        let selected = select_candidate_detailed(&train, role, strategy);
+        let selected = fixed.unwrap_or_else(|| select_candidate_detailed(&train, role, strategy));
         let refs = train_rows.iter().collect::<Vec<_>>();
         let Some(model) = fit_hierarchical_model_regularized(
             &refs,
@@ -1377,7 +1424,7 @@ fn evaluate_raw_strategy(
         .get(role_name)
         .cloned()
         .unwrap_or_default();
-    let selected = select_candidate_detailed(source, role, strategy);
+    let selected = fixed.unwrap_or_else(|| select_candidate_detailed(source, role, strategy));
     let refs = full_rows.iter().collect::<Vec<_>>();
     let model = fit_hierarchical_model_regularized(
         &refs,

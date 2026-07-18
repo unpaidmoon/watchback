@@ -4,8 +4,8 @@ use super::{
     performance_forward::{CalibrationScale, ModelVariant, NestedCellReport},
     performance_model::{fit_model, predict_probability, FitConfig},
     performance_stability::{
-        CellDecision, CellEvaluation, StabilityConfigSnapshot, StabilityEvaluation,
-        StabilityReport, TrainingStage,
+        CellDecision, CellEvaluation, PromotedCandidate, StabilityConfigSnapshot,
+        StabilityEvaluation, StabilityReport, TrainingStage,
     },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
 };
@@ -87,6 +87,8 @@ pub struct FitSearchArtifact {
     pub learning_rate: f64,
     pub steps: usize,
     pub minimum_cohort_offset_rows: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promoted_candidates: Option<Vec<PromotedCandidate>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -800,7 +802,31 @@ fn model_spec_id_from_values(
 fn validate_config_snapshot(config: &StabilityConfigSnapshot) -> Result<()> {
     let valid_variants = ["core", "role_full"];
     let unique = |values: &[String]| values.iter().collect::<BTreeSet<_>>().len() == values.len();
-    if config.fit_variants.is_empty()
+    let invalid_promoted = config
+        .promoted_candidates
+        .as_ref()
+        .is_some_and(|candidates| {
+            candidates.is_empty()
+                || candidates.iter().any(|candidate| {
+                    strategy_rank(&candidate.strategy) == usize::MAX
+                        || !config
+                            .fit_variants
+                            .contains(&variant_name(candidate.variant).to_owned())
+                        || !config
+                            .final_hit_multipliers
+                            .contains(&candidate.final_multiplier)
+                        || !config
+                            .regularization_candidates
+                            .contains(&[candidate.lambda_core, candidate.lambda_cohort])
+                })
+                || candidates.iter().enumerate().any(|(index, candidate)| {
+                    candidates[..index]
+                        .iter()
+                        .any(|previous| previous == candidate)
+                })
+        });
+    if invalid_promoted
+        || config.fit_variants.is_empty()
         || !unique(&config.fit_variants)
         || config
             .fit_variants
@@ -1472,6 +1498,7 @@ fn training_config(evaluation: &StabilityEvaluation) -> TrainingConfigArtifact {
             learning_rate: snapshot.fit_learning_rate,
             steps: snapshot.fit_steps,
             minimum_cohort_offset_rows: snapshot.minimum_cohort_offset_rows,
+            promoted_candidates: snapshot.promoted_candidates.clone(),
         },
         validation: ValidationGateArtifact {
             stage: stage.into(),

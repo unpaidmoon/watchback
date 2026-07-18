@@ -629,6 +629,7 @@ fn artifact_uses_the_actual_evaluation_snapshot_and_rejects_seed_mismatch() {
             seed: 23,
             max_loo_worsened_fraction: 0.10,
             max_abs_average_adjustment: 0.05,
+            promoted_candidates: None,
         },
     );
     assert_eq!(evaluation.config.seed, 23);

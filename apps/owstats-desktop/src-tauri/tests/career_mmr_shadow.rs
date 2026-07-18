@@ -184,6 +184,7 @@ fn artifact() -> PerformanceModelArtifact {
                 learning_rate: 0.1,
                 steps: 1,
                 minimum_cohort_offset_rows: 1,
+                promoted_candidates: None,
             },
             validation: ValidationGateArtifact {
                 stage: "test".into(),
