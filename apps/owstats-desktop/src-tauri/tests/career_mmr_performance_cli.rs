@@ -10,7 +10,7 @@ use owstats_desktop_lib::{
     app_paths::SharedAppPaths,
     career_mmr::{
         training::TrainingAudit,
-        training_report::{build_training_outputs, recompute_promotion_hash},
+        training_report::{build_training_outputs, recompute_promotion_checksum},
     },
 };
 use std::fs;
@@ -306,19 +306,68 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
         }
         value["promotable_candidates"] = serde_json::Value::Array(candidates);
     }
-    value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
+    value["promotion_checksum"] = serde_json::json!(recompute_promotion_checksum(&value).unwrap());
     value
+}
+
+fn write_promotion_bundle(path: &std::path::Path, report: &serde_json::Value) {
+    use sha2::{Digest, Sha256};
+    let stage = report["training_config"]["validation"]["stage"]
+        .as_str()
+        .unwrap();
+    let seed = report["seed"].as_u64().unwrap();
+    let training_stage = match stage {
+        "screen_100" => TrainingStage::Screen100,
+        "candidate_1000" => TrainingStage::Candidate1000,
+        _ => TrainingStage::Final10000,
+    };
+    let prior: Vec<PromotedCandidate> = report["training_config"]["fit"]["promoted_candidates"]
+        .clone()
+        .as_array()
+        .map(|_| {
+            serde_json::from_value(report["training_config"]["fit"]["promoted_candidates"].clone())
+                .unwrap()
+        })
+        .unwrap_or_default();
+    let mut config = if prior.is_empty() {
+        StabilityConfig::for_stage(training_stage)
+    } else {
+        StabilityConfig::for_stage_with_promoted(training_stage, prior)
+    };
+    config.seed = seed;
+    let evaluation = evaluate_stability(&[], config);
+    let (artifact, _) =
+        build_training_outputs(&[], &TrainingAudit::default(), &evaluation, seed).unwrap();
+    let report_bytes = serde_json::to_vec(report).unwrap();
+    let artifact_bytes = serde_json::to_vec(&artifact).unwrap();
+    let artifact_name = "promotion-artifact.json";
+    let artifact_path = path.parent().unwrap().join(artifact_name);
+    fs::write(path, &report_bytes).unwrap();
+    fs::write(&artifact_path, &artifact_bytes).unwrap();
+    let manifest = serde_json::json!({
+        "schema_version": 1,
+        "integrity_kind": "checksum_not_authentication",
+        "stage": stage,
+        "seed": seed,
+        "report_basename": path.file_name().unwrap().to_str().unwrap(),
+        "report_sha256": format!("{:x}", Sha256::digest(&report_bytes)),
+        "artifact_basename": artifact_name,
+        "artifact_sha256": format!("{:x}", Sha256::digest(&artifact_bytes)),
+        "artifact_config_hash": artifact.config_hash,
+        "transaction_id": "synthetic-transaction"
+    });
+    let sidecar = path.with_file_name(format!(
+        "{}.stage-commit.json",
+        path.file_name().unwrap().to_str().unwrap()
+    ));
+    fs::write(sidecar, serde_json::to_vec(&manifest).unwrap()).unwrap();
 }
 
 #[test]
 fn candidate_stage_validates_promotion_and_reduces_actual_evaluation_work() {
     let app = synthetic_app_data();
     let promotion = app.path().join("promotion.json");
-    fs::write(
-        &promotion,
-        serde_json::to_vec(&promotion_report("screen_100", 0x5eed, true)).unwrap(),
-    )
-    .unwrap();
+    write_promotion_bundle(&promotion, &promotion_report("screen_100", 0x5eed, true));
     let report = app.path().join("candidate-report.json");
     let artifact = app.path().join("candidate-artifact.json");
     let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
@@ -366,11 +415,10 @@ fn candidate_stage_validates_promotion_and_reduces_actual_evaluation_work() {
 fn final_stage_uses_ten_thousand_bootstraps_only_for_promoted_candidates() {
     let app = synthetic_app_data();
     let promotion = app.path().join("promotion.json");
-    fs::write(
+    write_promotion_bundle(
         &promotion,
-        serde_json::to_vec(&promotion_report("candidate_1000", 0x5eed, true)).unwrap(),
-    )
-    .unwrap();
+        &promotion_report("candidate_1000", 0x5eed, true),
+    );
     let report = app.path().join("final-report.json");
     let artifact = app.path().join("final-artifact.json");
     let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
@@ -409,7 +457,8 @@ fn final_stage_uses_ten_thousand_bootstraps_only_for_promoted_candidates() {
 #[test]
 fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() {
     let rehash = |mut value: serde_json::Value| {
-        value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
+        value["promotion_checksum"] =
+            serde_json::json!(recompute_promotion_checksum(&value).unwrap());
         value
     };
     for (name, value) in [
@@ -428,7 +477,7 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
         }),
         ("random-promotion-hash", {
             let mut value = promotion_report("screen_100", 0x5eed, true);
-            value["promotion_hash"] = serde_json::json!("c".repeat(64));
+            value["promotion_checksum"] = serde_json::json!("c".repeat(64));
             value
         }),
         ("cell", {
@@ -495,7 +544,7 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
     ] {
         let app = synthetic_app_data();
         let promotion = app.path().join(format!("{name}.json"));
-        fs::write(&promotion, serde_json::to_vec(&value).unwrap()).unwrap();
+        write_promotion_bundle(&promotion, &value);
         let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
             .arg("--app-data-dir")
             .arg(app.path())
@@ -521,8 +570,52 @@ fn candidate_and_final_reports_require_nonempty_prior_promoted_candidates() {
     for stage in ["candidate_1000", "final_10000"] {
         let mut value = promotion_report(stage, 0x5eed, true);
         value["training_config"]["fit"]["promoted_candidates"] = serde_json::Value::Null;
-        value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
+        value["promotion_checksum"] =
+            serde_json::json!(recompute_promotion_checksum(&value).unwrap());
         assert!(validate_promotion_report(&value, stage, 0x5eed).is_err());
+    }
+}
+
+#[test]
+fn promotion_requires_the_complete_report_artifact_and_last_commit_marker_bundle() {
+    for case in [
+        "artifact-tamper",
+        "artifact-missing",
+        "marker-missing",
+        "marker-tamper",
+    ] {
+        let app = synthetic_app_data();
+        let promotion = app.path().join("promotion.json");
+        write_promotion_bundle(&promotion, &promotion_report("screen_100", 0x5eed, true));
+        let artifact = app.path().join("promotion-artifact.json");
+        let marker = app.path().join("promotion.json.stage-commit.json");
+        match case {
+            "artifact-tamper" => fs::write(&artifact, b"tampered").unwrap(),
+            "artifact-missing" => fs::remove_file(&artifact).unwrap(),
+            "marker-missing" => fs::remove_file(&marker).unwrap(),
+            "marker-tamper" => {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&marker).unwrap()).unwrap();
+                value["report_sha256"] = serde_json::json!("0".repeat(64));
+                fs::write(&marker, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+            .arg("--app-data-dir")
+            .arg(app.path())
+            .args(["--stage", "candidate", "--promote-from"])
+            .arg(&promotion)
+            .arg("--report")
+            .arg(app.path().join("report.json"))
+            .arg("--artifact")
+            .arg(app.path().join("artifact.json"))
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{case}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(stderr, "错误：上一阶段报告无效\n");
+        assert!(!stderr.contains("promotion"));
     }
 }
 

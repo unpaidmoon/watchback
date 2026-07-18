@@ -8,12 +8,13 @@ use owstats_desktop_lib::{
         shadow::simulate_shadow_replay,
         training::build_multi_account_projection,
         training_report::{
-            build_training_outputs, validate_promotion_report, validate_report_boundary,
+            build_training_outputs, recompute_config_hash, validate_promotion_report,
+            validate_report_boundary, PerformanceModelArtifact,
         },
         training_sources::discover_training_sources,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
@@ -129,6 +130,33 @@ struct ShadowAggregate {
     account_index: usize,
     role_matches: BTreeMap<String, usize>,
     total_cap_hits: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StageCommitManifest {
+    schema_version: u32,
+    integrity_kind: String,
+    stage: String,
+    seed: u64,
+    report_basename: String,
+    report_sha256: String,
+    artifact_basename: String,
+    artifact_sha256: String,
+    artifact_config_hash: String,
+    transaction_id: String,
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn commit_sidecar(report: &Path) -> Result<PathBuf, &'static str> {
+    let basename = report
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("输出路径无效")?;
+    Ok(report.with_file_name(format!("{basename}.stage-commit.json")))
 }
 
 fn run() -> Result<(), &'static str> {
@@ -352,9 +380,43 @@ fn load_promoted_candidates(
     if metadata.file_type().is_symlink() || is_reparse(&metadata) || !metadata.is_file() {
         return Err("上一阶段报告无效");
     }
-    let bytes = read_pinned_promotion(path, || Ok(())).map_err(|_| "上一阶段报告无效")?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|_| "上一阶段报告无效")?;
+    let report_read = read_pinned_promotion(path, || Ok(())).map_err(|_| "上一阶段报告无效")?;
+    let bytes = &report_read.bytes;
+    let manifest_path = commit_sidecar(path).map_err(|_| "上一阶段报告无效")?;
+    let manifest_read =
+        read_pinned_promotion(&manifest_path, || Ok(())).map_err(|_| "上一阶段报告无效")?;
+    let manifest: StageCommitManifest =
+        serde_json::from_slice(&manifest_read.bytes).map_err(|_| "上一阶段报告无效")?;
+    let safe_basename = |name: &str| {
+        !name.is_empty()
+            && Path::new(name).components().count() == 1
+            && Path::new(name).file_name().and_then(|value| value.to_str()) == Some(name)
+    };
+    if manifest.schema_version != 1
+        || manifest.integrity_kind != "checksum_not_authentication"
+        || !safe_basename(&manifest.report_basename)
+        || !safe_basename(&manifest.artifact_basename)
+        || path.file_name().and_then(|name| name.to_str()) != Some(&manifest.report_basename)
+        || manifest.report_sha256 != sha256_bytes(bytes)
+    {
+        return Err("上一阶段报告无效");
+    }
+    let artifact_path = path
+        .parent()
+        .ok_or("上一阶段报告无效")?
+        .join(&manifest.artifact_basename);
+    let artifact_read =
+        read_pinned_promotion(&artifact_path, || Ok(())).map_err(|_| "上一阶段报告无效")?;
+    let artifact_bytes = &artifact_read.bytes;
+    let artifact: PerformanceModelArtifact =
+        serde_json::from_slice(artifact_bytes).map_err(|_| "上一阶段报告无效")?;
+    if manifest.artifact_sha256 != sha256_bytes(artifact_bytes)
+        || manifest.artifact_config_hash != artifact.config_hash
+        || recompute_config_hash(&artifact).map_err(|_| "上一阶段报告无效")? != artifact.config_hash
+    {
+        return Err("上一阶段报告无效");
+    }
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "上一阶段报告无效")?;
     let expected_stage = if stage == Stage::Candidate {
         "screen_100"
     } else {
@@ -362,6 +424,13 @@ fn load_promoted_candidates(
     };
     let candidates =
         validate_promotion_report(&value, expected_stage, seed).map_err(|_| "上一阶段报告无效")?;
+    if manifest.stage != expected_stage
+        || manifest.seed != seed
+        || value.get("config_hash").and_then(|value| value.as_str())
+            != Some(manifest.artifact_config_hash.as_str())
+    {
+        return Err("上一阶段报告无效");
+    }
     Ok(Some(candidates))
 }
 
@@ -410,6 +479,8 @@ fn validate_paths(args: &CliArgs) -> Result<(), &'static str> {
             return Err("输出文件已存在，拒绝覆盖");
         }
     }
+    let sidecar = commit_sidecar(&args.report)?;
+    ensure_missing(&sidecar)?;
     Ok(())
 }
 
@@ -513,15 +584,128 @@ fn open_pinned_directory(path: &Path) -> std::io::Result<fs::File> {
         .open(path)
 }
 
+#[cfg(windows)]
+struct OwnedCommittedFile {
+    file: fs::File,
+    identity: FileIdentity,
+}
+
+#[cfg(windows)]
+impl OwnedCommittedFile {
+    fn delete(self) -> std::io::Result<()> {
+        use std::{mem::size_of, os::windows::io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
+        };
+        if file_identity(&self.file.metadata()?) != self.identity {
+            return Err(std::io::Error::other("owned file identity changed"));
+        }
+        let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
+        let result = unsafe {
+            SetFileInformationByHandle(
+                self.file.as_raw_handle(),
+                FileDispositionInfo,
+                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
+        };
+        if result == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        drop(self);
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+struct OwnedTempFile {
+    file: fs::File,
+    identity: FileIdentity,
+}
+
+#[cfg(windows)]
+impl OwnedTempFile {
+    fn create(path: &Path, bytes: &[u8]) -> Result<Self, &'static str> {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::{
+            Foundation::GENERIC_WRITE,
+            Storage::FileSystem::{
+                DELETE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+                FILE_SHARE_READ,
+            },
+        };
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .access_mode(GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|_| "无法创建安全临时输出")?;
+        file.write_all(bytes).map_err(|_| "无法写入临时输出")?;
+        file.flush().map_err(|_| "无法刷新临时输出")?;
+        file.sync_all().map_err(|_| "无法同步临时输出")?;
+        let identity = file_identity(&file.metadata().map_err(|_| "无法验证临时输出")?);
+        Ok(Self { file, identity })
+    }
+
+    fn verify_path(&self, path: &Path) -> Result<(), &'static str> {
+        let metadata = fs::symlink_metadata(path).map_err(|_| "临时输出已发生变化")?;
+        if is_reparse(&metadata)
+            || !metadata.is_file()
+            || file_identity(&metadata) != self.identity
+            || file_identity(&self.file.metadata().map_err(|_| "临时输出已发生变化")?)
+                != self.identity
+        {
+            return Err("临时输出已发生变化");
+        }
+        Ok(())
+    }
+
+    fn cleanup(self, path: &Path) -> Result<(), &'static str> {
+        use std::{mem::size_of, os::windows::io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
+        };
+        self.verify_path(path)?;
+        let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
+        let result = unsafe {
+            SetFileInformationByHandle(
+                self.file.as_raw_handle(),
+                FileDispositionInfo,
+                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
+        };
+        if result == 0 {
+            return Err("严重错误：输出回滚不完整");
+        }
+        drop(self);
+        Ok(())
+    }
+
+    fn into_committed(self) -> OwnedCommittedFile {
+        OwnedCommittedFile {
+            file: self.file,
+            identity: self.identity,
+        }
+    }
+}
+
 #[cfg(not(windows))]
 fn open_pinned_directory(path: &Path) -> std::io::Result<fs::File> {
     OpenOptions::new().read(true).open(path)
 }
 
+struct PinnedRead {
+    bytes: Vec<u8>,
+    _file: fs::File,
+}
+
 fn read_pinned_promotion(
     path: &Path,
     after_open: impl FnOnce() -> std::io::Result<()>,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<PinnedRead, &'static str> {
     let path_metadata = fs::symlink_metadata(path).map_err(|_| "上一阶段报告无效")?;
     if path_metadata.file_type().is_symlink()
         || is_reparse(&path_metadata)
@@ -543,7 +727,7 @@ fn read_pinned_promotion(
         return Err("上一阶段报告无效");
     }
     revalidate_pinned_file(path, &canonical, identity)?;
-    Ok(bytes)
+    Ok(PinnedRead { bytes, _file: file })
 }
 
 fn revalidate_pinned_file(
@@ -603,6 +787,12 @@ impl PinnedOutputDirectory {
         }
         Ok(())
     }
+
+    fn flush_best_effort(&self) {
+        // Windows may reject FlushFileBuffers for directory handles. The last-renamed
+        // commit marker is therefore the recovery boundary even when this flush is unsupported.
+        let _ = self._guard.sync_all();
+    }
 }
 
 #[cfg(windows)]
@@ -649,8 +839,10 @@ fn write_pair_atomic_with_hook(
     let artifact = pinned
         .canonical
         .join(artifact.file_name().ok_or("输出路径无效")?);
+    let manifest = commit_sidecar(&report)?;
     ensure_missing(&report)?;
     ensure_missing(&artifact)?;
+    ensure_missing(&manifest)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "无法创建安全临时输出")?
@@ -660,39 +852,131 @@ fn write_pair_atomic_with_hook(
     };
     let report_temp = temp_path(&report, "report");
     let artifact_temp = temp_path(&artifact, "artifact");
+    let manifest_temp = temp_path(&manifest, "manifest");
     let mut artifact_committed = false;
     let mut report_committed = false;
+    let mut manifest_committed = false;
     let mut artifact_guard = None;
+    let mut report_guard = None;
+    let mut manifest_guard = None;
+    let mut report_temp_guard = None;
+    let mut artifact_temp_guard = None;
+    let mut manifest_temp_guard = None;
     let result = (|| -> Result<(), &'static str> {
-        write_synced_new(&report_temp, report_bytes)?;
-        write_synced_new(&artifact_temp, artifact_bytes)?;
+        report_temp_guard = Some(OwnedTempFile::create(&report_temp, report_bytes)?);
+        artifact_temp_guard = Some(OwnedTempFile::create(&artifact_temp, artifact_bytes)?);
         hook("after_temps").map_err(|_| "输出目录在提交前发生变化")?;
         pinned.revalidate(parent)?;
         ensure_missing(&report)?;
         ensure_missing(&artifact)?;
         pinned.revalidate(parent)?;
+        artifact_temp_guard
+            .as_ref()
+            .ok_or("临时输出已发生变化")?
+            .verify_path(&artifact_temp)?;
         if fs::rename(&artifact_temp, &artifact).is_err() {
             return Err("无法提交模型产物");
         }
         artifact_committed = true;
-        artifact_guard = Some(open_pinned_file(&artifact).map_err(|_| "无法锁定已提交的模型产物")?);
+        artifact_guard = Some(
+            artifact_temp_guard
+                .take()
+                .ok_or("临时输出已发生变化")?
+                .into_committed(),
+        );
         hook("after_artifact").map_err(|_| "输出目录在提交期间发生变化")?;
         pinned.revalidate(parent)?;
         ensure_missing(&report)?;
         pinned.revalidate(parent)?;
+        report_temp_guard
+            .as_ref()
+            .ok_or("临时输出已发生变化")?
+            .verify_path(&report_temp)?;
         fs::rename(&report_temp, &report).map_err(|_| "无法提交训练报告")?;
         report_committed = true;
+        report_guard = Some(
+            report_temp_guard
+                .take()
+                .ok_or("临时输出已发生变化")?
+                .into_committed(),
+        );
+        let report_value: serde_json::Value =
+            serde_json::from_slice(report_bytes).map_err(|_| "无法生成阶段提交标记")?;
+        let artifact_value: serde_json::Value =
+            serde_json::from_slice(artifact_bytes).map_err(|_| "无法生成阶段提交标记")?;
+        let commit = StageCommitManifest {
+            schema_version: 1,
+            integrity_kind: "checksum_not_authentication".into(),
+            stage: report_value
+                .pointer("/training_config/validation/stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or("test")
+                .into(),
+            seed: report_value
+                .get("seed")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+            report_basename: report.file_name().unwrap().to_string_lossy().into_owned(),
+            report_sha256: sha256_bytes(report_bytes),
+            artifact_basename: artifact.file_name().unwrap().to_string_lossy().into_owned(),
+            artifact_sha256: sha256_bytes(artifact_bytes),
+            artifact_config_hash: artifact_value
+                .get("config_hash")
+                .and_then(|value| value.as_str())
+                .unwrap_or(&"0".repeat(64))
+                .to_owned(),
+            transaction_id: format!("tx-{nonce:x}"),
+        };
+        let manifest_bytes = serde_json::to_vec(&commit).map_err(|_| "无法生成阶段提交标记")?;
+        manifest_temp_guard = Some(OwnedTempFile::create(&manifest_temp, &manifest_bytes)?);
+        hook("before_manifest").map_err(|_| "无法提交阶段标记")?;
+        pinned.revalidate(parent)?;
+        ensure_missing(&manifest)?;
+        manifest_temp_guard
+            .as_ref()
+            .ok_or("临时输出已发生变化")?
+            .verify_path(&manifest_temp)?;
+        fs::rename(&manifest_temp, &manifest).map_err(|_| "无法提交阶段标记")?;
+        manifest_committed = true;
+        manifest_guard = Some(
+            manifest_temp_guard
+                .take()
+                .ok_or("临时输出已发生变化")?
+                .into_committed(),
+        );
+        pinned.flush_best_effort();
         sync_parent(&report)?;
         Ok(())
     })();
     if result.is_err() {
-        drop(artifact_guard.take());
-        let _ = fs::remove_file(&report_temp);
-        let _ = fs::remove_file(&artifact_temp);
-        if report_committed && fs::remove_file(&report).is_err() {
+        for (temp, path) in [
+            (manifest_temp_guard.take(), &manifest_temp),
+            (report_temp_guard.take(), &report_temp),
+            (artifact_temp_guard.take(), &artifact_temp),
+        ] {
+            if temp.is_some_and(|owned| owned.cleanup(path).is_err()) {
+                return Err("严重错误：输出回滚不完整");
+            }
+        }
+        if manifest_committed
+            && manifest_guard
+                .take()
+                .is_none_or(|owned| owned.delete().is_err())
+        {
             return Err("严重错误：输出回滚不完整");
         }
-        if artifact_committed && fs::remove_file(&artifact).is_err() {
+        if report_committed
+            && report_guard
+                .take()
+                .is_none_or(|owned| owned.delete().is_err())
+        {
+            return Err("严重错误：输出回滚不完整");
+        }
+        if artifact_committed
+            && artifact_guard
+                .take()
+                .is_none_or(|owned| owned.delete().is_err())
+        {
             return Err("严重错误：输出回滚不完整");
         }
     }
@@ -705,17 +989,6 @@ fn ensure_missing(path: &Path) -> Result<(), &'static str> {
         Ok(_) => Err("输出文件已存在，拒绝覆盖"),
         Err(_) => Err("无法确认输出路径状态"),
     }
-}
-
-fn write_synced_new(path: &Path, bytes: &[u8]) -> Result<(), &'static str> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|_| "无法创建安全临时输出")?;
-    file.write_all(bytes).map_err(|_| "无法写入临时输出")?;
-    file.flush().map_err(|_| "无法刷新临时输出")?;
-    file.sync_all().map_err(|_| "无法同步临时输出")
 }
 
 fn sync_parent(path: &Path) -> Result<(), &'static str> {
@@ -820,14 +1093,26 @@ mod io_race_tests {
         let dir = tempfile::tempdir().unwrap();
         let report = dir.path().join("report.json");
         let artifact = dir.path().join("artifact.json");
+        let mut racer_guard = None;
         let result =
             write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
                 if stage == "after_temps" {
-                    fs::write(&report, b"racer")?;
+                    use std::os::windows::fs::OpenOptionsExt;
+                    let mut file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create_new(true)
+                        .share_mode(0x1 | 0x2)
+                        .open(&report)?;
+                    file.write_all(b"racer")?;
+                    file.sync_all()?;
+                    racer_guard = Some(file);
                 }
                 Ok(())
             });
         assert!(result.is_err());
+        assert!(racer_guard.is_some(), "hook not reached: {result:?}");
+        assert_eq!(racer_guard.as_ref().unwrap().metadata().unwrap().len(), 5);
         assert_eq!(fs::read(&report).unwrap(), b"racer");
         assert!(!artifact.exists());
         assert!(fs::read_dir(dir.path())
@@ -864,14 +1149,26 @@ mod io_race_tests {
         let dir = tempfile::tempdir().unwrap();
         let report = dir.path().join("report.json");
         let artifact = dir.path().join("artifact.json");
+        let mut racer_guard = None;
         let result =
             write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
                 if stage == "after_artifact" {
-                    fs::write(&report, b"racer")?;
+                    use std::os::windows::fs::OpenOptionsExt;
+                    let mut file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create_new(true)
+                        .share_mode(0x1 | 0x2)
+                        .open(&report)?;
+                    file.write_all(b"racer")?;
+                    file.sync_all()?;
+                    racer_guard = Some(file);
                 }
                 Ok(())
             });
         assert!(result.is_err());
+        assert!(racer_guard.is_some(), "hook not reached: {result:?}");
+        assert_eq!(racer_guard.as_ref().unwrap().metadata().unwrap().len(), 5);
         assert_eq!(fs::read(&report).unwrap(), b"racer");
         assert!(!artifact.exists());
         assert!(fs::read_dir(dir.path())
@@ -908,7 +1205,7 @@ mod io_race_tests {
     }
 
     #[test]
-    fn artifact_and_parent_rename_attempts_are_blocked_by_pinned_windows_handles() {
+    fn same_handle_rollback_removes_a_committed_file_even_if_its_path_is_moved() {
         let root = tempfile::tempdir().unwrap();
         let parent = root.path().join("outputs");
         fs::create_dir(&parent).unwrap();
@@ -919,9 +1216,9 @@ mod io_race_tests {
         let result =
             write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
                 if stage == "after_artifact" {
-                    assert!(fs::rename(&artifact, &moved_artifact).is_err());
+                    fs::rename(&artifact, &moved_artifact)?;
                     assert!(fs::rename(&parent, &moved_parent).is_err());
-                    return Err(std::io::Error::other("blocked rename attempts"));
+                    return Err(std::io::Error::other("synthetic stop after moved output"));
                 }
                 Ok(())
             });
@@ -933,6 +1230,37 @@ mod io_race_tests {
         assert!(fs::read_dir(root.path())
             .unwrap()
             .flat_map(|entry| fs::read_dir(entry.unwrap().path()).into_iter().flatten())
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn failure_before_last_commit_marker_rolls_back_jsons_and_never_publishes_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let marker = commit_sidecar(&report).unwrap();
+        let report_bytes = br#"{"training_config":{"validation":{"stage":"test"}},"seed":0}"#;
+        let artifact_bytes = format!(r#"{{"config_hash":"{}"}}"#, "0".repeat(64));
+        let result = write_pair_atomic_with_hook(
+            &report,
+            report_bytes,
+            &artifact,
+            artifact_bytes.as_bytes(),
+            |stage| {
+                if stage == "before_manifest" {
+                    return Err(std::io::Error::other("synthetic marker failure"));
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!artifact.exists());
+        assert!(!marker.exists());
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
             .all(|name| !name.starts_with(".career-mmr-")));

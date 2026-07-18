@@ -9,7 +9,7 @@ use owstats_desktop_lib::career_mmr::{
     },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
     training_report::{
-        build_training_outputs, recompute_config_hash, recompute_promotion_hash,
+        build_training_outputs, recompute_config_hash, recompute_promotion_checksum,
         validate_promotion_report, validate_report_boundary,
     },
 };
@@ -282,8 +282,8 @@ fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
             std::fs::write(&path, serde_json::to_vec(report).unwrap()).unwrap();
             let value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
             assert_eq!(
-                recompute_promotion_hash(&value).unwrap(),
-                value["promotion_hash"].as_str().unwrap()
+                recompute_promotion_checksum(&value).unwrap(),
+                value["promotion_checksum"].as_str().unwrap()
             );
             validate_promotion_report(&value, stage, 0x5eed).unwrap()
         };
@@ -349,8 +349,8 @@ fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
     );
     let final_value = serde_json::to_value(&final_report).unwrap();
     assert_eq!(
-        recompute_promotion_hash(&final_value).unwrap(),
-        final_report.promotion_hash
+        recompute_promotion_checksum(&final_value).unwrap(),
+        final_report.promotion_checksum
     );
     assert!(!rows.is_empty());
     assert_eq!(
@@ -386,7 +386,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
 
     let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
 
-    assert_eq!(artifact.schema_version, 4);
+    assert_eq!(artifact.schema_version, 5);
     assert!(!artifact.algorithm.is_empty());
     assert!(!artifact.feature_version.is_empty());
     assert_eq!(artifact.seed, 0x5eed);
@@ -486,6 +486,27 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
         recompute_config_hash(&artifact).unwrap(),
         artifact.config_hash
     );
+}
+
+#[test]
+fn promotion_checksum_covers_shadow_nested_and_dataset_content_but_is_not_authentication() {
+    let (rows, audit, evaluation) = eligible_evaluation(91);
+    let (_, report) = build_training_outputs(&rows, &audit, &evaluation, 91).unwrap();
+    let original = serde_json::to_value(&report).unwrap();
+    assert_eq!(report.integrity_kind, "checksum_not_authentication");
+    for pointer in [
+        "/dataset/projected_rows",
+        "/cells/1/metrics/nested_validation/improved_folds",
+    ] {
+        let mut changed = original.clone();
+        let value = changed.pointer_mut(pointer).unwrap();
+        *value = serde_json::json!(value.as_u64().unwrap_or(0) + 1);
+        assert_ne!(
+            recompute_promotion_checksum(&changed).unwrap(),
+            report.promotion_checksum,
+            "{pointer}"
+        );
+    }
 }
 
 #[test]
