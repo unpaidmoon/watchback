@@ -224,6 +224,72 @@ fn stadium_uses_only_last_valid_round_role_and_performance() {
 }
 
 #[test]
+fn stadium_snapshot_quality_tracks_only_valid_performance_fields() {
+    let cases = [
+        ("empty", serde_json::json!({}), 0, 0.55),
+        (
+            "invalid",
+            serde_json::json!({
+                "kill":-1,"assist":"-2","death":"NaN","heroDamage":"bad",
+                "cure":-3,"resistDamage":"-4","finalHit":-5,
+                "targetCompetingTime":"invalid","healingTaken":-6,"damageTaken":"-7"
+            }),
+            0,
+            0.55,
+        ),
+        (
+            "partial",
+            serde_json::json!({"finalHit":"7","kill":3,"assist":-1}),
+            2,
+            0.62,
+        ),
+        (
+            "complete",
+            serde_json::json!({
+                "kill":1,"assist":"2","death":3,"heroDamage":"4",
+                "cure":5,"resistDamage":"6","finalHit":7,
+                "targetCompetingTime":"8","healingTaken":9,"damageTaken":"10"
+            }),
+            10,
+            0.90,
+        ),
+    ];
+    for (suffix, statistics, valid_count, expected_quality) in cases {
+        let (_dir, conn) = database();
+        install_stadium_roles(&conn);
+        let mut player = serde_json::json!({
+            "bnetId":"current-local",
+            "heroGuid":"support-hero"
+        });
+        player
+            .as_object_mut()
+            .unwrap()
+            .extend(statistics.as_object().unwrap().clone());
+        let id = format!("stadium-quality-{suffix}");
+        insert_stadium(
+            &conn,
+            &id,
+            serde_json::json!({"roleType":"tank"}),
+            serde_json::json!({
+                "roundCountList":[{"roundIndex":1,"teammateList":[player],"enemyList":[]}]
+            }),
+        );
+
+        let input = extract_stadium_match(&conn, &id).unwrap().unwrap();
+        assert_eq!(
+            input.performance_features.as_object().unwrap().len(),
+            valid_count,
+            "{suffix}"
+        );
+        assert!(
+            (input.data_quality - expected_quality).abs() < 1e-12,
+            "{suffix}: {}",
+            input.data_quality
+        );
+    }
+}
+
+#[test]
 fn stadium_missing_current_player_rounds_never_borrows_previous_performance() {
     let (_dir, conn) = database();
     install_stadium_roles(&conn);
@@ -558,10 +624,53 @@ fn stadium_audit_exposes_only_aggregate_shape_counts() {
         );
     }
 
+    insert_stadium(
+        &conn,
+        "duplicate-current-audit",
+        serde_json::json!({"roleType":"tank"}),
+        serde_json::json!({
+            "roundCountList":[
+                stadium_round(Some(1), None, "tank-hero", 8),
+                stadium_round(Some(2), None, "tank-hero", 3)
+            ]
+        }),
+    );
+    insert_player(
+        &conn,
+        "duplicate-current-audit",
+        23,
+        "duplicate-current",
+        "damage-hero",
+        Some("damage"),
+        0,
+        0,
+    );
+    for (id, invalid_key) in [
+        ("blank-current-audit", ""),
+        ("padded-current-audit", " current-local "),
+    ] {
+        insert_stadium(
+            &conn,
+            id,
+            serde_json::json!({"roleType":"tank"}),
+            serde_json::json!({
+                "roundCountList":[
+                    stadium_round(Some(1), None, "tank-hero", 8),
+                    stadium_round(Some(2), None, "tank-hero", 3)
+                ]
+            }),
+        );
+        conn.execute(
+            "UPDATE match_players SET bnet_id=?1 WHERE match_id=?2 AND is_current_player=1",
+            (invalid_key, id),
+        )
+        .unwrap();
+    }
+
     let audit = audit_read_only(conn);
     assert_eq!(audit.stadium_round_local_matches, 1);
     assert_eq!(audit.stadium_cumulative_matches, 1);
-    assert_eq!(audit.stadium_ambiguous_matches, 1);
+    assert_eq!(audit.stadium_ambiguous_matches, 4);
 }
 
 #[test]

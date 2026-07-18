@@ -88,6 +88,21 @@ pub(crate) struct StadiumFinalSnapshot {
     pub statistics: Value,
 }
 
+impl StadiumFinalSnapshot {
+    pub(crate) fn valid_performance_field_count(&self) -> usize {
+        self.statistics.as_object().map_or(0, serde_json::Map::len)
+    }
+
+    pub(crate) fn has_valid_performance_fields(&self) -> bool {
+        self.valid_performance_field_count() > 0
+    }
+
+    pub(crate) fn data_quality(&self) -> f64 {
+        0.55 + 0.35 * self.valid_performance_field_count() as f64
+            / STADIUM_PERFORMANCE_FIELDS.len() as f64
+    }
+}
+
 pub struct ExtractionContext {
     summary_roles: HashMap<String, Role>,
     hero_roles: HashMap<String, Role>,
@@ -287,10 +302,11 @@ pub fn extract_stadium_match_with_context(
 
     let selected = stadium_final_snapshot(rounds, &current_player_key, context);
     let (role, role_source, data_quality, performance_features) = if let Some(snapshot) = selected {
+        let data_quality = snapshot.data_quality();
         (
             snapshot.role,
             "stadium_last_round",
-            0.9,
+            data_quality,
             snapshot.statistics,
         )
     } else {
@@ -430,7 +446,7 @@ fn json_i64_field(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(json_i64_value)
 }
 
-const STADIUM_PERFORMANCE_FIELDS: &[&str] = &[
+pub(crate) const STADIUM_PERFORMANCE_FIELDS: &[&str] = &[
     "kill",
     "assist",
     "death",
@@ -447,9 +463,12 @@ fn stadium_performance_features(player: &Value) -> Value {
     let mut features = serde_json::Map::new();
     for key in STADIUM_PERFORMANCE_FIELDS {
         if let Some(value) = player.get(*key) {
+            let Some(number) = json_number(value).filter(|number| *number >= 0.0) else {
+                continue;
+            };
             if value.is_number() {
                 features.insert((*key).to_string(), value.clone());
-            } else if let Some(number) = json_number(value) {
+            } else {
                 features.insert((*key).to_string(), Value::from(number));
             }
         }
@@ -629,12 +648,18 @@ pub fn audit_career_mmr_inputs(conn: &Connection) -> Result<CareerMmrInputAudit>
     let mut stadium_ambiguous_matches = 0;
     let mut stadium = conn.prepare(
         r#"
-        SELECT d.raw_detail_json, p.bnet_id
+        SELECT d.raw_detail_json,
+               (SELECT CASE
+                    WHEN COUNT(*)=1
+                     AND MIN(p.bnet_id)=TRIM(MIN(p.bnet_id))
+                     AND TRIM(MIN(p.bnet_id))<>''
+                    THEN MIN(p.bnet_id)
+                END
+                FROM match_players p
+                WHERE p.match_id=m.match_id AND p.is_current_player=1)
         FROM matches m
         LEFT JOIN match_details d ON d.match_id=m.match_id
-        LEFT JOIN match_players p ON p.match_id=m.match_id AND p.is_current_player=1
         WHERE m.bucket='stadium'
-        GROUP BY m.match_id
         "#,
     )?;
     for row in stadium.query_map([], |row| {

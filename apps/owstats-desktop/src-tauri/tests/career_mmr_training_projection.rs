@@ -170,6 +170,74 @@ fn stadium_competitive_projects_only_the_final_snapshot() -> Result<()> {
 }
 
 #[test]
+fn stadium_training_quality_and_eligibility_follow_snapshot_coverage() -> Result<()> {
+    let cases = [
+        ("empty", serde_json::json!({}), 0.55, false),
+        (
+            "invalid",
+            serde_json::json!({"finalHit":-1,"kill":"NaN","assist":"bad"}),
+            0.55,
+            false,
+        ),
+        (
+            "partial",
+            serde_json::json!({"finalHit":"7","kill":3,"assist":-1}),
+            0.62,
+            true,
+        ),
+        (
+            "complete",
+            serde_json::json!({
+                "kill":1,"assist":"2","death":3,"heroDamage":"4",
+                "cure":5,"resistDamage":"6","finalHit":7,
+                "targetCompetingTime":"8","healingTaken":9,"damageTaken":"10"
+            }),
+            0.90,
+            true,
+        ),
+    ];
+    for (suffix, statistics, expected_quality, performance_eligible) in cases {
+        let (_dir, conn) = fixture()?;
+        let mut player = serde_json::json!({
+            "bnetId":"current-local",
+            "heroGuid":"support-hero"
+        });
+        player
+            .as_object_mut()
+            .unwrap()
+            .extend(statistics.as_object().unwrap().clone());
+        insert_stadium_match(
+            &conn,
+            &format!("stadium-quality-{suffix}"),
+            "SportFight",
+            "support",
+            serde_json::json!([{
+                "roundIndex":1,"teammateList":[player],"enemyList":[]
+            }]),
+        )?;
+
+        let projection = build_training_projection(&conn)?;
+        let row = projection
+            .rows
+            .iter()
+            .find(|row| row.mode_family == ModeFamily::StadiumCompetitive)
+            .unwrap();
+        assert!(
+            (row.data_quality - expected_quality).abs() < 1e-12,
+            "{suffix}"
+        );
+        assert_eq!(row.allow_performance, performance_eligible, "{suffix}");
+        assert_eq!(row.outcome_only, !performance_eligible, "{suffix}");
+        assert_eq!(
+            projection.audit.stadium_performance_eligible_rows,
+            usize::from(performance_eligible),
+            "{suffix}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn stadium_quick_keeps_outcome_row_but_never_trains_performance() -> Result<()> {
     let (_dir, conn) = fixture()?;
     insert_stadium_match(
@@ -197,6 +265,7 @@ fn stadium_quick_keeps_outcome_row_but_never_trains_performance() -> Result<()> 
     assert!(!row.allow_performance);
     assert!(!row.allow_performance_by_hero);
     assert_eq!(row.final_hit, None);
+    assert!((row.data_quality - 0.585).abs() < 1e-12);
     assert_eq!(row.duration_sec, 600.0);
     assert_eq!(row.hero_duration_sec, Some(600.0));
     assert_eq!(projection.audit.stadium_competitive_candidates, 0);

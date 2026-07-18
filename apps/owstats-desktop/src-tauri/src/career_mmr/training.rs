@@ -136,19 +136,6 @@ const STAT_HERO_DAMAGE: &str = "603482350067647671";
 const STAT_HEALING_PRIMARY: &str = "603482350067646913";
 const STAT_HEALING_FALLBACK: &str = "603482350067647479";
 const STAT_OBJECTIVE_TIME: &str = "603482350067648534";
-const STADIUM_PERFORMANCE_FIELDS: &[&str] = &[
-    "kill",
-    "assist",
-    "death",
-    "heroDamage",
-    "cure",
-    "resistDamage",
-    "finalHit",
-    "targetCompetingTime",
-    "healingTaken",
-    "damageTaken",
-];
-
 pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection> {
     let mut active_events = HashMap::new();
     if table_exists(conn, "career_mmr_events")? && table_exists(conn, "mmr_model_versions")? {
@@ -335,26 +322,25 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
                 .get("roleType")
                 .and_then(Value::as_str)
                 .and_then(|role| normalize_input_role(Some(role)));
-            let (role, hero, statistics, base_quality) = if let Some(snapshot) = snapshot {
-                (
-                    snapshot.role,
-                    Some(snapshot.hero_guid),
-                    Some(snapshot.statistics),
-                    0.9,
-                )
-            } else if let Some(role) = fallback_role {
-                (role, None, None, 0.35)
-            } else {
-                audit.stadium_ambiguous_excluded += 1;
-                continue;
-            };
+            let (role, hero, statistics, base_quality, has_performance_fields) =
+                if let Some(snapshot) = snapshot {
+                    let base_quality = snapshot.data_quality();
+                    let has_performance_fields = snapshot.has_valid_performance_fields();
+                    (
+                        snapshot.role,
+                        Some(snapshot.hero_guid),
+                        Some(snapshot.statistics),
+                        base_quality,
+                        has_performance_fields,
+                    )
+                } else if let Some(role) = fallback_role {
+                    (role, None, None, 0.35, false)
+                } else {
+                    audit.stadium_ambiguous_excluded += 1;
+                    continue;
+                };
             let training_cohort = mode_family.training_cohort();
             let stats = statistics.as_ref();
-            let has_performance_fields = stats.is_some_and(|value| {
-                STADIUM_PERFORMANCE_FIELDS
-                    .iter()
-                    .any(|key| numeric(value, key).is_some())
-            });
             let allow_performance = mode_family.trains_performance()
                 && training_cohort == TrainingCohort::StadiumCompetitive
                 && r.duration > 0
@@ -408,13 +394,11 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
             };
             audit_healing_semantics(healing_taken_semantic, &mut audit.healing_taken_semantics);
             let role_name = role.as_str();
-            let (expected_win_rate, mut data_quality) = active_events
+            let expected_win_rate = active_events
                 .get(&(r.match_id.clone(), role_name.to_string()))
-                .copied()
-                .unwrap_or((0.5, base_quality));
-            if !allow_performance {
-                data_quality = data_quality.min(0.55);
-            }
+                .map(|(expected, _quality)| *expected)
+                .unwrap_or(0.5);
+            let data_quality = base_quality;
             *role_counts.entry(role_name.to_string()).or_default() += 1;
             rows.push(TrainingRow {
                 match_group: stable_match_key(&r.match_id),
