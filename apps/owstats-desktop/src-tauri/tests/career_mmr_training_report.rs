@@ -1,5 +1,8 @@
 use owstats_desktop_lib::career_mmr::{
     input::{ModeFamily, Role},
+    performance::{build_feature_matrix, HealingTakenStrategy},
+    performance_forward::{MetricReport, NestedFoldReport},
+    performance_model::{fit_model, FitConfig},
     performance_stability::{evaluate_stability, CellDecision, StabilityConfig},
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
     training_report::{build_training_outputs, recompute_config_hash, validate_report_boundary},
@@ -73,6 +76,54 @@ fn mark_cell_eligible(
 ) {
     let report = &mut cell.reports[report_index];
     report.eligible = true;
+    report.decision = CellDecision::Eligible;
+    report.rejected_reasons.clear();
+    report.role = cell.role;
+    report.mode = cell.mode;
+    report.training_cohort = cell.training_cohort;
+    report.shared_parameter_version = cell.shared_parameter_version.clone();
+    report.forward.role = cell.role;
+    report.forward.strategy = report.strategy.clone();
+    report.forward.rejected_reasons.clear();
+    report.forward.metrics = Some(MetricReport {
+        auc: 0.6,
+        brier: 0.20,
+        ece: 0.02,
+    });
+    report.forward.baseline_metrics = Some(MetricReport {
+        auc: 0.5,
+        brier: 0.25,
+        ece: 0.02,
+    });
+    report.forward.average_adjustment = 0.01;
+    report.forward.p95_single_feature_share = 0.20;
+    report.forward.upper_cap_rate = 0.01;
+    report.forward.lower_cap_rate = 0.01;
+    report.leave_one_season_out.validation_groups = 2;
+    report.leave_one_season_out.candidate_rows = 2;
+    report.leave_one_season_out.evaluated_rows = 2;
+    report.leave_one_season_out.mean_brier_delta = Some(-0.01);
+    report.leave_one_season_out.worst_brier_delta = Some(-0.005);
+    report.leave_one_hero_out.validation_groups = 5;
+    report.leave_one_hero_out.candidate_rows = 5;
+    report.leave_one_hero_out.evaluated_rows = 5;
+    report.leave_one_hero_out.mean_brier_delta = Some(-0.01);
+    report.leave_one_hero_out.worst_brier_delta = Some(-0.005);
+    report.leave_one_account_out.candidate_groups = 1;
+    report.leave_one_account_out.evaluated_groups = 1;
+    report.leave_one_account_out.mean_brier_delta = Some(-0.01);
+    report.leave_one_account_out.worst_brier_delta = Some(-0.005);
+    report.bootstrap.requested_iterations = 10;
+    report.bootstrap.completed_iterations = 10;
+    report.bootstrap.fixed_variant = Some(report.forward.variant);
+    report.bootstrap.fixed_final_multiplier = Some(report.forward.final_multiplier);
+    report.bootstrap.fixed_lambda_core = Some(report.forward.lambda_core);
+    report.bootstrap.fixed_lambda_cohort = Some(report.forward.lambda_cohort);
+    report.bootstrap.mean_brier_delta = Some(-0.01);
+    report.bootstrap.brier_delta_ci95_low = Some(-0.02);
+    report.bootstrap.brier_delta_ci95_high = Some(-0.001);
+    report.bootstrap.mean_auc = Some(0.6);
+    report.bootstrap.mean_ece = Some(0.02);
     cell.selected = Some(report.strategy.clone());
     cell.decision = CellDecision::Eligible;
     cell.rejected_reasons.clear();
@@ -82,6 +133,58 @@ fn mark_cell_eligible(
     cell.nested_validation.selected_lambda_core = report.forward.lambda_core;
     cell.nested_validation.selected_lambda_cohort = report.forward.lambda_cohort;
     cell.nested_validation.improved_folds = 5;
+    cell.nested_validation.role = cell.role;
+    cell.nested_validation.mode = cell.mode;
+    cell.nested_validation.metrics = report.forward.metrics.clone();
+    cell.nested_validation.baseline_metrics = report.forward.baseline_metrics.clone();
+    cell.nested_validation.selection_degraded = false;
+    cell.nested_validation.folds = (0..5)
+        .map(|fold| NestedFoldReport {
+            fold,
+            training_rows: 10,
+            validation_rows: 2,
+            strategy: report.strategy.clone(),
+            variant: report.forward.variant,
+            final_multiplier: report.forward.final_multiplier,
+            lambda_core: report.forward.lambda_core,
+            lambda_cohort: report.forward.lambda_cohort,
+            inner_validation_rows: 4,
+            selection_degraded: false,
+            metrics: report.forward.metrics.clone(),
+            baseline_brier: Some(0.25),
+            brier_delta: Some(-0.05),
+        })
+        .collect();
+}
+
+fn eligible_evaluation(
+    seed: u64,
+) -> (
+    Vec<TrainingRow>,
+    TrainingAudit,
+    owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation,
+) {
+    let rows = synthetic_rows();
+    let audit = TrainingAudit {
+        source_accounts: 2,
+        projected_rows: rows.len(),
+        ..Default::default()
+    };
+    let mut evaluation = evaluate_stability(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 10,
+            seed,
+            ..Default::default()
+        },
+    );
+    let cell = evaluation
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    mark_cell_eligible(cell, 0);
+    (rows, audit, evaluation)
 }
 
 #[test]
@@ -95,7 +198,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
     let evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 0x5eed,
             ..Default::default()
         },
@@ -216,7 +319,7 @@ fn config_hash_ignores_account_and_match_identifiers() {
     let evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 7,
             ..Default::default()
         },
@@ -249,7 +352,7 @@ fn config_hash_covers_the_fitted_model_weights() {
     let mut evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 11,
             ..Default::default()
         },
@@ -280,7 +383,7 @@ fn config_hash_covers_normalization_and_every_validation_gate() {
     let evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 13,
             ..Default::default()
         },
@@ -315,7 +418,7 @@ fn conflicting_cell_candidates_share_one_order_independent_role_model() {
     let mut evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 17,
             ..Default::default()
         },
@@ -390,7 +493,7 @@ fn matching_shared_spec_can_enable_both_paired_modes() {
     let mut evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 19,
             ..Default::default()
         },
@@ -429,7 +532,7 @@ fn artifact_uses_the_actual_evaluation_snapshot_and_rejects_seed_mismatch() {
     let evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 23,
             max_loo_worsened_fraction: 0.10,
             max_abs_average_adjustment: 0.05,
@@ -500,7 +603,7 @@ fn rejected_reasons_always_override_an_inconsistent_eligible_flag() {
     let mut evaluation = evaluate_stability(
         &[],
         StabilityConfig {
-            bootstrap_iterations: 0,
+            bootstrap_iterations: 10,
             seed: 9,
             ..Default::default()
         },
@@ -516,4 +619,164 @@ fn rejected_reasons_always_override_an_inconsistent_eligible_flag() {
     assert!(!report.cells[0].eligible);
     assert_eq!(report.cells[0].decision, CellDecision::Shadow);
     assert_eq!(report.cells[0].rejected_reasons, ["synthetic_rejection"]);
+}
+
+#[test]
+fn artifact_boundary_shadows_every_incomplete_or_mismatched_validation_identity() {
+    for case in [
+        "cell_cohort",
+        "report_mode",
+        "forward_role",
+        "nested_mode",
+        "nested_strategy",
+        "missing_nested_metrics",
+        "nan_forward_metric",
+        "missing_bootstrap_ci",
+        "non_candidate_multiplier",
+    ] {
+        let (rows, audit, mut evaluation) = eligible_evaluation(31);
+        let cell = evaluation
+            .cells
+            .iter_mut()
+            .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+            .unwrap();
+        match case {
+            "cell_cohort" => {
+                cell.training_cohort =
+                    owstats_desktop_lib::career_mmr::input::TrainingCohort::OpenQueue
+            }
+            "report_mode" => cell.reports[0].mode = ModeFamily::OpenCompetitive,
+            "forward_role" => cell.reports[0].forward.role = Role::Damage,
+            "nested_mode" => cell.nested_validation.mode = ModeFamily::RoleQuick,
+            "nested_strategy" => cell.nested_validation.selected_strategy = "directnegative".into(),
+            "missing_nested_metrics" => cell.nested_validation.metrics = None,
+            "nan_forward_metric" => {
+                cell.reports[0].forward.metrics.as_mut().unwrap().brier = f64::NAN
+            }
+            "missing_bootstrap_ci" => cell.reports[0].bootstrap.brier_delta_ci95_high = None,
+            "non_candidate_multiplier" => {
+                cell.reports[0].forward.final_multiplier = 1.0000000000000002;
+                cell.nested_validation.selected_final_multiplier = 1.0000000000000002;
+                for fold in &mut cell.nested_validation.folds {
+                    fold.final_multiplier = 1.0000000000000002;
+                }
+            }
+            _ => unreachable!(),
+        }
+        let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 31).unwrap();
+        let deployed = artifact
+            .cells
+            .iter()
+            .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+            .unwrap();
+        let reported = report
+            .cells
+            .iter()
+            .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+            .unwrap();
+        assert!(!deployed.performance_enabled, "case {case}");
+        assert_eq!(reported.decision, CellDecision::Shadow, "case {case}");
+        assert!(
+            reported
+                .rejected_reasons
+                .contains(&"invalid_validation_evidence".to_string()),
+            "case {case}: {:?}",
+            reported.rejected_reasons
+        );
+    }
+}
+
+#[test]
+fn non_default_fit_snapshot_is_used_exactly_by_authoritative_refit() {
+    let (rows, audit, mut evaluation) = eligible_evaluation(37);
+    evaluation.config.fit_learning_rate = 0.007;
+    evaluation.config.fit_steps = 7;
+    evaluation.config.minimum_cohort_offset_rows = 1;
+    let artifact = build_training_outputs(&rows, &audit, &evaluation, 37)
+        .unwrap()
+        .0;
+    let role_artifact = &artifact.roles[&Role::Tank];
+    let matrix = build_feature_matrix(&rows, &[], HealingTakenStrategy::None);
+    let role_rows = matrix.training_by_role["tank"].iter().collect::<Vec<_>>();
+    let expected = fit_model(
+        &role_rows,
+        Role::Tank,
+        cell_variant(&evaluation),
+        HealingTakenStrategy::None,
+        &FitConfig {
+            lambda_core: role_artifact.lambda_core.unwrap(),
+            lambda_cohort: role_artifact.lambda_cohort.unwrap(),
+            learning_rate: 0.007,
+            steps: 7,
+            min_cohort_offset_rows: 1,
+            final_multiplier: role_artifact.final_hit_multiplier.unwrap(),
+        },
+    )
+    .unwrap();
+    for (name, weight) in expected.feature_names.iter().zip(&expected.core_weights) {
+        assert_eq!(role_artifact.feature_weights[name], *weight);
+    }
+    for (cohort, offsets) in &expected.cohort_offsets {
+        for (name, offset) in expected.feature_names.iter().zip(offsets) {
+            assert_eq!(role_artifact.training_cohort_offsets[cohort][name], *offset);
+        }
+    }
+    assert_eq!(artifact.training_config.fit.learning_rate, 0.007);
+    assert_eq!(artifact.training_config.fit.steps, 7);
+    assert_eq!(artifact.training_config.fit.minimum_cohort_offset_rows, 1);
+}
+
+fn cell_variant(
+    evaluation: &owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation,
+) -> owstats_desktop_lib::career_mmr::performance_forward::ModelVariant {
+    evaluation
+        .cells
+        .iter()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap()
+        .reports[0]
+        .forward
+        .variant
+}
+
+#[test]
+fn model_spec_id_is_canonical_and_rejects_adjacent_or_ambiguous_candidates() {
+    let (rows, audit, evaluation) = eligible_evaluation(41);
+    let first = build_training_outputs(&rows, &audit, &evaluation, 41)
+        .unwrap()
+        .0;
+    let decoded: owstats_desktop_lib::career_mmr::training_report::PerformanceModelArtifact =
+        serde_json::from_str(&serde_json::to_string(&first).unwrap()).unwrap();
+    assert_eq!(
+        first.roles[&Role::Tank].model_spec_id,
+        decoded.roles[&Role::Tank].model_spec_id
+    );
+    assert!(first.roles[&Role::Tank].model_spec_id.is_some());
+
+    let mut adjacent = evaluation.clone();
+    let cell = adjacent
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    cell.reports[0].forward.lambda_core = f64::from_bits(0.02f64.to_bits() + 1);
+    cell.nested_validation.selected_lambda_core = cell.reports[0].forward.lambda_core;
+    for fold in &mut cell.nested_validation.folds {
+        fold.lambda_core = cell.reports[0].forward.lambda_core;
+    }
+    let artifact = build_training_outputs(&rows, &audit, &adjacent, 41)
+        .unwrap()
+        .0;
+    assert!(
+        !artifact
+            .cells
+            .iter()
+            .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+            .unwrap()
+            .performance_enabled
+    );
+
+    let mut ambiguous = evaluation;
+    ambiguous.config.final_hit_multipliers.push(1.0);
+    assert!(build_training_outputs(&rows, &audit, &ambiguous, 41).is_err());
 }

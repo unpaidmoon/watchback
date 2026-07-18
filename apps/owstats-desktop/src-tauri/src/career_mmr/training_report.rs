@@ -39,6 +39,7 @@ pub struct PerformanceModelArtifact {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct HierarchicalModelArtifact {
+    pub model_spec_id: Option<ModelSpecId>,
     pub selected_strategy: Option<String>,
     pub selected_variant: Option<String>,
     pub feature_weights: BTreeMap<String, f64>,
@@ -50,6 +51,14 @@ pub struct HierarchicalModelArtifact {
     pub calibration_p95_abs_effect: Option<f64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ModelSpecId {
+    pub strategy_index: usize,
+    pub variant_index: usize,
+    pub multiplier_index: usize,
+    pub regularization_index: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CellArtifact {
     pub role: Role,
@@ -57,6 +66,7 @@ pub struct CellArtifact {
     pub training_cohort: TrainingCohort,
     pub shared_parameter_version: String,
     pub role_model_ref: String,
+    pub model_spec_id: Option<ModelSpecId>,
     pub performance_enabled: bool,
 }
 
@@ -209,6 +219,7 @@ pub struct CellReport {
     pub training_cohort: TrainingCohort,
     pub shared_parameter_version: String,
     pub role_model_ref: String,
+    pub model_spec_id: Option<ModelSpecId>,
     pub training_rows: usize,
     pub validation_rows: usize,
     pub seasons: usize,
@@ -246,6 +257,7 @@ pub fn build_training_outputs(
     evaluation: &StabilityEvaluation,
     seed: u64,
 ) -> Result<(PerformanceModelArtifact, TrainingReport)> {
+    validate_config_snapshot(&evaluation.config)?;
     require_complete_cells(evaluation)?;
     if seed != evaluation.config.seed {
         bail!("模型产物种子与训练评估配置不一致");
@@ -316,6 +328,7 @@ fn build_cell_artifacts(
                 training_cohort: cell.mode.training_cohort(),
                 shared_parameter_version: shared_parameter_version(cell.mode.training_cohort()),
                 role_model_ref: role_model_ref(cell.role, role_model),
+                model_spec_id: role_model.model_spec_id.clone(),
                 performance_enabled: cell_validates_role_model(
                     cell,
                     role_model,
@@ -347,8 +360,9 @@ fn build_role_artifacts(
                 cell_validates_report(cell, report, &evaluation.config).then_some(report)
             })
             .collect::<Vec<_>>();
-        let artifact = if let Some(promoted) = promote_role_candidate(&reports) {
-            refit_artifact(rows, promoted)
+        let artifact = if let Some(promoted) = promote_role_candidate(&reports, &evaluation.config)
+        {
+            refit_artifact(rows, promoted, &evaluation.config)
                 .ok_or_else(|| anyhow::anyhow!("已通过验收的职责无法生成权威模型产物"))?
         } else {
             HierarchicalModelArtifact::default()
@@ -358,13 +372,18 @@ fn build_role_artifacts(
     Ok(roles)
 }
 
-fn promote_role_candidate<'a>(reports: &[&'a StabilityReport]) -> Option<&'a StabilityReport> {
+fn promote_role_candidate<'a>(
+    reports: &[&'a StabilityReport],
+    config: &StabilityConfigSnapshot,
+) -> Option<&'a StabilityReport> {
     let mut candidates = reports
         .iter()
         .map(|report| {
             let support = reports
                 .iter()
-                .filter(|candidate| same_model_spec(report, candidate))
+                .filter(|candidate| {
+                    model_spec_id(report, config) == model_spec_id(candidate, config)
+                })
                 .count();
             (*report, support)
         })
@@ -395,39 +414,44 @@ fn promote_role_candidate<'a>(reports: &[&'a StabilityReport]) -> Option<&'a Sta
     candidates.first().map(|(report, _)| *report)
 }
 
-fn same_model_spec(left: &StabilityReport, right: &StabilityReport) -> bool {
-    left.strategy == right.strategy
-        && left.forward.variant == right.forward.variant
-        && left.forward.final_multiplier.to_bits() == right.forward.final_multiplier.to_bits()
-        && left.forward.lambda_core.to_bits() == right.forward.lambda_core.to_bits()
-        && left.forward.lambda_cohort.to_bits() == right.forward.lambda_cohort.to_bits()
-}
-
 fn cell_validates_report(
     cell: &CellEvaluation,
     report: &StabilityReport,
     config: &StabilityConfigSnapshot,
 ) -> bool {
+    let Some(spec_id) = model_spec_id(report, config) else {
+        return false;
+    };
     cell_is_eligible(cell)
+        && cell.training_cohort == cell.mode.training_cohort()
         && cell.selected.as_deref() == Some(report.strategy.as_str())
         && report.eligible
+        && report.decision == CellDecision::Eligible
+        && report.rejected_reasons.is_empty()
+        && report.role == cell.role
+        && report.mode == cell.mode
+        && report.training_cohort == cell.training_cohort
+        && report.shared_parameter_version == cell.shared_parameter_version
+        && report.forward.role == cell.role
+        && report.forward.strategy == report.strategy
+        && report.forward.rejected_reasons.is_empty()
+        && finite_forward_evidence(report, config)
+        && complete_strategy_identities(cell)
+        && cell.nested_validation.role == cell.role
+        && cell.nested_validation.mode == cell.mode
+        && !cell.nested_validation.selection_degraded
         && cell.nested_validation.selected_strategy == report.strategy
         && cell.nested_validation.selected_variant == report.forward.variant
-        && cell.nested_validation.selected_final_multiplier.to_bits()
-            == report.forward.final_multiplier.to_bits()
-        && cell.nested_validation.selected_lambda_core.to_bits()
-            == report.forward.lambda_core.to_bits()
-        && cell.nested_validation.selected_lambda_cohort.to_bits()
-            == report.forward.lambda_cohort.to_bits()
+        && model_spec_id_from_values(
+            &cell.nested_validation.selected_strategy,
+            cell.nested_validation.selected_variant,
+            cell.nested_validation.selected_final_multiplier,
+            cell.nested_validation.selected_lambda_core,
+            cell.nested_validation.selected_lambda_cohort,
+            config,
+        ) == Some(spec_id.clone())
         && cell.nested_validation.improved_folds >= config.minimum_improved_folds
-        && cell
-            .nested_validation
-            .metrics
-            .as_ref()
-            .zip(cell.nested_validation.baseline_metrics.as_ref())
-            .is_none_or(|(candidate, baseline)| {
-                candidate.ece <= baseline.ece + config.max_ece_worsening
-            })
+        && finite_nested_evidence(cell, config)
 }
 
 fn cell_validates_role_model(
@@ -440,18 +464,282 @@ fn cell_validates_role_model(
     };
     cell.reports.iter().any(|report| {
         report.strategy == strategy
+            && model.model_spec_id.as_ref() == model_spec_id(report, config).as_ref()
             && artifact_matches_report(model, report)
             && cell_validates_report(cell, report, config)
     })
 }
 
 fn artifact_matches_report(model: &HierarchicalModelArtifact, report: &StabilityReport) -> bool {
-    model.selected_strategy.as_deref() == Some(report.strategy.as_str())
+    model.model_spec_id.is_some()
+        && model.selected_strategy.as_deref() == Some(report.strategy.as_str())
         && model.selected_variant.as_deref() == Some(variant_name(report.forward.variant))
-        && model.final_hit_multiplier.map(f64::to_bits)
-            == Some(report.forward.final_multiplier.to_bits())
-        && model.lambda_core.map(f64::to_bits) == Some(report.forward.lambda_core.to_bits())
-        && model.lambda_cohort.map(f64::to_bits) == Some(report.forward.lambda_cohort.to_bits())
+        && model.final_hit_multiplier == Some(report.forward.final_multiplier)
+        && model.lambda_core == Some(report.forward.lambda_core)
+        && model.lambda_cohort == Some(report.forward.lambda_cohort)
+}
+
+fn metric_is_finite(metric: &super::performance_forward::MetricReport) -> bool {
+    metric.auc.is_finite() && metric.brier.is_finite() && metric.ece.is_finite()
+}
+
+fn option_finite(value: Option<f64>) -> bool {
+    value.is_some_and(f64::is_finite)
+}
+
+fn complete_strategy_identities(cell: &CellEvaluation) -> bool {
+    const STRATEGIES: [&str; 5] = [
+        "none",
+        "directnegative",
+        "heronormalized",
+        "excesshealing",
+        "resourceconversiondebt",
+    ];
+    cell.reports.len() == STRATEGIES.len()
+        && STRATEGIES.iter().all(|strategy| {
+            cell.reports
+                .iter()
+                .filter(|report| report.strategy == *strategy)
+                .count()
+                == 1
+        })
+        && cell.reports.iter().all(|report| {
+            report.role == cell.role
+                && report.mode == cell.mode
+                && report.training_cohort == cell.training_cohort
+                && report.shared_parameter_version == cell.shared_parameter_version
+                && report.forward.role == cell.role
+                && report.forward.strategy == report.strategy
+        })
+}
+
+fn finite_forward_evidence(report: &StabilityReport, config: &StabilityConfigSnapshot) -> bool {
+    let Some(candidate) = report.forward.metrics.as_ref() else {
+        return false;
+    };
+    let Some(baseline) = report.forward.baseline_metrics.as_ref() else {
+        return false;
+    };
+    metric_is_finite(candidate)
+        && metric_is_finite(baseline)
+        && candidate.ece <= baseline.ece + config.max_ece_worsening
+        && report.forward.average_adjustment.is_finite()
+        && report.forward.average_adjustment.abs() <= config.max_abs_average_adjustment
+        && report.forward.p95_single_feature_share.is_finite()
+        && report.forward.p95_single_feature_share <= config.maximum_single_feature_share
+        && report.forward.upper_cap_rate.is_finite()
+        && report.forward.lower_cap_rate.is_finite()
+        && report.forward.upper_cap_rate <= config.maximum_cap_hit_rate
+        && report.forward.lower_cap_rate <= config.maximum_cap_hit_rate
+        && loo_is_complete(
+            &report.leave_one_season_out,
+            config.minimum_season_loo_groups,
+            config,
+        )
+        && loo_is_complete(
+            &report.leave_one_hero_out,
+            config.minimum_hero_loo_groups,
+            config,
+        )
+        && (!config.require_account_coverage
+            || (report.leave_one_account_out.candidate_groups > 0
+                && report.leave_one_account_out.evaluated_groups > 0
+                && option_finite(report.leave_one_account_out.mean_brier_delta)
+                && option_finite(report.leave_one_account_out.worst_brier_delta)))
+        && report.bootstrap.requested_iterations > 0
+        && report.bootstrap.requested_iterations == config.bootstrap_iterations
+        && report.bootstrap.completed_iterations as f64
+            / report.bootstrap.requested_iterations as f64
+            >= config.minimum_bootstrap_completion
+        && option_finite(report.bootstrap.mean_brier_delta)
+        && option_finite(report.bootstrap.brier_delta_ci95_low)
+        && report.bootstrap.brier_delta_ci95_high.is_some_and(|value| {
+            value.is_finite() && value <= config.maximum_bootstrap_brier_ci_high
+        })
+        && option_finite(report.bootstrap.mean_auc)
+        && option_finite(report.bootstrap.mean_ece)
+        && bootstrap_model_spec_id(report, config) == model_spec_id(report, config)
+        && report.bootstrap.coefficients.iter().all(|coefficient| {
+            coefficient.direction_stability.is_finite()
+                && coefficient.ci95_low.is_finite()
+                && coefficient.ci95_high.is_finite()
+                && (!coefficient.critical_constraint
+                    || coefficient.direction_stability
+                        >= config.minimum_critical_direction_stability)
+                && (!config.require_critical_ci_excludes_zero
+                    || !coefficient.critical_constraint
+                    || coefficient.ci95_low > 0.0
+                    || coefficient.ci95_high < 0.0)
+                && (!config.require_nonzero_reference_coefficients || coefficient.reference_nonzero)
+        })
+}
+
+fn loo_is_complete(
+    loo: &super::performance_stability::LooReport,
+    minimum_groups: usize,
+    config: &StabilityConfigSnapshot,
+) -> bool {
+    loo.validation_groups >= minimum_groups
+        && loo.candidate_rows > 0
+        && loo.evaluated_rows as f64 / loo.candidate_rows as f64 >= config.minimum_loo_row_coverage
+        && option_finite(loo.mean_brier_delta)
+        && option_finite(loo.worst_brier_delta)
+        && loo.worsened_groups as f64 / loo.validation_groups as f64
+            <= config.max_loo_worsened_fraction
+}
+
+fn finite_nested_evidence(cell: &CellEvaluation, config: &StabilityConfigSnapshot) -> bool {
+    let Some(candidate) = cell.nested_validation.metrics.as_ref() else {
+        return false;
+    };
+    let Some(baseline) = cell.nested_validation.baseline_metrics.as_ref() else {
+        return false;
+    };
+    metric_is_finite(candidate)
+        && metric_is_finite(baseline)
+        && candidate.ece <= baseline.ece + config.max_ece_worsening
+        && !cell.nested_validation.folds.is_empty()
+        && cell.nested_validation.folds.iter().all(|fold| {
+            !fold.selection_degraded
+                && model_spec_id_from_values(
+                    &fold.strategy,
+                    fold.variant,
+                    fold.final_multiplier,
+                    fold.lambda_core,
+                    fold.lambda_cohort,
+                    config,
+                )
+                .is_some()
+                && fold.metrics.as_ref().is_some_and(metric_is_finite)
+                && option_finite(fold.baseline_brier)
+                && option_finite(fold.brier_delta)
+        })
+}
+
+fn bootstrap_model_spec_id(
+    report: &StabilityReport,
+    config: &StabilityConfigSnapshot,
+) -> Option<ModelSpecId> {
+    model_spec_id_from_values(
+        &report.strategy,
+        report.bootstrap.fixed_variant?,
+        report.bootstrap.fixed_final_multiplier?,
+        report.bootstrap.fixed_lambda_core?,
+        report.bootstrap.fixed_lambda_cohort?,
+        config,
+    )
+}
+
+fn model_spec_id(
+    report: &StabilityReport,
+    config: &StabilityConfigSnapshot,
+) -> Option<ModelSpecId> {
+    model_spec_id_from_values(
+        &report.strategy,
+        report.forward.variant,
+        report.forward.final_multiplier,
+        report.forward.lambda_core,
+        report.forward.lambda_cohort,
+        config,
+    )
+}
+
+fn unique_index<T: PartialEq>(values: &[T], target: &T) -> Option<usize> {
+    let mut matches = values
+        .iter()
+        .enumerate()
+        .filter(|(_, value)| *value == target);
+    let index = matches.next()?.0;
+    matches.next().is_none().then_some(index)
+}
+
+fn model_spec_id_from_values(
+    strategy: &str,
+    variant: ModelVariant,
+    multiplier: f64,
+    lambda_core: f64,
+    lambda_cohort: f64,
+    config: &StabilityConfigSnapshot,
+) -> Option<ModelSpecId> {
+    if !multiplier.is_finite() || !lambda_core.is_finite() || !lambda_cohort.is_finite() {
+        return None;
+    }
+    let strategies = [
+        "none",
+        "directnegative",
+        "heronormalized",
+        "excesshealing",
+        "resourceconversiondebt",
+    ];
+    let variant_name = variant_name(variant).to_string();
+    Some(ModelSpecId {
+        strategy_index: unique_index(&strategies, &strategy)?,
+        variant_index: unique_index(&config.fit_variants, &variant_name)?,
+        multiplier_index: unique_index(&config.final_hit_multipliers, &multiplier)?,
+        regularization_index: unique_index(
+            &config.regularization_candidates,
+            &[lambda_core, lambda_cohort],
+        )?,
+    })
+}
+
+fn validate_config_snapshot(config: &StabilityConfigSnapshot) -> Result<()> {
+    let valid_variants = ["core", "role_full"];
+    let unique = |values: &[String]| values.iter().collect::<BTreeSet<_>>().len() == values.len();
+    if config.fit_variants.is_empty()
+        || !unique(&config.fit_variants)
+        || config
+            .fit_variants
+            .iter()
+            .any(|value| !valid_variants.contains(&value.as_str()))
+        || config.final_hit_multipliers.is_empty()
+        || config
+            .final_hit_multipliers
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+        || config
+            .final_hit_multipliers
+            .iter()
+            .enumerate()
+            .any(|(i, value)| config.final_hit_multipliers[..i].contains(value))
+        || config.regularization_candidates.is_empty()
+        || config
+            .regularization_candidates
+            .iter()
+            .any(|pair| pair.iter().any(|value| !value.is_finite() || *value < 0.0))
+        || config
+            .regularization_candidates
+            .iter()
+            .enumerate()
+            .any(|(i, pair)| config.regularization_candidates[..i].contains(pair))
+        || !config.fit_learning_rate.is_finite()
+        || config.fit_learning_rate <= 0.0
+        || config.fit_steps == 0
+        || config.minimum_cohort_offset_rows == 0
+        || config.minimum_improved_folds == 0
+        || config.minimum_role_core_rows == 0
+        || config.minimum_cohort_rows == 0
+        || config.minimum_season_loo_groups == 0
+        || config.minimum_hero_loo_groups == 0
+        || !unit_interval(config.minimum_loo_row_coverage)
+        || !unit_interval(config.max_loo_worsened_fraction)
+        || !unit_interval(config.minimum_bootstrap_completion)
+        || !unit_interval(config.minimum_critical_direction_stability)
+        || !config.maximum_bootstrap_brier_ci_high.is_finite()
+        || !config.max_ece_worsening.is_finite()
+        || config.max_ece_worsening < 0.0
+        || !unit_interval(config.maximum_single_feature_share)
+        || !config.max_abs_average_adjustment.is_finite()
+        || config.max_abs_average_adjustment < 0.0
+        || !unit_interval(config.maximum_cap_hit_rate)
+    {
+        bail!("训练配置快照无效，拒绝生成模型产物");
+    }
+    Ok(())
+}
+
+fn unit_interval(value: f64) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 fn variant_rank(variant: ModelVariant) -> usize {
@@ -475,7 +763,9 @@ fn strategy_rank(strategy: &str) -> usize {
 fn refit_artifact(
     rows: &[TrainingRow],
     report: &super::performance_stability::StabilityReport,
+    snapshot: &StabilityConfigSnapshot,
 ) -> Option<HierarchicalModelArtifact> {
+    let spec_id = model_spec_id(report, snapshot)?;
     let strategy = parse_strategy(&report.strategy)?;
     let matrix = build_feature_matrix(rows, &[], strategy);
     let role_rows = matrix
@@ -486,8 +776,10 @@ fn refit_artifact(
     let config = FitConfig {
         lambda_core: report.forward.lambda_core,
         lambda_cohort: report.forward.lambda_cohort,
+        learning_rate: snapshot.fit_learning_rate,
+        steps: snapshot.fit_steps,
+        min_cohort_offset_rows: snapshot.minimum_cohort_offset_rows,
         final_multiplier: report.forward.final_multiplier,
-        ..FitConfig::default()
     };
     let model = fit_model(
         &role_rows,
@@ -523,6 +815,7 @@ fn refit_artifact(
         })
         .collect();
     Some(HierarchicalModelArtifact {
+        model_spec_id: Some(spec_id),
         selected_strategy: Some(report.strategy.clone()),
         selected_variant: Some(variant_name(report.forward.variant).into()),
         feature_weights,
@@ -623,6 +916,7 @@ fn cell_report(
     let eligible = cell_validates_role_model(cell, role_model, config);
     let mut rejected_reasons = cell.rejected_reasons.clone();
     if cell_is_eligible(cell) && !eligible {
+        rejected_reasons.push("invalid_validation_evidence".into());
         rejected_reasons.push("shared_role_model_not_validated_for_cell".into());
     }
     if !eligible && rejected_reasons.is_empty() {
@@ -634,6 +928,7 @@ fn cell_report(
         training_cohort: cell.mode.training_cohort(),
         shared_parameter_version: shared_parameter_version(cell.mode.training_cohort()),
         role_model_ref: role_model_ref(cell.role, role_model),
+        model_spec_id: role_model.model_spec_id.clone(),
         training_rows,
         validation_rows: actual.len(),
         seasons,
