@@ -2,7 +2,7 @@ use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     performance::{BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        build_forward_folds, metrics, role_vector, role_vector_with_multiplier,
+        build_forward_folds, metrics, missing_values, role_vector, role_vector_with_multiplier,
         HealingTakenStrategy, ModelVariant, Role,
     },
     training::TrainingEnvironment,
@@ -176,6 +176,125 @@ fn damage_conversion_uses_selected_final_multiplier_and_penalizes_empty_volume()
         1.0,
     );
     assert!(raw.values[slot] < base.values[slot]);
+}
+
+#[test]
+fn missing_value_count_matches_each_roles_actual_vector_inputs_and_strategy() {
+    let mut complete = row("missing-contract", 1, Role::Tank, 2.0);
+    complete.standardized.frontline_conversion = Some(1.0);
+    complete.standardized.survival = Some(1.0);
+    complete.standardized.abnormal_damage_taken = Some(1.0);
+    complete.damage_baseline_median_per_ten = Some(100.0);
+    assert_eq!(
+        missing_values(
+            &complete,
+            Role::Tank,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None,
+        ),
+        0
+    );
+    assert_eq!(
+        missing_values(
+            &complete,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None,
+        ),
+        0
+    );
+    assert_eq!(
+        missing_values(
+            &complete,
+            Role::Support,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None,
+        ),
+        0
+    );
+
+    let mut tank = complete.clone();
+    tank.standardized.damage = None;
+    assert_eq!(
+        missing_values(
+            &tank,
+            Role::Tank,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        0
+    );
+    tank.standardized.frontline_conversion = None;
+    tank.standardized.abnormal_damage_taken = None;
+    assert_eq!(
+        missing_values(
+            &tank,
+            Role::Tank,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        2
+    );
+
+    let mut damage = complete.clone();
+    damage.per_ten.damage = None;
+    assert_eq!(
+        missing_values(
+            &damage,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        1
+    );
+    damage.per_ten.damage = complete.per_ten.damage;
+    damage.damage_baseline_median_per_ten = None;
+    assert_eq!(
+        missing_values(
+            &damage,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        1
+    );
+
+    let mut support = complete.clone();
+    support.standardized.mitigation = None;
+    assert_eq!(
+        missing_values(
+            &support,
+            Role::Support,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        0
+    );
+    support.standardized.survival = None;
+    assert_eq!(
+        missing_values(
+            &support,
+            Role::Support,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        1
+    );
+
+    for strategy in [
+        HealingTakenStrategy::None,
+        HealingTakenStrategy::DirectNegative,
+        HealingTakenStrategy::HeroNormalized,
+        HealingTakenStrategy::ExcessHealing,
+        HealingTakenStrategy::ResourceConversionDebt,
+    ] {
+        let mut row = complete.clone();
+        row.healing_taken_derived = None;
+        assert_eq!(
+            missing_values(&row, Role::Tank, ModelVariant::Core, strategy),
+            usize::from(strategy != HealingTakenStrategy::None)
+        );
+    }
 }
 
 #[test]

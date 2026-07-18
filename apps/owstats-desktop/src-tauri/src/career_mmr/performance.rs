@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 const MIN_HERO_BASELINE_SAMPLES: usize = 30;
 const MAD_SCALE: f64 = 0.6745;
+const MAD_FLOOR_ABSOLUTE: f64 = 1.0e-6;
+const MAD_FLOOR_RELATIVE: f64 = 1.0e-6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealingTakenStrategy {
@@ -368,8 +370,9 @@ fn robust_baseline(values: &[f64]) -> Option<Baseline> {
         return None;
     }
     let center = median(values.to_vec());
-    let mad = median(values.iter().map(|value| (value - center).abs()).collect());
-    (mad > f64::EPSILON).then_some(Baseline {
+    let observed_mad = median(values.iter().map(|value| (value - center).abs()).collect());
+    let mad = observed_mad.max((center.abs() * MAD_FLOOR_RELATIVE).max(MAD_FLOOR_ABSOLUTE));
+    Some(Baseline {
         median: center,
         mad,
     })
@@ -607,8 +610,7 @@ fn transform(
         let excess_healing = healing_raw
             .zip(expected_healing)
             .map(|(actual, expected)| (actual - expected).max(0.0));
-        let positive = |feature| standardized[&feature].unwrap_or(0.0).max(0.0);
-        let role_conversion = match row.source.role.as_str() {
+        let conversion_features = match row.source.role.as_str() {
             "tank" => [
                 FeatureName::FinalHit,
                 FeatureName::NonFinalEliminations,
@@ -629,16 +631,18 @@ fn transform(
             ],
         }
         .into_iter()
-        .map(positive)
-        .sum::<f64>()
-            / 12.0;
+        .map(|feature| standardized[&feature].map(|value| value.max(0.0)))
+        .collect::<Option<Vec<_>>>();
+        let role_conversion =
+            conversion_features.map(|values| values.into_iter().sum::<f64>() / 12.0);
         let healing_taken_derived = match strategy {
             HealingTakenStrategy::None => None,
             HealingTakenStrategy::DirectNegative if safe => healing_raw,
             HealingTakenStrategy::HeroNormalized if safe => healing_z,
             HealingTakenStrategy::ExcessHealing if safe => excess_healing,
             HealingTakenStrategy::ResourceConversionDebt if safe => excess_healing
-                .map(|excess| excess * (1.0 - role_conversion.clamp(0.0, 1.0)).max(0.0)),
+                .zip(role_conversion)
+                .map(|(excess, conversion)| excess * (1.0 - conversion.clamp(0.0, 1.0)).max(0.0)),
             _ => {
                 if healing_raw.is_some() {
                     audit.unsafe_healing_taken_excluded += 1;

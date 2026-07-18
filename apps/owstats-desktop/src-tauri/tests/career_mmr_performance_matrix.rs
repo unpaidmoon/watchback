@@ -330,6 +330,7 @@ fn resource_debt_alone_distinguishes_conversion_for_equal_healing_exposure() {
         .map(|i| {
             let mut item = row("tank-a", "tank", 23, 10.0 + (i % 2) as f64 * 2.0);
             item.healing_taken = Some(1000.0 + i as f64 * 10.0);
+            item.objective_time_sec = Some(20.0 + (i % 2) as f64 * 4.0);
             item
         })
         .collect::<Vec<_>>();
@@ -468,5 +469,65 @@ fn derived_role_features_are_none_when_any_required_input_is_missing() {
             .standardized
             .survival,
         None
+    );
+}
+
+#[test]
+fn resource_debt_requires_all_four_observed_conversion_inputs() {
+    let mut training = (0..30)
+        .map(|i| {
+            let mut item = row(
+                "tank-debt-required",
+                "tank",
+                23,
+                10.0 + (i % 2) as f64 * 2.0,
+            );
+            item.objective_time_sec = Some(20.0 + (i % 2) as f64 * 4.0);
+            item
+        })
+        .collect::<Vec<_>>();
+    for item in &mut training {
+        item.healing_taken = Some(1000.0 + item.begin_ts as f64 * 10.0);
+    }
+    let mut missing = validation_row("tank-debt-required", "tank", 23, 12.0);
+    missing.healing_taken = Some(2000.0);
+    missing.objective_time_sec = None;
+    let result = build_feature_matrix(
+        &training,
+        &[missing],
+        HealingTakenStrategy::ResourceConversionDebt,
+    );
+    assert_eq!(
+        result.validation_by_role["tank"][0].healing_taken_derived,
+        None
+    );
+}
+
+#[test]
+fn constant_training_bucket_is_available_centered_and_finitely_clamped() {
+    let training = (0..30)
+        .map(|i| {
+            let mut item = row("constant-hero", "damage", 23, 10.0);
+            item.match_group = format!("constant-{i}");
+            item.source_match_group = format!("constant-source-{i}");
+            item.begin_ts = i;
+            item
+        })
+        .collect::<Vec<_>>();
+    let center = validation_row("constant-hero", "damage", 23, 10.0);
+    let mut shifted = validation_row("constant-hero", "damage", 23, 11.0);
+    shifted.match_group = "constant-shifted".into();
+    let result = build_feature_matrix(&training, &[center, shifted], HealingTakenStrategy::None);
+    let rows = &result.validation_by_role["damage"];
+    assert_eq!(
+        rows[0].baselines[&FeatureName::Damage],
+        BaselineLevel::HeroModeSeason
+    );
+    assert_eq!(rows[0].standardized.damage, Some(0.0));
+    assert_eq!(rows[1].standardized.damage, Some(3.0));
+    assert!(rows[1].standardized.damage.unwrap().is_finite());
+    assert_ne!(
+        rows[1].baselines[&FeatureName::Damage],
+        BaselineLevel::Unavailable
     );
 }

@@ -110,6 +110,21 @@ pub fn role_vector(
     role_vector_with_multiplier(row, role, variant, strategy, 1.0)
 }
 
+fn damage_conversion(row: &MatrixRow, final_multiplier: f64) -> Option<f64> {
+    let final_hit = row.per_ten.final_hit.filter(|value| value.is_finite())?;
+    let non_final = row
+        .per_ten
+        .non_final_eliminations
+        .filter(|value| value.is_finite())?;
+    let damage = row.per_ten.damage.filter(|value| value.is_finite())?;
+    let median = row
+        .damage_baseline_median_per_ten
+        .filter(|value| value.is_finite() && *value >= 0.0)?;
+    let denominator = damage.max(0.25 * median).max(f64::EPSILON);
+    let result = (final_hit * final_multiplier + non_final) / denominator;
+    result.is_finite().then_some(result)
+}
+
 pub fn role_vector_with_multiplier(
     row: &MatrixRow,
     role: Role,
@@ -146,18 +161,10 @@ pub fn role_vector_with_multiplier(
                 ("abnormal_damage_taken", value(f.abnormal_damage_taken)),
             ]),
             Role::Damage => {
-                let damage = value(row.per_ten.damage);
-                let floor = row
-                    .damage_baseline_median_per_ten
-                    .filter(|v| v.is_finite() && *v > 0.0)
-                    .map(|v| v * 0.25)
-                    .unwrap_or(0.0);
-                let conversion = (value(row.per_ten.final_hit) * final_multiplier
-                    + value(row.per_ten.non_final_eliminations))
-                    / damage.max(floor).max(f64::EPSILON);
+                let conversion = damage_conversion(row, final_multiplier);
                 pairs.extend([
                     ("objective", value(f.objective_time)),
-                    ("damage_conversion", conversion),
+                    ("damage_conversion", value(conversion)),
                 ]);
             }
             Role::Support => pairs.extend([
@@ -542,7 +549,7 @@ pub fn evaluate_strategy(
     }
 }
 
-fn missing_values(
+pub fn missing_values(
     row: &MatrixRow,
     role: Role,
     variant: ModelVariant,
@@ -556,9 +563,13 @@ fn missing_values(
     };
     if variant == ModelVariant::RoleFull {
         match role {
-            Role::Tank => values.extend([f.damage, f.mitigation, f.damage_taken, f.objective_time]),
-            Role::Damage => values.extend([f.damage, f.objective_time]),
-            Role::Support => values.extend([f.healing, f.damage, f.objective_time]),
+            Role::Tank => values.extend([
+                f.frontline_conversion,
+                f.mitigation,
+                f.abnormal_damage_taken,
+            ]),
+            Role::Damage => values.extend([f.objective_time, damage_conversion(row, 1.0)]),
+            Role::Support => values.extend([f.healing, f.damage, f.objective_time, f.survival]),
         }
     }
     values.iter().filter(|v| v.is_none()).count()
