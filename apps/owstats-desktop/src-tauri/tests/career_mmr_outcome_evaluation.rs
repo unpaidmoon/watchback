@@ -100,7 +100,7 @@ fn a_match_spanning_time_is_grouped_with_every_overlapping_time_component() {
         rows.push(row(
             ts,
             "damage",
-            ModeFamily::QuickPlay,
+            ModeFamily::RoleQuick,
             (ts % 2) as f64,
             0.5,
         ));
@@ -142,7 +142,7 @@ fn reports_brier_auc_and_ten_bin_ece_by_role_and_mode() {
             i,
             if i % 2 == 0 { "tank" } else { "support" },
             if i % 3 == 0 {
-                ModeFamily::QuickPlay
+                ModeFamily::RoleQuick
             } else {
                 ModeFamily::RoleCompetitive
             },
@@ -161,7 +161,7 @@ fn reports_brier_auc_and_ten_bin_ece_by_role_and_mode() {
     assert!(report
         .groups
         .iter()
-        .any(|g| g.dimension == "mode" && g.key == "quick_play"));
+        .any(|g| g.dimension == "mode" && g.key == "role_quick"));
     let overall = report
         .groups
         .iter()
