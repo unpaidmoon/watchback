@@ -43,7 +43,7 @@ fn insert_stadium_match(conn: &Connection, id: &str, season: i64, ts: i64) {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO hero_dict (guid,name,role,updated_at) VALUES ('stadium-tank','重装','tank','now'),('stadium-support','支援','healer','now')",
+        "INSERT OR IGNORE INTO hero_dict (guid,name,role,updated_at) VALUES ('stadium-tank','重装','tank','now'),('stadium-support','支援','healer','now')",
         [],
     )
     .unwrap();
@@ -297,14 +297,29 @@ fn synthetic_end_to_end_replay_covers_dynamic_seasons_roles_modes_caps_and_stadi
     insert_mode_match(&conn, "open-damage", 29, 200, "dps", "loss", "SportOpen");
     insert_mode_match(
         &conn,
-        "quick-support",
+        "role-quick-support",
         42,
         300,
         "healer",
         "win",
         "LeisurePreset",
     );
+    insert_mode_match(
+        &conn,
+        "open-quick-support",
+        42,
+        350,
+        "healer",
+        "win",
+        "Leisure6v6",
+    );
     insert_stadium_match(&conn, "stadium-final", 42, 400);
+    insert_stadium_match(&conn, "stadium-quick", 42, 500);
+    conn.execute(
+        "UPDATE matches SET game_mode='QuickFight' WHERE match_id='stadium-quick'",
+        [],
+    )
+    .unwrap();
     drop(conn);
 
     let summary = rebuild_career_mmr(&db).unwrap();
@@ -322,9 +337,11 @@ fn synthetic_end_to_end_replay_covers_dynamic_seasons_roles_modes_caps_and_stadi
         modes,
         vec![
             "open_competitive",
-            "quick_play",
+            "open_quick",
             "role_competitive",
-            "stadium_competitive"
+            "role_quick",
+            "stadium_competitive",
+            "stadium_quick"
         ]
     );
     let roles = conn
@@ -346,9 +363,17 @@ fn synthetic_end_to_end_replay_covers_dynamic_seasons_roles_modes_caps_and_stadi
         .unwrap()
     {
         let (mode, delta) = row.unwrap();
-        let cap = if mode == "quick_play" { 10.0 } else { 30.0 };
+        let cap = if mode.ends_with("_quick") { 10.0 } else { 30.0 };
         assert!(delta.abs() <= cap);
     }
+    let stadium_quick_mode: String = conn
+        .query_row(
+            "SELECT mode_family FROM career_mmr_events WHERE match_id='stadium-quick'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stadium_quick_mode, "stadium_quick");
     let stadium_role: String = conn
         .query_row(
             "SELECT role FROM career_mmr_events WHERE match_id='stadium-final'",

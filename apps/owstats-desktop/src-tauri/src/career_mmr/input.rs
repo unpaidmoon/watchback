@@ -1,22 +1,65 @@
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Role {
     Tank,
     Damage,
     Support,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModeFamily {
     RoleCompetitive,
+    RoleQuick,
     OpenCompetitive,
+    OpenQuick,
     StadiumCompetitive,
-    QuickPlay,
+    StadiumQuick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrainingCohort {
+    RoleQueue,
+    OpenQueue,
+    StadiumCompetitive,
+    OutcomeOnly,
+}
+
+impl ModeFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RoleCompetitive => "role_competitive",
+            Self::RoleQuick => "role_quick",
+            Self::OpenCompetitive => "open_competitive",
+            Self::OpenQuick => "open_quick",
+            Self::StadiumCompetitive => "stadium_competitive",
+            Self::StadiumQuick => "stadium_quick",
+        }
+    }
+
+    pub fn training_cohort(self) -> TrainingCohort {
+        match self {
+            Self::RoleCompetitive | Self::RoleQuick => TrainingCohort::RoleQueue,
+            Self::OpenCompetitive | Self::OpenQuick => TrainingCohort::OpenQueue,
+            Self::StadiumCompetitive => TrainingCohort::StadiumCompetitive,
+            Self::StadiumQuick => TrainingCohort::OutcomeOnly,
+        }
+    }
+
+    pub fn trains_performance(self) -> bool {
+        self != Self::StadiumQuick
+    }
+
+    pub fn is_quick(self) -> bool {
+        matches!(self, Self::RoleQuick | Self::OpenQuick | Self::StadiumQuick)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -74,7 +117,10 @@ pub fn normalize_mode_family(game_mode: &str, instance_type: Option<&str>) -> Op
     match game_mode.trim().to_ascii_lowercase().as_str() {
         "sportpreset" => Some(ModeFamily::RoleCompetitive),
         "sportopen" => Some(ModeFamily::OpenCompetitive),
-        "leisurepreset" | "leisure6v6" | "leisure" => Some(ModeFamily::QuickPlay),
+        "leisurepreset" | "leisure" => Some(ModeFamily::RoleQuick),
+        "leisure6v6" => Some(ModeFamily::OpenQuick),
+        "sportfight" => Some(ModeFamily::StadiumCompetitive),
+        "leisurefight" | "quickfight" => Some(ModeFamily::StadiumQuick),
         "sport" => match instance_type?.trim().to_ascii_lowercase().as_str() {
             "it_ranked" => Some(ModeFamily::RoleCompetitive),
             "it_ruleset" => Some(ModeFamily::OpenCompetitive),
@@ -165,7 +211,7 @@ pub fn extract_stadium_match_with_context(
     let row = conn
         .query_row(
             r#"
-            SELECT m.match_id, m.season, m.begin_ts, m.result, m.duration_sec,
+            SELECT m.match_id, m.season, m.begin_ts, m.game_mode, m.result, m.duration_sec,
                    m.raw_entry_json, d.raw_detail_json
             FROM matches m
             LEFT JOIN match_details d ON d.match_id = m.match_id
@@ -178,14 +224,16 @@ pub fn extract_stadium_match_with_context(
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()?;
-    let Some((match_id, season, begin_ts, result, duration_sec, raw_entry, raw_detail)) = row
+    let Some((match_id, season, begin_ts, game_mode, result, duration_sec, raw_entry, raw_detail)) =
+        row
     else {
         return Ok(None);
     };
@@ -193,6 +241,12 @@ pub fn extract_stadium_match_with_context(
         return Ok(None);
     };
     let entry = serde_json::from_str::<Value>(&raw_entry).unwrap_or(Value::Null);
+    let Some(mode_family) = normalize_mode_family(
+        &game_mode,
+        entry.get("instanceType").and_then(Value::as_str),
+    ) else {
+        return Ok(None);
+    };
     let detail = raw_detail
         .as_deref()
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
@@ -236,6 +290,7 @@ pub fn extract_stadium_match_with_context(
                     begin_ts,
                     result,
                     duration_sec,
+                    mode_family,
                     role,
                     team_strength,
                     opponent_strength,
@@ -266,6 +321,7 @@ pub fn extract_stadium_match_with_context(
             begin_ts,
             result,
             duration_sec,
+            mode_family,
             role,
             team_strength,
             opponent_strength,
@@ -277,7 +333,7 @@ pub fn extract_stadium_match_with_context(
         match_id,
         season,
         begin_ts,
-        mode_family: ModeFamily::StadiumCompetitive,
+        mode_family,
         result,
         duration_sec,
         role,
@@ -297,6 +353,7 @@ fn stadium_outcome_only(
     begin_ts: i64,
     result: f64,
     duration_sec: i64,
+    mode_family: ModeFamily,
     role: Role,
     team_strength: Option<f64>,
     opponent_strength: Option<f64>,
@@ -306,7 +363,7 @@ fn stadium_outcome_only(
         match_id,
         season,
         begin_ts,
-        mode_family: ModeFamily::StadiumCompetitive,
+        mode_family,
         result,
         duration_sec,
         role,

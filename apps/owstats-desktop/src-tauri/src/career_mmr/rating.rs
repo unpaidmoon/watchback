@@ -231,19 +231,18 @@ pub fn confidence(state: RoleRatingState, data_quality: f64) -> f64 {
 
 fn mode_weight(mode: ModeFamily) -> f64 {
     match mode {
-        ModeFamily::QuickPlay => 0.5,
-        ModeFamily::RoleCompetitive
-        | ModeFamily::OpenCompetitive
-        | ModeFamily::StadiumCompetitive => 1.0,
+        ModeFamily::RoleCompetitive | ModeFamily::OpenCompetitive => 1.0,
+        ModeFamily::StadiumCompetitive => 0.5,
+        ModeFamily::RoleQuick | ModeFamily::OpenQuick => 0.3,
+        ModeFamily::StadiumQuick => 0.1,
     }
 }
 
 fn mode_cap(mode: ModeFamily) -> f64 {
-    match mode {
-        ModeFamily::QuickPlay => 10.0,
-        ModeFamily::RoleCompetitive
-        | ModeFamily::OpenCompetitive
-        | ModeFamily::StadiumCompetitive => 30.0,
+    if mode.is_quick() {
+        10.0
+    } else {
+        30.0
     }
 }
 

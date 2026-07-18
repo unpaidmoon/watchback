@@ -2,6 +2,7 @@ use owstats_desktop_lib::career_mmr::input::{
     audit_career_mmr_inputs, classify_stadium_stat_shape, extract_ordinary_match,
     extract_ordinary_match_with_context, extract_stadium_match, extract_stadium_match_with_context,
     normalize_mode_family, normalize_role, ExtractionContext, ModeFamily, Role, StadiumStatShape,
+    TrainingCohort,
 };
 use owstats_desktop_lib::OwDatabase;
 use rusqlite::{Connection, OpenFlags};
@@ -13,6 +14,91 @@ fn database() -> (tempfile::TempDir, Connection) {
     db.initialize().unwrap();
     let conn = db.connect().unwrap();
     (dir, conn)
+}
+
+#[test]
+fn maps_every_upstream_mode_to_a_distinct_actual_mode() {
+    for (game_mode, instance_type, expected) in [
+        ("SportPreset", None, ModeFamily::RoleCompetitive),
+        ("sport", Some("IT_RANKED"), ModeFamily::RoleCompetitive),
+        ("LeisurePreset", None, ModeFamily::RoleQuick),
+        ("leisure", None, ModeFamily::RoleQuick),
+        ("SportOpen", None, ModeFamily::OpenCompetitive),
+        ("sport", Some("IT_RULESET"), ModeFamily::OpenCompetitive),
+        ("Leisure6v6", None, ModeFamily::OpenQuick),
+        ("SportFight", None, ModeFamily::StadiumCompetitive),
+        ("LeisureFight", None, ModeFamily::StadiumQuick),
+        ("QuickFight", None, ModeFamily::StadiumQuick),
+    ] {
+        assert_eq!(
+            normalize_mode_family(game_mode, instance_type),
+            Some(expected),
+            "{game_mode} {instance_type:?}"
+        );
+    }
+    assert_ne!(ModeFamily::RoleQuick, ModeFamily::OpenQuick);
+}
+
+#[test]
+fn modes_have_stable_names_training_cohorts_and_training_flags() {
+    let cases = [
+        (
+            ModeFamily::RoleCompetitive,
+            "role_competitive",
+            TrainingCohort::RoleQueue,
+            false,
+            true,
+        ),
+        (
+            ModeFamily::RoleQuick,
+            "role_quick",
+            TrainingCohort::RoleQueue,
+            true,
+            true,
+        ),
+        (
+            ModeFamily::OpenCompetitive,
+            "open_competitive",
+            TrainingCohort::OpenQueue,
+            false,
+            true,
+        ),
+        (
+            ModeFamily::OpenQuick,
+            "open_quick",
+            TrainingCohort::OpenQueue,
+            true,
+            true,
+        ),
+        (
+            ModeFamily::StadiumCompetitive,
+            "stadium_competitive",
+            TrainingCohort::StadiumCompetitive,
+            false,
+            true,
+        ),
+        (
+            ModeFamily::StadiumQuick,
+            "stadium_quick",
+            TrainingCohort::OutcomeOnly,
+            true,
+            false,
+        ),
+    ];
+    for (mode, name, cohort, quick, trains_performance) in cases {
+        assert_eq!(mode.as_str(), name);
+        assert_eq!(mode.training_cohort(), cohort);
+        assert_eq!(mode.is_quick(), quick);
+        assert_eq!(mode.trains_performance(), trains_performance);
+    }
+
+    let mut modes = cases.map(|case| case.0);
+    modes.sort();
+    let serialized = serde_json::to_string(&modes).unwrap();
+    assert_eq!(
+        serialized,
+        "[\"role_competitive\",\"role_quick\",\"open_competitive\",\"open_quick\",\"stadium_competitive\",\"stadium_quick\"]"
+    );
 }
 
 fn audit_read_only(
@@ -686,11 +772,11 @@ fn ordinary_mode_variants_follow_existing_product_semantics() {
     );
     assert_eq!(
         normalize_mode_family("LeisurePreset", None),
-        Some(ModeFamily::QuickPlay)
+        Some(ModeFamily::RoleQuick)
     );
     assert_eq!(
         normalize_mode_family("leisure6V6", None),
-        Some(ModeFamily::QuickPlay)
+        Some(ModeFamily::OpenQuick)
     );
     assert_eq!(
         normalize_mode_family("sport", Some("IT_RANKED")),

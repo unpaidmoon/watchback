@@ -279,12 +279,7 @@ fn rank_sum_auc(values: &[(f64, f64)]) -> Option<f64> {
 }
 
 fn mode_key(mode: ModeFamily) -> &'static str {
-    match mode {
-        ModeFamily::RoleCompetitive => "role_competitive",
-        ModeFamily::OpenCompetitive => "open_competitive",
-        ModeFamily::StadiumCompetitive => "stadium_competitive",
-        ModeFamily::QuickPlay => "quick_play",
-    }
+    mode.as_str()
 }
 
 #[cfg(test)]

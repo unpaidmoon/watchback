@@ -451,10 +451,33 @@ pub fn get_recent_mmr_explanations(
 fn mode_family(value: &str) -> Result<ModeFamily> {
     match value {
         "role_competitive" => Ok(ModeFamily::RoleCompetitive),
+        "role_quick" | "quick_play" => Ok(ModeFamily::RoleQuick),
         "open_competitive" => Ok(ModeFamily::OpenCompetitive),
+        "open_quick" => Ok(ModeFamily::OpenQuick),
         "stadium_competitive" => Ok(ModeFamily::StadiumCompetitive),
-        "quick_play" => Ok(ModeFamily::QuickPlay),
+        "stadium_quick" => Ok(ModeFamily::StadiumQuick),
         _ => bail!("模式数据无效"),
+    }
+}
+
+#[cfg(test)]
+mod mode_family_tests {
+    use super::mode_family;
+    use crate::career_mmr::input::ModeFamily;
+
+    #[test]
+    fn parses_six_stable_names_and_legacy_quick_play() {
+        for (value, expected) in [
+            ("role_competitive", ModeFamily::RoleCompetitive),
+            ("role_quick", ModeFamily::RoleQuick),
+            ("open_competitive", ModeFamily::OpenCompetitive),
+            ("open_quick", ModeFamily::OpenQuick),
+            ("stadium_competitive", ModeFamily::StadiumCompetitive),
+            ("stadium_quick", ModeFamily::StadiumQuick),
+            ("quick_play", ModeFamily::RoleQuick),
+        ] {
+            assert_eq!(mode_family(value).unwrap(), expected);
+        }
     }
 }
 pub fn get_career_mmr_build_status(db: &OwDatabase) -> Result<CareerMmrBuildStatus> {

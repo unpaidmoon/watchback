@@ -1,8 +1,8 @@
 use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     rating::{
-        apply_inactivity, expected_win, update_rating, RatingError, RatingInput, RatingUpdate,
-        RoleRatingState, INITIAL_MU, INITIAL_SIGMA,
+        apply_inactivity, expected_win, outcome_delta_for_expected, update_rating, RatingError,
+        RatingInput, RatingUpdate, RoleRatingState, INITIAL_MU, INITIAL_SIGMA,
     },
 };
 
@@ -83,9 +83,9 @@ fn per_role_caps_apply_after_role_share() {
     let mut competitive_input = input(1.0, ModeFamily::RoleCompetitive);
     competitive_input.opponent_strength = Some(3000.0);
     let competitive = update(uncertain, competitive_input);
-    let quick = update(uncertain, input(1.0, ModeFamily::QuickPlay));
+    let quick = update(uncertain, input(1.0, ModeFamily::RoleQuick));
     assert_eq!(competitive.delta, 30.0);
-    assert_eq!(quick.delta, 10.0);
+    assert_eq!(quick.delta, 7.5);
     let mut partial = competitive_input;
     partial.role_share = 0.4;
     assert!(update(uncertain, partial).delta.abs() < competitive.delta.abs());
@@ -95,9 +95,11 @@ fn per_role_caps_apply_after_role_share() {
 fn every_mode_caps_both_directions_and_applies_share_before_clamping() {
     for (mode, cap) in [
         (ModeFamily::RoleCompetitive, 30.0),
+        (ModeFamily::RoleQuick, 10.0),
         (ModeFamily::OpenCompetitive, 30.0),
+        (ModeFamily::OpenQuick, 10.0),
         (ModeFamily::StadiumCompetitive, 30.0),
-        (ModeFamily::QuickPlay, 10.0),
+        (ModeFamily::StadiumQuick, 10.0),
     ] {
         let mut decisive_win = input(1.0, mode);
         decisive_win.team_strength = Some(1500.0);
@@ -108,8 +110,14 @@ fn every_mode_caps_both_directions_and_applies_share_before_clamping() {
 
         let capped_win = update(state(), decisive_win).delta;
         let capped_loss = update(state(), decisive_loss).delta;
-        assert_eq!(capped_win, cap, "positive cap for {mode:?}");
-        assert_eq!(capped_loss, -cap, "negative cap for {mode:?}");
+        assert!(
+            capped_win > 0.0 && capped_win <= cap,
+            "positive cap for {mode:?}"
+        );
+        assert!(
+            capped_loss < 0.0 && capped_loss >= -cap,
+            "negative cap for {mode:?}"
+        );
 
         let mut partial_win = decisive_win;
         partial_win.role_share = 0.2;
@@ -117,6 +125,45 @@ fn every_mode_caps_both_directions_and_applies_share_before_clamping() {
         partial_loss.role_share = 0.2;
         assert!(update(state(), partial_win).delta.abs() < capped_win.abs());
         assert!(update(state(), partial_loss).delta.abs() < capped_loss.abs());
+    }
+}
+
+#[test]
+fn every_mode_has_the_exact_outcome_weight() {
+    for (mode, expected_delta) in [
+        (ModeFamily::RoleCompetitive, 25.0),
+        (ModeFamily::RoleQuick, 7.5),
+        (ModeFamily::OpenCompetitive, 25.0),
+        (ModeFamily::OpenQuick, 7.5),
+        (ModeFamily::StadiumCompetitive, 12.5),
+        (ModeFamily::StadiumQuick, 2.5),
+    ] {
+        assert_eq!(
+            outcome_delta_for_expected(INITIAL_SIGMA, mode, 1.0, 1.0, 1.0, 0.5),
+            expected_delta,
+            "weight for {mode:?}"
+        );
+    }
+}
+
+#[test]
+fn every_mode_caps_extreme_positive_and_negative_outcomes() {
+    for (mode, cap) in [
+        (ModeFamily::RoleCompetitive, 30.0),
+        (ModeFamily::RoleQuick, 10.0),
+        (ModeFamily::OpenCompetitive, 30.0),
+        (ModeFamily::OpenQuick, 10.0),
+        (ModeFamily::StadiumCompetitive, 30.0),
+        (ModeFamily::StadiumQuick, 10.0),
+    ] {
+        assert_eq!(
+            outcome_delta_for_expected(INITIAL_SIGMA, mode, 1.0, 1.0, 10.0, 0.0),
+            cap
+        );
+        assert_eq!(
+            outcome_delta_for_expected(INITIAL_SIGMA, mode, 1.0, 1.0, 0.0, 10.0),
+            -cap
+        );
     }
 }
 
