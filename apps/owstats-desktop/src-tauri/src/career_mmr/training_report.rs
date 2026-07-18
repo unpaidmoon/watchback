@@ -1498,6 +1498,7 @@ fn training_config(evaluation: &StabilityEvaluation) -> TrainingConfigArtifact {
 }
 
 pub fn recompute_config_hash(artifact: &PerformanceModelArtifact) -> Result<String> {
+    validate_artifact_numeric_boundary(artifact)?;
     let mut value = serde_json::to_value(artifact)?;
     let object = value
         .as_object_mut()
@@ -1505,6 +1506,23 @@ pub fn recompute_config_hash(artifact: &PerformanceModelArtifact) -> Result<Stri
     object.remove("config_hash");
     let bytes = serde_json::to_vec(&value)?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn validate_artifact_numeric_boundary(artifact: &PerformanceModelArtifact) -> Result<()> {
+    if artifact
+        .normalization
+        .healing_expectations
+        .iter()
+        .any(|expectation| {
+            !expectation.fallback_median_per_ten.is_finite()
+                || expectation
+                    .coefficients
+                    .is_some_and(|values| values.into_iter().any(|value| !value.is_finite()))
+        })
+    {
+        bail!("模型产物包含无效治疗期望参数");
+    }
+    Ok(())
 }
 
 pub fn validate_report_boundary(value: &Value) -> Result<()> {

@@ -1,8 +1,33 @@
 use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
-    performance::{build_feature_matrix, BaselineLevel, FeatureName, HealingTakenStrategy},
+    performance::{
+        build_feature_matrix, predict_healing_expectation, BaselineLevel, FeatureName,
+        HealingTakenStrategy,
+    },
     training::{TrainingEnvironment, TrainingRow},
 };
+
+#[test]
+fn healing_expectation_prediction_is_nonnegative_and_fails_safe() {
+    assert_eq!(
+        predict_healing_expectation(Some([1.0, -2.0, 0.0, 0.0, 0.0]), 7.0, [2.0, 0.0, 0.0, 0.0]),
+        0.0
+    );
+    assert_eq!(
+        predict_healing_expectation(
+            Some([0.0, f64::MAX, 0.0, 0.0, 0.0]),
+            7.0,
+            [f64::MAX, 0.0, 0.0, 0.0]
+        ),
+        7.0
+    );
+    assert_eq!(predict_healing_expectation(None, -9.0, [0.0; 4]), 0.0);
+    assert_eq!(predict_healing_expectation(None, f64::NAN, [0.0; 4]), 0.0);
+    assert_eq!(
+        predict_healing_expectation(Some([f64::NAN; 5]), f64::INFINITY, [0.0; 4]),
+        0.0
+    );
+}
 
 fn row(hero: &str, role: &str, season: i64, value: f64) -> TrainingRow {
     TrainingRow {

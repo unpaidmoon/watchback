@@ -460,12 +460,21 @@ impl HealingExpectationModel {
     }
 
     fn predict(&self, inputs: [f64; 4]) -> f64 {
-        self.coefficients
-            .map(|beta| predict_linear(beta, inputs))
-            .filter(|value| value.is_finite())
-            .unwrap_or(self.fallback_median)
-            .max(0.0)
+        predict_healing_expectation(self.coefficients, self.fallback_median, inputs)
     }
+}
+
+pub fn predict_healing_expectation(
+    coefficients: Option<[f64; 5]>,
+    fallback_median: f64,
+    inputs: [f64; 4],
+) -> f64 {
+    coefficients
+        .map(|beta| predict_linear(beta, inputs))
+        .filter(|value| value.is_finite())
+        .or_else(|| fallback_median.is_finite().then_some(fallback_median))
+        .unwrap_or(0.0)
+        .max(0.0)
 }
 
 fn predict_linear(beta: [f64; 5], x: [f64; 4]) -> f64 {

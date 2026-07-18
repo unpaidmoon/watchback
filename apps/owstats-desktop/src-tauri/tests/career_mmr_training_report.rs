@@ -386,6 +386,22 @@ fn each_actual_cell_stores_its_own_training_logit_effect_p95() {
 }
 
 #[test]
+fn artifact_boundary_rejects_nonfinite_healing_expectation_values() {
+    let (rows, audit, evaluation) = eligible_evaluation(79);
+    let artifact = build_training_outputs(&rows, &audit, &evaluation, 79)
+        .unwrap()
+        .0;
+    assert!(!artifact.normalization.healing_expectations.is_empty());
+    let mut invalid_fallback = artifact.clone();
+    invalid_fallback.normalization.healing_expectations[0].fallback_median_per_ten = f64::NAN;
+    assert!(recompute_config_hash(&invalid_fallback).is_err());
+    let mut invalid_coefficients = artifact;
+    invalid_coefficients.normalization.healing_expectations[0].coefficients =
+        Some([0.0, f64::INFINITY, 0.0, 0.0, 0.0]);
+    assert!(recompute_config_hash(&invalid_coefficients).is_err());
+}
+
+#[test]
 fn config_hash_ignores_account_and_match_identifiers() {
     let rows = synthetic_rows();
     let audit = TrainingAudit {

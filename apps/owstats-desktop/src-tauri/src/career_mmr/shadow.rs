@@ -2,7 +2,10 @@
 
 use super::{
     input::{ModeFamily, Role},
-    performance::{BaselineLevel, FeatureName, FeatureValues, HealingTakenStrategy, MatrixRow},
+    performance::{
+        predict_healing_expectation, BaselineLevel, FeatureName, FeatureValues,
+        HealingTakenStrategy, MatrixRow,
+    },
     performance_forward::{role_vector_with_multiplier, ModelVariant},
     rating::{
         bounded_performance_adjustment, update_rating_for_expected, RatingInput, RoleRatingState,
@@ -369,17 +372,16 @@ pub fn matrix_row_from_artifact(
         &normalization.healing_expectations,
     )
     .map(|expectation| {
-        expectation
-            .coefficients
-            .map_or(expectation.fallback_median_per_ten, |beta| {
-                let x = [
-                    (row.duration_sec / 600.0).max(0.0),
-                    standardized[&FeatureName::DamageTaken].unwrap_or(0.0),
-                    standardized[&FeatureName::Death].unwrap_or(0.0),
-                    standardized[&FeatureName::AvailableTeamHealing].unwrap_or(0.0),
-                ];
-                beta[0] + beta[1] * x[0] + beta[2] * x[1] + beta[3] * x[2] + beta[4] * x[3]
-            })
+        predict_healing_expectation(
+            expectation.coefficients,
+            expectation.fallback_median_per_ten,
+            [
+                (row.duration_sec / 600.0).max(0.0),
+                standardized[&FeatureName::DamageTaken].unwrap_or(0.0),
+                standardized[&FeatureName::Death].unwrap_or(0.0),
+                standardized[&FeatureName::AvailableTeamHealing].unwrap_or(0.0),
+            ],
+        )
     });
     let excess = healing_raw
         .zip(expected_healing)
