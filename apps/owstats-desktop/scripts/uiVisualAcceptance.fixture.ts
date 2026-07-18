@@ -23,8 +23,9 @@ export const fixtureShell = {
   navigation: [
     { label: "对局", route: "/matches" },
     { label: "战报", route: "/review?season=23&view=overview" },
-    { label: "生涯 MMR", route: "/career-mmr" },
+    { label: "成就", route: "/achievements?season=23" },
     { label: "排行", route: "/ranking?season=23&tab=heroes" },
+    { label: "生涯 MMR", route: "/career-mmr" },
     { label: "指挥台", route: "/onboarding" },
   ],
 } as const;

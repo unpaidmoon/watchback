@@ -19,7 +19,12 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
 }
 
 const navLabels = phase6NavItems.map((item) => item.label).join(",");
-assertEqual(navLabels, "对局,战报,生涯 MMR,排行,指挥台", "phase 6 navigation labels");
+assertEqual(navLabels, "对局,战报,成就,排行,生涯 MMR,指挥台", "phase 6 navigation labels");
+assertEqual(
+  phase6NavItems.find((item) => item.path === "/achievements")?.title,
+  "赛季成就与进度",
+  "achievements navigation keeps the season-progress title",
+);
 assertEqual(phase6NavItems.some((item) => item.path === "/sync"), false, "sync page is removed from capsule navigation");
 assertEqual(typeof getPlayerProfile, "function", "player profile API wrapper exists");
 assertEqual(typeof getUserSettings, "function", "user settings API wrapper exists");

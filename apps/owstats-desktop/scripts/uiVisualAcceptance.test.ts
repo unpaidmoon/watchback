@@ -45,8 +45,13 @@ assert.match(serialized, /角斗竞技/, "visual fixtures include the arena matc
 
 assert.deepEqual(
   fixtureShell.navigation.map((item) => item.label),
-  ["对局", "战报", "生涯 MMR", "排行", "指挥台"],
+  ["对局", "战报", "成就", "排行", "生涯 MMR", "指挥台"],
   "shell fixture covers the exact primary navigation order",
+);
+assert.equal(
+  fixtureShell.navigation.find((item) => item.label === "成就")?.route,
+  "/achievements?season=23",
+  "shell fixture routes achievements to the anonymous S23 visual state",
 );
 assert.equal(fixtureMatches.length, 2, "match fixture contains one normal row and one arena row");
 assert.equal(fixtureNormalDetail.arenaDetail, null, "normal detail exercises the non-arena workbench branch");
