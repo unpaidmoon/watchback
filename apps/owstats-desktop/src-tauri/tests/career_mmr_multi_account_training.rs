@@ -12,7 +12,10 @@ use owstats_desktop_lib::{
     OwDatabase,
 };
 use rusqlite::{params, Connection};
-use std::fs;
+use std::{
+    fs,
+    io::{Read, Seek, SeekFrom},
+};
 use tempfile::TempDir;
 
 fn synthetic_account(index: u8) -> Result<AccountId> {
@@ -105,8 +108,12 @@ fn insert_source_rows(conn: &Connection, account_index: u8) -> Result<()> {
     )?;
     if account_index == 1 {
         conn.execute(
+            r#"UPDATE matches SET raw_entry_json='{"roleType":"damage","healingTaken":900,"heroPlayTimeList":[{"heroGuid":"synthetic-hero","durationSec":30}]}' WHERE match_id='source-1-shared'"#,
+            [],
+        )?;
+        conn.execute(
             "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES('source-1-shared','normal',?1,'now')",
-            [r#"{"payload":{"data":{"heroList":[{"heroId":"synthetic-hero","userTimeSec":600,"useTimeRate":1.0,"statMap":{}},{"heroId":"synthetic-hero","userTimeSec":600,"useTimeRate":1.0,"statMap":{}}]}}}"#],
+            [r#"{"payload":{"data":{"heroList":[{"heroId":"synthetic-hero","userTimeSec":30,"useTimeRate":0.05,"statMap":{"603482350067646507":9}},{"heroId":"synthetic-hero","userTimeSec":30,"useTimeRate":0.05,"statMap":{"603482350067646507":9}}]}}}"#],
         )?;
     }
     Ok(())
@@ -148,6 +155,55 @@ fn discovers_only_registry_accounts_with_stable_anonymous_groups() -> Result<()>
     Ok(())
 }
 
+fn replace_with_minimal_training_database(path: &std::path::Path, index: u8) -> Result<()> {
+    fs::remove_file(path)?;
+    let conn = Connection::open(path)?;
+    conn.execute_batch(
+        "CREATE TABLE matches(match_id TEXT, season INTEGER, begin_ts INTEGER, hero_guid TEXT, result TEXT, game_mode TEXT, duration_sec INTEGER, raw_entry_json TEXT, bucket TEXT);
+         CREATE TABLE hero_dict(guid TEXT, role TEXT);
+         CREATE TABLE match_players(match_id TEXT, is_current_player INTEGER, raw_json TEXT);
+         CREATE TABLE match_details(match_id TEXT, raw_detail_json TEXT);",
+    )?;
+    conn.execute(
+        "INSERT INTO hero_dict VALUES('synthetic-hero','damage')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO matches VALUES(?1,24,?2,'synthetic-hero','win','SportPreset',600,'{\"roleType\":\"damage\",\"heroPlayTimeList\":[{\"heroGuid\":\"synthetic-hero\",\"durationSec\":600}]}','preset')",
+        params![format!("minimal-{index}"), 10_000 + i64::from(index)],
+    )?;
+    if index == 1 {
+        conn.execute(
+            "INSERT INTO matches VALUES('minimal-stadium',24,20000,'synthetic-hero','win','SportFight',600,'{\"roleType\":\"damage\"}','stadium')",
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO match_details VALUES('minimal-stadium','{}')",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn minimal_legacy_schema_discovers_and_builds_without_optional_identity_columns() -> Result<()> {
+    let (_dir, paths) = registry_fixture()?;
+    for index in [1, 2] {
+        replace_with_minimal_training_database(
+            &paths.account(&synthetic_account(index)?).database(),
+            index,
+        )?;
+    }
+
+    let sources = discover_training_sources(&paths)?;
+    let projection = build_multi_account_projection(&sources)?;
+
+    assert_eq!(projection.audit.source_accounts, 2);
+    assert_eq!(projection.rows.len(), 2);
+    assert_eq!(projection.audit.stadium_ambiguous_excluded, 1);
+    Ok(())
+}
+
 #[test]
 fn opens_sources_query_only_and_validates_only_training_schema() -> Result<()> {
     let (_dir, paths) = registry_fixture()?;
@@ -184,12 +240,34 @@ fn aggregates_accounts_without_splitting_shared_matches_or_emitting_peer_rows() 
         .collect::<Result<Vec<_>>>()?;
     let backup = dir.path().join("backups/unregistered.sqlite3");
     let backup_before = fs::read(&backup)?;
+    let backup_metadata_before = fs::metadata(&backup)?;
+    let mut backup_guard = open_exclusive_read_guard(&backup)?;
+    #[cfg(windows)]
+    assert!(Connection::open(&backup).is_err());
 
     let projection = build_multi_account_projection(&sources)?;
 
     assert_eq!(projection.audit.source_accounts, 2);
+    assert_eq!(projection.audit.ordinary_candidates, 4);
+    assert_eq!(projection.audit.stadium_competitive_candidates, 0);
+    assert_eq!(projection.audit.stadium_ambiguous_excluded, 0);
     assert_eq!(projection.audit.projected_rows, 4);
     assert_eq!(projection.rows.len(), 4);
+    assert_eq!(projection.audit.roles[0].samples, 4);
+    assert_eq!(projection.audit.coverage.duration, 4);
+    assert_eq!(projection.audit.coverage.exact_hero_duration, 4);
+    assert_eq!(projection.audit.coverage.final_hero, 4);
+    assert_eq!(projection.audit.coverage.healing_taken, 1);
+    assert_eq!(projection.audit.coverage.hero_final_hit, 1);
+    assert_eq!(projection.audit.minor_segment_rows, 1);
+    assert_eq!(
+        projection
+            .audit
+            .healing_taken_semantics
+            .explicit_external_healing_rows,
+        1
+    );
+    assert_eq!(projection.audit.healing_taken_semantics.unknown_rows, 3);
     assert_eq!(
         projection
             .rows
@@ -237,8 +315,29 @@ fn aggregates_accounts_without_splitting_shared_matches_or_emitting_peer_rows() 
             count
         );
     }
-    assert_eq!(fs::read(backup)?, backup_before);
+    let backup_metadata_after = backup_guard.metadata()?;
+    assert_eq!(backup_metadata_after.len(), backup_metadata_before.len());
+    assert_eq!(
+        backup_metadata_after.modified()?,
+        backup_metadata_before.modified()?
+    );
+    backup_guard.seek(SeekFrom::Start(0))?;
+    let mut backup_after = Vec::new();
+    backup_guard.read_to_end(&mut backup_after)?;
+    assert_eq!(backup_after, backup_before);
     Ok(())
+}
+
+#[cfg(windows)]
+fn open_exclusive_read_guard(path: &std::path::Path) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new().read(true).share_mode(0).open(path)
+}
+
+#[cfg(not(windows))]
+fn open_exclusive_read_guard(path: &std::path::Path) -> std::io::Result<fs::File> {
+    fs::OpenOptions::new().read(true).open(path)
 }
 
 #[test]
@@ -303,6 +402,45 @@ fn rejects_a_registered_database_replaced_by_a_filesystem_link() -> Result<()> {
     };
 
     assert_eq!(error, "无法发现多账号训练数据源");
+    Ok(())
+}
+
+#[test]
+fn opening_fails_closed_when_database_is_replaced_after_discovery() -> Result<()> {
+    let (dir, paths) = registry_fixture()?;
+    let sources = discover_training_sources(&paths)?;
+    let database = paths.account(&synthetic_account(1)?).database();
+    let replacement = dir.path().join("replacement.sqlite3");
+    OwDatabase::new(&replacement).initialize()?;
+    fs::remove_file(&database)?;
+    create_file_symlink(&replacement, &database)?;
+
+    let open_error = match open_query_only(&sources[0]) {
+        Ok(_) => panic!("discover 后替换数据库时，open 必须拒绝"),
+        Err(error) => error.to_string(),
+    };
+    assert_eq!(open_error, "无法只读打开训练数据源");
+    assert!(build_multi_account_projection(&sources).is_err());
+    Ok(())
+}
+
+#[test]
+fn opening_fails_closed_when_database_is_replaced_by_a_regular_file_after_discovery() -> Result<()>
+{
+    let (dir, paths) = registry_fixture()?;
+    let sources = discover_training_sources(&paths)?;
+    let database = paths.account(&synthetic_account(1)?).database();
+    let replacement = dir.path().join("replacement-regular.sqlite3");
+    OwDatabase::new(&replacement).initialize()?;
+    fs::remove_file(&database)?;
+    fs::rename(&replacement, &database)?;
+
+    let open_error = match open_query_only(&sources[0]) {
+        Ok(_) => panic!("discover 后替换为不同普通文件时，open 必须拒绝"),
+        Err(error) => error.to_string(),
+    };
+    assert_eq!(open_error, "无法只读打开训练数据源");
+    assert!(build_multi_account_projection(&sources).is_err());
     Ok(())
 }
 

@@ -48,6 +48,7 @@ pub struct TrainingRow {
 pub struct TrainingProjection {
     pub rows: Vec<TrainingRow>,
     pub audit: TrainingAudit,
+    row_audits: Vec<TrainingRowAudit>,
 }
 
 impl TrainingProjection {
@@ -58,17 +59,26 @@ impl TrainingProjection {
     pub fn merge(&mut self, other: Self) {
         self.audit.merge(other.audit);
         self.rows.extend(other.rows);
+        self.row_audits.extend(other.row_audits);
+        self.deduplicate_rows();
+    }
+
+    fn deduplicate_rows(&mut self) {
         let mut seen = HashSet::new();
-        self.rows.retain(|row| {
-            seen.insert((
-                row.account_group.clone(),
-                row.source_match_group.clone(),
-                row.role.clone(),
-                row.hero_group.clone(),
-                row.begin_ts,
-            ))
-        });
-        self.rows.sort_by(|left, right| {
+        let mut pairs = std::mem::take(&mut self.rows)
+            .into_iter()
+            .zip(std::mem::take(&mut self.row_audits))
+            .filter(|(row, _)| {
+                seen.insert((
+                    row.account_group.clone(),
+                    row.source_match_group.clone(),
+                    row.role.clone(),
+                    row.hero_group.clone(),
+                    row.begin_ts,
+                ))
+            })
+            .collect::<Vec<_>>();
+        pairs.sort_by(|(left, _), (right, _)| {
             left.begin_ts
                 .cmp(&right.begin_ts)
                 .then_with(|| left.account_group.cmp(&right.account_group))
@@ -76,15 +86,8 @@ impl TrainingProjection {
                 .then_with(|| left.role.cmp(&right.role))
                 .then_with(|| left.hero_group.cmp(&right.hero_group))
         });
-        self.audit.projected_rows = self.rows.len();
-        self.audit.performance_eligible_rows =
-            self.rows.iter().filter(|row| row.allow_performance).count();
-        self.audit.resource_debt_eligible_rows = self
-            .rows
-            .iter()
-            .filter(|row| row.usable_for_resource_debt)
-            .count();
-        self.audit.roles = role_audit(&self.rows);
+        (self.rows, self.row_audits) = pairs.into_iter().unzip();
+        rebuild_row_audit(&self.rows, &self.row_audits, &mut self.audit);
     }
 }
 
@@ -140,6 +143,15 @@ pub struct TrainingAudit {
     pub roles: Vec<RoleTrainingAudit>,
     pub coverage: FeatureCoverage,
     pub healing_taken_semantics: HealingTakenSemanticsAudit,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct TrainingRowAudit {
+    coverage: FeatureCoverage,
+    minor_segment: bool,
+    stadium_quick_outcome_only: bool,
+    stadium_performance_eligible: bool,
+    healing_taken_semantics: HealingTakenSemanticsAudit,
 }
 
 impl TrainingAudit {
@@ -327,14 +339,19 @@ pub fn build_training_projection_for_account(
         |row| row.get::<_, usize>(0),
     )?;
     if stadium_candidates > 0 {
+        let current_player_key = if column_exists(conn, "match_players", "bnet_id")? {
+            r#"(SELECT p.bnet_id FROM match_players p
+                  WHERE p.match_id=m.match_id AND p.is_current_player=1
+                  AND p.bnet_id=TRIM(p.bnet_id) AND TRIM(p.bnet_id)<>''
+                  AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1)"#
+        } else {
+            "NULL"
+        };
         let stadium_sql = format!(
             r#"SELECT m.match_id,m.season,m.begin_ts,{map_guid},{team_score},{opponent_score},
                       COALESCE(d.role,''),m.hero_guid,m.result,m.game_mode,
                       m.duration_sec,m.raw_entry_json,'{{}}',COALESCE(md.raw_detail_json,'{{}}'),m.bucket,
-                      (SELECT p.bnet_id FROM match_players p
-                        WHERE p.match_id=m.match_id AND p.is_current_player=1
-                        AND p.bnet_id=TRIM(p.bnet_id) AND TRIM(p.bnet_id)<>''
-                        AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1)
+                      {current_player_key}
                FROM matches m
                LEFT JOIN hero_dict d ON d.guid=m.hero_guid
                LEFT JOIN match_details md ON md.match_id=m.match_id
@@ -376,7 +393,6 @@ pub fn build_training_projection_for_account(
     let extraction_context = (stadium_candidates > 0)
         .then(|| ExtractionContext::build(conn))
         .transpose()?;
-    let mut role_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut hero_roles: HashMap<String, String> = {
         let mut stmt = conn.prepare("SELECT guid,role FROM hero_dict WHERE role IS NOT NULL")?;
         let roles = stmt
@@ -419,6 +435,7 @@ pub fn build_training_projection_for_account(
         }
     }
     let mut rows = Vec::new();
+    let mut row_audits = Vec::new();
     for r in raw {
         let entry = serde_json::from_str::<Value>(&r.entry).unwrap_or(Value::Null);
         let detail = serde_json::from_str::<Value>(&r.detail).unwrap_or(Value::Null);
@@ -483,58 +500,58 @@ pub fn build_training_projection_for_account(
             let outcome_only = training_cohort == TrainingCohort::OutcomeOnly || !allow_performance;
             let healing_taken = stats.and_then(|value| numeric(value, "healingTaken"));
             let allow_resource_debt = allow_performance && healing_taken.is_some();
-            audit.coverage.final_hit +=
+            let mut row_audit = TrainingRowAudit::default();
+            row_audit.coverage.final_hit =
                 usize::from(stats.and_then(|value| numeric(value, "finalHit")).is_some());
-            audit.coverage.kill +=
+            row_audit.coverage.kill =
                 usize::from(stats.and_then(|value| numeric(value, "kill")).is_some());
-            audit.coverage.assist +=
+            row_audit.coverage.assist =
                 usize::from(stats.and_then(|value| numeric(value, "assist")).is_some());
-            audit.coverage.death +=
+            row_audit.coverage.death =
                 usize::from(stats.and_then(|value| numeric(value, "death")).is_some());
-            audit.coverage.damage += usize::from(
+            row_audit.coverage.damage = usize::from(
                 stats
                     .and_then(|value| numeric(value, "heroDamage"))
                     .is_some(),
             );
-            audit.coverage.healing +=
+            row_audit.coverage.healing =
                 usize::from(stats.and_then(|value| numeric(value, "cure")).is_some());
-            audit.coverage.mitigation += usize::from(
+            row_audit.coverage.mitigation = usize::from(
                 stats
                     .and_then(|value| numeric(value, "resistDamage"))
                     .is_some(),
             );
-            audit.coverage.healing_taken += usize::from(healing_taken.is_some());
-            audit.coverage.damage_taken += usize::from(
+            row_audit.coverage.healing_taken = usize::from(healing_taken.is_some());
+            row_audit.coverage.damage_taken = usize::from(
                 stats
                     .and_then(|value| numeric(value, "damageTaken"))
                     .is_some(),
             );
-            audit.coverage.objective_time += usize::from(
+            row_audit.coverage.objective_time = usize::from(
                 stats
                     .and_then(|value| numeric(value, "targetCompetingTime"))
                     .is_some(),
             );
-            audit.coverage.duration += usize::from(r.duration > 0);
-            audit.coverage.exact_hero_duration += usize::from(hero.is_some());
-            audit.coverage.final_hero += usize::from(hero.is_some());
-            audit.performance_eligible_rows += usize::from(allow_performance);
-            audit.stadium_performance_eligible_rows += usize::from(allow_performance);
-            audit.resource_debt_eligible_rows += usize::from(allow_resource_debt);
-            audit.stadium_quick_outcome_only_rows +=
-                usize::from(training_cohort == TrainingCohort::OutcomeOnly);
+            row_audit.coverage.duration = usize::from(r.duration > 0);
+            row_audit.coverage.exact_hero_duration = usize::from(hero.is_some());
+            row_audit.coverage.final_hero = usize::from(hero.is_some());
+            row_audit.stadium_performance_eligible = allow_performance;
+            row_audit.stadium_quick_outcome_only = training_cohort == TrainingCohort::OutcomeOnly;
             let healing_taken_semantic = if healing_taken.is_some() {
                 "external"
             } else {
                 "unknown"
             };
-            audit_healing_semantics(healing_taken_semantic, &mut audit.healing_taken_semantics);
+            audit_healing_semantics(
+                healing_taken_semantic,
+                &mut row_audit.healing_taken_semantics,
+            );
             let role_name = role.as_str();
             let expected_win_rate = active_events
                 .get(&(r.match_id.clone(), role_name.to_string()))
                 .map(|(expected, _quality)| *expected)
                 .unwrap_or(0.5);
             let data_quality = base_quality;
-            *role_counts.entry(role_name.to_string()).or_default() += 1;
             rows.push(TrainingRow {
                 account_group: account_group.to_owned(),
                 source_match_group: source_match_group.clone(),
@@ -569,6 +586,7 @@ pub fn build_training_projection_for_account(
                 healing_taken_semantic,
                 usable_for_resource_debt: allow_resource_debt,
             });
+            row_audits.push(row_audit);
             continue;
         }
         if r.hero.is_empty() {
@@ -582,21 +600,21 @@ pub fn build_training_projection_for_account(
             .or_else(|| numeric(&r.player, "targetCompetingTime"));
         let segments = hero_segments(&detail);
         let legacy_hero_duration = legacy_hero_duration(&entry, &r.hero);
-        audit.coverage.final_hit += usize::from(has_numeric(&entry, &r.player, "finalHit"));
-        audit.coverage.kill += usize::from(has_numeric(&entry, &r.player, "kill"));
-        audit.coverage.assist += usize::from(has_numeric(&entry, &r.player, "assist"));
-        audit.coverage.death += usize::from(has_numeric(&entry, &r.player, "death"));
-        audit.coverage.damage += usize::from(has_numeric(&entry, &r.player, "heroDamage"));
-        audit.coverage.healing += usize::from(has_numeric(&entry, &r.player, "cure"));
-        audit.coverage.mitigation += usize::from(has_numeric(&entry, &r.player, "resistDamage"));
-        audit.coverage.healing_taken += usize::from(has_numeric(&entry, &r.player, "healingTaken"));
-        audit.coverage.damage_taken += usize::from(has_numeric(&entry, &r.player, "damageTaken"));
-        audit.coverage.objective_time +=
-            usize::from(has_numeric(&entry, &r.player, "targetCompetingTime"));
-        audit.coverage.duration += usize::from(r.duration > 0);
-        audit.coverage.exact_hero_duration +=
-            segments.len() + usize::from(segments.is_empty() && legacy_hero_duration.is_some());
-        audit.coverage.final_hero += 1;
+        let mut match_coverage = FeatureCoverage {
+            final_hit: usize::from(has_numeric(&entry, &r.player, "finalHit")),
+            kill: usize::from(has_numeric(&entry, &r.player, "kill")),
+            assist: usize::from(has_numeric(&entry, &r.player, "assist")),
+            death: usize::from(has_numeric(&entry, &r.player, "death")),
+            damage: usize::from(has_numeric(&entry, &r.player, "heroDamage")),
+            healing: usize::from(has_numeric(&entry, &r.player, "cure")),
+            mitigation: usize::from(has_numeric(&entry, &r.player, "resistDamage")),
+            healing_taken: usize::from(has_numeric(&entry, &r.player, "healingTaken")),
+            damage_taken: usize::from(has_numeric(&entry, &r.player, "damageTaken")),
+            objective_time: usize::from(has_numeric(&entry, &r.player, "targetCompetingTime")),
+            duration: usize::from(r.duration > 0),
+            final_hero: 1,
+            ..Default::default()
+        };
         let segment_count = segments.len();
         let segment_rows: Vec<Option<HeroSegment>> = if segment_count == 0 {
             vec![None]
@@ -627,35 +645,42 @@ pub fn build_training_projection_for_account(
                 .map(|item| item.duration_sec)
                 .or(legacy_hero_duration);
             let stats = segment.as_ref().map(|item| &item.stats);
-            audit.coverage.hero_final_hit += usize::from(
+            let mut row_audit = TrainingRowAudit::default();
+            row_audit.coverage.hero_final_hit = usize::from(
                 stats
                     .and_then(|value| numeric(value, STAT_FINAL_HIT))
                     .is_some(),
             );
-            audit.coverage.hero_kill +=
+            row_audit.coverage.hero_kill =
                 usize::from(stats.and_then(|value| numeric(value, STAT_KILL)).is_some());
-            audit.coverage.hero_assist += usize::from(
+            row_audit.coverage.hero_assist = usize::from(
                 stats
                     .and_then(|value| numeric(value, STAT_ASSIST))
                     .is_some(),
             );
-            audit.coverage.hero_death +=
+            row_audit.coverage.hero_death =
                 usize::from(stats.and_then(|value| numeric(value, STAT_DEATH)).is_some());
-            audit.coverage.hero_damage += usize::from(
+            row_audit.coverage.hero_damage = usize::from(
                 stats
                     .and_then(|value| numeric(value, STAT_HERO_DAMAGE))
                     .is_some(),
             );
-            audit.coverage.hero_healing += usize::from(stats.is_some_and(|value| {
+            row_audit.coverage.hero_healing = usize::from(stats.is_some_and(|value| {
                 numeric(value, STAT_HEALING_PRIMARY)
                     .or_else(|| numeric(value, STAT_HEALING_FALLBACK))
                     .is_some()
             }));
-            audit.coverage.hero_objective_time += usize::from(
+            row_audit.coverage.hero_objective_time = usize::from(
                 stats
                     .and_then(|value| numeric(value, STAT_OBJECTIVE_TIME))
                     .is_some(),
             );
+            row_audit.coverage.exact_hero_duration = usize::from(
+                segment.is_some() || (segment_count == 0 && legacy_hero_duration.is_some()),
+            );
+            row_audit
+                .coverage
+                .merge(std::mem::take(&mut match_coverage));
             let exact_and_substantial = segment.as_ref().is_some_and(|item| {
                 item.duration_sec >= 60.0
                     && item
@@ -669,15 +694,16 @@ pub fn build_training_projection_for_account(
                 && training_cohort != TrainingCohort::OutcomeOnly;
             let allow_resource_debt =
                 allow_performance && segment_count == 1 && healing_taken.is_some();
-            audit.performance_eligible_rows += usize::from(allow_performance);
-            audit.resource_debt_eligible_rows += usize::from(allow_resource_debt);
-            audit.minor_segment_rows += usize::from(segment.is_some() && !exact_and_substantial);
+            row_audit.minor_segment = segment.is_some() && !exact_and_substantial;
             let healing_taken_semantic = if healing_taken.is_some() {
                 "external"
             } else {
                 "unknown"
             };
-            audit_healing_semantics(healing_taken_semantic, &mut audit.healing_taken_semantics);
+            audit_healing_semantics(
+                healing_taken_semantic,
+                &mut row_audit.healing_taken_semantics,
+            );
             let (expected_win_rate, mut data_quality) = active_events
                 .get(&(r.match_id.clone(), role.to_string()))
                 .copied()
@@ -685,7 +711,6 @@ pub fn build_training_projection_for_account(
             if !allow_performance {
                 data_quality = data_quality.min(0.55);
             }
-            *role_counts.entry(role.to_string()).or_default() += 1;
             rows.push(TrainingRow {
                 account_group: account_group.to_owned(),
                 source_match_group: source_match_group.clone(),
@@ -730,14 +755,16 @@ pub fn build_training_projection_for_account(
                 healing_taken_semantic,
                 usable_for_resource_debt: allow_resource_debt,
             });
+            row_audits.push(row_audit);
         }
     }
-    audit.projected_rows = rows.len();
-    audit.roles = role_counts
-        .into_iter()
-        .map(|(role, samples)| RoleTrainingAudit { role, samples })
-        .collect();
-    Ok(TrainingProjection { rows, audit })
+    let mut projection = TrainingProjection {
+        rows,
+        audit,
+        row_audits,
+    };
+    projection.deduplicate_rows();
+    Ok(projection)
 }
 
 pub fn build_multi_account_projection(
@@ -760,15 +787,38 @@ pub fn build_multi_account_projection(
     result.map_err(|_| anyhow::anyhow!("无法聚合多账号训练数据"))
 }
 
-fn role_audit(rows: &[TrainingRow]) -> Vec<RoleTrainingAudit> {
+fn rebuild_row_audit(
+    rows: &[TrainingRow],
+    row_audits: &[TrainingRowAudit],
+    audit: &mut TrainingAudit,
+) {
+    debug_assert_eq!(rows.len(), row_audits.len());
+    audit.projected_rows = rows.len();
+    audit.performance_eligible_rows = 0;
+    audit.resource_debt_eligible_rows = 0;
+    audit.minor_segment_rows = 0;
+    audit.stadium_quick_outcome_only_rows = 0;
+    audit.stadium_performance_eligible_rows = 0;
+    audit.coverage = FeatureCoverage::default();
+    audit.healing_taken_semantics = HealingTakenSemanticsAudit::default();
     let mut roles = BTreeMap::new();
-    for row in rows {
+    for (row, row_audit) in rows.iter().zip(row_audits) {
         *roles.entry(row.role.clone()).or_insert(0) += 1;
+        audit.performance_eligible_rows += usize::from(row.allow_performance);
+        audit.resource_debt_eligible_rows += usize::from(row.usable_for_resource_debt);
+        audit.minor_segment_rows += usize::from(row_audit.minor_segment);
+        audit.stadium_quick_outcome_only_rows += usize::from(row_audit.stadium_quick_outcome_only);
+        audit.stadium_performance_eligible_rows +=
+            usize::from(row_audit.stadium_performance_eligible);
+        audit.coverage.merge(row_audit.coverage.clone());
+        audit
+            .healing_taken_semantics
+            .merge(row_audit.healing_taken_semantics.clone());
     }
-    roles
+    audit.roles = roles
         .into_iter()
         .map(|(role, samples)| RoleTrainingAudit { role, samples })
-        .collect()
+        .collect();
 }
 
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
