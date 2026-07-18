@@ -58,8 +58,8 @@ assert.match(
 );
 assert.match(
   reviewCss,
-  /@media\s*\(max-width:\s*1080px\)[\s\S]*?\.reviewWorkspace\s+\.phase6AchievementCard:nth-child\(2n\)\s*\{[^}]*border-left:\s*1px solid color-mix\(/s,
-  "两列成就墙应重新计算纵向分隔线",
+  /@media\s*\(max-width:\s*1440px\)[\s\S]*?\.reviewWorkspace\s+\.phase6AchievementWall\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.reviewWorkspace\s+\.phase6AchievementCard:nth-child\(2n\)\s*\{[^}]*border-left:\s*1px solid color-mix\(/s,
+  "1440px 两列成就墙应同时重排网格与纵向分隔线",
 );
 assert.match(
   reviewCss,

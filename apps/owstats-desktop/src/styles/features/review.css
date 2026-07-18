@@ -321,7 +321,11 @@
   background: var(--surface-control);
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1440px) {
+  .reviewWorkspace .phase6AchievementWall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .reviewWorkspace .phase6AchievementCard:nth-child(n) {
     border-left: 0;
     border-top: 0;
