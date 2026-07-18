@@ -2,7 +2,7 @@ use owstats_desktop_lib::career_mmr::{
     input::{ModeFamily, Role},
     performance_stability::{evaluate_stability, CellDecision, StabilityConfig},
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
-    training_report::{build_training_outputs, validate_report_boundary},
+    training_report::{build_training_outputs, recompute_config_hash, validate_report_boundary},
 };
 use serde_json::{json, Value};
 
@@ -85,7 +85,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
 
     let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
 
-    assert_eq!(artifact.schema_version, 1);
+    assert_eq!(artifact.schema_version, 2);
     assert!(!artifact.algorithm.is_empty());
     assert!(!artifact.feature_version.is_empty());
     assert_eq!(artifact.seed, 0x5eed);
@@ -100,6 +100,8 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
     assert_eq!(artifact.normalization.healing_ridge_lambda, 0.1);
     assert_eq!(artifact.caps.competitive_mmr, 3.0);
     assert_eq!(artifact.caps.quick_mmr, 1.0);
+    assert_eq!(artifact.caps.competitive_match_delta_mmr, 30.0);
+    assert_eq!(artifact.caps.quick_match_delta_mmr, 10.0);
     assert_eq!(artifact.config_hash.len(), 64);
     assert_eq!(report.dataset.account_datasets, 2);
     assert_eq!(report.cells.len(), 15);
@@ -132,6 +134,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
             role_comp.shared_parameter_version,
             role_quick.shared_parameter_version
         );
+        assert_eq!(role_comp.role_model_ref, role_quick.role_model_ref);
         assert_ne!(role_comp.mode, role_quick.mode);
     }
 
@@ -178,6 +181,10 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
     assert_eq!(decoded.normalization, artifact.normalization);
     assert_eq!(decoded.caps, artifact.caps);
     assert_eq!(decoded, artifact);
+    assert_eq!(
+        recompute_config_hash(&artifact).unwrap(),
+        artifact.config_hash
+    );
 }
 
 #[test]
@@ -243,6 +250,95 @@ fn config_hash_covers_the_fitted_model_weights() {
         .config_hash;
 
     assert_ne!(shadow_hash, fitted_hash);
+}
+
+#[test]
+fn config_hash_covers_normalization_and_every_validation_gate() {
+    let rows = synthetic_rows();
+    let audit = TrainingAudit {
+        source_accounts: 2,
+        projected_rows: rows.len(),
+        ..Default::default()
+    };
+    let evaluation = evaluate_stability(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 0,
+            ..Default::default()
+        },
+    );
+    let original = build_training_outputs(&rows, &audit, &evaluation, 13)
+        .unwrap()
+        .0;
+
+    let mut normalization_changed = original.clone();
+    normalization_changed.normalization.baselines[0].median_per_ten += 1.0;
+    assert_ne!(
+        original.config_hash,
+        recompute_config_hash(&normalization_changed).unwrap()
+    );
+
+    let mut gate_changed = original.clone();
+    gate_changed.training_config.validation.max_ece_worsening += 0.001;
+    assert_ne!(
+        original.config_hash,
+        recompute_config_hash(&gate_changed).unwrap()
+    );
+}
+
+#[test]
+fn conflicting_cell_candidates_share_one_order_independent_role_model() {
+    let rows = synthetic_rows();
+    let audit = TrainingAudit {
+        source_accounts: 2,
+        projected_rows: rows.len(),
+        ..Default::default()
+    };
+    let mut evaluation = evaluate_stability(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 0,
+            ..Default::default()
+        },
+    );
+    for (mode, report_index) in [
+        (ModeFamily::RoleCompetitive, 0usize),
+        (ModeFamily::RoleQuick, 4usize),
+    ] {
+        let cell = evaluation
+            .cells
+            .iter_mut()
+            .find(|cell| cell.role == Role::Tank && cell.mode == mode)
+            .unwrap();
+        cell.reports[report_index].eligible = true;
+        cell.selected = Some(cell.reports[report_index].strategy.clone());
+        cell.decision = CellDecision::Eligible;
+        cell.rejected_reasons.clear();
+    }
+    let first = build_training_outputs(&rows, &audit, &evaluation, 17)
+        .unwrap()
+        .0;
+    evaluation.cells.reverse();
+    let reordered = build_training_outputs(&rows, &audit, &evaluation, 17)
+        .unwrap()
+        .0;
+
+    let pair = first
+        .cells
+        .iter()
+        .filter(|cell| {
+            cell.role == Role::Tank
+                && matches!(
+                    cell.mode,
+                    ModeFamily::RoleCompetitive | ModeFamily::RoleQuick
+                )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(pair.len(), 2);
+    assert_eq!(pair[0].role_model_ref, pair[1].role_model_ref);
+    assert_eq!(first.roles[&Role::Tank], reordered.roles[&Role::Tank]);
+    assert_eq!(first.cells, reordered.cells);
+    assert_eq!(first.config_hash, reordered.config_hash);
 }
 
 #[test]

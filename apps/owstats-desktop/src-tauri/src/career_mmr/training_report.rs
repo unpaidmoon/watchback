@@ -1,9 +1,8 @@
 use super::{
     input::{ModeFamily, Role, TrainingCohort},
     performance::{build_feature_matrix, HealingTakenStrategy},
-    performance_forward::ModelVariant,
-    performance_forward::NestedCellReport,
-    performance_model::{fit_model, FitConfig},
+    performance_forward::{CalibrationScale, ModelVariant, NestedCellReport},
+    performance_model::{fit_model, predict_probability, FitConfig, MODEL_FIT_STEPS},
     performance_stability::{CellDecision, CellEvaluation, StabilityEvaluation, StabilityReport},
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
 };
@@ -13,7 +12,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const ALGORITHM: &str = "career-role-mmr-hierarchical-logit-v1";
 const FEATURE_VERSION: &str = "role-features-and-resource-debt-v1";
 const MAD_SCALE: f64 = 0.6745;
@@ -30,6 +29,8 @@ pub struct PerformanceModelArtifact {
     pub cells: Vec<CellArtifact>,
     pub normalization: NormalizationArtifact,
     pub caps: PerformanceCaps,
+    pub training_config: TrainingConfigArtifact,
+    pub sample_buckets: Vec<AggregateSampleBucket>,
     pub config_hash: String,
 }
 
@@ -52,9 +53,62 @@ pub struct CellArtifact {
     pub mode: ModeFamily,
     pub training_cohort: TrainingCohort,
     pub shared_parameter_version: String,
-    pub selected_strategy: Option<String>,
+    pub role_model_ref: String,
     pub performance_enabled: bool,
-    pub model: Option<HierarchicalModelArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrainingConfigArtifact {
+    pub mode_weights: BTreeMap<ModeFamily, f64>,
+    pub fit: FitSearchArtifact,
+    pub validation: ValidationGateArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FitSearchArtifact {
+    pub variants: Vec<String>,
+    pub final_hit_multipliers: Vec<f64>,
+    pub regularization_candidates: Vec<RegularizationCandidate>,
+    pub learning_rate: f64,
+    pub steps: usize,
+    pub minimum_cohort_offset_rows: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegularizationCandidate {
+    pub lambda_core: f64,
+    pub lambda_cohort: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ValidationGateArtifact {
+    pub stage: String,
+    pub bootstrap_iterations: usize,
+    pub minimum_improved_folds: usize,
+    pub minimum_role_core_rows: usize,
+    pub minimum_cohort_rows: usize,
+    pub minimum_season_loo_groups: usize,
+    pub minimum_hero_loo_groups: usize,
+    pub minimum_loo_row_coverage: f64,
+    pub maximum_loo_worsened_fraction: f64,
+    pub minimum_bootstrap_completion: f64,
+    pub minimum_critical_direction_stability: f64,
+    pub maximum_bootstrap_brier_ci_high: f64,
+    pub max_ece_worsening: f64,
+    pub maximum_single_feature_share: f64,
+    pub maximum_average_adjustment_mmr: f64,
+    pub maximum_cap_hit_rate: f64,
+    pub require_account_coverage: bool,
+    pub require_critical_ci_excludes_zero: bool,
+    pub require_nonzero_reference_coefficients: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AggregateSampleBucket {
+    pub role: String,
+    pub mode: ModeFamily,
+    pub season: i64,
+    pub rows: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -99,6 +153,8 @@ pub struct HealingExpectationArtifact {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PerformanceCaps {
+    pub competitive_match_delta_mmr: f64,
+    pub quick_match_delta_mmr: f64,
     pub relative_to_base_delta: f64,
     pub competitive_mmr: f64,
     pub support_competitive_mmr: f64,
@@ -109,6 +165,8 @@ pub struct PerformanceCaps {
 impl Default for PerformanceCaps {
     fn default() -> Self {
         Self {
+            competitive_match_delta_mmr: 30.0,
+            quick_match_delta_mmr: 10.0,
             relative_to_base_delta: 0.10,
             competitive_mmr: 3.0,
             support_competitive_mmr: 2.0,
@@ -127,6 +185,7 @@ pub struct TrainingReport {
     pub dataset: DatasetReport,
     pub cells: Vec<CellReport>,
     pub stadium_quick: OutcomeOnlyReport,
+    pub training_config: TrainingConfigArtifact,
     pub config_hash: String,
 }
 
@@ -145,6 +204,7 @@ pub struct CellReport {
     pub mode: ModeFamily,
     pub training_cohort: TrainingCohort,
     pub shared_parameter_version: String,
+    pub role_model_ref: String,
     pub training_rows: usize,
     pub validation_rows: usize,
     pub seasons: usize,
@@ -182,12 +242,15 @@ pub fn build_training_outputs(
     evaluation: &StabilityEvaluation,
     seed: u64,
 ) -> Result<(PerformanceModelArtifact, TrainingReport)> {
+    require_complete_cells(evaluation)?;
     let normalization = build_normalization(rows);
-    let cells = build_cell_artifacts(rows, evaluation)?;
-    let roles = build_role_artifacts(&cells);
+    let roles = build_role_artifacts(rows, evaluation)?;
+    let cells = build_cell_artifacts(evaluation, &roles);
+    let report_cells = build_cell_reports(rows, evaluation, &roles)?;
     let caps = PerformanceCaps::default();
-    let config_hash = configuration_hash(rows, seed, &caps, &roles, &cells)?;
-    let artifact = PerformanceModelArtifact {
+    let training_config = training_config(evaluation);
+    let sample_buckets = aggregate_sample_buckets(rows);
+    let mut artifact = PerformanceModelArtifact {
         schema_version: SCHEMA_VERSION,
         algorithm: ALGORITHM.into(),
         feature_version: FEATURE_VERSION.into(),
@@ -196,19 +259,24 @@ pub fn build_training_outputs(
         cells,
         normalization,
         caps,
-        config_hash: config_hash.clone(),
+        training_config: training_config.clone(),
+        sample_buckets,
+        config_hash: String::new(),
     };
     // The immutable artifact is returned in exactly the representation that is
     // persisted. Besides rejecting non-finite floats through deserialization,
     // this avoids adjacent-float differences after a JSON save/load cycle.
-    let artifact = serde_json::from_str(&serde_json::to_string(&artifact)?)?;
+    artifact = serde_json::from_str(&serde_json::to_string(&artifact)?)?;
+    artifact.config_hash = recompute_config_hash(&artifact)?;
+    artifact = serde_json::from_str(&serde_json::to_string(&artifact)?)?;
+    let config_hash = artifact.config_hash.clone();
     let report = TrainingReport {
         schema_version: SCHEMA_VERSION,
         algorithm: ALGORITHM.into(),
         feature_version: FEATURE_VERSION.into(),
         seed,
         dataset: dataset_report(rows, audit),
-        cells: build_cell_reports(rows, evaluation)?,
+        cells: report_cells,
         stadium_quick: OutcomeOnlyReport {
             mode: ModeFamily::StadiumQuick,
             rows: rows
@@ -218,6 +286,7 @@ pub fn build_training_outputs(
             decision: CellDecision::OutcomeOnly,
             performance_adjustment_mmr: 0,
         },
+        training_config,
         config_hash,
     };
     validate_report_boundary(&serde_json::to_value(&artifact)?)?;
@@ -226,49 +295,119 @@ pub fn build_training_outputs(
 }
 
 fn build_cell_artifacts(
-    rows: &[TrainingRow],
     evaluation: &StabilityEvaluation,
-) -> Result<Vec<CellArtifact>> {
-    require_complete_cells(evaluation)?;
-    evaluation
+    roles: &BTreeMap<Role, HierarchicalModelArtifact>,
+) -> Vec<CellArtifact> {
+    let mut cells = evaluation
         .cells
         .iter()
         .map(|cell| {
-            let eligible = cell_is_eligible(cell);
-            let selected_report = cell.selected.as_deref().and_then(|strategy| {
-                cell.reports
-                    .iter()
-                    .find(|report| report.strategy == strategy && report.eligible)
-            });
-            let model = selected_report.and_then(|report| refit_artifact(rows, report));
-            if eligible && model.is_none() {
-                bail!("已通过验收的职责模式无法生成模型产物");
-            }
-            Ok(CellArtifact {
+            let authority_available = roles
+                .get(&cell.role)
+                .is_some_and(|model| model.selected_strategy.is_some());
+            CellArtifact {
                 role: cell.role,
                 mode: cell.mode,
-                training_cohort: cell.training_cohort,
-                shared_parameter_version: cell.shared_parameter_version.clone(),
-                selected_strategy: cell.selected.clone(),
-                performance_enabled: eligible,
-                model,
-            })
+                training_cohort: cell.mode.training_cohort(),
+                shared_parameter_version: shared_parameter_version(cell.mode.training_cohort()),
+                role_model_ref: role_model_ref(cell.role, &roles[&cell.role]),
+                performance_enabled: cell_is_eligible(cell) && authority_available,
+            }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    cells.sort_by_key(|cell| (cell.role, cell.mode));
+    cells
 }
 
-fn build_role_artifacts(cells: &[CellArtifact]) -> BTreeMap<Role, HierarchicalModelArtifact> {
-    [Role::Tank, Role::Damage, Role::Support]
-        .into_iter()
-        .map(|role| {
-            let selected = cells
+fn build_role_artifacts(
+    rows: &[TrainingRow],
+    evaluation: &StabilityEvaluation,
+) -> Result<BTreeMap<Role, HierarchicalModelArtifact>> {
+    let mut roles = BTreeMap::new();
+    for role in [Role::Tank, Role::Damage, Role::Support] {
+        let reports = evaluation
+            .cells
+            .iter()
+            .filter(|cell| cell.role == role && cell_is_eligible(cell))
+            .filter_map(|cell| {
+                let selected = cell.selected.as_deref()?;
+                cell.reports
+                    .iter()
+                    .find(|report| report.strategy == selected && report.eligible)
+            })
+            .collect::<Vec<_>>();
+        let artifact = if let Some(promoted) = promote_role_candidate(&reports) {
+            refit_artifact(rows, promoted)
+                .ok_or_else(|| anyhow::anyhow!("已通过验收的职责无法生成权威模型产物"))?
+        } else {
+            HierarchicalModelArtifact::default()
+        };
+        roles.insert(role, artifact);
+    }
+    Ok(roles)
+}
+
+fn promote_role_candidate<'a>(reports: &[&'a StabilityReport]) -> Option<&'a StabilityReport> {
+    let mut candidates = reports
+        .iter()
+        .map(|report| {
+            let support = reports
                 .iter()
-                .filter(|cell| cell.role == role && cell.performance_enabled)
-                .find_map(|cell| cell.model.clone());
-            let artifact = selected.unwrap_or_default();
-            (role, artifact)
+                .filter(|candidate| same_model_spec(report, candidate))
+                .count();
+            (*report, support)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    candidates.sort_by(|(left, left_support), (right, right_support)| {
+        right_support
+            .cmp(left_support)
+            .then_with(|| {
+                variant_rank(left.forward.variant).cmp(&variant_rank(right.forward.variant))
+            })
+            .then_with(|| strategy_rank(&left.strategy).cmp(&strategy_rank(&right.strategy)))
+            .then_with(|| {
+                left.forward
+                    .final_multiplier
+                    .total_cmp(&right.forward.final_multiplier)
+            })
+            .then_with(|| {
+                left.forward
+                    .lambda_core
+                    .total_cmp(&right.forward.lambda_core)
+            })
+            .then_with(|| {
+                left.forward
+                    .lambda_cohort
+                    .total_cmp(&right.forward.lambda_cohort)
+            })
+    });
+    candidates.first().map(|(report, _)| *report)
+}
+
+fn same_model_spec(left: &StabilityReport, right: &StabilityReport) -> bool {
+    left.strategy == right.strategy
+        && left.forward.variant == right.forward.variant
+        && left.forward.final_multiplier.to_bits() == right.forward.final_multiplier.to_bits()
+        && left.forward.lambda_core.to_bits() == right.forward.lambda_core.to_bits()
+        && left.forward.lambda_cohort.to_bits() == right.forward.lambda_cohort.to_bits()
+}
+
+fn variant_rank(variant: ModelVariant) -> usize {
+    match variant {
+        ModelVariant::Core => 0,
+        ModelVariant::RoleFull => 1,
+    }
+}
+
+fn strategy_rank(strategy: &str) -> usize {
+    match strategy {
+        "none" => 0,
+        "directnegative" => 1,
+        "heronormalized" => 2,
+        "excesshealing" => 3,
+        "resourceconversiondebt" => 4,
+        _ => usize::MAX,
+    }
 }
 
 fn refit_artifact(
@@ -295,6 +434,11 @@ fn refit_artifact(
         strategy,
         &config,
     )?;
+    let calibration = CalibrationScale::fit(
+        role_rows
+            .iter()
+            .map(|row| predict_probability(&model, row) - row.expected_win_rate),
+    );
     let feature_weights = model
         .feature_names
         .iter()
@@ -325,7 +469,7 @@ fn refit_artifact(
         final_hit_multiplier: Some(model.final_multiplier),
         lambda_core: Some(config.lambda_core),
         lambda_cohort: Some(config.lambda_cohort),
-        calibration_p95_abs_effect: Some(report.forward.calibration_scale.p95_abs_effect),
+        calibration_p95_abs_effect: Some(calibration.p95_abs_effect),
     })
 }
 
@@ -347,19 +491,43 @@ fn variant_name(value: ModelVariant) -> &'static str {
     }
 }
 
+fn shared_parameter_version(cohort: TrainingCohort) -> String {
+    match cohort {
+        TrainingCohort::RoleQueue => "role_queue-v2",
+        TrainingCohort::OpenQueue => "open_queue-v2",
+        TrainingCohort::StadiumCompetitive => "stadium_competitive-v2",
+        TrainingCohort::OutcomeOnly => "outcome_only-v2",
+    }
+    .into()
+}
+
+fn role_model_ref(role: Role, model: &HierarchicalModelArtifact) -> String {
+    let bytes = serde_json::to_vec(model).expect("权威职责模型只能包含可序列化聚合值");
+    let role = role_name(role);
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    format!("{role}-role-model-v2-{}", &digest[..16])
+}
+
 fn build_cell_reports(
     rows: &[TrainingRow],
     evaluation: &StabilityEvaluation,
+    roles: &BTreeMap<Role, HierarchicalModelArtifact>,
 ) -> Result<Vec<CellReport>> {
     require_complete_cells(evaluation)?;
-    Ok(evaluation
+    let mut reports = evaluation
         .cells
         .iter()
-        .map(|cell| cell_report(rows, cell))
-        .collect())
+        .map(|cell| cell_report(rows, cell, &roles[&cell.role]))
+        .collect::<Vec<_>>();
+    reports.sort_by_key(|cell| (cell.role, cell.mode));
+    Ok(reports)
 }
 
-fn cell_report(rows: &[TrainingRow], cell: &CellEvaluation) -> CellReport {
+fn cell_report(
+    rows: &[TrainingRow],
+    cell: &CellEvaluation,
+    role_model: &HierarchicalModelArtifact,
+) -> CellReport {
     let role = role_name(cell.role);
     let cohort_rows = rows.iter().filter(|row| {
         row.role == role
@@ -389,7 +557,7 @@ fn cell_report(rows: &[TrainingRow], cell: &CellEvaluation) -> CellReport {
         .len();
     let candidate = cell.nested_validation.metrics.as_ref();
     let baseline = cell.nested_validation.baseline_metrics.as_ref();
-    let eligible = cell_is_eligible(cell);
+    let eligible = cell_is_eligible(cell) && role_model.selected_strategy.is_some();
     let mut rejected_reasons = cell.rejected_reasons.clone();
     if !eligible && rejected_reasons.is_empty() {
         rejected_reasons.push("no_eligible_strategy".into());
@@ -397,8 +565,9 @@ fn cell_report(rows: &[TrainingRow], cell: &CellEvaluation) -> CellReport {
     CellReport {
         role: cell.role,
         mode: cell.mode,
-        training_cohort: cell.training_cohort,
-        shared_parameter_version: cell.shared_parameter_version.clone(),
+        training_cohort: cell.mode.training_cohort(),
+        shared_parameter_version: shared_parameter_version(cell.mode.training_cohort()),
+        role_model_ref: role_model_ref(cell.role, role_model),
         training_rows,
         validation_rows: actual.len(),
         seasons,
@@ -779,66 +948,95 @@ fn solve(mut matrix: [[f64; 5]; 5], mut rhs: [f64; 5]) -> Option<[f64; 5]> {
     Some(rhs)
 }
 
-#[derive(Serialize)]
-struct HashInput<'a> {
-    algorithm: &'a str,
-    feature_version: &'a str,
-    seed: u64,
-    mode_weights: BTreeMap<ModeFamily, f64>,
-    caps: &'a PerformanceCaps,
-    roles: &'a BTreeMap<Role, HierarchicalModelArtifact>,
-    cells: &'a [CellArtifact],
-    sample_buckets: Vec<SampleBucket>,
-}
-
-#[derive(Serialize)]
-struct SampleBucket {
-    role: String,
-    mode: ModeFamily,
-    season: i64,
-    rows: usize,
-}
-
-fn configuration_hash(
-    rows: &[TrainingRow],
-    seed: u64,
-    caps: &PerformanceCaps,
-    roles: &BTreeMap<Role, HierarchicalModelArtifact>,
-    cells: &[CellArtifact],
-) -> Result<String> {
-    let mode_weights = BTreeMap::from([
-        (ModeFamily::RoleCompetitive, 1.0),
-        (ModeFamily::RoleQuick, 0.3),
-        (ModeFamily::OpenCompetitive, 1.0),
-        (ModeFamily::OpenQuick, 0.3),
-        (ModeFamily::StadiumCompetitive, 0.5),
-        (ModeFamily::StadiumQuick, 0.1),
-    ]);
+fn aggregate_sample_buckets(rows: &[TrainingRow]) -> Vec<AggregateSampleBucket> {
     let mut grouped = BTreeMap::new();
     for row in rows {
         *grouped
             .entry((row.role.clone(), row.mode_family, row.season))
             .or_insert(0) += 1;
     }
-    let sample_buckets = grouped
+    grouped
         .into_iter()
-        .map(|((role, mode, season), rows)| SampleBucket {
+        .map(|((role, mode, season), rows)| AggregateSampleBucket {
             role,
             mode,
             season,
             rows,
         })
-        .collect();
-    let bytes = serde_json::to_vec(&HashInput {
-        algorithm: ALGORITHM,
-        feature_version: FEATURE_VERSION,
-        seed,
-        mode_weights,
-        caps,
-        roles,
-        cells,
-        sample_buckets,
-    })?;
+        .collect()
+}
+
+fn training_config(evaluation: &StabilityEvaluation) -> TrainingConfigArtifact {
+    let bootstrap_iterations = evaluation
+        .reports
+        .iter()
+        .map(|report| report.bootstrap.requested_iterations)
+        .max()
+        .unwrap_or(0);
+    let stage = match bootstrap_iterations {
+        100 => "screen_100",
+        1_000 => "candidate_1000",
+        10_000 => "final_10000",
+        _ => "custom",
+    };
+    let defaults = FitConfig::default();
+    TrainingConfigArtifact {
+        mode_weights: BTreeMap::from([
+            (ModeFamily::RoleCompetitive, 1.0),
+            (ModeFamily::RoleQuick, 0.3),
+            (ModeFamily::OpenCompetitive, 1.0),
+            (ModeFamily::OpenQuick, 0.3),
+            (ModeFamily::StadiumCompetitive, 0.5),
+            (ModeFamily::StadiumQuick, 0.1),
+        ]),
+        fit: FitSearchArtifact {
+            variants: vec!["core".into(), "role_full".into()],
+            final_hit_multipliers: vec![1.0, 1.25, 1.5, 1.75, 2.0],
+            regularization_candidates: vec![
+                RegularizationCandidate {
+                    lambda_core: 0.02,
+                    lambda_cohort: 0.05,
+                },
+                RegularizationCandidate {
+                    lambda_core: 0.05,
+                    lambda_cohort: 0.10,
+                },
+            ],
+            learning_rate: defaults.learning_rate,
+            steps: MODEL_FIT_STEPS,
+            minimum_cohort_offset_rows: defaults.min_cohort_offset_rows,
+        },
+        validation: ValidationGateArtifact {
+            stage: stage.into(),
+            bootstrap_iterations,
+            minimum_improved_folds: 4,
+            minimum_role_core_rows: 500,
+            minimum_cohort_rows: 150,
+            minimum_season_loo_groups: 2,
+            minimum_hero_loo_groups: 5,
+            minimum_loo_row_coverage: 0.80,
+            maximum_loo_worsened_fraction: 0.25,
+            minimum_bootstrap_completion: 0.90,
+            minimum_critical_direction_stability: 0.90,
+            maximum_bootstrap_brier_ci_high: 0.0,
+            max_ece_worsening: 0.005,
+            maximum_single_feature_share: 0.35,
+            maximum_average_adjustment_mmr: 0.10,
+            maximum_cap_hit_rate: 0.05,
+            require_account_coverage: true,
+            require_critical_ci_excludes_zero: true,
+            require_nonzero_reference_coefficients: true,
+        },
+    }
+}
+
+pub fn recompute_config_hash(artifact: &PerformanceModelArtifact) -> Result<String> {
+    let mut value = serde_json::to_value(artifact)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("模型产物结构无效"))?;
+    object.remove("config_hash");
+    let bytes = serde_json::to_vec(&value)?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
