@@ -27,7 +27,7 @@ impl LoginProgress {
     pub fn new(phase: LoginPhase, message: impl AsRef<str>) -> Self {
         Self {
             phase,
-            message: crate::credential_store::redact_sensitive_text(message.as_ref()),
+            message: message.as_ref().to_string(),
         }
     }
 }

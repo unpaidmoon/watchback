@@ -3,12 +3,89 @@ use chrono::Utc;
 use rusqlite::params;
 use std::io::Write;
 use std::path::Path;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotOutcome {
     Unchanged,
     Replaced,
     StaleRevision,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotBenchmark {
+    pub season: i64,
+    pub entries: usize,
+    pub details: usize,
+    pub errors: usize,
+    pub assemble_ms: u64,
+    pub serialize_ms: u64,
+    pub write_and_sync_ms: u64,
+    pub total_ms: u64,
+    pub output_bytes: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_output_parent_uses_current_directory_for_bare_filename() {
+        assert_eq!(
+            benchmark_output_parent(Path::new("benchmark.json")),
+            Path::new(".")
+        );
+    }
+}
+
+pub fn benchmark_snapshot(
+    db: &OwDatabase,
+    season: i64,
+    output: &Path,
+) -> Result<SnapshotBenchmark> {
+    db.initialize()?;
+    let total_started = Instant::now();
+
+    let assemble_started = Instant::now();
+    let payload = rebuild_complete_season_payload_initialized(
+        db,
+        season,
+        &json!({
+            "season": season,
+            "matches": {},
+        }),
+    )?;
+    let assemble_ms = assemble_started.elapsed().as_millis() as u64;
+    let entries = snapshot_array_count(&payload, "entries")?;
+    let details = snapshot_array_count(&payload, "details")?;
+    let errors = snapshot_array_count(&payload, "detail_errors")?;
+
+    let serialize_started = Instant::now();
+    let bytes = serde_json::to_vec_pretty(&payload)?;
+    let serialize_ms = serialize_started.elapsed().as_millis() as u64;
+
+    let write_and_sync_started = Instant::now();
+    let parent = benchmark_output_parent(output);
+    std::fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(&bytes)?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(output).map_err(|error| error.error)?;
+    let write_and_sync_ms = write_and_sync_started.elapsed().as_millis() as u64;
+
+    Ok(SnapshotBenchmark {
+        season,
+        entries,
+        details,
+        errors,
+        assemble_ms,
+        serialize_ms,
+        write_and_sync_ms,
+        total_ms: total_started.elapsed().as_millis() as u64,
+        output_bytes: bytes.len() as u64,
+    })
 }
 
 pub fn rebuild_snapshot_for_revision(
@@ -56,9 +133,8 @@ where
         .parent()
         .ok_or_else(|| anyhow!("season snapshot destination has no parent"))?;
     std::fs::create_dir_all(parent)?;
-    let sanitized = sanitize_snapshot_value(&payload);
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(temporary.as_file_mut(), &sanitized)?;
+    serde_json::to_writer_pretty(temporary.as_file_mut(), &payload)?;
     temporary.as_file_mut().flush()?;
     temporary.as_file().sync_all()?;
 
@@ -106,6 +182,14 @@ pub fn rebuild_complete_season_payload(
     current_fetch_payload: &Value,
 ) -> Result<Value> {
     db.initialize()?;
+    rebuild_complete_season_payload_initialized(db, season, current_fetch_payload)
+}
+
+fn rebuild_complete_season_payload_initialized(
+    db: &OwDatabase,
+    season: i64,
+    current_fetch_payload: &Value,
+) -> Result<Value> {
     let conn = db.connect()?;
     let transaction = conn.unchecked_transaction()?;
 
@@ -153,24 +237,22 @@ pub fn rebuild_complete_season_payload(
     matches.insert("details".to_string(), Value::Array(details));
     matches.insert("detail_errors".to_string(), Value::Array(detail_errors));
 
-    Ok(sanitize_snapshot_value(&rebuilt))
+    Ok(rebuilt)
 }
 
-fn sanitize_snapshot_value(value: &Value) -> Value {
-    redact_snapshot_strings(&crate::redaction::sanitize_persisted_json(value))
+fn benchmark_output_parent(output: &Path) -> &Path {
+    output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
 }
 
-fn redact_snapshot_strings(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(key, child)| (key.clone(), redact_snapshot_strings(child)))
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.iter().map(redact_snapshot_strings).collect()),
-        Value::String(text) => Value::String(crate::redaction::redact_sensitive_text(text)),
-        _ => value.clone(),
-    }
+fn snapshot_array_count(payload: &Value, field: &str) -> Result<usize> {
+    payload
+        .pointer(&format!("/matches/{field}"))
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .ok_or_else(|| anyhow!("rebuilt snapshot matches.{field} must be an array"))
 }
 
 fn parse_rows(

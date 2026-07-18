@@ -37,7 +37,7 @@ fn normalize_incremental_detail_outcomes(
     }
 
     let mut errors_by_id = HashMap::new();
-    for error in sanitize_detail_errors(detail_errors) {
+    for error in normalize_detail_errors(detail_errors) {
         let Some(match_id) =
             string_field(&error, "match_id").filter(|id| attempted_detail_ids.contains(id))
         else {
@@ -66,10 +66,9 @@ pub fn write_season_payload(output_dir: &Path, season: i64, payload: &Value) -> 
     std::fs::create_dir_all(output_dir)
         .with_context(|| format!("failed to create output directory {}", output_dir.display()))?;
     let path = output_dir.join(format!("local_s{season}_full_season.json"));
-    let sanitized = crate::redaction::sanitize_persisted_json(payload);
     let mut temporary = tempfile::NamedTempFile::new_in(output_dir)
         .with_context(|| format!("failed to create temporary season payload for S{season}"))?;
-    serde_json::to_writer_pretty(temporary.as_file_mut(), &sanitized)
+    serde_json::to_writer_pretty(temporary.as_file_mut(), payload)
         .with_context(|| format!("failed to serialize season payload for S{season}"))?;
     temporary
         .as_file_mut()
@@ -99,7 +98,7 @@ pub fn sync_import_parts(
 ) -> Result<SyncSummary> {
     db.initialize()?;
     let total = entries.len();
-    let safe_detail_errors = sanitize_detail_errors(detail_errors);
+    let detail_errors = normalize_detail_errors(detail_errors);
     let payload = json!({
         "input_bnet": cached_player.get("input_bnet").cloned().unwrap_or(Value::Null),
         "resolved_bnet": cached_player.get("resolved_bnet").cloned().unwrap_or(Value::Null),
@@ -110,7 +109,7 @@ pub fn sync_import_parts(
             "total": entries.len(),
             "entries": entries,
             "details": details,
-            "detail_errors": safe_detail_errors,
+            "detail_errors": detail_errors,
         }
     });
     let import_summary = import_payload_value_embedded(db, &payload)?;
@@ -163,7 +162,7 @@ pub(super) fn sync_import_incremental_parts(
 ) -> Result<SyncSummary> {
     db.initialize()?;
     let total = entries.len();
-    let (details, safe_detail_errors) =
+    let (details, detail_errors) =
         normalize_incremental_detail_outcomes(details, detail_errors, &attempted_detail_ids);
     let payload = json!({
         "input_bnet": cached_player.get("input_bnet").cloned().unwrap_or(Value::Null),
@@ -175,7 +174,7 @@ pub(super) fn sync_import_incremental_parts(
             "total": entries.len(),
             "entries": entries,
             "details": details,
-            "detail_errors": safe_detail_errors,
+            "detail_errors": detail_errors,
         }
     });
     let import_summary = crate::importer::import_incremental_payload_value_embedded(
@@ -318,7 +317,7 @@ mod tests {
                 "payload": {
                     "code": 0,
                     "data": [],
-                    "customerToken": "private-token"
+                    "customerToken": "synthetic-private-token"
                 }
             })],
             vec![],
@@ -329,7 +328,7 @@ mod tests {
         let (details_count, message, raw_json, errors_count) = persisted_error_state(&db);
         assert_eq!(details_count, 0);
         assert_eq!(message, "详情响应无有效数据");
-        assert!(!raw_json.contains("private-token"));
+        assert!(!raw_json.contains("synthetic-private-token"));
         assert_eq!(summary.failed_details, 1);
         assert_eq!(summary.latest_errors, vec!["详情响应无有效数据"]);
         assert_eq!(errors_count, 1);

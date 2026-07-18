@@ -22,10 +22,8 @@ mod match_evaluation;
 mod match_favorites;
 mod models;
 pub mod player_target;
-mod privacy_migration;
 mod queries;
 pub mod ranking;
-mod redaction;
 mod review;
 pub mod season_fetch;
 mod settings;
@@ -34,6 +32,7 @@ mod sync_coordinator;
 
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use background_sync::{BackgroundEventSink, BackgroundSeasonSyncManager};
+pub use commands::runtime_error_message;
 pub use db::OwDatabase;
 pub use importer::{
     import_full_season_payload, import_incremental_payload_value_embedded, import_payload_value,
@@ -43,10 +42,14 @@ pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSIO
 pub use match_favorites::{delete_match_favorite, get_match_favorite, save_match_favorite};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
-pub use redaction::redact_sensitive_json;
 pub use review::{get_onboarding_status, get_personal_season_review};
 #[doc(hidden)]
 pub use sync::write_season_payload;
+#[doc(hidden)]
+pub use sync::{
+    benchmark_snapshot, rebuild_complete_season_payload, rebuild_snapshot_for_revision,
+    rebuild_snapshot_for_revision_with_hook, SnapshotBenchmark, SnapshotOutcome,
+};
 pub use sync::{
     build_page_diagnostics, classify_quick_page, commit_quick_list_probe, dump_season_json,
     dump_season_json_with_base_url, load_season_sync_inventory,
@@ -62,11 +65,6 @@ pub use sync::{
     sync_season_with_progress, BackgroundRunSummary, ClaimedSeasonJob, DetailSelection,
     ModeSyncInventory, ModeWork, QuickPageDecision, RequestShape, SeasonBackgroundStatus,
     SeasonModeKey, SeasonSyncInventory, SeasonSyncStore,
-};
-#[doc(hidden)]
-pub use sync::{
-    rebuild_complete_season_payload, rebuild_snapshot_for_revision,
-    rebuild_snapshot_for_revision_with_hook, SnapshotOutcome,
 };
 
 pub fn run() {

@@ -1,7 +1,7 @@
 # OWStatsLocal 当前开发状态
 
-> 更新日期：2026-07-14
-> 稳定化阶段：STAB-007 已验证。资源、运行路径、同步身份、隐私持久化、数据库恢复、核心模块职责边界与统一验证入口均已收口。
+> 更新日期：2026-07-18
+> 稳定化阶段：STAB-007 已验证。资源、运行路径、同步身份、原始运行时数据边界、数据库恢复、核心模块职责边界与统一验证入口均已收口。
 
 ## 产品与架构
 
@@ -18,7 +18,7 @@
 - `ow-lookups.json` 是前端和 Rust importer 共用的最小正式字典；桌面运行不再读取 ignored `docs/reference` 或仓库 `data/players`。
 - `AppPaths` 统一派生数据库、设置、资料、凭据、旧 target、浏览器 profile、seasons、diagnostics 和 backups；桌面同步 JSON 直接写入 `app_data/seasons`。
 - 同步只使用当前浏览器登录账号的凭据身份；登录流程会从带“战网昵称”标签的当前页面文本自动识别 BattleTag，再通过 `searchBnetAccount` 与 `queryCard` 两阶段校验后建立目标。产品不再提供任意 BattleTag 输入或绑定命令；账号与目标未确认一致时不能解锁同步。
-- 新写入的赛季 JSON、SQLite raw JSON、同步错误和前端可见错误都经过统一递归脱敏。首次打开旧数据库会先备份 SQLite/赛季 JSON 至 `privacy-backups`，再对旧数据进行幂等清洗；不读取或操作旧 target 文件、真实凭据、浏览器 profile、真实数据库或玩家 dump。
+- 新写入的赛季 JSON、SQLite raw JSON、同步错误和既有前端错误面均原样保留上游自然出现的字段与错误文本，不执行运行时递归脱敏或遮盖。历史隐私迁移已退休：初始化不重写旧 SQLite 或赛季 JSON，既有 privacy backup、marker 和已脱敏历史保持原状，不重抓或恢复历史值；仍不读取或操作真实凭据、浏览器 profile、真实数据库或玩家 dump。
 - SQLite 使用显式 v1-v4 迁移注册表；旧库升级前生成一致性副本至 `app_data/backups`，新库不生成冗余备份。所有连接统一配置 WAL、NORMAL 和 5 秒锁等待，且高于程序版本的数据库会被拒绝打开。
 - 同步错误按赛季保存为最新快照，重复同步不增长；桌面端只允许一个赛季同步在运行，中断导入会回滚，移除故障后可以重试。
 - 核心 Rust 代码已从单文件拆为 `queries/`、`review/`、`sync/` 的兼容 façade 与内部职责模块；对局详情和指挥台赛季健康卡均为独立 React 组件，URL、DTO、路由与用户可见中文保持原契约。

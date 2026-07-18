@@ -249,10 +249,7 @@ impl CdpPage {
                 continue;
             }
             if let Some(exception) = payload.get("exceptionDetails") {
-                return Err(anyhow!(
-                    "{}",
-                    crate::credential_store::redact_sensitive_text(&exception.to_string())
-                ));
+                return Err(anyhow!(exception.to_string()));
             }
             return Ok(payload
                 .get("result")

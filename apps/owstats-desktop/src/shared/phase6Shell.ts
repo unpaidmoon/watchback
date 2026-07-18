@@ -127,18 +127,11 @@ export function commandCenterMetrics(status: OnboardingStatus | null): CommandMe
 }
 
 export function productErrorMessage(error: unknown): string {
-  const text = String(error);
-
-  if (text.includes("invoke") || text.includes("__TAURI__") || text.includes("__TAURI_INTERNALS__")) {
-    return "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
+  if (error === null || error === undefined) {
+    return "请求失败，请稍后重新加载。";
   }
-
-  const productText = text
-    .replace(/^(?:(?:Error|TypeError|RangeError|ReferenceError|SyntaxError):\s*)+/i, "")
-    .trim();
-  return /[\u3400-\u9fff]/.test(productText)
-    ? productText
-    : "请求失败，请稍后重新加载。";
+  const message = String(error);
+  return message === "" ? "请求失败，请稍后重新加载。" : message;
 }
 
 export function hasDesktopBackend(host: unknown = globalThis): boolean {

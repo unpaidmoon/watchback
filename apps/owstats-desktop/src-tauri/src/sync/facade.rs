@@ -608,10 +608,7 @@ fn query_season_database_totals_after_commit(
 }
 
 fn committed_snapshot_update_error(error: impl std::fmt::Display) -> anyhow::Error {
-    anyhow!(
-        "数据库更新成功，但本地快照更新失败：{}",
-        crate::redaction::redact_sensitive_text(&error.to_string())
-    )
+    anyhow!("数据库更新成功，但本地快照更新失败：{error}")
 }
 
 pub async fn dump_season_json(
@@ -682,14 +679,13 @@ mod tests {
     }
 
     #[test]
-    fn committed_snapshot_error_redacts_sensitive_text() {
-        let error = committed_snapshot_update_error(anyhow!(
-            "request failed token=synthetic-secret customerToken=synthetic-player-key"
-        ));
-        let message = error.to_string();
+    fn committed_snapshot_error_preserves_original_text() {
+        let source = "request failed token=synthetic-secret customerToken=synthetic-player-key";
+        let error = committed_snapshot_update_error(anyhow!(source));
 
-        assert!(message.starts_with("数据库更新成功，但本地快照更新失败："));
-        assert!(!message.contains("synthetic-secret"));
-        assert!(!message.contains("synthetic-player-key"));
+        assert_eq!(
+            error.to_string(),
+            format!("数据库更新成功，但本地快照更新失败：{source}")
+        );
     }
 }

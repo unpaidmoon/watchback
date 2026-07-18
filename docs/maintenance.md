@@ -59,11 +59,13 @@ npm run tauri build
 - Check `git status --short` before every commit and before release. Only intentional source and documentation changes should be listed.
 - If a change modifies the SQLite schema, add or update migration tests. At minimum, cover initializing the database twice so migrations stay idempotent.
 
-## Privacy Migration
+## 原始运行时数据与历史记录
 
-- 桌面程序初始化数据库时会执行一次 `privacy_sanitization_v1`：仅处理 app data 下的 SQLite raw 字段和 `seasons/` JSON，并先写入 `privacy-backups/<timestamp>/` 备份。
-- 迁移会递归删除 token、cookie、authorization、credential 和 storage 类键；失败时不会写完成 marker，可在修复环境后安全重试。
-- 不要手动删除 `privacy-backups` 以掩盖问题；它可能是恢复旧数据的唯一副本。凭据、浏览器 profile 和旧 `.dashen_player_target.json` 不属于该迁移的读取或备份范围。
+- 上游自然出现的字段和错误文本在抓取、导入、SQLite、赛季快照、查询 raw JSON 与既有错误面中原样通过；不得重新加入运行时递归脱敏、遮盖、清理、空操作或功能开关。
+- 不主动把凭据文件中的 token、customerToken、cookie、authorization 或 credential 复制到原本不包含它们的 DTO、账号索引、登录进度或后台事件、日志及其他 payload；账号和事件的现有字段最小化约束保持不变。
+- 数据库初始化不再重写历史 raw JSON 或赛季文件；既有 privacy backup、marker 与已存在数据仅为兼容而保留，不主动删除、重抓或恢复历史已脱敏值。
+- 赛季快照重建只组装一次并直接原子序列化；临时文件、`sync_all`、revision 稳定性检查和原子替换语义保持不变。
+- 快照性能基准只可对复制后的本地 SQLite 与临时输出运行，输出仅含 season、entries、details、errors、阶段耗时和输出字节数；不得打印 ID、路径、数据库行、payload 或凭据，临时副本和输出由操作者清理。
 
 ## 多账号运行时数据
 
@@ -73,7 +75,7 @@ npm run tauri build
 - 首次升级旧版单账号数据时，后端先复制到临时目录并校验内容，再发布到已确认账号目录，最后清理旧文件。迁移 journal 用于断电恢复；不要手工移动、修改或删除未完成 journal。
 - “退出账号”会永久删除该账号目录中的凭据与本地数据库等全部账号数据。删除失败时保留恢复 journal，重启应用后应先完成恢复；恢复完成前不得继续添加、切换、重新登录或删除账号。
 - 凭据过期只影响需要上游登录的操作，不应阻止用户读取该账号已保存的本地数据；使用“重新登录”刷新当前账号凭据。
-- 安全排障只能记录账号数量、当前账号是否存在、凭据状态和脱敏错误分类。不得复制账号列表、BattleTag、真实目录内容、角色私密标识、凭据、浏览器 profile 或数据库内容到日志和报告。
+- 安全排障只能记录账号数量、当前账号是否存在、凭据状态和错误分类。不得复制账号列表、BattleTag、真实目录内容、角色私密标识、凭据、浏览器 profile、数据库内容或错误正文到日志和报告。
 - 索引损坏、活动账号目录缺失或恢复失败时应停止账号域命令并显示中文安全错误。不要通过编辑 `accounts.json` 或拼接 `account_id` 路径绕过校验。
 
 ## Database Migrations and Sync Stability

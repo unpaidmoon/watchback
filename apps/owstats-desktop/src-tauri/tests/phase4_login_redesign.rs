@@ -1,6 +1,7 @@
+use owstats_desktop_lib::account_store::AccountId;
 use owstats_desktop_lib::browser_session::{build_browser_command, choose_debug_port};
 use owstats_desktop_lib::credential_store::{
-    credential_status_for_path, redact_sensitive_text, save_credentials_atomic, DashenCredentials,
+    credential_status_for_path, save_credentials_atomic, DashenCredentials,
 };
 use owstats_desktop_lib::credentials::{
     LoginCaptureIdentity, LoginIdentityTracker, PairedIdentityStatus,
@@ -10,7 +11,7 @@ use owstats_desktop_lib::dashen_auth::{
     extract_battle_tag, extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
     is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
 };
-use owstats_desktop_lib::login_flow::{LoginPhase, LoginProgress};
+use owstats_desktop_lib::login_target::LoginTargetCoordinator;
 
 #[test]
 fn browser_capture_is_separate_from_final_credential_persistence() {
@@ -48,17 +49,15 @@ fn product_login_handlers_only_expose_staged_account_flows() {
 }
 
 #[test]
-fn login_progress_never_exposes_sensitive_values() {
-    let progress = LoginProgress::new(
-        LoginPhase::TokenPending,
-        "token=abc customerToken=def cookie=ghi role_id=123456",
-    );
+fn login_target_failure_preserves_synthetic_error_fragments() {
+    let coordinator = LoginTargetCoordinator::default();
+    let account_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
+    let source = "token=synthetic-login-token Authorization: Bearer synthetic-login-header cookie=synthetic-login-cookie";
 
-    assert_eq!(progress.phase, LoginPhase::TokenPending);
-    assert!(!progress.message.contains("abc"));
-    assert!(!progress.message.contains("def"));
-    assert!(!progress.message.contains("ghi"));
-    assert!(progress.message.contains("role_id=123456"));
+    let status = coordinator.replace_bind_failed(&account_id, 123456, "Synthetic#1234", source);
+
+    assert_eq!(status.state, "bindFailed");
+    assert_eq!(status.message, format!("自动绑定失败：{source}"),);
 }
 
 #[test]
@@ -690,7 +689,7 @@ fn missing_signature_helper_is_detected_as_recoverable() {
 }
 
 #[test]
-fn credential_status_and_progress_redact_secrets() {
+fn credential_status_does_not_publish_stored_secrets() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join(".dashen_credentials.json");
     save_credentials_atomic(
@@ -711,8 +710,4 @@ fn credential_status_and_progress_redact_secrets() {
     assert_eq!(status.role_id, Some(123456));
     assert!(!status.message.contains("secret-token"));
     assert!(!status.message.contains("customer-secret"));
-    assert_eq!(
-        redact_sensitive_text("token=secret-token cookie=abc customerToken=def"),
-        "token=***REDACTED*** cookie=***REDACTED*** customerToken=***REDACTED***"
-    );
 }

@@ -6,7 +6,6 @@ use crate::models::{
     MatchDetailView, MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary,
     PlayerPerk, PlayerRow, PlayerSearchOption, SameRoleComparison,
 };
-use crate::redaction::redact_sensitive_json;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use rusqlite::{params, OptionalExtension, ToSql};

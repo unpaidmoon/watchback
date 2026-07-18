@@ -262,11 +262,10 @@ fn upsert_list_entry(
     entry: &Value,
     now: &str,
 ) -> Result<()> {
-    let sanitized = crate::redaction::sanitize_persisted_json(entry);
-    let match_id = crate::importer::string_field(&sanitized, "matchId").unwrap_or_default();
-    let mode = crate::importer::normalized_game_mode(&sanitized);
-    let map_guid = crate::importer::string_field(&sanitized, "mapGuid").unwrap_or_default();
-    let hero_guid = crate::importer::string_field(&sanitized, "heroGuid").unwrap_or_default();
+    let match_id = crate::importer::string_field(entry, "matchId").unwrap_or_default();
+    let mode = crate::importer::normalized_game_mode(entry);
+    let map_guid = crate::importer::string_field(entry, "mapGuid").unwrap_or_default();
+    let hero_guid = crate::importer::string_field(entry, "heroGuid").unwrap_or_default();
     tx.execute(
         r#"
         INSERT INTO matches (
@@ -311,20 +310,20 @@ fn upsert_list_entry(
             crate::importer::bucket_for(&mode, match_kind),
             mode,
             match_kind,
-            crate::importer::result_label(crate::importer::int_field(&sanitized, "matchRet")),
+            crate::importer::result_label(crate::importer::int_field(entry, "matchRet")),
             map_guid,
             hero_guid,
-            crate::importer::normalize_timestamp(crate::importer::int_field(&sanitized, "beginTs")),
-            crate::importer::int_field(&sanitized, "teamScore"),
-            crate::importer::int_field(&sanitized, "opponentScore"),
-            crate::importer::int_field(&sanitized, "kill"),
-            crate::importer::int_field(&sanitized, "assist"),
-            crate::importer::int_field(&sanitized, "death"),
-            crate::importer::int_field(&sanitized, "heroDamage"),
-            crate::importer::int_field(&sanitized, "cure"),
-            crate::importer::int_field(&sanitized, "resistDamage"),
-            crate::importer::int_field(&sanitized, "totalWorth"),
-            serde_json::to_string(&sanitized)?,
+            crate::importer::normalize_timestamp(crate::importer::int_field(entry, "beginTs")),
+            crate::importer::int_field(entry, "teamScore"),
+            crate::importer::int_field(entry, "opponentScore"),
+            crate::importer::int_field(entry, "kill"),
+            crate::importer::int_field(entry, "assist"),
+            crate::importer::int_field(entry, "death"),
+            crate::importer::int_field(entry, "heroDamage"),
+            crate::importer::int_field(entry, "cure"),
+            crate::importer::int_field(entry, "resistDamage"),
+            crate::importer::int_field(entry, "totalWorth"),
+            serde_json::to_string(entry)?,
             now
         ],
     )?;

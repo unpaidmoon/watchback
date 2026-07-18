@@ -9,7 +9,8 @@ use owstats_desktop_lib::{
     sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
-    sync_season_with_current_account_credentials_path_output_dir_base_url, OwDatabase, SyncMode,
+    sync_season_with_current_account_credentials_path_output_dir_base_url, write_season_payload,
+    OwDatabase, SyncMode,
 };
 use rusqlite::params;
 use std::io::{Read, Write};
@@ -365,7 +366,7 @@ async fn dashen_client_retries_http_429_with_backoff() {
 }
 
 #[tokio::test]
-async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
+async fn full_season_fetch_preserves_naturally_occurring_upstream_fields() {
     use owstats_desktop_lib::dashen_client::DashenCredentials;
     use owstats_desktop_lib::season_fetch::{fetch_full_season_with_base_url, FullSeasonRequest};
 
@@ -390,6 +391,10 @@ async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
     .await
     .unwrap();
 
+    let temp = tempfile::tempdir().unwrap();
+    let written = write_season_payload(temp.path(), 23, &fetch.payload).unwrap();
+    let written_payload: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(written).unwrap()).unwrap();
     let text = serde_json::to_string(&fetch.payload).unwrap();
     assert_eq!(fetch.entries, 3);
     assert_eq!(fetch.details, 2);
@@ -421,14 +426,64 @@ async fn full_season_fetch_never_persists_local_or_upstream_tokens() {
             .len(),
         1
     );
+    let detail_error = fetch.payload["matches"]["detail_errors"][0]["message"]
+        .as_str()
+        .expect("detail fetch error has a message");
+    assert!(detail_error.contains("HTTP status server error (500 Internal Server Error)"));
+    assert!(detail_error.contains("token=player-customer-token"));
     assert!(!fetch.payload["matches"]["list_pages"]
         .as_array()
         .unwrap()
         .is_empty());
+    assert_eq!(
+        fetch.payload["matches"]["details"][0]["payload"]["data"]["customerToken"],
+        "detail-secret"
+    );
+    assert_eq!(
+        written_payload["matches"]["details"][0]["payload"]["data"]["customerToken"],
+        "detail-secret"
+    );
     assert!(fetch.payload.get("customer_token").is_none());
-    assert!(!text.contains("player-customer-token"));
-    assert!(!text.contains("detail-secret"));
+    assert!(text.contains("player-customer-token"));
     assert!(!text.contains("account-auth-token"));
+}
+
+#[tokio::test]
+async fn dashen_client_returns_unexpected_redirect_status_without_panicking() {
+    use owstats_desktop_lib::dashen_client::{DashenClient, DashenCredentials};
+
+    let server = spawn_status_server("302 Found", 2);
+    let client = DashenClient::new(
+        DashenCredentials {
+            role_id: 123,
+            token: "synthetic-account-token".to_string(),
+            dts: Some(2026),
+            server: 1,
+        },
+        format!("{}/customer", server.base_url),
+    )
+    .unwrap();
+
+    let get_error = client
+        .query_match_list("synthetic-player-token", "sport", 1, Some(23))
+        .await
+        .unwrap_err()
+        .to_string();
+    let post_error = client
+        .search_bnet_account("Synthetic#1234")
+        .await
+        .unwrap_err()
+        .to_string();
+
+    for error in [get_error, post_error] {
+        assert!(error.contains("unexpected HTTP status 302 Found"));
+        assert_ne!(error, "unexpected HTTP status 302 Found");
+    }
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests
+        .iter()
+        .any(|request| request.body.contains(r#""name":"Synthetic#1234""#)));
 }
 
 #[tokio::test]
@@ -1517,17 +1572,21 @@ async fn quick_budget_defers_deep_history_until_full_fetch_and_rebuilds_a_safe_s
     let snapshot = std::fs::read_to_string(season_dir.join("local_s23_full_season.json")).unwrap();
     assert!(snapshot.contains("known-sport"));
     assert!(snapshot.contains("deep-late-match"));
-    for sensitive in [
-        "synthetic-account-secret",
-        "synthetic-player-key",
+    for credential_from_request in ["synthetic-account-secret", "synthetic-player-key"] {
+        assert!(
+            !snapshot.contains(credential_from_request),
+            "rebuilt snapshot must not append {credential_from_request} from the request"
+        );
+    }
+    for upstream_detail_field in [
         "synthetic-detail-token",
         "synthetic-authorization-secret",
         "customerToken",
         "authorization",
     ] {
         assert!(
-            !snapshot.contains(sensitive),
-            "rebuilt snapshot leaked {sensitive}"
+            snapshot.contains(upstream_detail_field),
+            "rebuilt snapshot must preserve {upstream_detail_field} from the upstream detail"
         );
     }
 }
@@ -1918,13 +1977,14 @@ async fn full_fetch_invalid_refresh_preserves_old_detail_and_player_index_and_re
             |row| row.get(0),
         )
         .unwrap();
+    assert!(error_message.contains("HTTP status server error (500 Internal Server Error)"));
+    assert!(error_message.contains("token=synthetic-player-key"));
     assert!(!error_message.contains("synthetic-account-secret"));
-    assert!(!error_message.contains("synthetic-player-key"));
     let snapshot = std::fs::read_to_string(season_dir.join("local_s23_full_season.json")).unwrap();
     assert!(snapshot.contains("metric-invalid"));
     assert!(snapshot.contains("old-player"));
     assert!(!snapshot.contains("synthetic-account-secret"));
-    assert!(!snapshot.contains("synthetic-player-key"));
+    assert!(snapshot.contains("synthetic-player-key"));
 }
 
 #[derive(Clone, Debug)]
@@ -2078,6 +2138,42 @@ fn spawn_recording_server(routes: Vec<(&'static str, &'static str)>) -> Recordin
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    RecordingServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
+}
+
+fn spawn_status_server(status: &'static str, requests_to_serve: usize) -> RecordingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming().take(requests_to_serve) {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let mut buffer = [0_u8; 8192];
+            let Ok(read) = stream.read(&mut buffer) else {
+                continue;
+            };
+            let mut request_bytes = buffer[..read].to_vec();
+            read_remaining_body(&mut stream, &mut request_bytes);
+            let request = String::from_utf8_lossy(&request_bytes);
+            captured.lock().unwrap().push(RecordedRequest {
+                first_line: request.lines().next().unwrap_or_default().to_string(),
+                headers: String::new(),
+                body: request
+                    .split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_string())
+                    .unwrap_or_default(),
+            });
+            let response =
+                format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             let _ = stream.write_all(response.as_bytes());
         }
     });

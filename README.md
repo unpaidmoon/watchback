@@ -8,6 +8,7 @@ OWStatsLocal 是一个 Windows 优先的守望先锋本地数据分析桌面应�
 - 单用户、本机数据路径。
 - 桌面端登录网易大神，同步赛季数据到本地 SQLite。
 - 不提交 token、cookie、customerToken、浏览器 profile、原始玩家隐私数据。
+- 运行时业务 raw JSON 按上游内容原样保留；应用不会主动把登录凭据扩散到新的输出面。
 
 ## 功能
 

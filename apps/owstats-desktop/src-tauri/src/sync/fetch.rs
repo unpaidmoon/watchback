@@ -98,7 +98,7 @@ pub(super) async fn fetch_season_parts_with_base_url(
             Err(error) => detail_errors.push(json!({
                 "match_id": match_id,
                 "error_type": "DetailFetchError",
-                "message": safe_error_message(&error.to_string()),
+                "message": error.to_string(),
             })),
         }
         let latest_errors = detail_errors

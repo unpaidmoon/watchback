@@ -50,6 +50,7 @@ import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress } from "../shared/types";
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
+const browserPreviewLoginHint = "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
 
 let dashboardCache: DashboardSnapshot | null = null;
 
@@ -354,6 +355,10 @@ export function OnboardingPage() {
   }
 
   function runAddAccount() {
+    if (!hasDesktopBackend()) {
+      setError(browserPreviewLoginHint);
+      return Promise.resolve(false);
+    }
     return runAddAccountOperation({
       ...accountOperationLifecycle(),
       invoke: addAccount,
@@ -361,6 +366,10 @@ export function OnboardingPage() {
   }
 
   function runReloginAccount(account: AccountSummary) {
+    if (!hasDesktopBackend()) {
+      setError(browserPreviewLoginHint);
+      return Promise.resolve(false);
+    }
     return runReloginAccountOperation(account, {
       ...accountOperationLifecycle(),
       invoke: () => reloginAccount(account.accountId),

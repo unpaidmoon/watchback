@@ -14,7 +14,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-const SAFE_LOGIN_ERROR: &str = "账号登录处理失败，请重试。";
 const LOGIN_OPERATION_VERSION: u32 = 1;
 const JOURNAL_FILE: &str = "operation.json";
 const OLD_MANIFEST_FILE: &str = "old-manifest.json";
@@ -452,7 +451,7 @@ pub fn publish_add_account(
     manager: &AccountContextManager,
     capture: LoginCapture,
 ) -> Result<AccountLoginResult> {
-    let mut result = publish_add_account_inner(manager, capture).map_err(publication_error)?;
+    let mut result = publish_add_account_inner(manager, capture)?;
     if let Some(account_id) = result
         .account_id
         .as_deref()
@@ -518,15 +517,7 @@ pub fn publish_relogin_account(
     expected_account_id: &AccountId,
     capture: LoginCapture,
 ) -> Result<AccountLoginResult> {
-    publish_relogin_account_inner(manager, expected_account_id, capture).map_err(publication_error)
-}
-
-fn publication_error(error: anyhow::Error) -> anyhow::Error {
-    if error.to_string() == crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR {
-        anyhow!(crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR)
-    } else {
-        anyhow!(SAFE_LOGIN_ERROR)
-    }
+    publish_relogin_account_inner(manager, expected_account_id, capture)
 }
 
 pub(crate) async fn capture_and_publish_relogin<F, Fut, R, C>(
@@ -542,16 +533,16 @@ where
     R: LoginProgressReporter,
     C: FnOnce() -> bool,
 {
-    manager.prepare_login_capture().map_err(publication_error)?;
+    manager.prepare_login_capture()?;
     let capture = match capture().await {
         Ok(capture) => capture,
         Err(_) if was_cancelled() => {
             progress.report(LoginPhase::Cancelled, "已取消登录等待。");
             bail!("登录已取消。")
         }
-        Err(_) => {
-            progress.report(LoginPhase::Failed, "登录失败，请重试。");
-            bail!("账号登录处理失败，请重试。")
+        Err(error) => {
+            progress.report(LoginPhase::Failed, &error.to_string());
+            return Err(error);
         }
     };
     progress.report(LoginPhase::Saving, "正在安全保存账号登录信息。");
@@ -565,11 +556,8 @@ where
             Ok(result)
         }
         Err(error) => {
-            progress.report(LoginPhase::Failed, "账号登录处理失败，请重试。");
-            if error.to_string() == crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR {
-                bail!(crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR)
-            }
-            bail!("账号登录处理失败，请重试。")
+            progress.report(LoginPhase::Failed, &error.to_string());
+            Err(error)
         }
     }
 }
@@ -586,16 +574,16 @@ where
     R: LoginProgressReporter,
     C: FnOnce() -> bool,
 {
-    manager.prepare_login_capture().map_err(publication_error)?;
+    manager.prepare_login_capture()?;
     let capture = match capture().await {
         Ok(capture) => capture,
         Err(_) if was_cancelled() => {
             progress.report(LoginPhase::Cancelled, "已取消登录等待。");
             bail!("登录已取消。")
         }
-        Err(_) => {
-            progress.report(LoginPhase::Failed, "登录失败，请重试。");
-            bail!("账号登录处理失败，请重试。")
+        Err(error) => {
+            progress.report(LoginPhase::Failed, &error.to_string());
+            return Err(error);
         }
     };
     progress.report(LoginPhase::Saving, "正在安全保存账号登录信息。");
@@ -605,11 +593,8 @@ where
             Ok(result)
         }
         Err(error) => {
-            progress.report(LoginPhase::Failed, "账号登录处理失败，请重试。");
-            if error.to_string() == crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR {
-                bail!(crate::account_context::ACCOUNT_DELETION_RECOVERY_ERROR)
-            }
-            bail!("账号登录处理失败，请重试。")
+            progress.report(LoginPhase::Failed, &error.to_string());
+            Err(error)
         }
     }
 }
@@ -1337,6 +1322,15 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingProgressMessages(Mutex<Vec<(LoginPhase, String)>>);
+
+    impl LoginProgressReporter for RecordingProgressMessages {
+        fn report(&self, phase: LoginPhase, message: &str) {
+            self.0.lock().unwrap().push((phase, message.to_string()));
+        }
+    }
+
     #[tokio::test]
     async fn capture_and_publish_relogin_reports_order_and_never_overwrites_on_mismatch() {
         let temp = tempfile::tempdir().unwrap();
@@ -1428,17 +1422,22 @@ mod tests {
         );
         assert!(!shared.pending_logins().exists());
 
-        let failed = RecordingProgress::default();
-        assert!(capture_and_publish_relogin(
+        let failed = RecordingProgressMessages::default();
+        let capture_error = "browser capture ended before account data was available";
+        let error = capture_and_publish_relogin(
             &manager,
             &account_id,
             &failed,
-            || async { Err(anyhow!("token=must-not-escape")) },
+            || async { Err(anyhow!(capture_error)) },
             || false,
         )
         .await
-        .is_err());
-        assert_eq!(*failed.0.lock().unwrap(), vec![LoginPhase::Failed]);
+        .unwrap_err();
+        assert_eq!(error.to_string(), capture_error);
+        assert_eq!(
+            *failed.0.lock().unwrap(),
+            vec![(LoginPhase::Failed, capture_error.to_string())]
+        );
 
         let cancelled = RecordingProgress::default();
         let before_cancel = fs::read(shared.account(&account_id).credentials()).unwrap();
@@ -1459,7 +1458,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn capture_and_publish_add_reports_saving_ready_and_safe_failure() {
+    async fn capture_and_publish_add_reports_saving_ready_and_preserves_capture_failure() {
         let temp = tempfile::tempdir().unwrap();
         let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
         let manager = AccountContextManager::load(shared).unwrap();
@@ -1478,16 +1477,72 @@ mod tests {
             vec![LoginPhase::Saving, LoginPhase::Ready]
         );
 
-        let failed = RecordingProgress::default();
-        assert!(capture_and_publish_add(
+        let failed = RecordingProgressMessages::default();
+        let capture_error = "browser capture returned an incomplete login response";
+        let error = capture_and_publish_add(
             &manager,
             &failed,
-            || async { Err(anyhow!("token=must-not-escape")) },
+            || async { Err(anyhow!(capture_error)) },
             || false,
         )
         .await
-        .is_err());
-        assert_eq!(*failed.0.lock().unwrap(), vec![LoginPhase::Failed]);
+        .unwrap_err();
+        assert_eq!(error.to_string(), capture_error);
+        assert_eq!(
+            *failed.0.lock().unwrap(),
+            vec![(LoginPhase::Failed, capture_error.to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_and_publish_add_preserves_publication_error_text_in_result_and_progress() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+        let progress = RecordingProgressMessages::default();
+        let original = "captured credentials are incomplete";
+
+        let error = capture_and_publish_add(
+            &manager,
+            &progress,
+            || async { Ok(capture("New#1011", "")) },
+            || false,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), original);
+        assert_eq!(
+            progress.0.lock().unwrap().last(),
+            Some(&(LoginPhase::Failed, original.to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_and_publish_relogin_preserves_publication_error_text_in_result_and_progress() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        let progress = RecordingProgressMessages::default();
+        let original = "captured credentials are incomplete";
+
+        let error = capture_and_publish_relogin(
+            &manager,
+            &account_id,
+            &progress,
+            || async { Ok(capture("Old#1011", "")) },
+            || false,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), original);
+        assert_eq!(
+            progress.0.lock().unwrap().last(),
+            Some(&(LoginPhase::Failed, original.to_string()))
+        );
     }
 
     fn install_existing(manager: &AccountContextManager, account_id: &AccountId) {

@@ -4,6 +4,8 @@ This document is the durable ledger for the OWStatsLocal main-thread workflow.
 Use it to recover decisions when a Codex session is compacted, restarted, or
 split into execution and verification threads.
 
+> **当前运行时数据政策（2026-07-18）**：本账本保留旧决定作历史记录；其中任何要求对运行时 raw JSON、错误文本或历史 SQLite/赛季 JSON 递归脱敏、遮盖或重写的条目，均已由 [`2026-07-18-remove-runtime-redaction-design.md`](2026-07-18-remove-runtime-redaction-design.md) 废止。当前以原始数据直通、禁止主动扩散凭据、以及保留发布资源和账号/event schema 防线为准。
+
 ## Main Thread Charter
 
 The active main thread owns:
@@ -34,11 +36,10 @@ details. Execution threads bring back concise evidence instead.
 - Confirm commands run from `D:\Codex\OW_data\owstats-local` or a deliberate
   subdirectory under it.
 - All user-facing frontend text must be Chinese.
-- Never print, commit, or expose `OW_DASHEN_TOKEN`, `customerToken`,
-  `data/.dashen_credentials.json`, cookies or browser storage under
-  `data/chrome-dashen-profile/`, or raw player privacy identifiers from local
-  API dumps.
-- Raw JSON viewers must redact token-like fields before display.
+- 不得主动把 `OW_DASHEN_TOKEN`、`customerToken`、
+  `data/.dashen_credentials.json`、cookie、`data/chrome-dashen-profile/`
+  下的浏览器存储或本地 API dump 的玩家私密标识复制到日志、提交、发布包、共享配置、账号/event 表面或新的 DTO/payload。上游自然出现的运行时 raw JSON 与错误文本仍按 2026-07-18 设计原样通过。
+- 正常对局的既有 raw JSON 查看面按存储内容原样返回；不得为显示重新加入运行时脱敏。战斗对局 raw JSON 为 `Null` 以及显示名/GUID 兜底仍是产品/schema 决策。
 - Do not touch generated artifacts, build output, `node_modules`, `target`,
   browser profiles, or local data dumps.
 - Keep narrow tasks narrow. Do not reopen product direction for region-scoped
@@ -90,9 +91,8 @@ Forbidden:
 
 Hard requirements:
 - All user-facing frontend text must be Chinese.
-- Do not print, commit, or expose OW_DASHEN_TOKEN, customerToken, local
-  credentials, cookies, browser storage, or raw player privacy identifiers.
-- Raw JSON/token-like fields must be redacted before display.
+- 不得主动从凭据存储或请求对象把 OW_DASHEN_TOKEN、customerToken、本地凭据、cookie、浏览器存储或玩家私密标识复制或新增到日志、提交、发布包、共享配置、账号/event 表面或新的 DTO/payload；运行时 raw JSON 或错误文本中自然出现的字段不构成违规。
+- 既有正常对局 raw JSON 面按存储内容原样返回；不得主动把凭据复制到账号、DTO、事件、日志或原本不含它们的 payload。
 - Keep the change local to the requested scope.
 
 Verification:
@@ -129,10 +129,9 @@ Execution report:
 Review focus:
 - Does the result satisfy the original task?
 - Are there unrelated changes?
-- Did the work expose OW_DASHEN_TOKEN, customerToken, local credentials,
-  cookies, browser storage, or raw player privacy identifiers?
+- 是否从凭据存储或请求对象主动把 OW_DASHEN_TOKEN、customerToken、本地凭据、cookie、浏览器存储或玩家私密标识复制或新增到日志、提交、发布包、共享配置、账号/event 表面或新的 DTO/payload？运行时 raw JSON 或错误文本中自然出现的字段不构成违规。
 - Is all user-facing frontend text Chinese?
-- Are raw JSON/token-like fields redacted before display?
+- 是否保持正常对局 raw JSON 原样返回、未主动把凭据复制到账号、DTO、事件、日志或新 payload？
 - Were reasonable verification commands run?
 - What risks remain before delivery?
 

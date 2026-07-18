@@ -344,19 +344,54 @@ assertEqual(
   "zero-total progress displays only its phase",
 );
 assertEqual(
-  productErrorMessage("TypeError: Cannot read properties of undefined (reading 'invoke')").includes("Tauri"),
-  true,
-  "tauri browser error becomes product copy",
+  productErrorMessage("TypeError: Cannot read properties of undefined (reading 'invoke')"),
+  "TypeError: Cannot read properties of undefined (reading 'invoke')",
+  "plain invoke errors remain unchanged",
 );
 assertEqual(
   productErrorMessage(new Error("合成视觉验收错误：排行请求失败，请重新加载。")),
-  "合成视觉验收错误：排行请求失败，请重新加载。",
-  "JavaScript Error prefixes must not leak into Chinese product copy",
+  "Error: 合成视觉验收错误：排行请求失败，请重新加载。",
+  "Error inputs retain their native prefix",
 );
 assertEqual(
   productErrorMessage(new Error("network request failed")),
+  "Error: network request failed",
+  "plain English errors remain unchanged",
+);
+assertEqual(
+  productErrorMessage("upstream rejected request; token=synthetic-test-fragment"),
+  "upstream rejected request; token=synthetic-test-fragment",
+  "token-like runtime error fragments remain unchanged",
+);
+assertEqual(
+  productErrorMessage(null),
   "请求失败，请稍后重新加载。",
-  "non-Chinese implementation errors must fall back to stable Chinese product copy",
+  "null errors use the stable product fallback",
+);
+assertEqual(
+  productErrorMessage(undefined),
+  "请求失败，请稍后重新加载。",
+  "undefined errors use the stable product fallback",
+);
+assertEqual(
+  productErrorMessage(""),
+  "请求失败，请稍后重新加载。",
+  "empty errors use the stable product fallback",
+);
+assertEqual(
+  productErrorMessage([]),
+  "请求失败，请稍后重新加载。",
+  "values with an empty string representation use the stable product fallback",
+);
+assertEqual(
+  /function runAddAccount\(\)\s*\{\s*if \(!hasDesktopBackend\(\)\) \{\s*setError\(browserPreviewLoginHint\);\s*return Promise\.resolve\(false\);\s*\}[\s\S]*?invoke: addAccount/.test(onboardingSource),
+  true,
+  "add-account browser preview selects its hint before invoking the backend",
+);
+assertEqual(
+  /function runReloginAccount\(account: AccountSummary\)\s*\{\s*if \(!hasDesktopBackend\(\)\) \{\s*setError\(browserPreviewLoginHint\);\s*return Promise\.resolve\(false\);\s*\}[\s\S]*?invoke: \(\) => reloginAccount\(account\.accountId\)/.test(onboardingSource),
+  true,
+  "relogin browser preview selects its hint before invoking the backend",
 );
 assertEqual(hasDesktopBackend({}), false, "plain browser has no desktop backend");
 assertEqual(hasDesktopBackend({ __TAURI_INTERNALS__: {} }), true, "tauri internals indicate desktop backend");

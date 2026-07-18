@@ -1,8 +1,9 @@
 use owstats_desktop_lib::credential_store::save_credentials_atomic;
 use owstats_desktop_lib::credentials::{
-    credential_status_for_path, redacted_login_error, select_browser, BrowserCandidate,
-    DashenCredentials,
+    credential_status_for_path, select_browser, BrowserCandidate, DashenCredentials,
 };
+use owstats_desktop_lib::login_flow::{LoginPhase, LoginProgress};
+use owstats_desktop_lib::AccountLoginResult;
 
 #[test]
 fn credential_status_accepts_saved_login_without_bound_player_target() {
@@ -59,9 +60,35 @@ fn browser_selection_prefers_chrome_then_edge() {
 }
 
 #[test]
-fn login_error_message_redacts_token_like_values() {
-    let message = redacted_login_error("token=abc customerToken=def cookie=ghi");
-    assert!(!message.contains("abc"));
-    assert!(!message.contains("def"));
-    assert!(!message.contains("ghi"));
+fn login_progress_preserves_error_text_without_adding_fields() {
+    let source = "token=abc customerToken=def cookie=ghi";
+    let progress = LoginProgress::new(LoginPhase::TokenPending, source);
+    let value = serde_json::to_value(progress).unwrap();
+
+    assert_eq!(value["message"], source);
+    assert_eq!(value.as_object().unwrap().len(), 2);
+    assert!(value.get("token").is_none());
+    assert!(value.get("customerToken").is_none());
+    assert!(value.get("credential").is_none());
+    assert!(value.get("roleId").is_none());
+}
+
+#[test]
+fn account_login_result_schema_has_no_credential_fields() {
+    let value = serde_json::to_value(AccountLoginResult {
+        kind: "newAccountAdded".to_string(),
+        account_id: Some("synthetic-account".to_string()),
+        battle_tag: Some("Synthetic#1000".to_string()),
+        message: "saved".to_string(),
+        should_offer_switch: false,
+    })
+    .unwrap();
+
+    assert_eq!(value.as_object().unwrap().len(), 5);
+    for field in ["token", "customerToken", "credential", "roleId"] {
+        assert!(
+            value.get(field).is_none(),
+            "login result must not expose {field}"
+        );
+    }
 }
