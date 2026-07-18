@@ -307,7 +307,6 @@ pub(crate) fn fit_hierarchical_model(
     variant: ModelVariant,
     strategy: MatrixStrategy,
     multiplier: f64,
-    steps: usize,
 ) -> Option<HierarchicalModel> {
     fit_model(
         rows,
@@ -315,7 +314,6 @@ pub(crate) fn fit_hierarchical_model(
         variant,
         strategy,
         &FitConfig {
-            steps,
             final_multiplier: multiplier,
             ..FitConfig::default()
         },
@@ -340,7 +338,7 @@ fn select_matrix_candidate(
             for fold in &inner {
                 let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
                 let Some(model) =
-                    fit_hierarchical_model(&train, role, variant, strategy, multiplier, 300)
+                    fit_hierarchical_model(&train, role, variant, strategy, multiplier)
                 else {
                     valid = false;
                     break;
@@ -391,14 +389,9 @@ pub fn evaluate_strategy(
         let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
         let train_rows = train.iter().map(|row| (*row).clone()).collect::<Vec<_>>();
         let fold_selected = select_matrix_candidate(&train_rows, role, strategy);
-        let Some(model) = fit_hierarchical_model(
-            &train,
-            role,
-            fold_selected.0,
-            strategy,
-            fold_selected.1,
-            300,
-        ) else {
+        let Some(model) =
+            fit_hierarchical_model(&train, role, fold_selected.0, strategy, fold_selected.1)
+        else {
             continue;
         };
         let a = fold
@@ -479,7 +472,7 @@ pub fn evaluate_strategy(
     let full = rows.iter().collect::<Vec<_>>();
     let full_selected = select_matrix_candidate(&rows, role, strategy);
     let selected = (full_selected.0, full_selected.1);
-    let model = fit_hierarchical_model(&full, role, selected.0, strategy, selected.1, 300);
+    let model = fit_hierarchical_model(&full, role, selected.0, strategy, selected.1);
     let proto = rows
         .first()
         .map(|r| role_vector(r, role, selected.0, strategy));
@@ -693,8 +686,7 @@ fn evaluate_raw_strategy(
         }
         let selected = select_candidate(&train, role, strategy);
         let refs = train_rows.iter().collect::<Vec<_>>();
-        let Some(model) =
-            fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1, 300)
+        let Some(model) = fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1)
         else {
             continue;
         };
@@ -762,7 +754,7 @@ fn evaluate_raw_strategy(
         .unwrap_or_default();
     let selected = select_candidate(source, role, strategy);
     let refs = full_rows.iter().collect::<Vec<_>>();
-    let model = fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1, 300);
+    let model = fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1);
     let names = full_rows
         .first()
         .map(|r| role_vector(r, role, selected.0, strategy).names)
@@ -880,7 +872,7 @@ pub(crate) fn select_candidate(
                 }
                 let train = train_rows.iter().collect::<Vec<_>>();
                 let Some(model) =
-                    fit_hierarchical_model(&train, role, variant, strategy, multiplier, 300)
+                    fit_hierarchical_model(&train, role, variant, strategy, multiplier)
                 else {
                     valid = false;
                     break;

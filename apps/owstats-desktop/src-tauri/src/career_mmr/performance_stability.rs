@@ -19,8 +19,6 @@ pub struct StabilityConfig {
     pub seed: u64,
     pub max_loo_worsened_fraction: f64,
     pub max_abs_average_adjustment: f64,
-    /// Deterministic projected-gradient steps for each hierarchical bootstrap refit.
-    pub optimizer_passes: usize,
 }
 impl Default for StabilityConfig {
     fn default() -> Self {
@@ -29,7 +27,6 @@ impl Default for StabilityConfig {
             seed: 0x5eed,
             max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
             max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
-            optimizer_passes: 12,
         }
     }
 }
@@ -87,22 +84,28 @@ pub struct CoefficientStability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BootstrapWorkEstimate {
     pub baseline_rebuilds: usize,
+    pub matrix_rows_rebuilt: usize,
+    pub model_fit_steps: usize,
     pub weighted_gradient_cells: usize,
     pub projected_updates: usize,
+    pub three_role_fits: usize,
 }
 pub fn bootstrap_work_estimate(
     rows: usize,
     features: usize,
     iterations: usize,
-    passes: usize,
 ) -> BootstrapWorkEstimate {
+    let steps = super::performance_model::MODEL_FIT_STEPS;
     BootstrapWorkEstimate {
         baseline_rebuilds: iterations,
+        matrix_rows_rebuilt: rows.saturating_mul(iterations),
+        model_fit_steps: steps.saturating_mul(iterations),
         weighted_gradient_cells: rows
             .saturating_mul(features)
-            .saturating_mul(passes)
+            .saturating_mul(steps)
             .saturating_mul(iterations),
-        projected_updates: features.saturating_mul(passes).saturating_mul(iterations),
+        projected_updates: features.saturating_mul(steps).saturating_mul(iterations),
+        three_role_fits: iterations.saturating_mul(3),
     }
 }
 
@@ -552,7 +555,7 @@ fn fit_split_model(
     selected: (ModelVariant, f64),
 ) -> Option<HierarchicalModel> {
     let refs = training.iter().collect::<Vec<_>>();
-    fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1, 300)
+    fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1)
 }
 
 pub fn clone_cluster_for_bootstrap(rows: &[TrainingRow], instance: usize) -> Vec<TrainingRow> {
@@ -586,8 +589,7 @@ fn bootstrap(
         .cloned()
         .unwrap_or_default();
     let full_refs = full_rows.iter().collect::<Vec<_>>();
-    let Some(full_model) =
-        fit_hierarchical_model(&full_refs, role, variant, strategy, multiplier, 300)
+    let Some(full_model) = fit_hierarchical_model(&full_refs, role, variant, strategy, multiplier)
     else {
         return BootstrapReport {
             requested_iterations: config.bootstrap_iterations,
@@ -643,14 +645,7 @@ fn bootstrap(
         let refs = tr.iter().collect::<Vec<_>>();
         // Each resample rebuilds fold-local baselines and refits the exact Task 5
         // hierarchical logit model with fixed selected hyperparameters.
-        let Some(model) = fit_hierarchical_model(
-            &refs,
-            role,
-            variant,
-            strategy,
-            multiplier,
-            config.optimizer_passes.max(1),
-        ) else {
+        let Some(model) = fit_resample_model(&refs, role, variant, strategy, multiplier) else {
             skipped += 1;
             continue;
         };
@@ -722,6 +717,16 @@ fn bootstrap(
         mean_auc: mean(&aucs),
         mean_ece: mean(&eces),
     }
+}
+
+fn fit_resample_model(
+    rows: &[&super::performance::MatrixRow],
+    role: Role,
+    variant: ModelVariant,
+    strategy: HealingTakenStrategy,
+    multiplier: f64,
+) -> Option<HierarchicalModel> {
+    fit_hierarchical_model(rows, role, variant, strategy, multiplier)
 }
 
 struct Lcg(u64);
@@ -840,7 +845,6 @@ mod hierarchical_bootstrap_tests {
             2.0,
             &StabilityConfig {
                 bootstrap_iterations: 3,
-                optimizer_passes: 3,
                 seed: 17,
                 ..Default::default()
             },
@@ -882,6 +886,38 @@ mod hierarchical_bootstrap_tests {
         assert_ne!(
             predict_probability(&model, &role_row),
             predict_probability(&model, &stadium_row)
+        );
+    }
+
+    #[test]
+    fn bootstrap_sample_fit_is_identical_to_the_formal_estimator() {
+        let training = (0..160)
+            .map(|i| row(i, ModeFamily::RoleCompetitive))
+            .chain((160..320).map(|i| row(i, ModeFamily::StadiumCompetitive)))
+            .collect::<Vec<_>>();
+        let matrix = build_feature_matrix(&training, &[], HealingTakenStrategy::None);
+        let rows = matrix.training_by_role.get("damage").unwrap();
+        let refs = rows.iter().collect::<Vec<_>>();
+        let formal = fit_hierarchical_model(
+            &refs,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None,
+            2.0,
+        )
+        .unwrap();
+        let bootstrap = fit_resample_model(
+            &refs,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None,
+            2.0,
+        )
+        .unwrap();
+        assert_eq!(bootstrap, formal);
+        assert_eq!(
+            predict_probability(&bootstrap, &rows[0]),
+            predict_probability(&formal, &rows[0])
         );
     }
 }

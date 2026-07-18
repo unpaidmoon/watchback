@@ -688,10 +688,24 @@ fn bootstrap_work_estimate_and_hundred_iteration_smoke_are_bounded() {
     use owstats_desktop_lib::career_mmr::performance_stability::{
         bootstrap_work_estimate, StabilityConfig,
     };
-    let estimate = bootstrap_work_estimate(60, 9, 100, StabilityConfig::default().optimizer_passes);
+    let estimate = bootstrap_work_estimate(60, 9, 100);
     assert_eq!(estimate.baseline_rebuilds, 100);
-    assert!(estimate.weighted_gradient_cells <= 60 * 9 * 20 * 100);
-    assert!(estimate.projected_updates <= 9 * 20 * 100);
+    assert_eq!(estimate.matrix_rows_rebuilt, 6_000);
+    assert_eq!(estimate.model_fit_steps, 30_000);
+    assert_eq!(estimate.weighted_gradient_cells, 60 * 9 * 300 * 100);
+    assert_eq!(estimate.projected_updates, 9 * 300 * 100);
+    assert_eq!(estimate.three_role_fits, 300);
+    for bootstrap_iterations in [100, 1_000, 10_000] {
+        let config = StabilityConfig {
+            bootstrap_iterations,
+            ..Default::default()
+        };
+        assert_eq!(config.bootstrap_iterations, bootstrap_iterations);
+        assert_eq!(
+            bootstrap_work_estimate(1_800, 6, bootstrap_iterations).three_role_fits,
+            bootstrap_iterations * 3
+        );
+    }
 }
 
 #[test]

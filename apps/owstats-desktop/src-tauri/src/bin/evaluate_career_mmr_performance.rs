@@ -17,7 +17,7 @@ struct CliArgs {
 struct AlgorithmConfig {
     bootstrap_iterations: usize,
     seed: u64,
-    optimizer_passes: usize,
+    model_fit_steps: usize,
 }
 
 #[derive(Serialize)]
@@ -76,7 +76,7 @@ fn run() -> Result<String, &'static str> {
     let algorithm_config = AlgorithmConfig {
         bootstrap_iterations: config.bootstrap_iterations,
         seed: config.seed,
-        optimizer_passes: config.optimizer_passes,
+        model_fit_steps: owstats_desktop_lib::career_mmr::performance_model::MODEL_FIT_STEPS,
     };
     let evaluation = evaluate_stability(&projection.rows, config);
     let report = EvaluationReport {

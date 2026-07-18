@@ -2,7 +2,7 @@ use owstats_desktop_lib::career_mmr::{
     input::{ModeFamily, Role, TrainingCohort},
     performance::{BaselineLevel, FeatureValues, HealingTakenStrategy, MatrixRow},
     performance_forward::ModelVariant,
-    performance_model::{fit_model, predict_probability, FitConfig},
+    performance_model::{fit_model, predict_probability, FitConfig, MODEL_FIT_STEPS},
 };
 use std::collections::BTreeMap;
 
@@ -123,6 +123,7 @@ fn sparse_cohort_offset_remains_forced_to_zero() {
 
 #[test]
 fn logit_offset_model_improves_on_informative_synthetic_features() {
+    assert_eq!(FitConfig::default().steps, MODEL_FIT_STEPS);
     let rows = (0..300)
         .map(|i| row(i, ModeFamily::RoleCompetitive, true))
         .collect::<Vec<_>>();
@@ -145,6 +146,61 @@ fn logit_offset_model_improves_on_informative_synthetic_features() {
         .sum::<f64>()
         / rows.len() as f64;
     assert!(candidate < baseline);
+}
+
+#[test]
+#[ignore = "aggregate performance benchmark; Task 10 reruns on the real training matrix"]
+fn benchmark_formal_1800_row_fit_and_scaled_bootstrap_eta() {
+    use owstats_desktop_lib::career_mmr::performance_stability::bootstrap_work_estimate;
+    use std::time::Instant;
+
+    let rows = (0..600)
+        .map(|i| row(i, ModeFamily::RoleCompetitive, true))
+        .chain((600..1200).map(|i| row(i, ModeFamily::OpenCompetitive, true)))
+        .chain((1200..1800).map(|i| row(i, ModeFamily::StadiumCompetitive, false)))
+        .collect::<Vec<_>>();
+    let refs = rows.iter().collect::<Vec<_>>();
+    let config = FitConfig {
+        final_multiplier: 2.0,
+        ..FitConfig::default()
+    };
+    let started = Instant::now();
+    let model = fit_model(
+        &refs,
+        Role::Damage,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::ResourceConversionDebt,
+        &config,
+    )
+    .unwrap();
+    let elapsed_ms = started.elapsed().as_millis().max(1);
+    let hundred_started = Instant::now();
+    for _ in 0..100 {
+        let repeated = fit_model(
+            &refs,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::ResourceConversionDebt,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(repeated.core_weights, model.core_weights);
+    }
+    let actual_100_ms = hundred_started.elapsed().as_millis().max(1);
+    let estimate_100 = bootstrap_work_estimate(rows.len(), model.feature_names.len(), 100);
+    let estimate_1000 = bootstrap_work_estimate(rows.len(), model.feature_names.len(), 1000);
+    eprintln!(
+        "rows={} steps={} fit_ms={} estimated_100_fit_ms={} actual_100_fit_ms={} estimated_1000x3_fit_ms={} matrix_rows_100={} gradient_cells_1000={}",
+        rows.len(),
+        MODEL_FIT_STEPS,
+        elapsed_ms,
+        elapsed_ms * 100,
+        actual_100_ms,
+        actual_100_ms * 30,
+        estimate_100.matrix_rows_rebuilt,
+        estimate_1000.weighted_gradient_cells,
+    );
+    assert_eq!(estimate_1000.three_role_fits, 3000);
 }
 
 #[test]
