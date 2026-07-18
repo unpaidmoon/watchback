@@ -1,6 +1,6 @@
 use owstats_desktop_lib::career_mmr::performance_stability::{
     aggregate_progress_schedule, aggregate_progress_schedule_with_outcome, evaluate_stability,
-    StabilityConfig, TrainingStage,
+    PromotedCandidate, StabilityConfig, TrainingStage,
 };
 use owstats_desktop_lib::{
     account_store::{
@@ -224,7 +224,21 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
         "candidate_1000" => TrainingStage::Candidate1000,
         _ => TrainingStage::Final10000,
     };
-    let mut config = StabilityConfig::for_stage(training_stage);
+    let prior_candidates = ["tank", "damage", "support"]
+        .into_iter()
+        .map(|role| {
+            serde_json::from_value::<PromotedCandidate>(serde_json::json!({
+                "role": role, "strategy": "none", "variant": "core",
+                "final_multiplier": 1.0, "lambda_core": 0.02, "lambda_cohort": 0.05
+            }))
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let mut config = if training_stage == TrainingStage::Screen100 {
+        StabilityConfig::for_stage(training_stage)
+    } else {
+        StabilityConfig::for_stage_with_promoted(training_stage, prior_candidates)
+    };
     config.seed = seed;
     let evaluation = evaluate_stability(&[], config);
     let (_, report) =
@@ -472,6 +486,12 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
             value["token"] = serde_json::json!("synthetic-secret");
             rehash(value)
         }),
+        ("screen-with-promoted", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["training_config"]["fit"]["promoted_candidates"] =
+                value["promotable_candidates"].clone();
+            rehash(value)
+        }),
     ] {
         let app = synthetic_app_data();
         let promotion = app.path().join(format!("{name}.json"));
@@ -492,6 +512,17 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
             String::from_utf8(output.stderr).unwrap(),
             "错误：上一阶段报告无效\n"
         );
+    }
+}
+
+#[test]
+fn candidate_and_final_reports_require_nonempty_prior_promoted_candidates() {
+    use owstats_desktop_lib::career_mmr::training_report::validate_promotion_report;
+    for stage in ["candidate_1000", "final_10000"] {
+        let mut value = promotion_report(stage, 0x5eed, true);
+        value["training_config"]["fit"]["promoted_candidates"] = serde_json::Value::Null;
+        value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
+        assert!(validate_promotion_report(&value, stage, 0x5eed).is_err());
     }
 }
 

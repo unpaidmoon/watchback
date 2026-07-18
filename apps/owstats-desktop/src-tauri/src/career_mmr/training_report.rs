@@ -555,15 +555,38 @@ impl TrainingReport {
             "final_10000" => TrainingStage::Final10000,
             _ => bail!("上一阶段报告无效"),
         };
-        let mut expected_config = self
-            .training_config
-            .fit
-            .promoted_candidates
-            .clone()
-            .map_or_else(
-                || StabilityConfig::for_stage(stage),
-                |candidates| StabilityConfig::for_stage_with_promoted(stage, candidates),
-            );
+        let promoted = self.training_config.fit.promoted_candidates.clone();
+        match stage {
+            TrainingStage::Screen100 if promoted.is_some() => {
+                bail!("上一阶段报告无效")
+            }
+            TrainingStage::Candidate1000 | TrainingStage::Final10000 => {
+                let candidates = promoted
+                    .as_ref()
+                    .filter(|items| !items.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("上一阶段报告无效"))?;
+                let mut roles = BTreeSet::new();
+                if candidates.iter().any(|candidate| {
+                    !roles.insert(candidate.role)
+                        || model_spec_id_from_values(
+                            &candidate.strategy,
+                            candidate.variant,
+                            candidate.final_multiplier,
+                            candidate.lambda_core,
+                            candidate.lambda_cohort,
+                            &StabilityConfig::for_stage(stage).snapshot(),
+                        )
+                        .is_none()
+                }) {
+                    bail!("上一阶段报告无效");
+                }
+            }
+            _ => {}
+        }
+        let mut expected_config = promoted.map_or_else(
+            || StabilityConfig::for_stage(stage),
+            |candidates| StabilityConfig::for_stage_with_promoted(stage, candidates),
+        );
         expected_config.seed = expected_seed;
         let expected_training_config = training_config(&StabilityEvaluation {
             config: expected_config.snapshot(),

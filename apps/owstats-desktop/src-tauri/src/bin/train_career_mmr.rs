@@ -133,6 +133,7 @@ struct ShadowAggregate {
 
 fn run() -> Result<(), &'static str> {
     let args = parse_args_from(std::env::args_os().skip(1))?;
+    ensure_training_write_platform()?;
     let shared = SharedAppPaths::from_app_data_dir(&args.app_data_dir);
     let sources = discover_training_sources(&shared).map_err(|_| "无法发现训练账号数据库")?;
     if sources.is_empty() {
@@ -249,6 +250,16 @@ fn run() -> Result<(), &'static str> {
         serde_json::to_vec_pretty(&artifact_value).map_err(|_| "无法序列化模型产物")?;
     write_pair_atomic(&args.report, &report_bytes, &args.artifact, &artifact_bytes)?;
     Ok(())
+}
+
+#[cfg(windows)]
+fn ensure_training_write_platform() -> Result<(), &'static str> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn ensure_training_write_platform() -> Result<(), &'static str> {
+    Err("分阶段训练写入仅支持 Windows")
 }
 
 const FIXED_REJECTION_CODES: [&str; 26] = [
@@ -594,6 +605,7 @@ impl PinnedOutputDirectory {
     }
 }
 
+#[cfg(windows)]
 fn write_pair_atomic(
     report: &Path,
     report_bytes: &[u8],
@@ -603,6 +615,17 @@ fn write_pair_atomic(
     write_pair_atomic_with_hook(report, report_bytes, artifact, artifact_bytes, |_| Ok(()))
 }
 
+#[cfg(not(windows))]
+fn write_pair_atomic(
+    _report: &Path,
+    _report_bytes: &[u8],
+    _artifact: &Path,
+    _artifact_bytes: &[u8],
+) -> Result<(), &'static str> {
+    Err("分阶段训练写入仅支持 Windows")
+}
+
+#[cfg(windows)]
 fn write_pair_atomic_with_hook(
     report: &Path,
     report_bytes: &[u8],
@@ -712,7 +735,7 @@ fn main() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod io_race_tests {
     use super::*;
 
@@ -882,5 +905,54 @@ mod io_race_tests {
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
             .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn artifact_and_parent_rename_attempts_are_blocked_by_pinned_windows_handles() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("outputs");
+        fs::create_dir(&parent).unwrap();
+        let report = parent.join("report.json");
+        let artifact = parent.join("artifact.json");
+        let moved_artifact = parent.join("moved-artifact.json");
+        let moved_parent = root.path().join("moved-parent");
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "after_artifact" {
+                    assert!(fs::rename(&artifact, &moved_artifact).is_err());
+                    assert!(fs::rename(&parent, &moved_parent).is_err());
+                    return Err(std::io::Error::other("blocked rename attempts"));
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!artifact.exists());
+        assert!(!moved_artifact.exists());
+        assert!(!moved_parent.exists());
+        assert!(fs::read_dir(root.path())
+            .unwrap()
+            .flat_map(|entry| fs::read_dir(entry.unwrap().path()).into_iter().flatten())
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod non_windows_write_tests {
+    use super::*;
+
+    #[test]
+    fn staged_training_write_is_rejected_without_creating_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        assert_eq!(
+            write_pair_atomic(&report, b"report", &artifact, b"artifact"),
+            Err("分阶段训练写入仅支持 Windows")
+        );
+        assert!(!report.exists());
+        assert!(!artifact.exists());
     }
 }
