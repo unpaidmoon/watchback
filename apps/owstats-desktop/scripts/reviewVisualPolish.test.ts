@@ -28,13 +28,18 @@ assert.match(
 );
 assert.match(
   reviewCss,
-  /\.reviewWorkspace\s+\.phase6GlassPanelShared\.solid\.phase6AchievementPanel\s*\{[^}]*background:\s*var\(--glass-primary\);/s,
-  "成就墙应使用一级玻璃表面",
+  /\.reviewWorkspace\s+\.phase6GlassPanelShared\.solid\.phase6AchievementPanel\s*\{[^}]*background:\s*var\(--action-primary\);[^}]*color:\s*var\(--action-on-primary\);/s,
+  "成就墙应使用统一深炭黑陈列面",
 );
 assert.match(
   reviewCss,
-  /\.reviewWorkspace\s+\.phase6AchievementCard\s*\{[^}]*background:\s*var\(--glass-secondary\);/s,
-  "成就卡片应使用次级玻璃表面",
+  /\.reviewWorkspace\s+\.phase6AchievementCard\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
+  "成就项应在深色墙内压平而不是继续使用独立卡片",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementWall\s*\{[^}]*gap:\s*0;[^}]*border-top:\s*1px solid color-mix\([^;]+;[^}]*border-bottom:\s*1px solid color-mix\([^;]+;/s,
+  "成就墙应使用连续细分隔线组织成就项",
 );
 assert.match(
   reviewCss,
