@@ -8,6 +8,7 @@ import { MatchesPage } from "./pages/MatchesPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { Phase6StyleBoardPage } from "./pages/Phase6StyleBoardPage";
 import { PersonalReviewPage } from "./pages/PersonalReviewPage";
+import { AchievementsPage } from "./pages/AchievementsPage";
 import { RankingPage } from "./pages/RankingPage";
 import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
 import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
@@ -57,6 +58,7 @@ export function App() {
             <Route path="/matches" element={<MatchesPage />} />
             <Route path="/matches/:matchId" element={<MatchDetailPage />} />
             <Route path="/review" element={<PersonalReviewPage />} />
+            <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />
             <Route path="/analytics/friends" element={<FriendAnalyticsPage />} />

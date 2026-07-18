@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const reviewCss = readFileSync(new URL("../src/styles/features/review.css", import.meta.url), "utf8");
 const friendCss = readFileSync(new URL("../src/styles/features/friends.css", import.meta.url), "utf8");
 const friendDetailSource = readFileSync(new URL("../src/pages/FriendDetailPage.tsx", import.meta.url), "utf8");
-const reviewSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
+const reviewSource = `${readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8")}\n${readFileSync(new URL("../src/features/review/AchievementWall.tsx", import.meta.url), "utf8")}`;
 
 assert.match(
   reviewCss,

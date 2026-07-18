@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -22,13 +22,21 @@ import {
   parseFriendAnalysisSeasonParam,
 } from "../src/pages/FriendAnalyticsPage";
 
-const reviewSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
+const reviewSource = `${readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8")}\n${readFileSync(new URL("../src/features/review/usePersonalSeasonReview.ts", import.meta.url), "utf8")}`;
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
 const friendDetailSource = readFileSync(new URL("../src/pages/FriendDetailPage.tsx", import.meta.url), "utf8");
 const matchesSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 const filterBarSource = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
 const matchFiltersSource = readFileSync(new URL("../src/features/matches/matchFilters.ts", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+assert.equal(
+  existsSync(new URL("../src/pages/AchievementsPage.tsx", import.meta.url)),
+  true,
+  "achievements must have an independent page instead of a review-tab redirect",
+);
+assert.match(appSource, /<Route path="\/achievements" element=\{<AchievementsPage \/>\} \/>/, "primary navigation must resolve achievements to its page");
 
 assert.equal(reviewSource.includes("params.get(\"season\") || 22"), false, "review page must not hard-code S22 as default season");
 assert.equal(reviewSource.includes("selectableSeasons"), false, "review page must not keep a fixed season list");
