@@ -1,8 +1,9 @@
 use owstats_desktop_lib::career_mmr::{
-    input::ModeFamily,
+    input::{ModeFamily, Role},
     rating::{
-        apply_inactivity, expected_win, outcome_delta_for_expected, update_rating, RatingError,
-        RatingInput, RatingUpdate, RoleRatingState, INITIAL_MU, INITIAL_SIGMA,
+        apply_inactivity, bounded_performance_adjustment, expected_win, outcome_delta_for_expected,
+        update_rating, update_rating_for_expected, RatingError, RatingInput, RatingUpdate,
+        RoleRatingState, INITIAL_MU, INITIAL_SIGMA,
     },
 };
 
@@ -10,6 +11,119 @@ const DAY_SECONDS: i64 = 86_400;
 
 fn state() -> RoleRatingState {
     RoleRatingState::new(1_700_000_000, 22)
+}
+
+#[test]
+fn performance_adjustment_uses_exact_role_mode_and_relative_caps() {
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::RoleCompetitive),
+        2.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(-20.0, 99.0, Role::Damage, ModeFamily::RoleCompetitive),
+        2.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Support, ModeFamily::RoleCompetitive),
+        2.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(40.0, 99.0, Role::Damage, ModeFamily::OpenCompetitive),
+        3.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::RoleQuick),
+        1.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::OpenQuick),
+        1.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::StadiumQuick),
+        0.0
+    );
+    assert!(
+        20.0 + bounded_performance_adjustment(
+            20.0,
+            -99.0,
+            Role::Damage,
+            ModeFamily::RoleCompetitive
+        ) > 0.0
+    );
+    assert!(
+        -20.0
+            + bounded_performance_adjustment(
+                -20.0,
+                99.0,
+                Role::Damage,
+                ModeFamily::RoleCompetitive
+            )
+            < 0.0
+    );
+}
+
+#[test]
+fn performance_limiter_fails_safe_for_non_finite_inputs() {
+    for requested in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            bounded_performance_adjustment(
+                20.0,
+                requested,
+                Role::Tank,
+                ModeFamily::RoleCompetitive
+            ),
+            0.0
+        );
+    }
+    assert_eq!(
+        bounded_performance_adjustment(f64::NAN, 1.0, Role::Tank, ModeFamily::RoleCompetitive),
+        0.0
+    );
+}
+
+#[test]
+fn expected_update_applies_performance_before_the_existing_match_cap() {
+    let mut decisive = input(1.0, ModeFamily::RoleCompetitive);
+    decisive.team_strength = None;
+    decisive.opponent_strength = None;
+    let baseline = update_rating_for_expected(state(), decisive, 0.5, 0.0).unwrap();
+    let adjusted = update_rating_for_expected(state(), decisive, 0.5, 2.0).unwrap();
+    assert_eq!(baseline.delta, 25.0);
+    assert_eq!(adjusted.base_delta, 25.0);
+    assert_eq!(adjusted.performance_adjustment, 2.0);
+    assert_eq!(adjusted.delta, 27.0);
+
+    let capped = update_rating_for_expected(state(), decisive, 0.0, 3.0).unwrap();
+    assert_eq!(capped.delta, 30.0);
+    assert_eq!(capped.performance_adjustment, 0.0);
+
+    let mut draw = decisive;
+    draw.result = 0.5;
+    let neutral = update_rating_for_expected(state(), draw, 0.5, 2.0).unwrap();
+    assert_eq!(neutral.base_delta, 0.0);
+    assert_eq!(neutral.performance_adjustment, 0.0);
+    assert_eq!(neutral.delta, 0.0);
+}
+
+#[test]
+fn expected_update_rejects_invalid_expected_or_adjustment_without_state_change() {
+    for (expected, adjustment) in [
+        (f64::NAN, 0.0),
+        (0.5, f64::INFINITY),
+        (-0.1, 0.0),
+        (1.1, 0.0),
+    ] {
+        let result = update_rating_for_expected(
+            state(),
+            input(1.0, ModeFamily::RoleCompetitive),
+            expected,
+            adjustment,
+        )
+        .unwrap();
+        assert_eq!(result.new_state, state());
+        assert_eq!(result.delta, 0.0);
+    }
 }
 fn input(result: f64, mode: ModeFamily) -> RatingInput {
     RatingInput {

@@ -7,6 +7,7 @@ pub mod performance_stability;
 pub mod query;
 pub mod rating;
 pub mod replay;
+pub mod shadow;
 pub mod training;
 pub mod training_report;
 pub mod training_sources;

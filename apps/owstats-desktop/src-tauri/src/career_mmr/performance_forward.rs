@@ -11,6 +11,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 
 pub use super::performance::HealingTakenStrategy;
+pub use super::rating::bounded_performance_adjustment;
 
 const MULTIPLIERS: [f64; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 const DIRECT_EXPOSURE_SCALE: f64 = 10_000.0;
@@ -344,28 +345,6 @@ pub struct BoundedFeatureAttribution {
     pub allocated_absolute_mmr: Vec<f64>,
     pub shares: Vec<f64>,
     pub max_share: f64,
-}
-
-/// Single formal limiter used by validation now and by shadow replay in Task 8.
-/// Keeping it public here prevents validation and production replay from drifting.
-pub fn bounded_performance_adjustment(
-    base_delta: f64,
-    requested: f64,
-    role: Role,
-    mode: ModeFamily,
-) -> f64 {
-    if base_delta == 0.0 || mode == ModeFamily::StadiumQuick {
-        return 0.0;
-    }
-    let absolute = if mode.is_quick() {
-        1.0
-    } else if role == Role::Support {
-        2.0
-    } else {
-        3.0
-    };
-    let limit = (0.1 * base_delta.abs()).min(absolute);
-    requested.clamp(-limit, limit)
 }
 
 fn formal_diagnostic_adjustment(
