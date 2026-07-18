@@ -346,9 +346,30 @@ fn formal_diagnostic_adjustment(
     )
 }
 
-fn probability_logit(value: f64) -> f64 {
-    let value = value.clamp(1.0e-6, 1.0 - 1.0e-6);
-    (value / (1.0 - value)).ln()
+pub fn bounded_single_feature_share(
+    base_delta: f64,
+    normalized_contributions: &[f64],
+    role: Role,
+    mode: ModeFamily,
+) -> f64 {
+    let requested_total = normalized_contributions.iter().sum::<f64>();
+    let formal_total =
+        bounded_performance_adjustment(base_delta, requested_total, role, mode).abs();
+    let max_feature = normalized_contributions
+        .iter()
+        .map(|contribution| {
+            bounded_performance_adjustment(base_delta, *contribution, role, mode).abs()
+        })
+        .fold(0.0, f64::max);
+    if formal_total <= f64::EPSILON {
+        if max_feature <= f64::EPSILON {
+            0.0
+        } else {
+            1.0
+        }
+    } else {
+        max_feature / formal_total
+    }
 }
 
 pub(crate) fn fit_hierarchical_model_regularized(
@@ -779,6 +800,87 @@ pub fn evaluate_cell_strategy(
     evaluate_raw_strategy(&rows, role, strategy, Some(mode))
 }
 
+pub fn fit_formal_validation_adjustments(
+    training: &[TrainingRow],
+    validation: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: MatrixStrategy,
+) -> Vec<f64> {
+    let role_name = match role {
+        Role::Tank => "tank",
+        Role::Damage => "damage",
+        Role::Support => "support",
+    };
+    let selected = select_candidate_detailed(training, role, strategy);
+    let matrix = build_feature_matrix(training, validation, strategy);
+    let train = matrix
+        .training_by_role
+        .get(role_name)
+        .cloned()
+        .unwrap_or_default();
+    let valid = matrix
+        .validation_by_role
+        .get(role_name)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| row.mode_family == mode)
+        .collect::<Vec<_>>();
+    let refs = train.iter().collect::<Vec<_>>();
+    let Some(model) = fit_hierarchical_model_regularized(
+        &refs,
+        role,
+        selected.variant,
+        strategy,
+        selected.multiplier,
+        selected.lambda_core,
+        selected.lambda_cohort,
+    ) else {
+        return Vec::new();
+    };
+    let raw = validation
+        .iter()
+        .map(|row| (row.match_group.as_str(), row))
+        .collect::<HashMap<_, _>>();
+    let effects = valid
+        .iter()
+        .filter_map(|row| {
+            let base_delta = raw.get(row.match_group.as_str())?.base_delta?;
+            let effective = model.effective_weights(row.mode_family.training_cohort());
+            let vector = role_vector_with_multiplier(
+                row,
+                role,
+                selected.variant,
+                strategy,
+                selected.multiplier,
+            );
+            let effect = effective
+                .iter()
+                .zip(vector.values)
+                .map(|(weight, value)| weight * value)
+                .sum::<f64>();
+            Some((base_delta, effect, row.mode_family))
+        })
+        .collect::<Vec<_>>();
+    let mut absolute = effects
+        .iter()
+        .map(|sample| sample.1.abs())
+        .collect::<Vec<_>>();
+    absolute.sort_by(f64::total_cmp);
+    let p95 = absolute
+        .get(((absolute.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or(1.0)
+        .max(f64::EPSILON);
+    effects
+        .into_iter()
+        .map(|(base_delta, effect, mode)| {
+            bounded_performance_adjustment(base_delta, effect / p95, role, mode)
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NestedFoldReport {
     pub fold: usize,
@@ -1079,7 +1181,6 @@ fn evaluate_raw_strategy(
     let mut all_p = Vec::new();
     let mut all_base = Vec::new();
     let mut missing = 0;
-    let mut all_ratios = Vec::new();
     let mut diagnostic_effects = Vec::new();
     for (number, fold) in folds.iter().enumerate() {
         let train = fold
@@ -1135,9 +1236,21 @@ fn evaluate_raw_strategy(
         diagnostic_effects.extend(valid_rows.iter().filter_map(|row| {
             let raw = raw_validation.get(row.match_group.as_str())?;
             let base_delta = raw.base_delta?;
-            let effect = probability_logit(predict_probability(&model, row))
-                - probability_logit(row.expected_win_rate);
-            Some((base_delta, effect, row.mode_family))
+            let effective = model.effective_weights(row.mode_family.training_cohort());
+            let vector = role_vector_with_multiplier(
+                row,
+                role,
+                selected.variant,
+                strategy,
+                selected.multiplier,
+            );
+            let contributions = effective
+                .iter()
+                .zip(vector.values)
+                .map(|(weight, value)| weight * value)
+                .collect::<Vec<_>>();
+            let effect = contributions.iter().sum::<f64>();
+            Some((base_delta, effect, row.mode_family, contributions))
         }));
         let base = valid_rows
             .iter()
@@ -1146,26 +1259,6 @@ fn evaluate_raw_strategy(
             / valid_rows.len() as f64;
         let metric = metrics(&a, &p);
         let delta = metric.as_ref().map(|m| m.brier - base);
-        let mut ratios = valid_rows
-            .iter()
-            .map(|r| {
-                let effective = model.effective_weights(r.mode_family.training_cohort());
-                max_feature_contribution_share(
-                    r,
-                    role,
-                    selected.variant,
-                    strategy,
-                    selected.multiplier,
-                    &effective,
-                )
-            })
-            .collect::<Vec<_>>();
-        all_ratios.extend(ratios.iter().copied());
-        ratios.sort_by(f64::total_cmp);
-        let p95 = ratios
-            .get(((ratios.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
-            .copied()
-            .unwrap_or(0.0);
         let names = role_vector(&valid_rows[0], role, selected.variant, strategy).names;
         let weights = names
             .into_iter()
@@ -1186,7 +1279,7 @@ fn evaluate_raw_strategy(
             metrics: metric,
             baseline_brier: Some(base),
             brier_delta: delta,
-            rejected_35_percent: p95 > 0.35,
+            rejected_35_percent: false,
             weights,
             variant: selected.variant,
             final_multiplier: selected.multiplier,
@@ -1243,9 +1336,6 @@ fn evaluate_raw_strategy(
     if selected.degraded {
         rejected.push("inner_forward_selection_insufficient_data_core_1_25".into());
     }
-    if fold_reports.iter().any(|f| f.rejected_35_percent) {
-        rejected.push("p95_single_feature_contribution_above_35_percent".into())
-    }
     if !full_refit_weights
         .get("final")
         .zip(full_refit_weights.get("nonfinal"))
@@ -1265,16 +1355,29 @@ fn evaluate_raw_strategy(
         .unwrap_or(1.0)
         .max(f64::EPSILON);
     let adjustment_samples = diagnostic_effects
-        .into_iter()
-        .map(|(base, effect, mode)| {
-            formal_diagnostic_adjustment(base, effect / p95_effect, role, mode)
+        .iter()
+        .map(|(base, effect, mode, _)| {
+            formal_diagnostic_adjustment(*base, effect / p95_effect, role, *mode)
         })
         .collect::<Vec<_>>();
-    all_ratios.sort_by(f64::total_cmp);
-    let p95_single_feature_share = all_ratios
-        .get(((all_ratios.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+    let mut bounded_feature_shares = diagnostic_effects
+        .iter()
+        .map(|(base, _, mode, contributions)| {
+            let normalized = contributions
+                .iter()
+                .map(|contribution| contribution / p95_effect)
+                .collect::<Vec<_>>();
+            bounded_single_feature_share(*base, &normalized, role, *mode)
+        })
+        .collect::<Vec<_>>();
+    bounded_feature_shares.sort_by(f64::total_cmp);
+    let p95_single_feature_share = bounded_feature_shares
+        .get(((bounded_feature_shares.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
         .copied()
         .unwrap_or(0.0);
+    if p95_single_feature_share > 0.35 {
+        rejected.push("p95_single_feature_contribution_above_35_percent".into());
+    }
     StrategyReport {
         role,
         strategy: format!("{strategy:?}").to_lowercase(),

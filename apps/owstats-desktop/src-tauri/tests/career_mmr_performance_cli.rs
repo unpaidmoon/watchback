@@ -1,3 +1,6 @@
+use owstats_desktop_lib::career_mmr::performance_stability::{
+    aggregate_progress_schedule, TrainingStage,
+};
 use std::process::Command;
 
 const SOURCE: &str = include_str!("../src/bin/evaluate_career_mmr_performance.rs");
@@ -18,6 +21,35 @@ fn cli_source_uses_read_only_query_only_and_safe_aggregate_output() {
 #[test]
 fn cli_defaults_to_one_thousand_bootstrap_iterations() {
     assert!(SOURCE.contains("bootstrap_iterations: 1000"));
+}
+
+#[test]
+fn staged_progress_uses_exact_aggregate_work_and_safe_eta_batches() {
+    for (stage, iterations) in [
+        (TrainingStage::Screen100, 100usize),
+        (TrainingStage::Candidate1000, 1_000),
+        (TrainingStage::Final10000, 10_000),
+    ] {
+        assert_eq!(stage.bootstrap_iterations(), iterations);
+        let events = aggregate_progress_schedule(stage, 137);
+        let total = iterations * 3 * 5;
+        assert_eq!(events.first().unwrap().completed, 0);
+        assert_eq!(events.first().unwrap().total, total);
+        assert_eq!(events.last().unwrap().completed, total);
+        assert_eq!(events.last().unwrap().eta_ms, Some(0));
+        assert!(events
+            .windows(2)
+            .all(|pair| pair[0].completed < pair[1].completed));
+        assert!(events
+            .iter()
+            .skip(1)
+            .take(events.len().saturating_sub(2))
+            .all(|event| event.eta_ms.is_some_and(|eta| eta > 0)));
+        let json = serde_json::to_string(&events).unwrap().to_ascii_lowercase();
+        for forbidden in ["account", "match", "hero", "player", "guid", "path"] {
+            assert!(!json.contains(forbidden));
+        }
+    }
 }
 
 #[test]

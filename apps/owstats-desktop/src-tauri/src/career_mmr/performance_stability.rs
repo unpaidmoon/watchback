@@ -67,6 +67,49 @@ pub struct ProgressEvent {
     pub eta_ms: Option<u128>,
 }
 
+fn aggregate_progress_event(
+    stage: TrainingStage,
+    completed: usize,
+    total: usize,
+    elapsed_ms: u128,
+) -> ProgressEvent {
+    let completed = completed.min(total);
+    let eta_ms = if completed == 0 {
+        None
+    } else if completed == total {
+        Some(0)
+    } else {
+        Some(elapsed_ms.saturating_mul((total - completed) as u128) / completed as u128)
+    };
+    ProgressEvent {
+        stage,
+        completed,
+        total,
+        elapsed_ms,
+        eta_ms,
+    }
+}
+
+pub fn aggregate_progress_schedule(stage: TrainingStage, batch_size: usize) -> Vec<ProgressEvent> {
+    let total = stage
+        .bootstrap_iterations()
+        .saturating_mul(3)
+        .saturating_mul(5);
+    let batch_size = batch_size.max(1);
+    let mut events = vec![aggregate_progress_event(stage, 0, total, 0)];
+    let mut completed = 0usize;
+    while completed < total {
+        completed = completed.saturating_add(batch_size).min(total);
+        events.push(aggregate_progress_event(
+            stage,
+            completed,
+            total,
+            completed as u128 * 2,
+        ));
+    }
+    events
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StabilityConfig {
     pub bootstrap_iterations: usize,
@@ -242,8 +285,6 @@ pub struct StabilityReport {
     pub performance_adjustment: f64,
     #[serde(skip)]
     max_loo_worsened_fraction: f64,
-    #[serde(skip)]
-    max_abs_average_adjustment: f64,
 }
 impl StabilityReport {
     pub fn testing(role: Role, strategy: &str) -> Self {
@@ -292,7 +333,6 @@ impl StabilityReport {
             rejected_reasons: vec![],
             performance_adjustment: 0.0,
             max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
-            max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
         }
     }
     pub fn apply_gates(&mut self) {
@@ -390,7 +430,7 @@ impl StabilityReport {
                 "p95_single_feature_contribution_above_35_percent",
             );
         }
-        if self.forward.average_adjustment.abs() > self.max_abs_average_adjustment {
+        if self.forward.average_adjustment.abs() > MAX_ABS_AVERAGE_ADJUSTMENT {
             push_once(&mut reasons, "average_adjustment_above_0_10_mmr");
         }
         if self.forward.upper_cap_rate > 0.05 || self.forward.lower_cap_rate > 0.05 {
@@ -462,13 +502,7 @@ pub fn evaluate_stability_with_progress(
         .saturating_mul(3)
         .saturating_mul(5);
     let started = std::time::Instant::now();
-    on_progress(ProgressEvent {
-        stage,
-        completed: 0,
-        total,
-        elapsed_ms: 0,
-        eta_ms: None,
-    });
+    on_progress(aggregate_progress_event(stage, 0, total, 0));
     let source = eligible_performance_rows(source);
     let (mut reports, worker_errors) = std::thread::scope(|scope| {
         let source = &source;
@@ -540,7 +574,6 @@ pub fn evaluate_stability_with_progress(
                             rejected_reasons: vec![],
                             performance_adjustment: 0.0,
                             max_loo_worsened_fraction: config.max_loo_worsened_fraction,
-                            max_abs_average_adjustment: config.max_abs_average_adjustment,
                         };
                         report.apply_gates();
                         if role_core_rows < 500 {
@@ -568,16 +601,9 @@ pub fn evaluate_stability_with_progress(
             if completed > emitted_completed {
                 emitted_completed = completed;
                 let elapsed_ms = started.elapsed().as_millis();
-                let eta_ms = (completed > 0 && completed < total).then(|| {
-                    elapsed_ms.saturating_mul((total - completed) as u128) / completed as u128
-                });
-                on_progress(ProgressEvent {
-                    stage,
-                    completed,
-                    total,
-                    elapsed_ms,
-                    eta_ms,
-                });
+                on_progress(aggregate_progress_event(
+                    stage, completed, total, elapsed_ms,
+                ));
             }
         }
         merge_worker_results(
@@ -701,13 +727,12 @@ pub fn evaluate_stability_with_progress(
         cells,
         worker_errors,
     };
-    on_progress(ProgressEvent {
+    on_progress(aggregate_progress_event(
         stage,
-        completed: total,
         total,
-        elapsed_ms: started.elapsed().as_millis(),
-        eta_ms: Some(0),
-    });
+        total,
+        started.elapsed().as_millis(),
+    ));
     evaluation
 }
 
@@ -791,22 +816,32 @@ fn loo_season(
     let evals = groups
         .into_iter()
         .map(|held| {
-            let train = source
-                .iter()
-                .filter(|r| r.season != held)
-                .cloned()
-                .collect::<Vec<_>>();
-            let valid = source
-                .iter()
-                .filter(|r| r.season == held && r.mode_family == mode)
-                .cloned()
-                .collect::<Vec<_>>();
+            let (train, valid) = season_loo_split(source, held, mode);
             let candidate = valid.len();
             let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
             (delta, candidate, evaluated)
         })
         .collect::<Vec<_>>();
     loo_from_evals(evals)
+}
+
+fn season_loo_split(
+    source: &[TrainingRow],
+    held: i64,
+    mode: ModeFamily,
+) -> (Vec<TrainingRow>, Vec<TrainingRow>) {
+    (
+        source
+            .iter()
+            .filter(|row| row.season != held)
+            .cloned()
+            .collect(),
+        source
+            .iter()
+            .filter(|row| row.season == held && row.mode_family == mode)
+            .cloned()
+            .collect(),
+    )
 }
 
 fn loo_hero(
@@ -823,27 +858,43 @@ fn loo_hero(
     let evals = groups
         .into_iter()
         .map(|held| {
-            let held_matches = source
-                .iter()
-                .filter(|r| r.hero_group == held && r.mode_family == mode)
-                .map(|r| r.match_group.as_str())
-                .collect::<BTreeSet<_>>();
-            let train = source
-                .iter()
-                .filter(|r| !held_matches.contains(r.match_group.as_str()))
-                .cloned()
-                .collect::<Vec<_>>();
-            let valid = source
-                .iter()
-                .filter(|r| held_matches.contains(r.match_group.as_str()) && r.hero_group == held)
-                .cloned()
-                .collect::<Vec<_>>();
+            let (train, valid) = hero_loo_split(source, &held, mode);
             let candidate = valid.len();
             let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
             (delta, candidate, evaluated)
         })
         .collect::<Vec<_>>();
     loo_from_evals(evals)
+}
+
+fn hero_loo_split(
+    source: &[TrainingRow],
+    held: &Option<String>,
+    mode: ModeFamily,
+) -> (Vec<TrainingRow>, Vec<TrainingRow>) {
+    // The target cell controls validation only. Because the role core and cohort
+    // offsets train on every actual mode, every match containing the held hero in
+    // any mode must leave the training pool as one indivisible group.
+    let held_matches = source
+        .iter()
+        .filter(|row| &row.hero_group == held)
+        .map(|row| row.match_group.as_str())
+        .collect::<BTreeSet<_>>();
+    let train = source
+        .iter()
+        .filter(|row| !held_matches.contains(row.match_group.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let valid = source
+        .iter()
+        .filter(|row| {
+            held_matches.contains(row.match_group.as_str())
+                && &row.hero_group == held
+                && row.mode_family == mode
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    (train, valid)
 }
 
 fn loo_account(
@@ -861,16 +912,7 @@ fn loo_account(
     let mut deltas = Vec::new();
     let mut coverage_limited_groups = 0;
     for held in groups {
-        let train = source
-            .iter()
-            .filter(|row| row.account_group != held)
-            .cloned()
-            .collect::<Vec<_>>();
-        let valid = source
-            .iter()
-            .filter(|row| row.account_group == held && row.mode_family == mode)
-            .cloned()
-            .collect::<Vec<_>>();
+        let (train, valid) = account_loo_split(source, &held, mode);
         let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
         if delta.is_none() || evaluated < valid.len() {
             coverage_limited_groups += 1;
@@ -886,6 +928,25 @@ fn loo_account(
         mean_brier_delta: mean(&deltas),
         worst_brier_delta: deltas.iter().copied().max_by(f64::total_cmp),
     }
+}
+
+fn account_loo_split(
+    source: &[TrainingRow],
+    held: &str,
+    mode: ModeFamily,
+) -> (Vec<TrainingRow>, Vec<TrainingRow>) {
+    (
+        source
+            .iter()
+            .filter(|row| row.account_group != held)
+            .cloned()
+            .collect(),
+        source
+            .iter()
+            .filter(|row| row.account_group == held && row.mode_family == mode)
+            .cloned()
+            .collect(),
+    )
 }
 
 fn loo_from_evals(evals: Vec<(Option<f64>, usize, usize)>) -> LooReport {
@@ -1390,6 +1451,87 @@ mod hierarchical_bootstrap_tests {
             predict_probability(&model, &role_row),
             predict_probability(&model, &stadium_row)
         );
+    }
+
+    #[test]
+    fn hero_loo_excludes_held_hero_matches_from_every_actual_mode() {
+        let mut source = (0..180)
+            .map(|i| {
+                let mut row = row(i, ModeFamily::RoleCompetitive);
+                row.hero_group = Some("training-hero".into());
+                row
+            })
+            .collect::<Vec<_>>();
+        let mut held_comp = row(1_000, ModeFamily::RoleCompetitive);
+        held_comp.hero_group = Some("held-hero".into());
+        held_comp.match_group = "held-comp".into();
+        let mut held_quick = row(1_001, ModeFamily::RoleQuick);
+        held_quick.hero_group = Some("held-hero".into());
+        held_quick.match_group = "held-quick".into();
+        source.extend([held_comp, held_quick]);
+
+        let held = Some("held-hero".into());
+        let (train_before, valid_before) =
+            hero_loo_split(&source, &held, ModeFamily::RoleCompetitive);
+        let mut contaminated = source;
+        let quick = contaminated
+            .iter_mut()
+            .find(|row| row.match_group == "held-quick")
+            .unwrap();
+        quick.final_hit = Some(1.0e15);
+        quick.damage = Some(1.0e18);
+        quick.healing_taken = Some(1.0e18);
+        let (train_after, valid_after) =
+            hero_loo_split(&contaminated, &held, ModeFamily::RoleCompetitive);
+
+        assert_eq!(train_before, train_after);
+        assert_eq!(valid_before, valid_after);
+        assert!(train_after
+            .iter()
+            .all(|row| row.hero_group.as_deref() != Some("held-hero")));
+        assert!(valid_after
+            .iter()
+            .all(|row| row.mode_family == ModeFamily::RoleCompetitive));
+        assert_eq!(
+            validate_split(
+                &train_before,
+                &valid_before,
+                Role::Damage,
+                ModeFamily::RoleCompetitive,
+                HealingTakenStrategy::None,
+                None,
+            ),
+            validate_split(
+                &train_after,
+                &valid_after,
+                Role::Damage,
+                ModeFamily::RoleCompetitive,
+                HealingTakenStrategy::None,
+                None,
+            )
+        );
+
+        let held_season = contaminated
+            .iter()
+            .find(|row| row.match_group == "held-comp")
+            .unwrap()
+            .season;
+        let (season_train, season_valid) =
+            season_loo_split(&contaminated, held_season, ModeFamily::RoleCompetitive);
+        assert!(season_train.iter().all(|row| row.season != held_season));
+        assert!(season_valid
+            .iter()
+            .all(|row| row.mode_family == ModeFamily::RoleCompetitive));
+
+        let (account_train, account_valid) = account_loo_split(
+            &contaminated,
+            "synthetic-account",
+            ModeFamily::RoleCompetitive,
+        );
+        assert!(account_train.is_empty());
+        assert!(account_valid
+            .iter()
+            .all(|row| row.mode_family == ModeFamily::RoleCompetitive));
     }
 
     #[test]

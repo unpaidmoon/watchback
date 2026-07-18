@@ -2,10 +2,10 @@ use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     performance::{build_feature_matrix, BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        bounded_performance_adjustment, build_forward_folds, evaluate_cell_strategy,
-        evaluate_forward, evaluate_nested_cell, evaluate_strategy, max_feature_contribution_share,
-        metrics, missing_values, role_vector, role_vector_with_multiplier, HealingTakenStrategy,
-        ModelVariant, Role,
+        bounded_performance_adjustment, bounded_single_feature_share, build_forward_folds,
+        evaluate_cell_strategy, evaluate_forward, evaluate_nested_cell, evaluate_strategy,
+        fit_formal_validation_adjustments, max_feature_contribution_share, metrics, missing_values,
+        role_vector, role_vector_with_multiplier, HealingTakenStrategy, ModelVariant, Role,
     },
     training::TrainingEnvironment,
 };
@@ -542,6 +542,33 @@ fn raw_damage_or_healing_volume_does_not_change_fixed_standardized_signal() {
 }
 
 #[test]
+fn fitted_counterfactuals_flow_through_requested_effect_and_the_formal_limiter() {
+    let train = (0..80).map(|i| training("damage", i)).collect::<Vec<_>>();
+    let anchor = training("damage", 1_000);
+    let mut high_volume = anchor.clone();
+    high_volume.match_group = "counterfactual-high".into();
+    high_volume.damage = Some(1.0e9);
+    high_volume.healing = Some(1.0e9);
+    let mut higher_volume = high_volume.clone();
+    higher_volume.match_group = "counterfactual-higher".into();
+    higher_volume.damage = Some(1.0e12);
+    higher_volume.healing = Some(1.0e12);
+    let mut more_final = anchor.clone();
+    more_final.match_group = "counterfactual-final".into();
+    more_final.final_hit = anchor.final_hit.map(|value| value + 2.0);
+    let adjustments = fit_formal_validation_adjustments(
+        &train,
+        &[anchor, high_volume, higher_volume, more_final],
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+        HealingTakenStrategy::None,
+    );
+    assert_eq!(adjustments.len(), 4);
+    assert!(adjustments[2] <= adjustments[1] + 1e-12);
+    assert!(adjustments[3] > adjustments[0]);
+}
+
+#[test]
 fn outcome_only_extremes_cannot_change_any_forward_result() {
     let base = (0..80).map(|i| training("damage", i)).collect::<Vec<_>>();
     let expected = evaluate_forward(&base);
@@ -935,6 +962,40 @@ fn formal_limiter_is_the_reusable_task8_contract() {
     );
     assert_eq!(
         bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::StadiumQuick),
+        0.0
+    );
+}
+
+#[test]
+fn p95_feature_share_uses_base_delta_and_formal_total_adjustment() {
+    let contributions = [0.8, 0.4];
+    let raw_logit_ratio = 0.8 / (0.8 + 0.4);
+    let generous = bounded_single_feature_share(
+        20.0,
+        &contributions,
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+    );
+    let constrained = bounded_single_feature_share(
+        4.0,
+        &contributions,
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+    );
+    assert!((generous - 0.8 / 1.2).abs() < 1e-12);
+    assert_eq!(constrained, 1.0);
+    assert_ne!(constrained, raw_logit_ratio);
+    assert_eq!(
+        bounded_single_feature_share(
+            10.0,
+            &[0.5, -0.5],
+            Role::Damage,
+            ModeFamily::RoleCompetitive,
+        ),
+        1.0
+    );
+    assert_eq!(
+        bounded_single_feature_share(10.0, &[0.0, 0.0], Role::Damage, ModeFamily::RoleCompetitive,),
         0.0
     );
 }
