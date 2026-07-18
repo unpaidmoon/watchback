@@ -83,29 +83,48 @@ pub struct CoefficientStability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BootstrapWorkEstimate {
-    pub baseline_rebuilds: usize,
-    pub matrix_rows_rebuilt: usize,
-    pub model_fit_steps: usize,
-    pub weighted_gradient_cells: usize,
-    pub projected_updates: usize,
-    pub three_role_fits: usize,
+    pub per_cell_model_fits: usize,
+    pub per_cell_baseline_rebuilds: usize,
+    pub per_cell_matrix_rows_rebuilt: usize,
+    pub per_cell_model_fit_steps: usize,
+    pub per_cell_weighted_gradient_cells: usize,
+    pub per_cell_projected_updates: usize,
+    pub total_model_fits: usize,
+    pub total_baseline_rebuilds: usize,
+    pub total_matrix_rows_rebuilt: usize,
+    pub total_model_fit_steps: usize,
+    pub total_weighted_gradient_cells: usize,
+    pub total_projected_updates: usize,
 }
 pub fn bootstrap_work_estimate(
     rows: usize,
     features: usize,
     iterations: usize,
+    role_count: usize,
+    strategy_count: usize,
 ) -> BootstrapWorkEstimate {
     let steps = super::performance_model::MODEL_FIT_STEPS;
+    let cells = role_count.saturating_mul(strategy_count);
+    let per_cell_matrix_rows_rebuilt = rows.saturating_mul(iterations);
+    let per_cell_model_fit_steps = steps.saturating_mul(iterations);
+    let per_cell_weighted_gradient_cells = rows
+        .saturating_mul(features)
+        .saturating_mul(steps)
+        .saturating_mul(iterations);
+    let per_cell_projected_updates = features.saturating_mul(steps).saturating_mul(iterations);
     BootstrapWorkEstimate {
-        baseline_rebuilds: iterations,
-        matrix_rows_rebuilt: rows.saturating_mul(iterations),
-        model_fit_steps: steps.saturating_mul(iterations),
-        weighted_gradient_cells: rows
-            .saturating_mul(features)
-            .saturating_mul(steps)
-            .saturating_mul(iterations),
-        projected_updates: features.saturating_mul(steps).saturating_mul(iterations),
-        three_role_fits: iterations.saturating_mul(3),
+        per_cell_model_fits: iterations,
+        per_cell_baseline_rebuilds: iterations,
+        per_cell_matrix_rows_rebuilt,
+        per_cell_model_fit_steps,
+        per_cell_weighted_gradient_cells,
+        per_cell_projected_updates,
+        total_model_fits: iterations.saturating_mul(cells),
+        total_baseline_rebuilds: iterations.saturating_mul(cells),
+        total_matrix_rows_rebuilt: per_cell_matrix_rows_rebuilt.saturating_mul(cells),
+        total_model_fit_steps: per_cell_model_fit_steps.saturating_mul(cells),
+        total_weighted_gradient_cells: per_cell_weighted_gradient_cells.saturating_mul(cells),
+        total_projected_updates: per_cell_projected_updates.saturating_mul(cells),
     }
 }
 

@@ -688,13 +688,25 @@ fn bootstrap_work_estimate_and_hundred_iteration_smoke_are_bounded() {
     use owstats_desktop_lib::career_mmr::performance_stability::{
         bootstrap_work_estimate, StabilityConfig,
     };
-    let estimate = bootstrap_work_estimate(60, 9, 100);
-    assert_eq!(estimate.baseline_rebuilds, 100);
-    assert_eq!(estimate.matrix_rows_rebuilt, 6_000);
-    assert_eq!(estimate.model_fit_steps, 30_000);
-    assert_eq!(estimate.weighted_gradient_cells, 60 * 9 * 300 * 100);
-    assert_eq!(estimate.projected_updates, 9 * 300 * 100);
-    assert_eq!(estimate.three_role_fits, 300);
+    let estimate = bootstrap_work_estimate(60, 9, 100, 3, 5);
+    assert_eq!(estimate.per_cell_model_fits, 100);
+    assert_eq!(estimate.per_cell_baseline_rebuilds, 100);
+    assert_eq!(estimate.per_cell_matrix_rows_rebuilt, 6_000);
+    assert_eq!(estimate.per_cell_model_fit_steps, 30_000);
+    assert_eq!(
+        estimate.per_cell_weighted_gradient_cells,
+        60 * 9 * 300 * 100
+    );
+    assert_eq!(estimate.per_cell_projected_updates, 9 * 300 * 100);
+    assert_eq!(estimate.total_model_fits, 1_500);
+    assert_eq!(estimate.total_baseline_rebuilds, 1_500);
+    assert_eq!(estimate.total_matrix_rows_rebuilt, 90_000);
+    assert_eq!(estimate.total_model_fit_steps, 450_000);
+    assert_eq!(
+        estimate.total_weighted_gradient_cells,
+        60 * 9 * 300 * 100 * 15
+    );
+    assert_eq!(estimate.total_projected_updates, 9 * 300 * 100 * 15);
     for bootstrap_iterations in [100, 1_000, 10_000] {
         let config = StabilityConfig {
             bootstrap_iterations,
@@ -702,10 +714,14 @@ fn bootstrap_work_estimate_and_hundred_iteration_smoke_are_bounded() {
         };
         assert_eq!(config.bootstrap_iterations, bootstrap_iterations);
         assert_eq!(
-            bootstrap_work_estimate(1_800, 6, bootstrap_iterations).three_role_fits,
-            bootstrap_iterations * 3
+            bootstrap_work_estimate(1_800, 6, bootstrap_iterations, 3, 5).total_model_fits,
+            bootstrap_iterations * 15
         );
     }
+    let saturated = bootstrap_work_estimate(usize::MAX, usize::MAX, usize::MAX, 3, 5);
+    assert_eq!(saturated.total_model_fits, usize::MAX);
+    assert_eq!(saturated.total_matrix_rows_rebuilt, usize::MAX);
+    assert_eq!(saturated.total_weighted_gradient_cells, usize::MAX);
 }
 
 #[test]

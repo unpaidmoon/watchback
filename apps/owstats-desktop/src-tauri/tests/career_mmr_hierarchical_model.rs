@@ -187,20 +187,22 @@ fn benchmark_formal_1800_row_fit_and_scaled_bootstrap_eta() {
         assert_eq!(repeated.core_weights, model.core_weights);
     }
     let actual_100_ms = hundred_started.elapsed().as_millis().max(1);
-    let estimate_100 = bootstrap_work_estimate(rows.len(), model.feature_names.len(), 100);
-    let estimate_1000 = bootstrap_work_estimate(rows.len(), model.feature_names.len(), 1000);
+    let estimate_100 = bootstrap_work_estimate(rows.len(), model.feature_names.len(), 100, 3, 5);
+    let estimate_1000 = bootstrap_work_estimate(rows.len(), model.feature_names.len(), 1000, 3, 5);
     eprintln!(
-        "rows={} steps={} fit_ms={} estimated_100_fit_ms={} actual_100_fit_ms={} estimated_1000x3_fit_ms={} matrix_rows_100={} gradient_cells_1000={}",
+        "rows={} steps={} per_cell_fit_ms={} estimated_per_cell_100_fit_ms={} actual_per_cell_100_fit_ms={} estimated_total_1000x15_fit_ms={} per_cell_matrix_rows_100={} total_matrix_rows_100={} per_cell_gradient_cells_1000={} total_gradient_cells_1000={}",
         rows.len(),
         MODEL_FIT_STEPS,
         elapsed_ms,
         elapsed_ms * 100,
         actual_100_ms,
-        actual_100_ms * 30,
-        estimate_100.matrix_rows_rebuilt,
-        estimate_1000.weighted_gradient_cells,
+        actual_100_ms * 150,
+        estimate_100.per_cell_matrix_rows_rebuilt,
+        estimate_100.total_matrix_rows_rebuilt,
+        estimate_1000.per_cell_weighted_gradient_cells,
+        estimate_1000.total_weighted_gradient_cells,
     );
-    assert_eq!(estimate_1000.three_role_fits, 3000);
+    assert_eq!(estimate_1000.total_model_fits, 15_000);
 }
 
 #[test]
