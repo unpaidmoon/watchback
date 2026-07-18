@@ -1,4 +1,5 @@
 use super::{
+    input::ModeFamily,
     performance::{
         build_feature_matrix, eligible_performance_rows, HealingTakenStrategy as MatrixStrategy,
         MatrixRow,
@@ -281,6 +282,8 @@ pub struct FoldReport {
     pub weights: BTreeMap<String, f64>,
     pub variant: ModelVariant,
     pub final_multiplier: f64,
+    pub lambda_core: f64,
+    pub lambda_cohort: f64,
     pub inner_validation_rows: usize,
     pub selection_degraded: bool,
 }
@@ -292,21 +295,70 @@ pub struct StrategyReport {
     pub performance_adjustment: f64,
     pub variant: ModelVariant,
     pub final_multiplier: f64,
+    pub lambda_core: f64,
+    pub lambda_cohort: f64,
     pub folds: Vec<FoldReport>,
     pub improved_folds: usize,
     pub metrics: Option<MetricReport>,
+    pub baseline_metrics: Option<MetricReport>,
     pub full_refit_weights: BTreeMap<String, f64>,
     pub average_adjustment: f64,
+    pub p95_single_feature_share: f64,
+    pub upper_cap_rate: f64,
+    pub lower_cap_rate: f64,
     pub missing_values: usize,
     pub rejected_reasons: Vec<String>,
 }
 
-pub(crate) fn fit_hierarchical_model(
+/// Single formal limiter used by validation now and by shadow replay in Task 8.
+/// Keeping it public here prevents validation and production replay from drifting.
+pub fn bounded_performance_adjustment(
+    base_delta: f64,
+    requested: f64,
+    role: Role,
+    mode: ModeFamily,
+) -> f64 {
+    if base_delta == 0.0 || mode == ModeFamily::StadiumQuick {
+        return 0.0;
+    }
+    let absolute = if mode.is_quick() {
+        1.0
+    } else if role == Role::Support {
+        2.0
+    } else {
+        3.0
+    };
+    let limit = (0.1 * base_delta.abs()).min(absolute);
+    requested.clamp(-limit, limit)
+}
+
+fn formal_diagnostic_adjustment(
+    base_delta: f64,
+    requested: f64,
+    role: Role,
+    mode: ModeFamily,
+) -> (f64, bool, bool) {
+    let bounded = bounded_performance_adjustment(base_delta, requested, role, mode);
+    (
+        bounded,
+        requested > 0.0 && bounded < requested,
+        requested < 0.0 && bounded > requested,
+    )
+}
+
+fn probability_logit(value: f64) -> f64 {
+    let value = value.clamp(1.0e-6, 1.0 - 1.0e-6);
+    (value / (1.0 - value)).ln()
+}
+
+pub(crate) fn fit_hierarchical_model_regularized(
     rows: &[&MatrixRow],
     role: Role,
     variant: ModelVariant,
     strategy: MatrixStrategy,
     multiplier: f64,
+    lambda_core: f64,
+    lambda_cohort: f64,
 ) -> Option<HierarchicalModel> {
     fit_model(
         rows,
@@ -315,47 +367,87 @@ pub(crate) fn fit_hierarchical_model(
         strategy,
         &FitConfig {
             final_multiplier: multiplier,
+            lambda_core,
+            lambda_cohort,
             ..FitConfig::default()
         },
     )
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CandidateSelection {
+    pub(crate) variant: ModelVariant,
+    pub(crate) multiplier: f64,
+    pub(crate) lambda_core: f64,
+    pub(crate) lambda_cohort: f64,
+    pub(crate) degraded: bool,
+}
+
+impl CandidateSelection {
+    fn core_degraded() -> Self {
+        Self {
+            variant: ModelVariant::Core,
+            multiplier: 1.25,
+            lambda_core: 0.02,
+            lambda_cohort: 0.05,
+            degraded: true,
+        }
+    }
 }
 fn select_matrix_candidate(
     rows: &[MatrixRow],
     role: Role,
     strategy: MatrixStrategy,
-) -> (ModelVariant, f64, bool) {
+) -> CandidateSelection {
     let inner = build_forward_folds(rows, 3);
     if inner.len() < 2 {
-        return (ModelVariant::Core, 1.25, true);
+        return CandidateSelection::core_degraded();
     }
-    let mut selected = (ModelVariant::Core, 1.25, false);
+    let mut selected = CandidateSelection {
+        degraded: false,
+        ..CandidateSelection::core_degraded()
+    };
     let mut best = f64::INFINITY;
     for variant in [ModelVariant::Core, ModelVariant::RoleFull] {
         for multiplier in MULTIPLIERS {
-            let mut loss = 0.0;
-            let mut count = 0usize;
-            let mut valid = true;
-            for fold in &inner {
-                let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
-                let Some(model) =
-                    fit_hierarchical_model(&train, role, variant, strategy, multiplier)
-                else {
-                    valid = false;
-                    break;
-                };
-                for &index in &fold.validation {
-                    let error = rows[index].result - predict_probability(&model, &rows[index]);
-                    if !error.is_finite() {
+            for (lambda_core, lambda_cohort) in [(0.02, 0.05), (0.05, 0.10)] {
+                let mut loss = 0.0;
+                let mut count = 0usize;
+                let mut valid = true;
+                for fold in &inner {
+                    let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
+                    let Some(model) = fit_hierarchical_model_regularized(
+                        &train,
+                        role,
+                        variant,
+                        strategy,
+                        multiplier,
+                        lambda_core,
+                        lambda_cohort,
+                    ) else {
                         valid = false;
                         break;
+                    };
+                    for &index in &fold.validation {
+                        let error = rows[index].result - predict_probability(&model, &rows[index]);
+                        if !error.is_finite() {
+                            valid = false;
+                            break;
+                        }
+                        loss += error.powi(2);
+                        count += 1;
                     }
-                    loss += error.powi(2);
-                    count += 1;
                 }
-            }
-            if valid && count > 0 && loss / (count as f64) < best {
-                best = loss / count as f64;
-                selected = (variant, multiplier, false);
+                if valid && count > 0 && loss / (count as f64) < best {
+                    best = loss / count as f64;
+                    selected = CandidateSelection {
+                        variant,
+                        multiplier,
+                        lambda_core,
+                        lambda_cohort,
+                        degraded: false,
+                    };
+                }
             }
         }
     }
@@ -384,14 +476,21 @@ pub fn evaluate_strategy(
     let mut reports = Vec::new();
     let mut all_a = Vec::new();
     let mut all_p = Vec::new();
+    let mut all_base = Vec::new();
     let mut improved = 0;
     for (number, fold) in folds.iter().enumerate() {
         let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
         let train_rows = train.iter().map(|row| (*row).clone()).collect::<Vec<_>>();
         let fold_selected = select_matrix_candidate(&train_rows, role, strategy);
-        let Some(model) =
-            fit_hierarchical_model(&train, role, fold_selected.0, strategy, fold_selected.1)
-        else {
+        let Some(model) = fit_hierarchical_model_regularized(
+            &train,
+            role,
+            fold_selected.variant,
+            strategy,
+            fold_selected.multiplier,
+            fold_selected.lambda_core,
+            fold_selected.lambda_cohort,
+        ) else {
             continue;
         };
         let a = fold
@@ -411,8 +510,8 @@ pub fn evaluate_strategy(
             .sum::<f64>()
             / a.len().max(1) as f64;
         let m = metrics(&a, &p);
-        let delta = m.as_ref().map(|x| base - x.brier);
-        if delta.unwrap_or(0.0) > 0.0 {
+        let delta = m.as_ref().map(|x| x.brier - base);
+        if delta.unwrap_or(0.0) < 0.0 {
             improved += 1
         }
         let rejected = fold
@@ -423,9 +522,9 @@ pub fn evaluate_strategy(
                 max_feature_contribution_share(
                     &rows[i],
                     role,
-                    fold_selected.0,
+                    fold_selected.variant,
                     strategy,
-                    fold_selected.1,
+                    fold_selected.multiplier,
                     &effective,
                 ) > 0.35
             })
@@ -439,12 +538,13 @@ pub fn evaluate_strategy(
             .unwrap_or(false);
         all_a.extend(&a);
         all_p.extend(&p);
+        all_base.extend(fold.validation.iter().map(|&i| rows[i].expected_win_rate));
         let weights = role_vector_with_multiplier(
             &rows[fold.validation[0]],
             role,
-            fold_selected.0,
+            fold_selected.variant,
             strategy,
-            fold_selected.1,
+            fold_selected.multiplier,
         )
         .names
         .into_iter()
@@ -460,22 +560,32 @@ pub fn evaluate_strategy(
             brier_delta: delta,
             rejected_35_percent: rejected,
             weights,
-            variant: fold_selected.0,
-            final_multiplier: fold_selected.1,
+            variant: fold_selected.variant,
+            final_multiplier: fold_selected.multiplier,
+            lambda_core: fold_selected.lambda_core,
+            lambda_cohort: fold_selected.lambda_cohort,
             inner_validation_rows: build_forward_folds(&train_rows, 3)
                 .iter()
                 .map(|fold| fold.validation.len())
                 .sum(),
-            selection_degraded: fold_selected.2,
+            selection_degraded: fold_selected.degraded,
         });
     }
     let full = rows.iter().collect::<Vec<_>>();
     let full_selected = select_matrix_candidate(&rows, role, strategy);
-    let selected = (full_selected.0, full_selected.1);
-    let model = fit_hierarchical_model(&full, role, selected.0, strategy, selected.1);
+    let selected = full_selected;
+    let model = fit_hierarchical_model_regularized(
+        &full,
+        role,
+        selected.variant,
+        strategy,
+        selected.multiplier,
+        selected.lambda_core,
+        selected.lambda_cohort,
+    );
     let proto = rows
         .first()
-        .map(|r| role_vector(r, role, selected.0, strategy));
+        .map(|r| role_vector(r, role, selected.variant, strategy));
     let full_refit_weights: BTreeMap<String, f64> = proto
         .map(|p| {
             p.names
@@ -515,25 +625,32 @@ pub fn evaluate_strategy(
     if !final_ok {
         rejected_reasons.push("final_weight_not_strictly_above_nonfinal".into());
     }
+    let p95_rejected = reports.iter().any(|fold| fold.rejected_35_percent);
     StrategyReport {
         role,
         strategy: format!("{strategy:?}").to_lowercase(),
         preliminary: true,
         performance_adjustment: 0.0,
-        variant: selected.0,
-        final_multiplier: selected.1,
+        variant: selected.variant,
+        final_multiplier: selected.multiplier,
+        lambda_core: selected.lambda_core,
+        lambda_cohort: selected.lambda_cohort,
         folds: reports,
         improved_folds: improved,
         metrics: metrics(&all_a, &all_p),
+        baseline_metrics: metrics(&all_a, &all_base),
         full_refit_weights,
         average_adjustment: if adjustments.is_empty() {
             0.0
         } else {
             adjustments.iter().sum::<f64>() / adjustments.len() as f64
         },
+        p95_single_feature_share: f64::from(p95_rejected),
+        upper_cap_rate: 0.0,
+        lower_cap_rate: 0.0,
         missing_values: rows
             .iter()
-            .map(|r| missing_values(r, role, selected.0, strategy))
+            .map(|r| missing_values(r, role, selected.variant, strategy))
             .sum(),
         rejected_reasons,
     }
@@ -592,7 +709,7 @@ pub fn evaluate_forward(source: &[TrainingRow]) -> Vec<StrategyReport> {
                     .filter(|r| r.role == role_name)
                     .cloned()
                     .collect::<Vec<_>>();
-                evaluate_raw_strategy(&role_rows, role, strategy)
+                evaluate_raw_strategy(&role_rows, role, strategy, None)
             })
         })
         .collect()
@@ -644,10 +761,312 @@ fn raw_folds(rows: &[TrainingRow], requested: usize) -> Vec<ForwardFold> {
         .collect()
 }
 
+pub fn evaluate_cell_strategy(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: MatrixStrategy,
+) -> StrategyReport {
+    let role_name = match role {
+        Role::Tank => "tank",
+        Role::Damage => "damage",
+        Role::Support => "support",
+    };
+    let rows = eligible_performance_rows(source)
+        .into_iter()
+        .filter(|row| row.role == role_name)
+        .collect::<Vec<_>>();
+    evaluate_raw_strategy(&rows, role, strategy, Some(mode))
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NestedFoldReport {
+    pub fold: usize,
+    pub training_rows: usize,
+    pub validation_rows: usize,
+    pub strategy: String,
+    pub variant: ModelVariant,
+    pub final_multiplier: f64,
+    pub lambda_core: f64,
+    pub lambda_cohort: f64,
+    pub inner_validation_rows: usize,
+    pub selection_degraded: bool,
+    pub metrics: Option<MetricReport>,
+    pub baseline_brier: Option<f64>,
+    pub brier_delta: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NestedCellReport {
+    pub role: Role,
+    pub mode: ModeFamily,
+    pub folds: Vec<NestedFoldReport>,
+    pub improved_folds: usize,
+    pub metrics: Option<MetricReport>,
+    pub baseline_metrics: Option<MetricReport>,
+    pub selection_degraded: bool,
+    pub selected_strategy: String,
+    pub selected_variant: ModelVariant,
+    pub selected_final_multiplier: f64,
+    pub selected_lambda_core: f64,
+    pub selected_lambda_cohort: f64,
+}
+
+#[derive(Clone, Copy)]
+struct CompleteCandidate {
+    strategy: MatrixStrategy,
+    hyperparameters: CandidateSelection,
+    inner_validation_rows: usize,
+}
+
+fn select_complete_candidate(
+    rows: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    force_degraded: bool,
+) -> CompleteCandidate {
+    let inner = raw_folds(rows, 3);
+    if inner.len() < 2 || force_degraded {
+        return CompleteCandidate {
+            strategy: MatrixStrategy::None,
+            hyperparameters: CandidateSelection::core_degraded(),
+            inner_validation_rows: inner.iter().map(|fold| fold.validation.len()).sum(),
+        };
+    }
+    let mut best = f64::INFINITY;
+    let mut selected = CompleteCandidate {
+        strategy: MatrixStrategy::None,
+        hyperparameters: CandidateSelection::core_degraded(),
+        inner_validation_rows: inner.iter().map(|fold| fold.validation.len()).sum(),
+    };
+    for strategy in [
+        MatrixStrategy::None,
+        MatrixStrategy::DirectNegative,
+        MatrixStrategy::HeroNormalized,
+        MatrixStrategy::ExcessHealing,
+        MatrixStrategy::ResourceConversionDebt,
+    ] {
+        for variant in [ModelVariant::Core, ModelVariant::RoleFull] {
+            for multiplier in MULTIPLIERS {
+                for (lambda_core, lambda_cohort) in [(0.02, 0.05), (0.05, 0.10)] {
+                    let mut loss = 0.0;
+                    let mut count = 0usize;
+                    let mut valid_candidate = true;
+                    for fold in &inner {
+                        let train = fold
+                            .training
+                            .iter()
+                            .map(|&index| rows[index].clone())
+                            .collect::<Vec<_>>();
+                        let valid = fold
+                            .validation
+                            .iter()
+                            .map(|&index| rows[index].clone())
+                            .filter(|row| row.mode_family == mode)
+                            .collect::<Vec<_>>();
+                        if valid.is_empty() {
+                            valid_candidate = false;
+                            break;
+                        }
+                        let matrix = build_feature_matrix(&train, &valid, strategy);
+                        let role_name = match role {
+                            Role::Tank => "tank",
+                            Role::Damage => "damage",
+                            Role::Support => "support",
+                        };
+                        let training = matrix
+                            .training_by_role
+                            .get(role_name)
+                            .cloned()
+                            .unwrap_or_default();
+                        let validation = matrix
+                            .validation_by_role
+                            .get(role_name)
+                            .cloned()
+                            .unwrap_or_default();
+                        let refs = training.iter().collect::<Vec<_>>();
+                        let Some(model) = fit_hierarchical_model_regularized(
+                            &refs,
+                            role,
+                            variant,
+                            strategy,
+                            multiplier,
+                            lambda_core,
+                            lambda_cohort,
+                        ) else {
+                            valid_candidate = false;
+                            break;
+                        };
+                        for row in &validation {
+                            let error = row.result - predict_probability(&model, row);
+                            if !error.is_finite() {
+                                valid_candidate = false;
+                                break;
+                            }
+                            loss += error.powi(2);
+                            count += 1;
+                        }
+                    }
+                    if valid_candidate && count > 0 && loss / (count as f64) < best {
+                        best = loss / count as f64;
+                        selected = CompleteCandidate {
+                            strategy,
+                            hyperparameters: CandidateSelection {
+                                variant,
+                                multiplier,
+                                lambda_core,
+                                lambda_cohort,
+                                degraded: false,
+                            },
+                            inner_validation_rows: inner
+                                .iter()
+                                .map(|fold| fold.validation.len())
+                                .sum(),
+                        };
+                    }
+                }
+            }
+        }
+    }
+    selected
+}
+
+pub fn evaluate_nested_cell(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+) -> NestedCellReport {
+    evaluate_nested_cell_impl(source, role, mode, false)
+}
+
+pub(crate) fn evaluate_nested_cell_shadow(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+) -> NestedCellReport {
+    evaluate_nested_cell_impl(source, role, mode, true)
+}
+
+fn evaluate_nested_cell_impl(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    force_degraded: bool,
+) -> NestedCellReport {
+    let role_name = match role {
+        Role::Tank => "tank",
+        Role::Damage => "damage",
+        Role::Support => "support",
+    };
+    let rows = eligible_performance_rows(source)
+        .into_iter()
+        .filter(|row| row.role == role_name)
+        .collect::<Vec<_>>();
+    let outer = raw_folds(&rows, 5);
+    let mut folds = Vec::new();
+    let mut actual = Vec::new();
+    let mut predicted = Vec::new();
+    let mut baseline = Vec::new();
+    for (number, fold) in outer.iter().enumerate() {
+        let train = fold
+            .training
+            .iter()
+            .map(|&index| rows[index].clone())
+            .collect::<Vec<_>>();
+        let valid = fold
+            .validation
+            .iter()
+            .map(|&index| rows[index].clone())
+            .filter(|row| row.mode_family == mode)
+            .collect::<Vec<_>>();
+        if valid.is_empty() {
+            continue;
+        }
+        let selected = select_complete_candidate(&train, role, mode, force_degraded);
+        let matrix = build_feature_matrix(&train, &valid, selected.strategy);
+        let training = matrix
+            .training_by_role
+            .get(role_name)
+            .cloned()
+            .unwrap_or_default();
+        let validation = matrix
+            .validation_by_role
+            .get(role_name)
+            .cloned()
+            .unwrap_or_default();
+        let refs = training.iter().collect::<Vec<_>>();
+        let Some(model) = fit_hierarchical_model_regularized(
+            &refs,
+            role,
+            selected.hyperparameters.variant,
+            selected.strategy,
+            selected.hyperparameters.multiplier,
+            selected.hyperparameters.lambda_core,
+            selected.hyperparameters.lambda_cohort,
+        ) else {
+            continue;
+        };
+        let fold_actual = validation.iter().map(|row| row.result).collect::<Vec<_>>();
+        let fold_predicted = validation
+            .iter()
+            .map(|row| predict_probability(&model, row))
+            .collect::<Vec<_>>();
+        let fold_baseline = validation
+            .iter()
+            .map(|row| row.expected_win_rate)
+            .collect::<Vec<_>>();
+        let candidate_metrics = metrics(&fold_actual, &fold_predicted);
+        let baseline_metrics = metrics(&fold_actual, &fold_baseline);
+        let baseline_brier = baseline_metrics.as_ref().map(|report| report.brier);
+        let brier_delta = candidate_metrics
+            .as_ref()
+            .zip(baseline_brier)
+            .map(|(candidate, baseline)| candidate.brier - baseline);
+        actual.extend(&fold_actual);
+        predicted.extend(&fold_predicted);
+        baseline.extend(&fold_baseline);
+        folds.push(NestedFoldReport {
+            fold: number + 1,
+            training_rows: training.len(),
+            validation_rows: validation.len(),
+            strategy: format!("{:?}", selected.strategy).to_lowercase(),
+            variant: selected.hyperparameters.variant,
+            final_multiplier: selected.hyperparameters.multiplier,
+            lambda_core: selected.hyperparameters.lambda_core,
+            lambda_cohort: selected.hyperparameters.lambda_cohort,
+            inner_validation_rows: selected.inner_validation_rows,
+            selection_degraded: selected.hyperparameters.degraded,
+            metrics: candidate_metrics,
+            baseline_brier,
+            brier_delta,
+        });
+    }
+    let final_selection = select_complete_candidate(&rows, role, mode, force_degraded);
+    NestedCellReport {
+        role,
+        mode,
+        improved_folds: folds
+            .iter()
+            .filter(|fold| fold.brier_delta.is_some_and(|delta| delta < 0.0))
+            .count(),
+        selection_degraded: folds.iter().any(|fold| fold.selection_degraded)
+            || final_selection.hyperparameters.degraded,
+        selected_strategy: format!("{:?}", final_selection.strategy).to_lowercase(),
+        selected_variant: final_selection.hyperparameters.variant,
+        selected_final_multiplier: final_selection.hyperparameters.multiplier,
+        selected_lambda_core: final_selection.hyperparameters.lambda_core,
+        selected_lambda_cohort: final_selection.hyperparameters.lambda_cohort,
+        metrics: metrics(&actual, &predicted),
+        baseline_metrics: metrics(&actual, &baseline),
+        folds,
+    }
+}
+
 fn evaluate_raw_strategy(
     source: &[TrainingRow],
     role: Role,
     strategy: MatrixStrategy,
+    validation_mode: Option<ModeFamily>,
 ) -> StrategyReport {
     let role_name = match role {
         Role::Tank => "tank",
@@ -658,7 +1077,10 @@ fn evaluate_raw_strategy(
     let mut fold_reports = Vec::new();
     let mut all_a = Vec::new();
     let mut all_p = Vec::new();
+    let mut all_base = Vec::new();
     let mut missing = 0;
+    let mut all_ratios = Vec::new();
+    let mut diagnostic_effects = Vec::new();
     for (number, fold) in folds.iter().enumerate() {
         let train = fold
             .training
@@ -669,7 +1091,11 @@ fn evaluate_raw_strategy(
             .validation
             .iter()
             .map(|&i| source[i].clone())
+            .filter(|row| validation_mode.is_none_or(|mode| row.mode_family == mode))
             .collect::<Vec<_>>();
+        if validation.is_empty() {
+            continue;
+        }
         let matrix = build_feature_matrix(&train, &validation, strategy);
         let train_rows = matrix
             .training_by_role
@@ -684,10 +1110,17 @@ fn evaluate_raw_strategy(
         if train_rows.is_empty() || valid_rows.is_empty() {
             continue;
         }
-        let selected = select_candidate(&train, role, strategy);
+        let selected = select_candidate_detailed(&train, role, strategy);
         let refs = train_rows.iter().collect::<Vec<_>>();
-        let Some(model) = fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1)
-        else {
+        let Some(model) = fit_hierarchical_model_regularized(
+            &refs,
+            role,
+            selected.variant,
+            strategy,
+            selected.multiplier,
+            selected.lambda_core,
+            selected.lambda_cohort,
+        ) else {
             continue;
         };
         let a = valid_rows.iter().map(|r| r.result).collect::<Vec<_>>();
@@ -695,28 +1128,45 @@ fn evaluate_raw_strategy(
             .iter()
             .map(|r| predict_probability(&model, r))
             .collect::<Vec<_>>();
+        let raw_validation = validation
+            .iter()
+            .map(|row| (row.match_group.as_str(), row))
+            .collect::<HashMap<_, _>>();
+        diagnostic_effects.extend(valid_rows.iter().filter_map(|row| {
+            let raw = raw_validation.get(row.match_group.as_str())?;
+            let base_delta = raw.base_delta?;
+            let effect = probability_logit(predict_probability(&model, row))
+                - probability_logit(row.expected_win_rate);
+            Some((base_delta, effect, row.mode_family))
+        }));
         let base = valid_rows
             .iter()
             .map(|r| (r.result - r.expected_win_rate).powi(2))
             .sum::<f64>()
             / valid_rows.len() as f64;
         let metric = metrics(&a, &p);
-        let delta = metric.as_ref().map(|m| base - m.brier);
+        let delta = metric.as_ref().map(|m| m.brier - base);
         let mut ratios = valid_rows
             .iter()
             .map(|r| {
                 let effective = model.effective_weights(r.mode_family.training_cohort());
                 max_feature_contribution_share(
-                    r, role, selected.0, strategy, selected.1, &effective,
+                    r,
+                    role,
+                    selected.variant,
+                    strategy,
+                    selected.multiplier,
+                    &effective,
                 )
             })
             .collect::<Vec<_>>();
+        all_ratios.extend(ratios.iter().copied());
         ratios.sort_by(f64::total_cmp);
         let p95 = ratios
             .get(((ratios.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
             .copied()
             .unwrap_or(0.0);
-        let names = role_vector(&valid_rows[0], role, selected.0, strategy).names;
+        let names = role_vector(&valid_rows[0], role, selected.variant, strategy).names;
         let weights = names
             .into_iter()
             .zip(model.core_weights.iter().copied())
@@ -724,10 +1174,11 @@ fn evaluate_raw_strategy(
             .collect();
         missing += valid_rows
             .iter()
-            .map(|r| missing_values(r, role, selected.0, strategy))
+            .map(|r| missing_values(r, role, selected.variant, strategy))
             .sum::<usize>();
         all_a.extend(&a);
         all_p.extend(&p);
+        all_base.extend(valid_rows.iter().map(|row| row.expected_win_rate));
         fold_reports.push(FoldReport {
             fold: number + 1,
             training_rows: train_rows.len(),
@@ -737,13 +1188,15 @@ fn evaluate_raw_strategy(
             brier_delta: delta,
             rejected_35_percent: p95 > 0.35,
             weights,
-            variant: selected.0,
-            final_multiplier: selected.1,
+            variant: selected.variant,
+            final_multiplier: selected.multiplier,
+            lambda_core: selected.lambda_core,
+            lambda_cohort: selected.lambda_cohort,
             inner_validation_rows: raw_folds(&train, 3)
                 .iter()
                 .map(|f| f.validation.len())
                 .sum(),
-            selection_degraded: selected.2,
+            selection_degraded: selected.degraded,
         });
     }
     let full_matrix = build_feature_matrix(source, &[], strategy);
@@ -752,12 +1205,20 @@ fn evaluate_raw_strategy(
         .get(role_name)
         .cloned()
         .unwrap_or_default();
-    let selected = select_candidate(source, role, strategy);
+    let selected = select_candidate_detailed(source, role, strategy);
     let refs = full_rows.iter().collect::<Vec<_>>();
-    let model = fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1);
+    let model = fit_hierarchical_model_regularized(
+        &refs,
+        role,
+        selected.variant,
+        strategy,
+        selected.multiplier,
+        selected.lambda_core,
+        selected.lambda_cohort,
+    );
     let names = full_rows
         .first()
-        .map(|r| role_vector(r, role, selected.0, strategy).names)
+        .map(|r| role_vector(r, role, selected.variant, strategy).names)
         .unwrap_or_default();
     let full_refit_weights: BTreeMap<String, f64> = names
         .into_iter()
@@ -773,13 +1234,13 @@ fn evaluate_raw_strategy(
         .collect();
     let improved = fold_reports
         .iter()
-        .filter(|f| f.brier_delta.unwrap_or(0.0) > 0.0)
+        .filter(|f| f.brier_delta.unwrap_or(0.0) < 0.0)
         .count();
     let mut rejected = Vec::new();
     if improved < 4 {
         rejected.push("improved_folds_below_4".into())
     }
-    if selected.2 {
+    if selected.degraded {
         rejected.push("inner_forward_selection_insufficient_data_core_1_25".into());
     }
     if fold_reports.iter().any(|f| f.rejected_35_percent) {
@@ -793,125 +1254,167 @@ fn evaluate_raw_strategy(
     {
         rejected.push("final_weight_not_strictly_above_nonfinal".into())
     }
-    let adjustments = full_rows
+    let mut absolute_effects = diagnostic_effects
         .iter()
-        .filter_map(|r| {
-            model
-                .as_ref()
-                .map(|model| predict_probability(model, r) - r.expected_win_rate)
+        .map(|sample| sample.1.abs())
+        .collect::<Vec<_>>();
+    absolute_effects.sort_by(f64::total_cmp);
+    let p95_effect = absolute_effects
+        .get(((absolute_effects.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or(1.0)
+        .max(f64::EPSILON);
+    let adjustment_samples = diagnostic_effects
+        .into_iter()
+        .map(|(base, effect, mode)| {
+            formal_diagnostic_adjustment(base, effect / p95_effect, role, mode)
         })
         .collect::<Vec<_>>();
+    all_ratios.sort_by(f64::total_cmp);
+    let p95_single_feature_share = all_ratios
+        .get(((all_ratios.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or(0.0);
     StrategyReport {
         role,
         strategy: format!("{strategy:?}").to_lowercase(),
         preliminary: true,
         performance_adjustment: 0.0,
-        variant: selected.0,
-        final_multiplier: selected.1,
+        variant: selected.variant,
+        final_multiplier: selected.multiplier,
+        lambda_core: selected.lambda_core,
+        lambda_cohort: selected.lambda_cohort,
         folds: fold_reports,
         improved_folds: improved,
         metrics: metrics(&all_a, &all_p),
+        baseline_metrics: metrics(&all_a, &all_base),
         full_refit_weights,
-        average_adjustment: if adjustments.is_empty() {
+        average_adjustment: if adjustment_samples.is_empty() {
             0.0
         } else {
-            adjustments.iter().sum::<f64>() / adjustments.len() as f64
+            adjustment_samples
+                .iter()
+                .map(|sample| sample.0)
+                .sum::<f64>()
+                / adjustment_samples.len() as f64
         },
+        p95_single_feature_share,
+        upper_cap_rate: adjustment_samples.iter().filter(|sample| sample.1).count() as f64
+            / adjustment_samples.len().max(1) as f64,
+        lower_cap_rate: adjustment_samples.iter().filter(|sample| sample.2).count() as f64
+            / adjustment_samples.len().max(1) as f64,
         missing_values: missing,
         rejected_reasons: rejected,
     }
 }
 
-pub(crate) fn select_candidate(
+pub(crate) fn select_candidate_detailed(
     rows: &[TrainingRow],
     role: Role,
     strategy: MatrixStrategy,
-) -> (ModelVariant, f64, bool) {
+) -> CandidateSelection {
     let rows = eligible_performance_rows(rows);
     let inner = raw_folds(&rows, 3);
     if inner.len() < 2 {
-        return (ModelVariant::Core, 1.25, true);
+        return CandidateSelection::core_degraded();
     }
-    let mut selected = (ModelVariant::Core, 1.25, false);
+    let mut selected = CandidateSelection {
+        degraded: false,
+        ..CandidateSelection::core_degraded()
+    };
     let mut best = f64::INFINITY;
     for variant in [ModelVariant::Core, ModelVariant::RoleFull] {
         for multiplier in MULTIPLIERS {
-            let mut loss = 0.0;
-            let mut count = 0usize;
-            let mut valid = true;
-            for fold in &inner {
-                let raw_train = fold
-                    .training
-                    .iter()
-                    .map(|&i| rows[i].clone())
-                    .collect::<Vec<_>>();
-                let raw_validation = fold
-                    .validation
-                    .iter()
-                    .map(|&i| rows[i].clone())
-                    .collect::<Vec<_>>();
-                let matrix = build_feature_matrix(&raw_train, &raw_validation, strategy);
-                let role_name = match role {
-                    Role::Tank => "tank",
-                    Role::Damage => "damage",
-                    Role::Support => "support",
-                };
-                let train_rows = matrix
-                    .training_by_role
-                    .get(role_name)
-                    .cloned()
-                    .unwrap_or_default();
-                let validation_rows = matrix
-                    .validation_by_role
-                    .get(role_name)
-                    .cloned()
-                    .unwrap_or_default();
-                if train_rows.is_empty() || validation_rows.is_empty() {
-                    valid = false;
-                    break;
-                }
-                let train = train_rows.iter().collect::<Vec<_>>();
-                let Some(model) =
-                    fit_hierarchical_model(&train, role, variant, strategy, multiplier)
-                else {
-                    valid = false;
-                    break;
-                };
-                let proto = train_rows
-                    .first()
-                    .map(|r| role_vector(r, role, variant, strategy));
-                let identifiable = model.core_weights.len()
-                    == proto.as_ref().map(|p| p.values.len()).unwrap_or(usize::MAX)
-                    && proto
-                        .and_then(|p| {
-                            p.final_index.zip(p.nonfinal_index).map(|(f, n)| {
-                                model.core_weights[f] > 0.0
-                                    && model.core_weights[f] > model.core_weights[n]
-                            })
-                        })
-                        .unwrap_or(false);
-                if !identifiable {
-                    valid = false;
-                    break;
-                }
-                for row in &validation_rows {
-                    let p = predict_probability(&model, row);
-                    let e = (row.result - p).powi(2);
-                    if !e.is_finite() {
+            for (lambda_core, lambda_cohort) in [(0.02, 0.05), (0.05, 0.10)] {
+                let mut loss = 0.0;
+                let mut count = 0usize;
+                let mut valid = true;
+                for fold in &inner {
+                    let raw_train = fold
+                        .training
+                        .iter()
+                        .map(|&i| rows[i].clone())
+                        .collect::<Vec<_>>();
+                    let raw_validation = fold
+                        .validation
+                        .iter()
+                        .map(|&i| rows[i].clone())
+                        .collect::<Vec<_>>();
+                    let matrix = build_feature_matrix(&raw_train, &raw_validation, strategy);
+                    let role_name = match role {
+                        Role::Tank => "tank",
+                        Role::Damage => "damage",
+                        Role::Support => "support",
+                    };
+                    let train_rows = matrix
+                        .training_by_role
+                        .get(role_name)
+                        .cloned()
+                        .unwrap_or_default();
+                    let validation_rows = matrix
+                        .validation_by_role
+                        .get(role_name)
+                        .cloned()
+                        .unwrap_or_default();
+                    if train_rows.is_empty() || validation_rows.is_empty() {
                         valid = false;
                         break;
                     }
-                    loss += e;
-                    count += 1
+                    let train = train_rows.iter().collect::<Vec<_>>();
+                    let Some(model) = fit_hierarchical_model_regularized(
+                        &train,
+                        role,
+                        variant,
+                        strategy,
+                        multiplier,
+                        lambda_core,
+                        lambda_cohort,
+                    ) else {
+                        valid = false;
+                        break;
+                    };
+                    let proto = train_rows
+                        .first()
+                        .map(|r| role_vector(r, role, variant, strategy));
+                    let identifiable = model.core_weights.len()
+                        == proto.as_ref().map(|p| p.values.len()).unwrap_or(usize::MAX)
+                        && proto
+                            .and_then(|p| {
+                                p.final_index.zip(p.nonfinal_index).map(|(f, n)| {
+                                    model.core_weights[f] > 0.0
+                                        && model.core_weights[f] > model.core_weights[n]
+                                })
+                            })
+                            .unwrap_or(false);
+                    if !identifiable {
+                        valid = false;
+                        break;
+                    }
+                    for row in &validation_rows {
+                        let p = predict_probability(&model, row);
+                        let e = (row.result - p).powi(2);
+                        if !e.is_finite() {
+                            valid = false;
+                            break;
+                        }
+                        loss += e;
+                        count += 1
+                    }
                 }
-            }
-            if !valid || count == 0 {
-                continue;
-            }
-            let score = loss / count as f64;
-            if score < best {
-                best = score;
-                selected = (variant, multiplier, false)
+                if !valid || count == 0 {
+                    continue;
+                }
+                let score = loss / count as f64;
+                if score < best {
+                    best = score;
+                    selected = CandidateSelection {
+                        variant,
+                        multiplier,
+                        lambda_core,
+                        lambda_cohort,
+                        degraded: false,
+                    }
+                }
             }
         }
     }

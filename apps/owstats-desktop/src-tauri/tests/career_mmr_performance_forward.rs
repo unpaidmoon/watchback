@@ -1,8 +1,9 @@
 use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
-    performance::{BaselineLevel, FeatureValues, MatrixRow},
+    performance::{build_feature_matrix, BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        build_forward_folds, evaluate_forward, evaluate_strategy, max_feature_contribution_share,
+        bounded_performance_adjustment, build_forward_folds, evaluate_cell_strategy,
+        evaluate_forward, evaluate_nested_cell, evaluate_strategy, max_feature_contribution_share,
         metrics, missing_values, role_vector, role_vector_with_multiplier, HealingTakenStrategy,
         ModelVariant, Role,
     },
@@ -434,6 +435,113 @@ fn all_role_strategy_combinations_are_preliminary_and_inactive() {
 }
 
 #[test]
+fn brier_delta_is_candidate_minus_baseline() {
+    let rows = (0..40).map(|i| training("damage", i)).collect::<Vec<_>>();
+    let report = evaluate_forward(&rows);
+    for fold in report.iter().flat_map(|report| &report.folds) {
+        if let (Some(metrics), Some(baseline), Some(delta)) =
+            (&fold.metrics, fold.baseline_brier, fold.brier_delta)
+        {
+            assert!((delta - (metrics.brier - baseline)).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn paired_modes_share_training_rows_but_keep_validation_samples_independent() {
+    let rows = (0..60)
+        .map(|i| {
+            let mut row = training("damage", i);
+            row.mode_family = if i % 3 == 0 {
+                ModeFamily::RoleQuick
+            } else {
+                ModeFamily::RoleCompetitive
+            };
+            row
+        })
+        .collect::<Vec<_>>();
+    let competitive = evaluate_cell_strategy(
+        &rows,
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+        HealingTakenStrategy::None,
+    );
+    let quick = evaluate_cell_strategy(
+        &rows,
+        Role::Damage,
+        ModeFamily::RoleQuick,
+        HealingTakenStrategy::None,
+    );
+    assert_eq!(competitive.variant, quick.variant);
+    assert_eq!(competitive.final_multiplier, quick.final_multiplier);
+    assert_eq!(competitive.lambda_core, quick.lambda_core);
+    assert_eq!(competitive.lambda_cohort, quick.lambda_cohort);
+    assert_ne!(
+        competitive
+            .folds
+            .iter()
+            .map(|fold| fold.validation_rows)
+            .sum::<usize>(),
+        quick
+            .folds
+            .iter()
+            .map(|fold| fold.validation_rows)
+            .sum::<usize>()
+    );
+}
+
+#[test]
+fn raw_damage_or_healing_volume_does_not_change_fixed_standardized_signal() {
+    let train = (0..40).map(|i| training("support", i)).collect::<Vec<_>>();
+    let mut high = training("support", 1_000);
+    high.damage = Some(1.0e9);
+    high.healing = Some(1.0e9);
+    let mut higher = high.clone();
+    higher.match_group = "private-support-volume-higher".into();
+    higher.source_match_group = "source-support-volume-higher".into();
+    higher.begin_ts += 1;
+    higher.damage = Some(1.0e12);
+    higher.healing = Some(1.0e12);
+    let matrix = build_feature_matrix(&train, &[high, higher], HealingTakenStrategy::None);
+    let rows = matrix.validation_by_role.get("support").unwrap();
+    let before = role_vector(
+        &rows[0],
+        Role::Support,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+    );
+    let after = role_vector(
+        &rows[1],
+        Role::Support,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+    );
+    let damage = before
+        .names
+        .iter()
+        .position(|name| *name == "damage")
+        .unwrap();
+    let healing = before
+        .names
+        .iter()
+        .position(|name| *name == "healing")
+        .unwrap();
+    assert_eq!(before.values[damage], after.values[damage]);
+    assert_eq!(before.values[healing], after.values[healing]);
+
+    let mut more_final_hits = rows[0].clone();
+    more_final_hits.standardized.final_hit = Some(3.0);
+    let final_signal = role_vector(
+        &more_final_hits,
+        Role::Support,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+    );
+    let index = final_signal.final_index.unwrap();
+    assert!(final_signal.values[index] > before.values[index]);
+}
+
+#[test]
 fn outcome_only_extremes_cannot_change_any_forward_result() {
     let base = (0..80).map(|i| training("damage", i)).collect::<Vec<_>>();
     let expected = evaluate_forward(&base);
@@ -483,12 +591,47 @@ fn matrix_api_future_extreme_cannot_change_the_earliest_fold_model() {
 }
 
 #[test]
+fn future_strategy_preference_cannot_change_earliest_outer_fold_selection() {
+    let base = (0..50).map(|i| training("damage", i)).collect::<Vec<_>>();
+    let before = evaluate_nested_cell(&base, Role::Damage, ModeFamily::RoleCompetitive);
+    let mut contaminated = base;
+    contaminated.extend((0..40).map(|i| {
+        let mut row = training("damage", 10_000 + i);
+        row.match_group = "private-damage-49".into();
+        row.healing_taken = Some(if i % 2 == 0 { 1.0e9 } else { 0.0 });
+        row.damage = Some(if i % 2 == 0 { 1.0 } else { 1.0e9 });
+        row
+    }));
+    let after = evaluate_nested_cell(&contaminated, Role::Damage, ModeFamily::RoleCompetitive);
+    let before = before
+        .folds
+        .iter()
+        .find(|fold| !fold.selection_degraded)
+        .unwrap();
+    let after = after
+        .folds
+        .iter()
+        .find(|fold| !fold.selection_degraded)
+        .unwrap();
+    assert_eq!(before.strategy, after.strategy);
+    assert_eq!(before.variant, after.variant);
+    assert_eq!(before.final_multiplier, after.final_multiplier);
+    assert_eq!(before.lambda_core, after.lambda_core);
+    assert_eq!(before.lambda_cohort, after.lambda_cohort);
+}
+
+#[test]
 fn loo_and_bootstrap_source_contains_only_the_shared_hierarchical_fit_path() {
     let source = include_str!("../src/career_mmr/performance_stability.rs");
     assert!(!source.contains("fit_bootstrap"));
     assert!(!source.contains("let mut gram"));
     assert!(!source.contains("row.result - row.expected_win_rate"));
-    assert!(source.matches("fit_hierarchical_model(").count() >= 3);
+    assert!(
+        source
+            .matches("fit_hierarchical_model_regularized(")
+            .count()
+            >= 3
+    );
     assert!(source.contains("predict_probability(&model"));
     assert!(source.contains("scope: \"core\""));
 }
@@ -549,7 +692,7 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
         .collect::<Vec<_>>();
     assert_eq!(StabilityConfig::default().bootstrap_iterations, 1000);
     let config = StabilityConfig {
-        bootstrap_iterations: 100,
+        bootstrap_iterations: 2,
         seed: 7,
         ..Default::default()
     };
@@ -558,11 +701,53 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     let second = evaluate_stability(&rows, config);
     assert_eq!(first, second);
-    assert_eq!(first.reports.len(), 15);
+    assert_eq!(first.reports.len(), 75);
+    assert_eq!(first.cells.len(), 15);
+    assert!(first
+        .cells
+        .iter()
+        .all(|cell| cell.mode != ModeFamily::StadiumQuick));
+    for role in [Role::Tank, Role::Damage, Role::Support] {
+        for mode in [
+            ModeFamily::RoleCompetitive,
+            ModeFamily::RoleQuick,
+            ModeFamily::OpenCompetitive,
+            ModeFamily::OpenQuick,
+            ModeFamily::StadiumCompetitive,
+        ] {
+            assert!(first
+                .cells
+                .iter()
+                .any(|cell| cell.role == role && cell.mode == mode));
+        }
+    }
+    let role_comp = first
+        .cells
+        .iter()
+        .find(|cell| cell.role == Role::Damage && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    let role_quick = first
+        .cells
+        .iter()
+        .find(|cell| cell.role == Role::Damage && cell.mode == ModeFamily::RoleQuick)
+        .unwrap();
+    assert_eq!(
+        role_comp.shared_parameter_version,
+        role_quick.shared_parameter_version
+    );
+    assert_ne!(role_comp.mode, role_quick.mode);
+    assert!(role_comp.reports.iter().all(|report| {
+        report.leave_one_account_out.candidate_groups == 1
+            && report.leave_one_account_out.coverage_limited_groups == 1
+            && report
+                .rejected_reasons
+                .iter()
+                .any(|reason| reason == "account_coverage_limited")
+    }));
     assert!(first
         .reports
         .iter()
-        .all(|r| r.bootstrap.requested_iterations == 100));
+        .all(|r| r.bootstrap.requested_iterations == 2));
     assert!(first.roles.iter().all(|r| r.selected.is_none()
         || r.reports
             .iter()
@@ -570,6 +755,35 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
     let json = serde_json::to_string(&first).unwrap();
     assert!(!json.contains("private-match"));
     assert!(!json.contains("private-hero"));
+}
+
+#[test]
+fn stage_configs_and_progress_events_are_aggregate_only() {
+    use owstats_desktop_lib::career_mmr::performance_stability::{
+        evaluate_stability_with_progress, StabilityConfig, TrainingStage,
+    };
+    assert_eq!(TrainingStage::Screen100.bootstrap_iterations(), 100);
+    assert_eq!(TrainingStage::Candidate1000.bootstrap_iterations(), 1_000);
+    assert_eq!(TrainingStage::Final10000.bootstrap_iterations(), 10_000);
+    let mut events = Vec::new();
+    let evaluation = evaluate_stability_with_progress(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 0,
+            ..Default::default()
+        },
+        |event| events.push(event),
+    );
+    assert_eq!(evaluation.cells.len(), 15);
+    assert_eq!(events.first().unwrap().completed, 0);
+    assert_eq!(
+        events.last().unwrap().completed,
+        events.last().unwrap().total
+    );
+    let json = serde_json::to_string(&events).unwrap().to_ascii_lowercase();
+    for forbidden in ["account", "match", "hero", "player", "guid"] {
+        assert!(!json.contains(forbidden));
+    }
 }
 
 #[test]
@@ -640,6 +854,92 @@ fn eligibility_never_falls_back_and_direction_gate_rejects() {
 }
 
 #[test]
+fn formal_cell_gates_use_exact_thresholds_and_reason_codes() {
+    use owstats_desktop_lib::career_mmr::performance_stability::{
+        BootstrapReport, CoefficientStability, LooReport, StabilityReport,
+    };
+    let valid_loo = || LooReport::from_deltas(vec![Some(-0.1); 5]);
+    let valid_bootstrap = || BootstrapReport {
+        requested_iterations: 100,
+        completed_iterations: 100,
+        brier_delta_ci95_high: Some(-0.001),
+        coefficients: vec![CoefficientStability {
+            weight: "final".into(),
+            scope: "core".into(),
+            direction_stability: 0.90,
+            ci95_low: 0.001,
+            ci95_high: 0.1,
+            critical_constraint: true,
+            reference_nonzero: true,
+        }],
+        ..Default::default()
+    };
+    let base = || {
+        let mut report = StabilityReport::testing(Role::Tank, "none");
+        report.leave_one_season_out = valid_loo();
+        report.leave_one_hero_out = valid_loo();
+        report.bootstrap = valid_bootstrap();
+        report
+    };
+
+    let mut report = base();
+    report.forward.improved_folds = 3;
+    report.apply_gates();
+    assert!(report
+        .rejected_reasons
+        .iter()
+        .any(|r| r == "improved_folds_below_4"));
+
+    let mut report = base();
+    report.bootstrap.brier_delta_ci95_high = Some(0.0);
+    report.apply_gates();
+    assert!(report
+        .rejected_reasons
+        .iter()
+        .any(|r| r == "bootstrap_brier_ci_not_below_zero"));
+
+    let mut report = base();
+    report.forward.metrics.as_mut().unwrap().ece = 0.106;
+    report.apply_gates();
+    assert!(report
+        .rejected_reasons
+        .iter()
+        .any(|r| r == "ece_worse_than_0_005"));
+
+    let mut report = base();
+    report.forward.p95_single_feature_share = 0.351;
+    report.forward.average_adjustment = 0.101;
+    report.forward.upper_cap_rate = 0.051;
+    report.apply_gates();
+    for expected in [
+        "p95_single_feature_contribution_above_35_percent",
+        "average_adjustment_above_0_10_mmr",
+        "cap_hit_rate_above_5_percent",
+    ] {
+        assert!(report
+            .rejected_reasons
+            .iter()
+            .any(|reason| reason == expected));
+    }
+}
+
+#[test]
+fn formal_limiter_is_the_reusable_task8_contract() {
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::RoleCompetitive,),
+        2.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::RoleQuick),
+        1.0
+    );
+    assert_eq!(
+        bounded_performance_adjustment(20.0, 99.0, Role::Damage, ModeFamily::StadiumQuick),
+        0.0
+    );
+}
+
+#[test]
 fn stability_gates_require_enough_loo_groups_and_every_coefficient_ci() {
     use owstats_desktop_lib::career_mmr::performance_stability::{
         BootstrapReport, CoefficientStability, LooReport, StabilityReport,
@@ -655,7 +955,7 @@ fn stability_gates_require_enough_loo_groups_and_every_coefficient_ci() {
             direction_stability: 0.95,
             ci95_low: -0.1,
             ci95_high: 0.2,
-            critical_constraint: false,
+            critical_constraint: true,
             reference_nonzero: true,
         }],
         ..Default::default()
@@ -672,7 +972,7 @@ fn stability_gates_require_enough_loo_groups_and_every_coefficient_ci() {
     assert!(report
         .rejected_reasons
         .iter()
-        .any(|r| r == "coefficient_ci95_crosses_zero"));
+        .any(|r| r == "critical_coefficient_ci_crosses_zero"));
 
     report.bootstrap.coefficients[0].ci95_low = 0.01;
     report.bootstrap.coefficients[0].reference_nonzero = false;

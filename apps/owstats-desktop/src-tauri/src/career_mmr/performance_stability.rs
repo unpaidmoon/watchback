@@ -1,17 +1,71 @@
 use super::{
+    input::{ModeFamily, TrainingCohort},
     performance::{build_feature_matrix, eligible_performance_rows, HealingTakenStrategy},
     performance_forward::{
-        evaluate_forward, fit_hierarchical_model, metrics, select_candidate, MetricReport,
-        ModelVariant, Role, StrategyReport,
+        evaluate_cell_strategy, evaluate_nested_cell, evaluate_nested_cell_shadow,
+        fit_hierarchical_model_regularized, metrics, select_candidate_detailed, CandidateSelection,
+        MetricReport, ModelVariant, NestedCellReport, Role, StrategyReport,
     },
     performance_model::{predict_probability, HierarchicalModel},
     training::TrainingRow,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::mpsc;
 
 const MAX_LOO_WORSENED_FRACTION: f64 = 0.25;
-const MAX_ABS_AVERAGE_ADJUSTMENT: f64 = 0.02;
+const MAX_ABS_AVERAGE_ADJUSTMENT: f64 = 0.10;
+
+pub const VALIDATION_MODES: [ModeFamily; 5] = [
+    ModeFamily::RoleCompetitive,
+    ModeFamily::RoleQuick,
+    ModeFamily::OpenCompetitive,
+    ModeFamily::OpenQuick,
+    ModeFamily::StadiumCompetitive,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellDecision {
+    Eligible,
+    Shadow,
+    OutcomeOnly,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct AccountLooReport {
+    pub candidate_groups: usize,
+    pub evaluated_groups: usize,
+    pub coverage_limited_groups: usize,
+    pub mean_brier_delta: Option<f64>,
+    pub worst_brier_delta: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrainingStage {
+    Screen100,
+    Candidate1000,
+    Final10000,
+}
+impl TrainingStage {
+    pub fn bootstrap_iterations(self) -> usize {
+        match self {
+            Self::Screen100 => 100,
+            Self::Candidate1000 => 1_000,
+            Self::Final10000 => 10_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProgressEvent {
+    pub stage: TrainingStage,
+    pub completed: usize,
+    pub total: usize,
+    pub elapsed_ms: u128,
+    pub eta_ms: Option<u128>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StabilityConfig {
@@ -27,6 +81,14 @@ impl Default for StabilityConfig {
             seed: 0x5eed,
             max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
             max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
+        }
+    }
+}
+impl StabilityConfig {
+    pub fn for_stage(stage: TrainingStage) -> Self {
+        Self {
+            bootstrap_iterations: stage.bootstrap_iterations(),
+            ..Self::default()
         }
     }
 }
@@ -135,6 +197,8 @@ pub struct BootstrapReport {
     pub skipped_iterations: usize,
     pub fixed_variant: Option<ModelVariant>,
     pub fixed_final_multiplier: Option<f64>,
+    pub fixed_lambda_core: Option<f64>,
+    pub fixed_lambda_cohort: Option<f64>,
     pub hierarchical_offset_iterations: usize,
     pub coefficients: Vec<CoefficientStability>,
     pub mean_brier_delta: Option<f64>,
@@ -163,12 +227,17 @@ impl BootstrapReport {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StabilityReport {
     pub role: Role,
+    pub mode: ModeFamily,
+    pub training_cohort: TrainingCohort,
+    pub shared_parameter_version: String,
     pub strategy: String,
     pub forward: StrategyReport,
     pub leave_one_season_out: LooReport,
     pub leave_one_hero_out: LooReport,
+    pub leave_one_account_out: AccountLooReport,
     pub bootstrap: BootstrapReport,
     pub eligible: bool,
+    pub decision: CellDecision,
     pub rejected_reasons: Vec<String>,
     pub performance_adjustment: f64,
     #[serde(skip)]
@@ -185,6 +254,8 @@ impl StabilityReport {
             performance_adjustment: 0.0,
             variant: ModelVariant::Core,
             final_multiplier: 1.0,
+            lambda_core: 0.02,
+            lambda_cohort: 0.05,
             folds: vec![],
             improved_folds: 5,
             metrics: Some(MetricReport {
@@ -192,19 +263,32 @@ impl StabilityReport {
                 brier: 0.2,
                 ece: 0.1,
             }),
+            baseline_metrics: Some(MetricReport {
+                auc: 0.5,
+                brier: 0.25,
+                ece: 0.1,
+            }),
             full_refit_weights: BTreeMap::new(),
             average_adjustment: 0.0,
+            p95_single_feature_share: 0.0,
+            upper_cap_rate: 0.0,
+            lower_cap_rate: 0.0,
             missing_values: 0,
             rejected_reasons: vec![],
         };
         Self {
             role,
+            mode: ModeFamily::RoleCompetitive,
+            training_cohort: TrainingCohort::RoleQueue,
+            shared_parameter_version: "role_queue-v1".into(),
             strategy: strategy.into(),
             forward,
             leave_one_season_out: LooReport::default(),
             leave_one_hero_out: LooReport::default(),
+            leave_one_account_out: AccountLooReport::default(),
             bootstrap: BootstrapReport::default(),
             eligible: false,
+            decision: CellDecision::Shadow,
             rejected_reasons: vec![],
             performance_adjustment: 0.0,
             max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
@@ -214,18 +298,7 @@ impl StabilityReport {
     pub fn apply_gates(&mut self) {
         let mut reasons = self.forward.rejected_reasons.clone();
         if self.forward.improved_folds < 4 {
-            push_once(&mut reasons, "forward_improved_folds_below_4");
-        }
-        if self
-            .bootstrap
-            .coefficients
-            .iter()
-            .any(|c| c.reference_nonzero && c.direction_stability < 0.9)
-        {
-            push_once(
-                &mut reasons,
-                "coefficient_direction_stability_below_90_percent",
-            );
+            push_once(&mut reasons, "improved_folds_below_4");
         }
         if self
             .bootstrap
@@ -250,9 +323,9 @@ impl StabilityReport {
             .bootstrap
             .coefficients
             .iter()
-            .any(|c| c.ci95_low <= 0.0 && c.ci95_high >= 0.0)
+            .any(|c| c.critical_constraint && c.ci95_low <= 0.0 && c.ci95_high >= 0.0)
         {
-            push_once(&mut reasons, "coefficient_ci95_crosses_zero");
+            push_once(&mut reasons, "critical_coefficient_ci_crosses_zero");
         }
         if self.leave_one_season_out.validation_groups < 2 {
             push_once(&mut reasons, "season_loo_valid_groups_below_2");
@@ -295,17 +368,51 @@ impl StabilityReport {
                 );
             }
         }
-        if self.bootstrap.brier_delta_ci95_high.is_none_or(|v| v > 0.0) {
-            push_once(&mut reasons, "bootstrap_brier_delta_ci95_upper_above_zero");
+        if self
+            .bootstrap
+            .brier_delta_ci95_high
+            .is_none_or(|v| v >= 0.0)
+        {
+            push_once(&mut reasons, "bootstrap_brier_ci_not_below_zero");
+        }
+        if self
+            .forward
+            .metrics
+            .as_ref()
+            .zip(self.forward.baseline_metrics.as_ref())
+            .is_some_and(|(candidate, baseline)| candidate.ece > baseline.ece + 0.005)
+        {
+            push_once(&mut reasons, "ece_worse_than_0_005");
+        }
+        if self.forward.p95_single_feature_share > 0.35 {
+            push_once(
+                &mut reasons,
+                "p95_single_feature_contribution_above_35_percent",
+            );
         }
         if self.forward.average_adjustment.abs() > self.max_abs_average_adjustment {
-            push_once(&mut reasons, "average_adjustment_abs_above_0_02");
+            push_once(&mut reasons, "average_adjustment_above_0_10_mmr");
         }
-        if self.role == Role::Support {
-            push_once(&mut reasons, "support_conservative_hold");
+        if self.forward.upper_cap_rate > 0.05 || self.forward.lower_cap_rate > 0.05 {
+            push_once(&mut reasons, "cap_hit_rate_above_5_percent");
+        }
+        if self.strategy == "resourceconversiondebt"
+            && self
+                .bootstrap
+                .coefficients
+                .iter()
+                .find(|coefficient| coefficient.weight == "debt")
+                .is_none_or(|coefficient| coefficient.ci95_high >= 0.0)
+        {
+            push_once(&mut reasons, "resource_debt_ci_upper_not_below_zero");
         }
         self.rejected_reasons = reasons;
         self.eligible = self.rejected_reasons.is_empty();
+        self.decision = if self.eligible {
+            CellDecision::Eligible
+        } else {
+            CellDecision::Shadow
+        };
         self.performance_adjustment = 0.0;
     }
 }
@@ -317,63 +424,162 @@ pub struct RoleSelection {
     pub reports: Vec<StabilityReport>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CellEvaluation {
+    pub role: Role,
+    pub mode: ModeFamily,
+    pub training_cohort: TrainingCohort,
+    pub shared_parameter_version: String,
+    pub selected: Option<String>,
+    pub decision: CellDecision,
+    pub rejected_reasons: Vec<String>,
+    pub nested_validation: NestedCellReport,
+    pub reports: Vec<StabilityReport>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StabilityEvaluation {
     pub reports: Vec<StabilityReport>,
     pub roles: Vec<RoleSelection>,
+    pub cells: Vec<CellEvaluation>,
     pub worker_errors: Vec<String>,
 }
 
 pub fn evaluate_stability(source: &[TrainingRow], config: StabilityConfig) -> StabilityEvaluation {
+    evaluate_stability_with_progress(source, config, |_| {})
+}
+
+pub fn evaluate_stability_with_progress(
+    source: &[TrainingRow],
+    config: StabilityConfig,
+    mut on_progress: impl FnMut(ProgressEvent),
+) -> StabilityEvaluation {
+    let stage = match config.bootstrap_iterations {
+        0..=100 => TrainingStage::Screen100,
+        101..=1_000 => TrainingStage::Candidate1000,
+        _ => TrainingStage::Final10000,
+    };
+    let total = config
+        .bootstrap_iterations
+        .saturating_mul(3)
+        .saturating_mul(5);
+    let started = std::time::Instant::now();
+    on_progress(ProgressEvent {
+        stage,
+        completed: 0,
+        total,
+        elapsed_ms: 0,
+        eta_ms: None,
+    });
     let source = eligible_performance_rows(source);
-    let forwards = evaluate_forward(&source);
     let (mut reports, worker_errors) = std::thread::scope(|scope| {
         let source = &source;
+        let (progress_tx, progress_rx) = mpsc::channel::<usize>();
         let handles = [Role::Tank, Role::Damage, Role::Support].map(|role| {
-            let role_forwards = forwards
-                .iter()
-                .filter(|f| f.role == role)
-                .cloned()
-                .collect::<Vec<_>>();
             let config = &config;
+            let progress_tx = progress_tx.clone();
             scope.spawn(move || {
-                let role_rows = source
+                let role_rows_all = source
                     .iter()
                     .filter(|r| r.role == role_name(role))
                     .cloned()
                     .collect::<Vec<_>>();
-                role_forwards
-                    .into_iter()
-                    .map(|forward| {
-                        let strategy = parse_strategy(&forward.strategy);
-                        let season = loo_season(&role_rows, role, strategy);
-                        let hero = loo_hero(&role_rows, role, strategy);
-                        let bootstrap = bootstrap(
-                            &role_rows,
-                            role,
-                            strategy,
-                            forward.variant,
-                            forward.final_multiplier,
-                            config,
-                        );
+                let role_core_rows = role_rows_all.len();
+                let mut reports = Vec::new();
+                for strategy in [
+                    HealingTakenStrategy::None,
+                    HealingTakenStrategy::DirectNegative,
+                    HealingTakenStrategy::HeroNormalized,
+                    HealingTakenStrategy::ExcessHealing,
+                    HealingTakenStrategy::ResourceConversionDebt,
+                ] {
+                    let forwards = VALIDATION_MODES
+                        .into_iter()
+                        .map(|mode| {
+                            (
+                                mode,
+                                evaluate_cell_strategy(&role_rows_all, role, mode, strategy),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let selected = &forwards[0].1;
+                    debug_assert!(forwards.iter().all(|(_, forward)| {
+                        forward.variant == selected.variant
+                            && forward.final_multiplier == selected.final_multiplier
+                            && forward.lambda_core == selected.lambda_core
+                            && forward.lambda_cohort == selected.lambda_cohort
+                    }));
+                    let mut bootstraps = bootstrap_all_modes(
+                        &role_rows_all,
+                        role,
+                        strategy,
+                        selected.variant,
+                        selected.final_multiplier,
+                        selected.lambda_core,
+                        selected.lambda_cohort,
+                        config,
+                        Some(&progress_tx),
+                    );
+                    for (mode, forward) in forwards {
+                        let cohort = mode.training_cohort();
+                        let season = loo_season(&role_rows_all, role, mode, strategy);
+                        let hero = loo_hero(&role_rows_all, role, mode, strategy);
+                        let account = loo_account(&role_rows_all, role, mode, strategy);
+                        let bootstrap = bootstraps.remove(&mode).unwrap_or_default();
                         let mut report = StabilityReport {
                             role,
+                            mode,
+                            training_cohort: cohort,
+                            shared_parameter_version: shared_parameter_version(cohort),
                             strategy: forward.strategy.clone(),
                             forward,
                             leave_one_season_out: season,
                             leave_one_hero_out: hero,
+                            leave_one_account_out: account,
                             bootstrap,
                             eligible: false,
+                            decision: CellDecision::Shadow,
                             rejected_reasons: vec![],
                             performance_adjustment: 0.0,
                             max_loo_worsened_fraction: config.max_loo_worsened_fraction,
                             max_abs_average_adjustment: config.max_abs_average_adjustment,
                         };
                         report.apply_gates();
-                        report
-                    })
-                    .collect::<Vec<_>>()
+                        if role_core_rows < 500 {
+                            push_once(&mut report.rejected_reasons, "role_core_rows_below_500");
+                            report.eligible = false;
+                            report.decision = CellDecision::Shadow;
+                        }
+                        if report.leave_one_account_out.coverage_limited_groups > 0 {
+                            push_once(&mut report.rejected_reasons, "account_coverage_limited");
+                            report.eligible = false;
+                            report.decision = CellDecision::Shadow;
+                        }
+                        reports.push(report);
+                    }
+                }
+                reports
             })
         });
+        drop(progress_tx);
+        let mut raw_completed = 0usize;
+        let mut emitted_completed = 0usize;
+        while let Ok(batch) = progress_rx.recv() {
+            raw_completed = raw_completed.saturating_add(batch);
+            let completed = raw_completed.min(total);
+            if completed > emitted_completed {
+                emitted_completed = completed;
+                let elapsed_ms = started.elapsed().as_millis();
+                let eta_ms = (completed > 0 && completed < total).then(|| {
+                    elapsed_ms.saturating_mul((total - completed) as u128) / completed as u128
+                });
+                on_progress(ProgressEvent {
+                    stage,
+                    completed,
+                    total,
+                    elapsed_ms,
+                    eta_ms,
+                });
+            }
+        }
         merge_worker_results(
             handles
                 .into_iter()
@@ -382,7 +588,96 @@ pub fn evaluate_stability(source: &[TrainingRow], config: StabilityConfig) -> St
                 .collect(),
         )
     });
-    reports.sort_by_key(|report| (report.role, strategy_order(&report.strategy)));
+    reports.sort_by_key(|report| (report.role, report.mode, strategy_order(&report.strategy)));
+    let reports_ref = &reports;
+    let source_ref = &source;
+    let cells = [Role::Tank, Role::Damage, Role::Support]
+        .into_iter()
+        .flat_map(|role| {
+            VALIDATION_MODES.into_iter().map(move |mode| {
+                let items = reports_ref
+                    .iter()
+                    .filter(|report| report.role == role && report.mode == mode)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let role_core_rows = source_ref
+                    .iter()
+                    .filter(|row| row.role == role_name(role))
+                    .count();
+                let nested_validation = if role_core_rows < 500 {
+                    evaluate_nested_cell_shadow(source_ref, role, mode)
+                } else {
+                    evaluate_nested_cell(source_ref, role, mode)
+                };
+                let mut selected = items
+                    .iter()
+                    .find(|report| {
+                        report.eligible
+                            && report.strategy == nested_validation.selected_strategy
+                            && report.forward.variant == nested_validation.selected_variant
+                            && report.forward.final_multiplier
+                                == nested_validation.selected_final_multiplier
+                            && report.forward.lambda_core == nested_validation.selected_lambda_core
+                            && report.forward.lambda_cohort
+                                == nested_validation.selected_lambda_cohort
+                    })
+                    .map(|report| report.strategy.clone());
+                let nested_passes = nested_validation.improved_folds >= 4
+                    && nested_validation
+                        .metrics
+                        .as_ref()
+                        .zip(nested_validation.baseline_metrics.as_ref())
+                        .is_none_or(|(candidate, baseline)| candidate.ece <= baseline.ece + 0.005);
+                if !nested_passes {
+                    selected = None;
+                }
+                let decision = if selected.is_some() {
+                    CellDecision::Eligible
+                } else {
+                    CellDecision::Shadow
+                };
+                let mut rejected_reasons = if let Some(selected_strategy) = selected.as_deref() {
+                    items
+                        .iter()
+                        .find(|report| report.strategy == selected_strategy && report.eligible)
+                        .map(|report| report.rejected_reasons.clone())
+                        .unwrap_or_default()
+                } else {
+                    items
+                        .iter()
+                        .flat_map(|report| report.rejected_reasons.iter().cloned())
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                };
+                if rejected_reasons.is_empty() && selected.is_none() {
+                    rejected_reasons.push("no_eligible_strategy".into());
+                }
+                if nested_validation.improved_folds < 4 {
+                    push_once(&mut rejected_reasons, "improved_folds_below_4");
+                }
+                if nested_validation
+                    .metrics
+                    .as_ref()
+                    .zip(nested_validation.baseline_metrics.as_ref())
+                    .is_some_and(|(candidate, baseline)| candidate.ece > baseline.ece + 0.005)
+                {
+                    push_once(&mut rejected_reasons, "ece_worse_than_0_005");
+                }
+                CellEvaluation {
+                    role,
+                    mode,
+                    training_cohort: mode.training_cohort(),
+                    shared_parameter_version: shared_parameter_version(mode.training_cohort()),
+                    selected,
+                    decision,
+                    rejected_reasons,
+                    nested_validation,
+                    reports: items,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
     let roles = [Role::Tank, Role::Damage, Role::Support]
         .into_iter()
         .map(|role| {
@@ -393,16 +688,37 @@ pub fn evaluate_stability(source: &[TrainingRow], config: StabilityConfig) -> St
                 .collect::<Vec<_>>();
             RoleSelection {
                 role,
-                selected: select_eligible(role, &items),
+                // Selection is intentionally cell-local; this legacy role-level
+                // summary must never substitute one actual mode's result for another.
+                selected: None,
                 reports: items,
             }
         })
         .collect();
-    StabilityEvaluation {
+    let evaluation = StabilityEvaluation {
         reports,
         roles,
+        cells,
         worker_errors,
+    };
+    on_progress(ProgressEvent {
+        stage,
+        completed: total,
+        total,
+        elapsed_ms: started.elapsed().as_millis(),
+        eta_ms: Some(0),
+    });
+    evaluation
+}
+
+fn shared_parameter_version(cohort: TrainingCohort) -> String {
+    match cohort {
+        TrainingCohort::RoleQueue => "role_queue-v1",
+        TrainingCohort::OpenQueue => "open_queue-v1",
+        TrainingCohort::StadiumCompetitive => "stadium_competitive-v1",
+        TrainingCohort::OutcomeOnly => "outcome_only-v1",
     }
+    .into()
 }
 
 pub fn merge_worker_results(
@@ -461,8 +777,17 @@ fn bootstrap_stability(r: &StabilityReport) -> f64 {
         .fold(1.0, f64::min)
 }
 
-fn loo_season(source: &[TrainingRow], role: Role, strategy: HealingTakenStrategy) -> LooReport {
-    let groups = source.iter().map(|r| r.season).collect::<BTreeSet<_>>();
+fn loo_season(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: HealingTakenStrategy,
+) -> LooReport {
+    let groups = source
+        .iter()
+        .filter(|r| r.mode_family == mode)
+        .map(|r| r.season)
+        .collect::<BTreeSet<_>>();
     let evals = groups
         .into_iter()
         .map(|held| {
@@ -473,20 +798,26 @@ fn loo_season(source: &[TrainingRow], role: Role, strategy: HealingTakenStrategy
                 .collect::<Vec<_>>();
             let valid = source
                 .iter()
-                .filter(|r| r.season == held)
+                .filter(|r| r.season == held && r.mode_family == mode)
                 .cloned()
                 .collect::<Vec<_>>();
             let candidate = valid.len();
-            let (delta, evaluated) = validate_split(&train, &valid, role, strategy, None);
+            let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
             (delta, candidate, evaluated)
         })
         .collect::<Vec<_>>();
     loo_from_evals(evals)
 }
 
-fn loo_hero(source: &[TrainingRow], role: Role, strategy: HealingTakenStrategy) -> LooReport {
+fn loo_hero(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: HealingTakenStrategy,
+) -> LooReport {
     let groups = source
         .iter()
+        .filter(|r| r.mode_family == mode)
         .map(|r| r.hero_group.clone())
         .collect::<BTreeSet<_>>();
     let evals = groups
@@ -494,7 +825,7 @@ fn loo_hero(source: &[TrainingRow], role: Role, strategy: HealingTakenStrategy) 
         .map(|held| {
             let held_matches = source
                 .iter()
-                .filter(|r| r.hero_group == held)
+                .filter(|r| r.hero_group == held && r.mode_family == mode)
                 .map(|r| r.match_group.as_str())
                 .collect::<BTreeSet<_>>();
             let train = source
@@ -508,11 +839,53 @@ fn loo_hero(source: &[TrainingRow], role: Role, strategy: HealingTakenStrategy) 
                 .cloned()
                 .collect::<Vec<_>>();
             let candidate = valid.len();
-            let (delta, evaluated) = validate_split(&train, &valid, role, strategy, None);
+            let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
             (delta, candidate, evaluated)
         })
         .collect::<Vec<_>>();
     loo_from_evals(evals)
+}
+
+fn loo_account(
+    source: &[TrainingRow],
+    role: Role,
+    mode: ModeFamily,
+    strategy: HealingTakenStrategy,
+) -> AccountLooReport {
+    let groups = source
+        .iter()
+        .filter(|row| row.mode_family == mode)
+        .map(|row| row.account_group.clone())
+        .collect::<BTreeSet<_>>();
+    let candidate_groups = groups.len();
+    let mut deltas = Vec::new();
+    let mut coverage_limited_groups = 0;
+    for held in groups {
+        let train = source
+            .iter()
+            .filter(|row| row.account_group != held)
+            .cloned()
+            .collect::<Vec<_>>();
+        let valid = source
+            .iter()
+            .filter(|row| row.account_group == held && row.mode_family == mode)
+            .cloned()
+            .collect::<Vec<_>>();
+        let (delta, evaluated) = validate_split(&train, &valid, role, mode, strategy, None);
+        if delta.is_none() || evaluated < valid.len() {
+            coverage_limited_groups += 1;
+        }
+        if let Some(delta) = delta {
+            deltas.push(delta);
+        }
+    }
+    AccountLooReport {
+        candidate_groups,
+        evaluated_groups: deltas.len(),
+        coverage_limited_groups,
+        mean_brier_delta: mean(&deltas),
+        worst_brier_delta: deltas.iter().copied().max_by(f64::total_cmp),
+    }
 }
 
 fn loo_from_evals(evals: Vec<(Option<f64>, usize, usize)>) -> LooReport {
@@ -528,8 +901,9 @@ fn validate_split(
     train: &[TrainingRow],
     valid: &[TrainingRow],
     role: Role,
+    mode: ModeFamily,
     strategy: HealingTakenStrategy,
-    fixed: Option<(ModelVariant, f64)>,
+    fixed: Option<CandidateSelection>,
 ) -> (Option<f64>, usize) {
     if valid.is_empty() {
         return (None, 0);
@@ -538,16 +912,17 @@ fn validate_split(
     let Some(tr) = matrix.training_by_role.get(role_name(role)) else {
         return (None, 0);
     };
-    let Some(va) = matrix.validation_by_role.get(role_name(role)) else {
+    let Some(all_va) = matrix.validation_by_role.get(role_name(role)) else {
         return (None, 0);
     };
+    let va = all_va
+        .iter()
+        .filter(|row| row.mode_family == mode)
+        .collect::<Vec<_>>();
     if tr.is_empty() || va.is_empty() {
         return (None, va.len());
     }
-    let selected = fixed.unwrap_or_else(|| {
-        let x = select_candidate(train, role, strategy);
-        (x.0, x.1)
-    });
+    let selected = fixed.unwrap_or_else(|| select_candidate_detailed(train, role, strategy));
     let Some(model) = fit_split_model(tr, role, strategy, selected) else {
         return (None, va.len());
     };
@@ -571,10 +946,18 @@ fn fit_split_model(
     training: &[super::performance::MatrixRow],
     role: Role,
     strategy: HealingTakenStrategy,
-    selected: (ModelVariant, f64),
+    selected: CandidateSelection,
 ) -> Option<HierarchicalModel> {
     let refs = training.iter().collect::<Vec<_>>();
-    fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1)
+    fit_hierarchical_model_regularized(
+        &refs,
+        role,
+        selected.variant,
+        strategy,
+        selected.multiplier,
+        selected.lambda_core,
+        selected.lambda_cohort,
+    )
 }
 
 pub fn clone_cluster_for_bootstrap(rows: &[TrainingRow], instance: usize) -> Vec<TrainingRow> {
@@ -587,14 +970,17 @@ pub fn clone_cluster_for_bootstrap(rows: &[TrainingRow], instance: usize) -> Vec
         .collect()
 }
 
-fn bootstrap(
+fn bootstrap_all_modes(
     source: &[TrainingRow],
     role: Role,
     strategy: HealingTakenStrategy,
     variant: ModelVariant,
     multiplier: f64,
+    lambda_core: f64,
+    lambda_cohort: f64,
     config: &StabilityConfig,
-) -> BootstrapReport {
+    progress: Option<&mpsc::Sender<usize>>,
+) -> BTreeMap<ModeFamily, BootstrapReport> {
     let mut clusters: BTreeMap<&str, Vec<TrainingRow>> = BTreeMap::new();
     for r in source {
         clusters.entry(&r.match_group).or_default().push(r.clone());
@@ -608,24 +994,55 @@ fn bootstrap(
         .cloned()
         .unwrap_or_default();
     let full_refs = full_rows.iter().collect::<Vec<_>>();
-    let Some(full_model) = fit_hierarchical_model(&full_refs, role, variant, strategy, multiplier)
-    else {
-        return BootstrapReport {
-            requested_iterations: config.bootstrap_iterations,
-            skipped_iterations: config.bootstrap_iterations,
-            fixed_variant: Some(variant),
-            fixed_final_multiplier: Some(multiplier),
-            ..Default::default()
-        };
+    let Some(full_model) = fit_hierarchical_model_regularized(
+        &full_refs,
+        role,
+        variant,
+        strategy,
+        multiplier,
+        lambda_core,
+        lambda_cohort,
+    ) else {
+        return VALIDATION_MODES
+            .into_iter()
+            .map(|mode| {
+                (
+                    mode,
+                    BootstrapReport {
+                        requested_iterations: config.bootstrap_iterations,
+                        skipped_iterations: config.bootstrap_iterations,
+                        fixed_variant: Some(variant),
+                        fixed_final_multiplier: Some(multiplier),
+                        fixed_lambda_core: Some(lambda_core),
+                        fixed_lambda_cohort: Some(lambda_cohort),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
     };
     let names = full_model.feature_names.clone();
     let mut samples = vec![Vec::new(); names.len()];
-    let mut deltas = Vec::new();
-    let mut aucs = Vec::new();
-    let mut eces = Vec::new();
+    let mut deltas = VALIDATION_MODES
+        .into_iter()
+        .map(|mode| (mode, Vec::new()))
+        .collect::<BTreeMap<_, _>>();
+    let mut aucs = deltas.clone();
+    let mut eces = deltas.clone();
     let mut skipped = 0;
     let mut hierarchical_offset_iterations = 0;
     for iteration in 0..config.bootstrap_iterations {
+        let progress_batch =
+            if (iteration + 1) % 10 == 0 || iteration + 1 == config.bootstrap_iterations {
+                let previous = iteration / 10 * 10;
+                iteration + 1 - previous
+            } else {
+                0
+            };
+        let _progress_after_iteration = BootstrapProgressGuard {
+            sender: progress,
+            completed: progress_batch,
+        };
         if clusters.is_empty() {
             skipped += 1;
             continue;
@@ -652,19 +1069,27 @@ fn bootstrap(
             .get(role_name(role))
             .cloned()
             .unwrap_or_default();
-        let va = matrix
+        let all_va = matrix
             .validation_by_role
             .get(role_name(role))
             .cloned()
             .unwrap_or_default();
-        if tr.is_empty() || va.is_empty() {
+        if tr.is_empty() || all_va.is_empty() {
             skipped += 1;
             continue;
         }
         let refs = tr.iter().collect::<Vec<_>>();
         // Each resample rebuilds fold-local baselines and refits the exact Task 5
         // hierarchical logit model with fixed selected hyperparameters.
-        let Some(model) = fit_resample_model(&refs, role, variant, strategy, multiplier) else {
+        let Some(model) = fit_resample_model(
+            &refs,
+            role,
+            variant,
+            strategy,
+            multiplier,
+            lambda_core,
+            lambda_cohort,
+        ) else {
             skipped += 1;
             continue;
         };
@@ -675,28 +1100,36 @@ fn bootstrap(
         if !model.cohort_offsets.is_empty() {
             hierarchical_offset_iterations += 1;
         }
-        let actual = va.iter().map(|r| r.result).collect::<Vec<_>>();
-        let predicted = va
-            .iter()
-            .map(|r| predict_probability(&model, r))
-            .collect::<Vec<_>>();
-        let Some(m) = metrics(&actual, &predicted) else {
-            skipped += 1;
-            continue;
-        };
-        let base = va
-            .iter()
-            .map(|r| (r.result - r.expected_win_rate).powi(2))
-            .sum::<f64>()
-            / va.len() as f64;
-        deltas.push(m.brier - base);
-        aucs.push(m.auc);
-        eces.push(m.ece);
+        for mode in VALIDATION_MODES {
+            let va = all_va
+                .iter()
+                .filter(|row| row.mode_family == mode)
+                .collect::<Vec<_>>();
+            if va.is_empty() {
+                continue;
+            }
+            let actual = va.iter().map(|r| r.result).collect::<Vec<_>>();
+            let predicted = va
+                .iter()
+                .map(|r| predict_probability(&model, r))
+                .collect::<Vec<_>>();
+            let Some(m) = metrics(&actual, &predicted) else {
+                continue;
+            };
+            let base = va
+                .iter()
+                .map(|r| (r.result - r.expected_win_rate).powi(2))
+                .sum::<f64>()
+                / va.len() as f64;
+            deltas.get_mut(&mode).unwrap().push(m.brier - base);
+            aucs.get_mut(&mode).unwrap().push(m.auc);
+            eces.get_mut(&mode).unwrap().push(m.ece);
+        }
         for (i, v) in model.core_weights.into_iter().enumerate() {
             samples[i].push(v)
         }
     }
-    let coefficients = names
+    let coefficients: Vec<CoefficientStability> = names
         .into_iter()
         .enumerate()
         .map(|(i, name)| {
@@ -721,20 +1154,50 @@ fn bootstrap(
             }
         })
         .collect();
-    let mut d = deltas.clone();
-    BootstrapReport {
-        requested_iterations: config.bootstrap_iterations,
-        completed_iterations: deltas.len(),
-        skipped_iterations: skipped,
-        fixed_variant: Some(variant),
-        fixed_final_multiplier: Some(multiplier),
-        hierarchical_offset_iterations,
-        coefficients,
-        mean_brier_delta: mean(&deltas),
-        brier_delta_ci95_low: quantile(&mut d, 0.025),
-        brier_delta_ci95_high: quantile(&mut deltas, 0.975),
-        mean_auc: mean(&aucs),
-        mean_ece: mean(&eces),
+    VALIDATION_MODES
+        .into_iter()
+        .map(|mode| {
+            let mut mode_deltas = deltas.remove(&mode).unwrap_or_default();
+            let mut low_samples = mode_deltas.clone();
+            let mode_aucs = aucs.remove(&mode).unwrap_or_default();
+            let mode_eces = eces.remove(&mode).unwrap_or_default();
+            let completed_iterations = mode_deltas.len();
+            (
+                mode,
+                BootstrapReport {
+                    requested_iterations: config.bootstrap_iterations,
+                    completed_iterations,
+                    skipped_iterations: config
+                        .bootstrap_iterations
+                        .saturating_sub(completed_iterations)
+                        .max(skipped),
+                    fixed_variant: Some(variant),
+                    fixed_final_multiplier: Some(multiplier),
+                    fixed_lambda_core: Some(lambda_core),
+                    fixed_lambda_cohort: Some(lambda_cohort),
+                    hierarchical_offset_iterations,
+                    coefficients: coefficients.clone(),
+                    mean_brier_delta: mean(&mode_deltas),
+                    brier_delta_ci95_low: quantile(&mut low_samples, 0.025),
+                    brier_delta_ci95_high: quantile(&mut mode_deltas, 0.975),
+                    mean_auc: mean(&mode_aucs),
+                    mean_ece: mean(&mode_eces),
+                },
+            )
+        })
+        .collect()
+}
+
+struct BootstrapProgressGuard<'a> {
+    sender: Option<&'a mpsc::Sender<usize>>,
+    completed: usize,
+}
+
+impl Drop for BootstrapProgressGuard<'_> {
+    fn drop(&mut self) {
+        if self.completed > 0 {
+            let _ = self.sender.map(|sender| sender.send(self.completed));
+        }
     }
 }
 
@@ -744,8 +1207,18 @@ fn fit_resample_model(
     variant: ModelVariant,
     strategy: HealingTakenStrategy,
     multiplier: f64,
+    lambda_core: f64,
+    lambda_cohort: f64,
 ) -> Option<HierarchicalModel> {
-    fit_hierarchical_model(rows, role, variant, strategy, multiplier)
+    fit_hierarchical_model_regularized(
+        rows,
+        role,
+        variant,
+        strategy,
+        multiplier,
+        lambda_core,
+        lambda_cohort,
+    )
 }
 
 struct Lcg(u64);
@@ -856,18 +1329,23 @@ mod hierarchical_bootstrap_tests {
             .map(|i| row(i, ModeFamily::RoleCompetitive))
             .chain((160..320).map(|i| row(i, ModeFamily::StadiumCompetitive)))
             .collect::<Vec<_>>();
-        let report = bootstrap(
+        let report = bootstrap_all_modes(
             &rows,
             Role::Damage,
             HealingTakenStrategy::None,
             ModelVariant::RoleFull,
             2.0,
+            0.02,
+            0.05,
             &StabilityConfig {
                 bootstrap_iterations: 3,
                 seed: 17,
                 ..Default::default()
             },
-        );
+            None,
+        )
+        .remove(&ModeFamily::RoleCompetitive)
+        .unwrap();
         assert_eq!(report.fixed_final_multiplier, Some(2.0));
         assert!(report.hierarchical_offset_iterations > 0);
         assert!(report
@@ -892,7 +1370,13 @@ mod hierarchical_bootstrap_tests {
             rows,
             Role::Damage,
             HealingTakenStrategy::None,
-            (ModelVariant::Core, 1.5),
+            CandidateSelection {
+                variant: ModelVariant::Core,
+                multiplier: 1.5,
+                lambda_core: 0.02,
+                lambda_cohort: 0.05,
+                degraded: false,
+            },
         )
         .unwrap();
         let role_row = rows
@@ -917,12 +1401,14 @@ mod hierarchical_bootstrap_tests {
         let matrix = build_feature_matrix(&training, &[], HealingTakenStrategy::None);
         let rows = matrix.training_by_role.get("damage").unwrap();
         let refs = rows.iter().collect::<Vec<_>>();
-        let formal = fit_hierarchical_model(
+        let formal = fit_hierarchical_model_regularized(
             &refs,
             Role::Damage,
             ModelVariant::RoleFull,
             HealingTakenStrategy::None,
             2.0,
+            0.02,
+            0.05,
         )
         .unwrap();
         let bootstrap = fit_resample_model(
@@ -931,6 +1417,8 @@ mod hierarchical_bootstrap_tests {
             ModelVariant::RoleFull,
             HealingTakenStrategy::None,
             2.0,
+            0.02,
+            0.05,
         )
         .unwrap();
         assert_eq!(bootstrap, formal);
