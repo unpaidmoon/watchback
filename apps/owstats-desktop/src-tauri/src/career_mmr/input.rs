@@ -370,7 +370,7 @@ fn normalize_result(result: &str) -> Option<f64> {
 
 fn unique_current_player_key(conn: &Connection, match_id: &str) -> Result<Option<String>> {
     Ok(conn.query_row(
-        "SELECT CASE WHEN COUNT(*)=1 THEN MIN(bnet_id) END FROM match_players WHERE match_id=?1 AND is_current_player=1",
+        "SELECT CASE WHEN COUNT(*)=1 AND MIN(bnet_id)=TRIM(MIN(bnet_id)) AND TRIM(MIN(bnet_id))<>'' THEN MIN(bnet_id) END FROM match_players WHERE match_id=?1 AND is_current_player=1",
         [match_id],
         |row| row.get(0),
     )?)

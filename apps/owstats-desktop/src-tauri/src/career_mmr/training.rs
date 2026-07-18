@@ -218,6 +218,7 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
                       m.duration_sec,m.raw_entry_json,'{}',COALESCE(md.raw_detail_json,'{}'),m.bucket,
                       (SELECT p.bnet_id FROM match_players p
                         WHERE p.match_id=m.match_id AND p.is_current_player=1
+                        AND p.bnet_id=TRIM(p.bnet_id) AND TRIM(p.bnet_id)<>''
                         AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1)
                FROM matches m
                LEFT JOIN hero_dict d ON d.guid=m.hero_guid
@@ -321,9 +322,15 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
                 .and_then(Value::as_array)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let snapshot = r.current_player_key.as_deref().and_then(|key| {
-                stadium_final_snapshot(rounds, key, extraction_context.as_ref().unwrap())
-            });
+            let Some(current_player_key) = r.current_player_key.as_deref() else {
+                audit.stadium_ambiguous_excluded += 1;
+                continue;
+            };
+            let snapshot = stadium_final_snapshot(
+                rounds,
+                current_player_key,
+                extraction_context.as_ref().unwrap(),
+            );
             let fallback_role = entry
                 .get("roleType")
                 .and_then(Value::as_str)

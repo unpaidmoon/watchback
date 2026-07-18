@@ -298,6 +298,37 @@ fn stadium_duplicate_current_player_markers_fail_closed() {
 }
 
 #[test]
+fn stadium_blank_or_padded_current_player_keys_fail_closed() {
+    for (id, invalid_key) in [
+        ("stadium-empty-current", ""),
+        ("stadium-space-current", "   "),
+        ("stadium-padded-current", " current-local "),
+    ] {
+        let (_dir, conn) = database();
+        install_stadium_roles(&conn);
+        insert_stadium(
+            &conn,
+            id,
+            serde_json::json!({"roleType":"tank"}),
+            serde_json::json!({
+                "roundCountList":[stadium_round(Some(1), None, "support-hero", 7)]
+            }),
+        );
+        conn.execute(
+            "UPDATE match_players SET bnet_id=?1 WHERE match_id=?2 AND is_current_player=1",
+            (invalid_key, id),
+        )
+        .unwrap();
+
+        let context = ExtractionContext::build(&conn).unwrap();
+        assert!(extract_stadium_match_with_context(&conn, id, &context)
+            .unwrap()
+            .is_none());
+        assert!(extract_stadium_match(&conn, id).unwrap().is_none());
+    }
+}
+
+#[test]
 fn stadium_structurally_valid_final_round_without_current_player_does_not_borrow_previous_round() {
     let (_dir, conn) = database();
     install_stadium_roles(&conn);

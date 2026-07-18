@@ -206,6 +206,34 @@ fn stadium_quick_keeps_outcome_row_but_never_trains_performance() -> Result<()> 
 }
 
 #[test]
+fn stadium_blank_current_player_key_does_not_create_a_training_row() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match(
+        &conn,
+        "stadium-blank-current",
+        "SportFight",
+        "support",
+        serde_json::json!([{
+            "roundIndex": 1,
+            "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":7}],
+            "enemyList": []
+        }]),
+    )?;
+    conn.execute(
+        "UPDATE match_players SET bnet_id='   ' WHERE match_id='stadium-blank-current' AND is_current_player=1",
+        [],
+    )?;
+
+    let projection = build_training_projection(&conn)?;
+    assert!(projection
+        .rows
+        .iter()
+        .all(|row| row.mode_family != ModeFamily::StadiumCompetitive));
+    assert_eq!(projection.audit.stadium_performance_eligible_rows, 0);
+    Ok(())
+}
+
+#[test]
 fn legacy_ambiguous_shape_is_diagnostic_only_for_stadium_competitive() -> Result<()> {
     let (_dir, conn) = fixture()?;
     insert_stadium_match(
