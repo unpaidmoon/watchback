@@ -6,7 +6,7 @@ use super::{
         fit_hierarchical_model_regularized, metrics, select_candidate_detailed, CalibrationScale,
         CandidateSelection, MetricReport, ModelVariant, NestedCellReport, Role, StrategyReport,
     },
-    performance_model::{predict_probability, HierarchicalModel},
+    performance_model::{predict_probability, FitConfig, HierarchicalModel, MODEL_FIT_STEPS},
     training::TrainingRow,
 };
 use serde::Serialize;
@@ -154,6 +154,76 @@ impl StabilityConfig {
             bootstrap_iterations: stage.bootstrap_iterations(),
             ..Self::default()
         }
+    }
+
+    pub fn snapshot(&self) -> StabilityConfigSnapshot {
+        let defaults = FitConfig::default();
+        StabilityConfigSnapshot {
+            seed: self.seed,
+            bootstrap_iterations: self.bootstrap_iterations,
+            stage: stage_for_iterations(self.bootstrap_iterations),
+            max_loo_worsened_fraction: self.max_loo_worsened_fraction,
+            max_abs_average_adjustment: self.max_abs_average_adjustment,
+            fit_variants: vec!["core".into(), "role_full".into()],
+            final_hit_multipliers: vec![1.0, 1.25, 1.5, 1.75, 2.0],
+            regularization_candidates: vec![[0.02, 0.05], [0.05, 0.10]],
+            fit_learning_rate: defaults.learning_rate,
+            fit_steps: MODEL_FIT_STEPS,
+            minimum_cohort_offset_rows: defaults.min_cohort_offset_rows,
+            minimum_improved_folds: 4,
+            minimum_role_core_rows: 500,
+            minimum_cohort_rows: 150,
+            minimum_season_loo_groups: 2,
+            minimum_hero_loo_groups: 5,
+            minimum_loo_row_coverage: 0.80,
+            minimum_bootstrap_completion: 0.90,
+            minimum_critical_direction_stability: 0.90,
+            maximum_bootstrap_brier_ci_high: 0.0,
+            max_ece_worsening: 0.005,
+            maximum_single_feature_share: 0.35,
+            maximum_cap_hit_rate: 0.05,
+            require_account_coverage: true,
+            require_critical_ci_excludes_zero: true,
+            require_nonzero_reference_coefficients: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct StabilityConfigSnapshot {
+    pub seed: u64,
+    pub bootstrap_iterations: usize,
+    pub stage: TrainingStage,
+    pub max_loo_worsened_fraction: f64,
+    pub max_abs_average_adjustment: f64,
+    pub fit_variants: Vec<String>,
+    pub final_hit_multipliers: Vec<f64>,
+    pub regularization_candidates: Vec<[f64; 2]>,
+    pub fit_learning_rate: f64,
+    pub fit_steps: usize,
+    pub minimum_cohort_offset_rows: usize,
+    pub minimum_improved_folds: usize,
+    pub minimum_role_core_rows: usize,
+    pub minimum_cohort_rows: usize,
+    pub minimum_season_loo_groups: usize,
+    pub minimum_hero_loo_groups: usize,
+    pub minimum_loo_row_coverage: f64,
+    pub minimum_bootstrap_completion: f64,
+    pub minimum_critical_direction_stability: f64,
+    pub maximum_bootstrap_brier_ci_high: f64,
+    pub max_ece_worsening: f64,
+    pub maximum_single_feature_share: f64,
+    pub maximum_cap_hit_rate: f64,
+    pub require_account_coverage: bool,
+    pub require_critical_ci_excludes_zero: bool,
+    pub require_nonzero_reference_coefficients: bool,
+}
+
+fn stage_for_iterations(iterations: usize) -> TrainingStage {
+    match iterations {
+        0..=100 => TrainingStage::Screen100,
+        101..=1_000 => TrainingStage::Candidate1000,
+        _ => TrainingStage::Final10000,
     }
 }
 
@@ -306,6 +376,8 @@ pub struct StabilityReport {
     pub performance_adjustment: f64,
     #[serde(skip)]
     max_loo_worsened_fraction: f64,
+    #[serde(skip)]
+    max_abs_average_adjustment: f64,
 }
 impl StabilityReport {
     pub fn testing(role: Role, strategy: &str) -> Self {
@@ -355,6 +427,7 @@ impl StabilityReport {
             rejected_reasons: vec![],
             performance_adjustment: 0.0,
             max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
+            max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
         }
     }
     pub fn apply_gates(&mut self) {
@@ -452,7 +525,7 @@ impl StabilityReport {
                 "p95_single_feature_contribution_above_35_percent",
             );
         }
-        if self.forward.average_adjustment.abs() > MAX_ABS_AVERAGE_ADJUSTMENT {
+        if self.forward.average_adjustment.abs() > self.max_abs_average_adjustment {
             push_once(&mut reasons, "average_adjustment_above_0_10_mmr");
         }
         if self.forward.upper_cap_rate > 0.05 || self.forward.lower_cap_rate > 0.05 {
@@ -499,6 +572,7 @@ pub struct CellEvaluation {
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StabilityEvaluation {
+    pub config: StabilityConfigSnapshot,
     pub reports: Vec<StabilityReport>,
     pub roles: Vec<RoleSelection>,
     pub cells: Vec<CellEvaluation>,
@@ -514,11 +588,8 @@ pub fn evaluate_stability_with_progress(
     config: StabilityConfig,
     mut on_progress: impl FnMut(ProgressEvent),
 ) -> StabilityEvaluation {
-    let stage = match config.bootstrap_iterations {
-        0..=100 => TrainingStage::Screen100,
-        101..=1_000 => TrainingStage::Candidate1000,
-        _ => TrainingStage::Final10000,
-    };
+    let config_snapshot = config.snapshot();
+    let stage = config_snapshot.stage;
     let bootstrap_total = config
         .bootstrap_iterations
         .saturating_mul(3)
@@ -597,6 +668,7 @@ pub fn evaluate_stability_with_progress(
                             rejected_reasons: vec![],
                             performance_adjustment: 0.0,
                             max_loo_worsened_fraction: config.max_loo_worsened_fraction,
+                            max_abs_average_adjustment: config.max_abs_average_adjustment,
                         };
                         report.apply_gates();
                         if role_core_rows < 500 {
@@ -677,6 +749,7 @@ pub fn evaluate_stability_with_progress(
         })
         .collect();
     let evaluation = StabilityEvaluation {
+        config: config_snapshot,
         reports,
         roles,
         cells,

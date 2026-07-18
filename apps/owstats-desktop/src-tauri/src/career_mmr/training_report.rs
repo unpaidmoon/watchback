@@ -2,8 +2,11 @@ use super::{
     input::{ModeFamily, Role, TrainingCohort},
     performance::{build_feature_matrix, HealingTakenStrategy},
     performance_forward::{CalibrationScale, ModelVariant, NestedCellReport},
-    performance_model::{fit_model, predict_probability, FitConfig, MODEL_FIT_STEPS},
-    performance_stability::{CellDecision, CellEvaluation, StabilityEvaluation, StabilityReport},
+    performance_model::{fit_model, predict_probability, FitConfig},
+    performance_stability::{
+        CellDecision, CellEvaluation, StabilityConfigSnapshot, StabilityEvaluation,
+        StabilityReport, TrainingStage,
+    },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
 };
 use anyhow::{bail, Result};
@@ -59,6 +62,7 @@ pub struct CellArtifact {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrainingConfigArtifact {
+    pub seed: u64,
     pub mode_weights: BTreeMap<ModeFamily, f64>,
     pub fit: FitSearchArtifact,
     pub validation: ValidationGateArtifact,
@@ -243,6 +247,9 @@ pub fn build_training_outputs(
     seed: u64,
 ) -> Result<(PerformanceModelArtifact, TrainingReport)> {
     require_complete_cells(evaluation)?;
+    if seed != evaluation.config.seed {
+        bail!("模型产物种子与训练评估配置不一致");
+    }
     let normalization = build_normalization(rows);
     let roles = build_role_artifacts(rows, evaluation)?;
     let cells = build_cell_artifacts(evaluation, &roles);
@@ -254,7 +261,7 @@ pub fn build_training_outputs(
         schema_version: SCHEMA_VERSION,
         algorithm: ALGORITHM.into(),
         feature_version: FEATURE_VERSION.into(),
-        seed,
+        seed: evaluation.config.seed,
         roles,
         cells,
         normalization,
@@ -274,7 +281,7 @@ pub fn build_training_outputs(
         schema_version: SCHEMA_VERSION,
         algorithm: ALGORITHM.into(),
         feature_version: FEATURE_VERSION.into(),
-        seed,
+        seed: evaluation.config.seed,
         dataset: dataset_report(rows, audit),
         cells: report_cells,
         stadium_quick: OutcomeOnlyReport {
@@ -302,16 +309,18 @@ fn build_cell_artifacts(
         .cells
         .iter()
         .map(|cell| {
-            let authority_available = roles
-                .get(&cell.role)
-                .is_some_and(|model| model.selected_strategy.is_some());
+            let role_model = &roles[&cell.role];
             CellArtifact {
                 role: cell.role,
                 mode: cell.mode,
                 training_cohort: cell.mode.training_cohort(),
                 shared_parameter_version: shared_parameter_version(cell.mode.training_cohort()),
-                role_model_ref: role_model_ref(cell.role, &roles[&cell.role]),
-                performance_enabled: cell_is_eligible(cell) && authority_available,
+                role_model_ref: role_model_ref(cell.role, role_model),
+                performance_enabled: cell_validates_role_model(
+                    cell,
+                    role_model,
+                    &evaluation.config,
+                ),
             }
         })
         .collect::<Vec<_>>();
@@ -328,12 +337,14 @@ fn build_role_artifacts(
         let reports = evaluation
             .cells
             .iter()
-            .filter(|cell| cell.role == role && cell_is_eligible(cell))
+            .filter(|cell| cell.role == role)
             .filter_map(|cell| {
                 let selected = cell.selected.as_deref()?;
-                cell.reports
+                let report = cell
+                    .reports
                     .iter()
-                    .find(|report| report.strategy == selected && report.eligible)
+                    .find(|report| report.strategy == selected && report.eligible)?;
+                cell_validates_report(cell, report, &evaluation.config).then_some(report)
             })
             .collect::<Vec<_>>();
         let artifact = if let Some(promoted) = promote_role_candidate(&reports) {
@@ -390,6 +401,57 @@ fn same_model_spec(left: &StabilityReport, right: &StabilityReport) -> bool {
         && left.forward.final_multiplier.to_bits() == right.forward.final_multiplier.to_bits()
         && left.forward.lambda_core.to_bits() == right.forward.lambda_core.to_bits()
         && left.forward.lambda_cohort.to_bits() == right.forward.lambda_cohort.to_bits()
+}
+
+fn cell_validates_report(
+    cell: &CellEvaluation,
+    report: &StabilityReport,
+    config: &StabilityConfigSnapshot,
+) -> bool {
+    cell_is_eligible(cell)
+        && cell.selected.as_deref() == Some(report.strategy.as_str())
+        && report.eligible
+        && cell.nested_validation.selected_strategy == report.strategy
+        && cell.nested_validation.selected_variant == report.forward.variant
+        && cell.nested_validation.selected_final_multiplier.to_bits()
+            == report.forward.final_multiplier.to_bits()
+        && cell.nested_validation.selected_lambda_core.to_bits()
+            == report.forward.lambda_core.to_bits()
+        && cell.nested_validation.selected_lambda_cohort.to_bits()
+            == report.forward.lambda_cohort.to_bits()
+        && cell.nested_validation.improved_folds >= config.minimum_improved_folds
+        && cell
+            .nested_validation
+            .metrics
+            .as_ref()
+            .zip(cell.nested_validation.baseline_metrics.as_ref())
+            .is_none_or(|(candidate, baseline)| {
+                candidate.ece <= baseline.ece + config.max_ece_worsening
+            })
+}
+
+fn cell_validates_role_model(
+    cell: &CellEvaluation,
+    model: &HierarchicalModelArtifact,
+    config: &StabilityConfigSnapshot,
+) -> bool {
+    let Some(strategy) = model.selected_strategy.as_deref() else {
+        return false;
+    };
+    cell.reports.iter().any(|report| {
+        report.strategy == strategy
+            && artifact_matches_report(model, report)
+            && cell_validates_report(cell, report, config)
+    })
+}
+
+fn artifact_matches_report(model: &HierarchicalModelArtifact, report: &StabilityReport) -> bool {
+    model.selected_strategy.as_deref() == Some(report.strategy.as_str())
+        && model.selected_variant.as_deref() == Some(variant_name(report.forward.variant))
+        && model.final_hit_multiplier.map(f64::to_bits)
+            == Some(report.forward.final_multiplier.to_bits())
+        && model.lambda_core.map(f64::to_bits) == Some(report.forward.lambda_core.to_bits())
+        && model.lambda_cohort.map(f64::to_bits) == Some(report.forward.lambda_cohort.to_bits())
 }
 
 fn variant_rank(variant: ModelVariant) -> usize {
@@ -517,7 +579,7 @@ fn build_cell_reports(
     let mut reports = evaluation
         .cells
         .iter()
-        .map(|cell| cell_report(rows, cell, &roles[&cell.role]))
+        .map(|cell| cell_report(rows, cell, &roles[&cell.role], &evaluation.config))
         .collect::<Vec<_>>();
     reports.sort_by_key(|cell| (cell.role, cell.mode));
     Ok(reports)
@@ -527,6 +589,7 @@ fn cell_report(
     rows: &[TrainingRow],
     cell: &CellEvaluation,
     role_model: &HierarchicalModelArtifact,
+    config: &StabilityConfigSnapshot,
 ) -> CellReport {
     let role = role_name(cell.role);
     let cohort_rows = rows.iter().filter(|row| {
@@ -557,8 +620,11 @@ fn cell_report(
         .len();
     let candidate = cell.nested_validation.metrics.as_ref();
     let baseline = cell.nested_validation.baseline_metrics.as_ref();
-    let eligible = cell_is_eligible(cell) && role_model.selected_strategy.is_some();
+    let eligible = cell_validates_role_model(cell, role_model, config);
     let mut rejected_reasons = cell.rejected_reasons.clone();
+    if cell_is_eligible(cell) && !eligible {
+        rejected_reasons.push("shared_role_model_not_validated_for_cell".into());
+    }
     if !eligible && rejected_reasons.is_empty() {
         rejected_reasons.push("no_eligible_strategy".into());
     }
@@ -967,20 +1033,14 @@ fn aggregate_sample_buckets(rows: &[TrainingRow]) -> Vec<AggregateSampleBucket> 
 }
 
 fn training_config(evaluation: &StabilityEvaluation) -> TrainingConfigArtifact {
-    let bootstrap_iterations = evaluation
-        .reports
-        .iter()
-        .map(|report| report.bootstrap.requested_iterations)
-        .max()
-        .unwrap_or(0);
-    let stage = match bootstrap_iterations {
-        100 => "screen_100",
-        1_000 => "candidate_1000",
-        10_000 => "final_10000",
-        _ => "custom",
+    let snapshot = &evaluation.config;
+    let stage = match snapshot.stage {
+        TrainingStage::Screen100 => "screen_100",
+        TrainingStage::Candidate1000 => "candidate_1000",
+        TrainingStage::Final10000 => "final_10000",
     };
-    let defaults = FitConfig::default();
     TrainingConfigArtifact {
+        seed: snapshot.seed,
         mode_weights: BTreeMap::from([
             (ModeFamily::RoleCompetitive, 1.0),
             (ModeFamily::RoleQuick, 0.3),
@@ -990,42 +1050,40 @@ fn training_config(evaluation: &StabilityEvaluation) -> TrainingConfigArtifact {
             (ModeFamily::StadiumQuick, 0.1),
         ]),
         fit: FitSearchArtifact {
-            variants: vec!["core".into(), "role_full".into()],
-            final_hit_multipliers: vec![1.0, 1.25, 1.5, 1.75, 2.0],
-            regularization_candidates: vec![
-                RegularizationCandidate {
-                    lambda_core: 0.02,
-                    lambda_cohort: 0.05,
-                },
-                RegularizationCandidate {
-                    lambda_core: 0.05,
-                    lambda_cohort: 0.10,
-                },
-            ],
-            learning_rate: defaults.learning_rate,
-            steps: MODEL_FIT_STEPS,
-            minimum_cohort_offset_rows: defaults.min_cohort_offset_rows,
+            variants: snapshot.fit_variants.clone(),
+            final_hit_multipliers: snapshot.final_hit_multipliers.clone(),
+            regularization_candidates: snapshot
+                .regularization_candidates
+                .iter()
+                .map(|candidate| RegularizationCandidate {
+                    lambda_core: candidate[0],
+                    lambda_cohort: candidate[1],
+                })
+                .collect(),
+            learning_rate: snapshot.fit_learning_rate,
+            steps: snapshot.fit_steps,
+            minimum_cohort_offset_rows: snapshot.minimum_cohort_offset_rows,
         },
         validation: ValidationGateArtifact {
             stage: stage.into(),
-            bootstrap_iterations,
-            minimum_improved_folds: 4,
-            minimum_role_core_rows: 500,
-            minimum_cohort_rows: 150,
-            minimum_season_loo_groups: 2,
-            minimum_hero_loo_groups: 5,
-            minimum_loo_row_coverage: 0.80,
-            maximum_loo_worsened_fraction: 0.25,
-            minimum_bootstrap_completion: 0.90,
-            minimum_critical_direction_stability: 0.90,
-            maximum_bootstrap_brier_ci_high: 0.0,
-            max_ece_worsening: 0.005,
-            maximum_single_feature_share: 0.35,
-            maximum_average_adjustment_mmr: 0.10,
-            maximum_cap_hit_rate: 0.05,
-            require_account_coverage: true,
-            require_critical_ci_excludes_zero: true,
-            require_nonzero_reference_coefficients: true,
+            bootstrap_iterations: snapshot.bootstrap_iterations,
+            minimum_improved_folds: snapshot.minimum_improved_folds,
+            minimum_role_core_rows: snapshot.minimum_role_core_rows,
+            minimum_cohort_rows: snapshot.minimum_cohort_rows,
+            minimum_season_loo_groups: snapshot.minimum_season_loo_groups,
+            minimum_hero_loo_groups: snapshot.minimum_hero_loo_groups,
+            minimum_loo_row_coverage: snapshot.minimum_loo_row_coverage,
+            maximum_loo_worsened_fraction: snapshot.max_loo_worsened_fraction,
+            minimum_bootstrap_completion: snapshot.minimum_bootstrap_completion,
+            minimum_critical_direction_stability: snapshot.minimum_critical_direction_stability,
+            maximum_bootstrap_brier_ci_high: snapshot.maximum_bootstrap_brier_ci_high,
+            max_ece_worsening: snapshot.max_ece_worsening,
+            maximum_single_feature_share: snapshot.maximum_single_feature_share,
+            maximum_average_adjustment_mmr: snapshot.max_abs_average_adjustment,
+            maximum_cap_hit_rate: snapshot.maximum_cap_hit_rate,
+            require_account_coverage: snapshot.require_account_coverage,
+            require_critical_ci_excludes_zero: snapshot.require_critical_ci_excludes_zero,
+            require_nonzero_reference_coefficients: snapshot.require_nonzero_reference_coefficients,
         },
     }
 }

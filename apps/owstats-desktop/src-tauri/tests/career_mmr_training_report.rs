@@ -67,6 +67,23 @@ fn synthetic_rows() -> Vec<TrainingRow> {
         .collect()
 }
 
+fn mark_cell_eligible(
+    cell: &mut owstats_desktop_lib::career_mmr::performance_stability::CellEvaluation,
+    report_index: usize,
+) {
+    let report = &mut cell.reports[report_index];
+    report.eligible = true;
+    cell.selected = Some(report.strategy.clone());
+    cell.decision = CellDecision::Eligible;
+    cell.rejected_reasons.clear();
+    cell.nested_validation.selected_strategy = report.strategy.clone();
+    cell.nested_validation.selected_variant = report.forward.variant;
+    cell.nested_validation.selected_final_multiplier = report.forward.final_multiplier;
+    cell.nested_validation.selected_lambda_core = report.forward.lambda_core;
+    cell.nested_validation.selected_lambda_cohort = report.forward.lambda_cohort;
+    cell.nested_validation.improved_folds = 5;
+}
+
 #[test]
 fn produces_complete_replayable_and_privacy_safe_outputs() {
     let rows = synthetic_rows();
@@ -79,6 +96,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
         &[],
         StabilityConfig {
             bootstrap_iterations: 0,
+            seed: 0x5eed,
             ..Default::default()
         },
     );
@@ -199,6 +217,7 @@ fn config_hash_ignores_account_and_match_identifiers() {
         &[],
         StabilityConfig {
             bootstrap_iterations: 0,
+            seed: 7,
             ..Default::default()
         },
     );
@@ -231,6 +250,7 @@ fn config_hash_covers_the_fitted_model_weights() {
         &[],
         StabilityConfig {
             bootstrap_iterations: 0,
+            seed: 11,
             ..Default::default()
         },
     );
@@ -239,10 +259,7 @@ fn config_hash_covers_the_fitted_model_weights() {
         .0
         .config_hash;
     let cell = &mut evaluation.cells[0];
-    cell.reports[0].eligible = true;
-    cell.selected = Some(cell.reports[0].strategy.clone());
-    cell.decision = CellDecision::Eligible;
-    cell.rejected_reasons.clear();
+    mark_cell_eligible(cell, 0);
 
     let fitted_hash = build_training_outputs(&rows, &audit, &evaluation, 11)
         .unwrap()
@@ -264,6 +281,7 @@ fn config_hash_covers_normalization_and_every_validation_gate() {
         &[],
         StabilityConfig {
             bootstrap_iterations: 0,
+            seed: 13,
             ..Default::default()
         },
     );
@@ -298,6 +316,7 @@ fn conflicting_cell_candidates_share_one_order_independent_role_model() {
         &[],
         StabilityConfig {
             bootstrap_iterations: 0,
+            seed: 17,
             ..Default::default()
         },
     );
@@ -310,10 +329,7 @@ fn conflicting_cell_candidates_share_one_order_independent_role_model() {
             .iter_mut()
             .find(|cell| cell.role == Role::Tank && cell.mode == mode)
             .unwrap();
-        cell.reports[report_index].eligible = true;
-        cell.selected = Some(cell.reports[report_index].strategy.clone());
-        cell.decision = CellDecision::Eligible;
-        cell.rejected_reasons.clear();
+        mark_cell_eligible(cell, report_index);
     }
     let first = build_training_outputs(&rows, &audit, &evaluation, 17)
         .unwrap()
@@ -336,9 +352,112 @@ fn conflicting_cell_candidates_share_one_order_independent_role_model() {
         .collect::<Vec<_>>();
     assert_eq!(pair.len(), 2);
     assert_eq!(pair[0].role_model_ref, pair[1].role_model_ref);
+    assert!(pair[0].performance_enabled);
+    assert!(!pair[1].performance_enabled);
+    let losing_report = first
+        .cells
+        .iter()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleQuick)
+        .unwrap();
+    let losing_validation = build_training_outputs(&rows, &audit, &evaluation, 17)
+        .unwrap()
+        .1
+        .cells
+        .into_iter()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleQuick)
+        .unwrap();
+    assert_eq!(
+        losing_report.performance_enabled,
+        losing_validation.eligible
+    );
+    assert_eq!(losing_validation.decision, CellDecision::Shadow);
+    assert!(losing_validation
+        .rejected_reasons
+        .contains(&"shared_role_model_not_validated_for_cell".into()));
     assert_eq!(first.roles[&Role::Tank], reordered.roles[&Role::Tank]);
     assert_eq!(first.cells, reordered.cells);
     assert_eq!(first.config_hash, reordered.config_hash);
+}
+
+#[test]
+fn matching_shared_spec_can_enable_both_paired_modes() {
+    let rows = synthetic_rows();
+    let audit = TrainingAudit {
+        source_accounts: 2,
+        projected_rows: rows.len(),
+        ..Default::default()
+    };
+    let mut evaluation = evaluate_stability(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 0,
+            seed: 19,
+            ..Default::default()
+        },
+    );
+    for mode in [ModeFamily::RoleCompetitive, ModeFamily::RoleQuick] {
+        let cell = evaluation
+            .cells
+            .iter_mut()
+            .find(|cell| cell.role == Role::Tank && cell.mode == mode)
+            .unwrap();
+        mark_cell_eligible(cell, 0);
+    }
+    let (_, report) = build_training_outputs(&rows, &audit, &evaluation, 19).unwrap();
+    let pair = report
+        .cells
+        .iter()
+        .filter(|cell| {
+            cell.role == Role::Tank
+                && matches!(
+                    cell.mode,
+                    ModeFamily::RoleCompetitive | ModeFamily::RoleQuick
+                )
+        })
+        .collect::<Vec<_>>();
+    assert!(pair.iter().all(|cell| cell.eligible));
+}
+
+#[test]
+fn artifact_uses_the_actual_evaluation_snapshot_and_rejects_seed_mismatch() {
+    let rows = synthetic_rows();
+    let audit = TrainingAudit {
+        source_accounts: 2,
+        projected_rows: rows.len(),
+        ..Default::default()
+    };
+    let evaluation = evaluate_stability(
+        &[],
+        StabilityConfig {
+            bootstrap_iterations: 0,
+            seed: 23,
+            max_loo_worsened_fraction: 0.10,
+            max_abs_average_adjustment: 0.05,
+        },
+    );
+    assert_eq!(evaluation.config.seed, 23);
+    assert_eq!(evaluation.config.max_loo_worsened_fraction, 0.10);
+    assert_eq!(evaluation.config.max_abs_average_adjustment, 0.05);
+
+    let artifact = build_training_outputs(&rows, &audit, &evaluation, 23)
+        .unwrap()
+        .0;
+    assert_eq!(artifact.seed, 23);
+    assert_eq!(
+        artifact
+            .training_config
+            .validation
+            .maximum_loo_worsened_fraction,
+        0.10
+    );
+    assert_eq!(
+        artifact
+            .training_config
+            .validation
+            .maximum_average_adjustment_mmr,
+        0.05
+    );
+    assert!(build_training_outputs(&rows, &audit, &evaluation, 24).is_err());
 }
 
 #[test]
@@ -382,6 +501,7 @@ fn rejected_reasons_always_override_an_inconsistent_eligible_flag() {
         &[],
         StabilityConfig {
             bootstrap_iterations: 0,
+            seed: 9,
             ..Default::default()
         },
     );
