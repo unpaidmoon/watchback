@@ -200,40 +200,52 @@
   border-top: 1px solid color-mix(in srgb, var(--action-on-primary) 10%, transparent);
 }
 
-.reviewWorkspace .phase6AchievementCard:hover,
-.reviewWorkspace .phase6AchievementCard:focus-within {
-  border-color: var(--text-tertiary);
+.reviewWorkspace .phase6AchievementCard:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--action-on-primary) 4%, transparent);
   box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.reviewWorkspace .phase6AchievementCard:focus-within {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--action-on-primary) 4%, transparent);
+  box-shadow: none;
+  outline: 2px solid var(--data-primary);
+  outline-offset: -2px;
 }
 
 .reviewWorkspace .phase6AchievementMedalImage {
-  filter: drop-shadow(0 10px 16px rgba(35, 40, 35, 0.14));
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.28));
 }
 
 .reviewWorkspace .phase6AchievementCard:hover .phase6AchievementMedalImage,
 .reviewWorkspace .phase6AchievementCard:focus-within .phase6AchievementMedalImage {
-  filter: drop-shadow(0 12px 18px rgba(75, 34, 209, 0.16));
+  filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.34));
 }
 
 .reviewWorkspace .phase6AchievementCopy strong {
-  color: var(--text-primary);
+  color: var(--action-on-primary);
 }
 
 .reviewWorkspace .phase6AchievementCopy strong span {
-  border-color: var(--glass-border);
-  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--action-on-primary) 16%, transparent);
+  color: color-mix(in srgb, var(--action-on-primary) 72%, transparent);
 }
 
 .reviewWorkspace .phase6AchievementCopy > span {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--action-on-primary) 82%, transparent);
 }
 
 .reviewWorkspace .phase6AchievementCopy small,
 .reviewWorkspace .phase6AchievementNext {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--action-on-primary) 62%, transparent);
 }
 
-.reviewWorkspace .phase6AchievementProgress,
+.reviewWorkspace .phase6AchievementProgress {
+  background: color-mix(in srgb, var(--action-on-primary) 12%, transparent);
+}
+
 .reviewWorkspace .phase6AchievementModalProgress {
   background: color-mix(in srgb, var(--data-secondary) 14%, var(--surface-control));
 }
@@ -244,18 +256,24 @@
 }
 
 .reviewWorkspace .phase6AchievementTierRail span {
-  border-color: var(--border-subtle);
-  color: var(--text-tertiary);
+  border-color: color-mix(in srgb, var(--action-on-primary) 14%, transparent);
+  color: color-mix(in srgb, var(--action-on-primary) 54%, transparent);
 }
 
 .reviewWorkspace .phase6AchievementTierRail span.unlocked {
-  border-color: color-mix(in srgb, var(--data-secondary) 32%, var(--border-subtle));
-  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--action-on-primary) 24%, transparent);
+  color: color-mix(in srgb, var(--action-on-primary) 78%, transparent);
 }
 
 .reviewWorkspace .phase6AchievementTierRail span.active {
   border-color: var(--data-primary);
   background: var(--data-primary);
+  color: var(--action-on-primary);
+}
+
+.reviewWorkspace .phase6AchievementCard .phase6EvidenceLink {
+  border-color: color-mix(in srgb, var(--action-on-primary) 16%, transparent);
+  background: color-mix(in srgb, var(--action-on-primary) 8%, transparent);
   color: var(--action-on-primary);
 }
 
@@ -301,6 +319,21 @@
 .reviewWorkspace .phase6AchievementModalStats .metric {
   border-color: var(--border-subtle);
   background: var(--surface-control);
+}
+
+@media (max-width: 1080px) {
+  .reviewWorkspace .phase6AchievementCard:nth-child(n) {
+    border-left: 0;
+    border-top: 0;
+  }
+
+  .reviewWorkspace .phase6AchievementCard:nth-child(2n) {
+    border-left: 1px solid color-mix(in srgb, var(--action-on-primary) 10%, transparent);
+  }
+
+  .reviewWorkspace .phase6AchievementCard:nth-child(n + 3) {
+    border-top: 1px solid color-mix(in srgb, var(--action-on-primary) 10%, transparent);
+  }
 }
 
 @media (max-width: 899px) {

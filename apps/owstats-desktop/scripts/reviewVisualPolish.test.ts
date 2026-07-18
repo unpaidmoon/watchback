@@ -43,6 +43,26 @@ assert.match(
 );
 assert.match(
   reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementCopy\s+strong\s*\{[^}]*color:\s*var\(--action-on-primary\);/s,
+  "成就名称应在深色墙上使用高对比浅色文字",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementCard\s+\.phase6EvidenceLink\s*\{[^}]*background:\s*color-mix\([^;]+;[^}]*color:\s*var\(--action-on-primary\);/s,
+  "成就证据链接应适配深色背景",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementCard:focus-within\s*\{[^}]*outline:\s*2px solid var\(--data-primary\);/s,
+  "成就项应保留可见键盘焦点",
+);
+assert.match(
+  reviewCss,
+  /@media\s*\(max-width:\s*1080px\)[\s\S]*?\.reviewWorkspace\s+\.phase6AchievementCard:nth-child\(2n\)\s*\{[^}]*border-left:\s*1px solid color-mix\(/s,
+  "两列成就墙应重新计算纵向分隔线",
+);
+assert.match(
+  reviewCss,
   /\.reviewWorkspace\s+\.phase6AchievementProgress\s+span,\s*\.reviewWorkspace\s+\.phase6AchievementModalProgress\s+span\s*\{[^}]*background:\s*var\(--data-secondary\);/s,
   "成就进度应使用纯冷蓝绿色强调",
 );
