@@ -15,7 +15,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 const ALGORITHM: &str = "career-role-mmr-hierarchical-logit-v1";
 const FEATURE_VERSION: &str = "role-features-and-resource-debt-v1";
 const MAD_SCALE: f64 = 0.6745;
@@ -204,6 +204,8 @@ pub struct TrainingReport {
     pub stadium_quick: OutcomeOnlyReport,
     pub training_config: TrainingConfigArtifact,
     pub config_hash: String,
+    pub promotable_candidates: Vec<PromotedCandidate>,
+    pub promotion_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -269,6 +271,7 @@ pub fn build_training_outputs(
     let roles = build_role_artifacts(rows, evaluation)?;
     let cells = build_cell_artifacts(rows, evaluation, &roles, &normalization);
     let report_cells = build_cell_reports(rows, evaluation, &roles)?;
+    let promotable_candidates = build_promotable_candidates(&report_cells, &roles)?;
     let caps = PerformanceCaps::default();
     let training_config = training_config(evaluation);
     let sample_buckets = aggregate_sample_buckets(rows);
@@ -292,7 +295,7 @@ pub fn build_training_outputs(
     artifact.config_hash = recompute_config_hash(&artifact)?;
     artifact = serde_json::from_str(&serde_json::to_string(&artifact)?)?;
     let config_hash = artifact.config_hash.clone();
-    let report = TrainingReport {
+    let mut report = TrainingReport {
         schema_version: SCHEMA_VERSION,
         algorithm: ALGORITHM.into(),
         feature_version: FEATURE_VERSION.into(),
@@ -310,10 +313,304 @@ pub fn build_training_outputs(
         },
         training_config,
         config_hash,
+        promotable_candidates,
+        promotion_hash: String::new(),
     };
+    report.promotion_hash = recompute_promotion_hash(&serde_json::to_value(&report)?)?;
     validate_report_boundary(&serde_json::to_value(&artifact)?)?;
     validate_report_boundary(&serde_json::to_value(&report)?)?;
     Ok((artifact, report))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+struct PromotionCellIdentity {
+    role: Role,
+    mode: ModeFamily,
+    model_spec_id: Option<ModelSpecId>,
+    role_model_ref: String,
+    decision: CellDecision,
+    rejected_reasons: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct PromotionHashCanonical<'a> {
+    stage: &'a str,
+    seed: u64,
+    artifact_config_hash: &'a str,
+    training_config: &'a Value,
+    eligible_cells: Vec<PromotionCellIdentity>,
+    promotable_candidates: Vec<PromotedCandidate>,
+}
+
+pub fn recompute_promotion_hash(value: &Value) -> Result<String> {
+    if value.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION as u64) {
+        bail!("训练报告版本无效");
+    }
+    let seed = value
+        .get("seed")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| anyhow::anyhow!("训练报告种子无效"))?;
+    let config_hash = value
+        .get("config_hash")
+        .and_then(Value::as_str)
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| anyhow::anyhow!("训练报告模型哈希无效"))?;
+    let training_config = value
+        .get("training_config")
+        .ok_or_else(|| anyhow::anyhow!("训练报告配置无效"))?;
+    let stage = training_config
+        .pointer("/validation/stage")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("训练报告阶段无效"))?;
+    let mut eligible_cells = value
+        .get("cells")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("训练报告验收格无效"))?
+        .iter()
+        .filter(|cell| cell.get("eligible").and_then(Value::as_bool) == Some(true))
+        .map(|cell| {
+            Ok(PromotionCellIdentity {
+                role: serde_json::from_value(
+                    cell.get("role")
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("训练报告职责无效"))?,
+                )?,
+                mode: serde_json::from_value(
+                    cell.get("mode")
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("训练报告模式无效"))?,
+                )?,
+                model_spec_id: serde_json::from_value(
+                    cell.get("model_spec_id").cloned().unwrap_or(Value::Null),
+                )?,
+                role_model_ref: cell
+                    .get("role_model_ref")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("训练报告模型引用无效"))?
+                    .to_owned(),
+                decision: serde_json::from_value(
+                    cell.get("decision")
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("训练报告决策无效"))?,
+                )?,
+                rejected_reasons: serde_json::from_value(
+                    cell.get("rejected_reasons")
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("训练报告拒绝原因无效"))?,
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    eligible_cells.sort();
+    let mut promotable_candidates: Vec<PromotedCandidate> = serde_json::from_value(
+        value
+            .get("promotable_candidates")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("训练报告晋级候选无效"))?,
+    )?;
+    promotable_candidates.sort_by(promoted_candidate_order);
+    let canonical = PromotionHashCanonical {
+        stage,
+        seed,
+        artifact_config_hash: config_hash,
+        training_config,
+        eligible_cells,
+        promotable_candidates,
+    };
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&canonical)?)
+    ))
+}
+
+/// Validates the complete promotion boundary used by the staged training CLI.
+/// The caller is responsible for pinning and reading the source file safely.
+pub fn validate_promotion_report(
+    value: &Value,
+    expected_stage: &str,
+    expected_seed: u64,
+) -> Result<Vec<PromotedCandidate>> {
+    let invalid = || anyhow::anyhow!("上一阶段报告无效");
+    let config_hash = value
+        .get("config_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(&invalid)?;
+    let promotion_hash = value
+        .get("promotion_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(&invalid)?;
+    if value.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION.into())
+        || value.get("seed").and_then(Value::as_u64) != Some(expected_seed)
+        || value
+            .pointer("/training_config/validation/stage")
+            .and_then(Value::as_str)
+            != Some(expected_stage)
+        || !is_sha256(config_hash)
+        || !is_sha256(promotion_hash)
+        || recompute_promotion_hash(value)? != promotion_hash
+        || value.pointer("/training_config/fit/variants")
+            != Some(&serde_json::json!(["core", "role_full"]))
+        || value.pointer("/training_config/fit/final_hit_multipliers")
+            != Some(&serde_json::json!([1.0, 1.25, 1.5, 1.75, 2.0]))
+        || value.pointer("/training_config/fit/regularization_candidates")
+            != Some(&serde_json::json!([
+                {"lambda_core": 0.02, "lambda_cohort": 0.05},
+                {"lambda_core": 0.05, "lambda_cohort": 0.10}
+            ]))
+    {
+        bail!("上一阶段报告无效");
+    }
+    let cells = value
+        .get("cells")
+        .and_then(Value::as_array)
+        .ok_or_else(&invalid)?;
+    let mut by_role = BTreeMap::<Role, PromotedCandidate>::new();
+    for cell in cells
+        .iter()
+        .filter(|cell| cell.get("eligible").and_then(Value::as_bool) == Some(true))
+    {
+        let role = match cell.get("role").and_then(Value::as_str) {
+            Some("tank") => Role::Tank,
+            Some("damage") => Role::Damage,
+            Some("support") => Role::Support,
+            _ => bail!("上一阶段报告无效"),
+        };
+        let reports = cell
+            .pointer("/metrics/strategy_reports")
+            .and_then(Value::as_array)
+            .ok_or_else(&invalid)?;
+        let spec = cell.get("model_spec_id").ok_or_else(&invalid)?;
+        let strategy_index = promotion_index(spec, "strategy_index", 5)?;
+        let variant_index = promotion_index(spec, "variant_index", 2)?;
+        let multiplier_index = promotion_index(spec, "multiplier_index", 5)?;
+        let regularization_index = promotion_index(spec, "regularization_index", 2)?;
+        let strategy = [
+            "none",
+            "directnegative",
+            "heronormalized",
+            "excesshealing",
+            "resourceconversiondebt",
+        ][strategy_index];
+        let variant = [ModelVariant::Core, ModelVariant::RoleFull][variant_index];
+        let final_multiplier = [1.0, 1.25, 1.5, 1.75, 2.0][multiplier_index];
+        let (lambda_core, lambda_cohort) = [(0.02, 0.05), (0.05, 0.10)][regularization_index];
+        let report = reports
+            .iter()
+            .find(|report| report.get("strategy").and_then(Value::as_str) == Some(strategy))
+            .filter(|report| report.get("eligible").and_then(Value::as_bool) == Some(true))
+            .ok_or_else(&invalid)?;
+        if report.pointer("/forward/variant").and_then(Value::as_str)
+            != Some(match variant {
+                ModelVariant::Core => "core",
+                ModelVariant::RoleFull => "role_full",
+            })
+            || promotion_number(report, "/forward/final_multiplier")? != final_multiplier
+            || promotion_number(report, "/forward/lambda_core")? != lambda_core
+            || promotion_number(report, "/forward/lambda_cohort")? != lambda_cohort
+        {
+            bail!("上一阶段报告无效");
+        }
+        let candidate = PromotedCandidate {
+            role,
+            strategy: strategy.into(),
+            variant,
+            final_multiplier,
+            lambda_core,
+            lambda_cohort,
+        };
+        if by_role
+            .get(&role)
+            .is_some_and(|existing| existing != &candidate)
+        {
+            bail!("上一阶段报告无效");
+        }
+        by_role.insert(role, candidate);
+    }
+    let candidates = by_role.into_values().collect::<Vec<_>>();
+    let declared: Vec<PromotedCandidate> = serde_json::from_value(
+        value
+            .get("promotable_candidates")
+            .cloned()
+            .ok_or_else(&invalid)?,
+    )?;
+    if candidates.is_empty() || declared != candidates {
+        bail!("上一阶段报告无效");
+    }
+    Ok(candidates)
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn promotion_index(value: &Value, field: &str, length: usize) -> Result<usize> {
+    let index = value
+        .get(field)
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| anyhow::anyhow!("上一阶段报告无效"))?;
+    if index >= length {
+        bail!("上一阶段报告无效");
+    }
+    Ok(index)
+}
+
+fn promotion_number(value: &Value, pointer: &str) -> Result<f64> {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_f64)
+        .filter(|number| number.is_finite())
+        .ok_or_else(|| anyhow::anyhow!("上一阶段报告无效"))
+}
+
+fn build_promotable_candidates(
+    cells: &[CellReport],
+    roles: &BTreeMap<Role, HierarchicalModelArtifact>,
+) -> Result<Vec<PromotedCandidate>> {
+    let mut candidates = Vec::new();
+    for role in [Role::Tank, Role::Damage, Role::Support] {
+        if !cells.iter().any(|cell| cell.role == role && cell.eligible) {
+            continue;
+        }
+        let model = &roles[&role];
+        let candidate = PromotedCandidate {
+            role,
+            strategy: model
+                .selected_strategy
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("可晋级职责缺少策略"))?,
+            variant: match model.selected_variant.as_deref() {
+                Some("core") => ModelVariant::Core,
+                Some("role_full") => ModelVariant::RoleFull,
+                _ => bail!("可晋级职责缺少模型变体"),
+            },
+            final_multiplier: model
+                .final_hit_multiplier
+                .ok_or_else(|| anyhow::anyhow!("可晋级职责缺少最后一击倍率"))?,
+            lambda_core: model
+                .lambda_core
+                .ok_or_else(|| anyhow::anyhow!("可晋级职责缺少核心正则"))?,
+            lambda_cohort: model
+                .lambda_cohort
+                .ok_or_else(|| anyhow::anyhow!("可晋级职责缺少队列正则"))?,
+        };
+        candidates.push(candidate);
+    }
+    candidates.sort_by(promoted_candidate_order);
+    Ok(candidates)
+}
+
+fn promoted_candidate_order(
+    left: &PromotedCandidate,
+    right: &PromotedCandidate,
+) -> std::cmp::Ordering {
+    left.role
+        .cmp(&right.role)
+        .then(left.strategy.cmp(&right.strategy))
+        .then(variant_rank(left.variant).cmp(&variant_rank(right.variant)))
+        .then(left.final_multiplier.total_cmp(&right.final_multiplier))
+        .then(left.lambda_core.total_cmp(&right.lambda_core))
+        .then(left.lambda_cohort.total_cmp(&right.lambda_cohort))
 }
 
 fn build_cell_artifacts(
@@ -410,6 +707,13 @@ fn promote_role_candidate<'a>(
     reports: &[&'a StabilityReport],
     config: &StabilityConfigSnapshot,
 ) -> Option<&'a StabilityReport> {
+    if let Some(promoted) = promoted_spec_for_role(config, reports.first()?.role) {
+        let mut matches = reports
+            .iter()
+            .filter(|report| model_spec_id(report, config) == Some(promoted.clone()));
+        let report = *matches.next()?;
+        return matches.next().is_none().then_some(report);
+    }
     let mut candidates = reports
         .iter()
         .map(|report| {
@@ -470,7 +774,7 @@ fn cell_validates_report(
         && report.forward.strategy == report.strategy
         && report.forward.rejected_reasons.is_empty()
         && finite_forward_evidence(report, config)
-        && complete_strategy_identities(cell)
+        && complete_strategy_identities(cell, config)
         && cell.nested_validation.role == cell.role
         && cell.nested_validation.mode == cell.mode
         && nested_degraded_state_is_valid(cell, config)
@@ -496,12 +800,16 @@ fn cell_validates_role_model(
     let Some(strategy) = model.selected_strategy.as_deref() else {
         return false;
     };
-    cell.reports.iter().any(|report| {
-        report.strategy == strategy
-            && model.model_spec_id.as_ref() == model_spec_id(report, config).as_ref()
-            && artifact_matches_report(model, report)
-            && cell_validates_report(cell, report, config)
-    })
+    let promoted_matches = config.promoted_candidates.as_ref().is_none_or(|_| {
+        promoted_spec_for_role(config, cell.role).as_ref() == model.model_spec_id.as_ref()
+    });
+    promoted_matches
+        && cell.reports.iter().any(|report| {
+            report.strategy == strategy
+                && model.model_spec_id.as_ref() == model_spec_id(report, config).as_ref()
+                && artifact_matches_report(model, report)
+                && cell_validates_report(cell, report, config)
+        })
 }
 
 fn artifact_matches_report(model: &HierarchicalModelArtifact, report: &StabilityReport) -> bool {
@@ -521,7 +829,7 @@ fn option_finite(value: Option<f64>) -> bool {
     value.is_some_and(f64::is_finite)
 }
 
-fn complete_strategy_identities(cell: &CellEvaluation) -> bool {
+fn complete_strategy_identities(cell: &CellEvaluation, config: &StabilityConfigSnapshot) -> bool {
     const STRATEGIES: [&str; 5] = [
         "none",
         "directnegative",
@@ -529,6 +837,19 @@ fn complete_strategy_identities(cell: &CellEvaluation) -> bool {
         "excesshealing",
         "resourceconversiondebt",
     ];
+    if config.promoted_candidates.is_some() {
+        let Some(promoted) = promoted_spec_for_role(config, cell.role) else {
+            return cell.reports.is_empty();
+        };
+        return cell.reports.len() == 1
+            && model_spec_id(&cell.reports[0], config) == Some(promoted)
+            && cell.reports[0].role == cell.role
+            && cell.reports[0].mode == cell.mode
+            && cell.reports[0].training_cohort == cell.training_cohort
+            && cell.reports[0].shared_parameter_version == cell.shared_parameter_version
+            && cell.reports[0].forward.role == cell.role
+            && cell.reports[0].forward.strategy == cell.reports[0].strategy;
+    }
     cell.reports.len() == STRATEGIES.len()
         && STRATEGIES.iter().all(|strategy| {
             cell.reports
@@ -545,6 +866,23 @@ fn complete_strategy_identities(cell: &CellEvaluation) -> bool {
                 && report.forward.role == cell.role
                 && report.forward.strategy == report.strategy
         })
+}
+
+fn promoted_spec_for_role(config: &StabilityConfigSnapshot, role: Role) -> Option<ModelSpecId> {
+    let candidates = config.promoted_candidates.as_ref()?;
+    let mut candidates = candidates.iter().filter(|candidate| candidate.role == role);
+    let candidate = candidates.next()?;
+    if candidates.next().is_some() {
+        return None;
+    }
+    model_spec_id_from_values(
+        &candidate.strategy,
+        candidate.variant,
+        candidate.final_multiplier,
+        candidate.lambda_core,
+        candidate.lambda_cohort,
+        config,
+    )
 }
 
 fn finite_forward_evidence(report: &StabilityReport, config: &StabilityConfigSnapshot) -> bool {

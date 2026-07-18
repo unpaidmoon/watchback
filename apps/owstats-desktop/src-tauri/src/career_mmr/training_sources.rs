@@ -44,7 +44,10 @@ impl TrainingSourceSpec {
     pub fn conflicts_with_output(&self, output: &Path) -> bool {
         output == self.database_path
             || (output.exists()
-                && fs::canonicalize(output).ok() == fs::canonicalize(&self.database_path).ok())
+                && (fs::canonicalize(output).ok() == fs::canonicalize(&self.database_path).ok()
+                    || fs::metadata(output).ok().is_some_and(|metadata| {
+                        database_identity(&metadata) == self.expected_database_identity
+                    })))
     }
 }
 

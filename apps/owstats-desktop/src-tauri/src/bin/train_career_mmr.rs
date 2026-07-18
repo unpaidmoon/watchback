@@ -1,14 +1,15 @@
 use owstats_desktop_lib::{
     app_paths::SharedAppPaths,
     career_mmr::{
-        input::Role,
-        performance_forward::ModelVariant,
         performance_stability::{
-            evaluate_stability_with_progress, PromotedCandidate, StabilityConfig, TrainingStage,
+            evaluate_stability_with_progress, CellDecision, PromotedCandidate, StabilityConfig,
+            StabilityEvaluation, TrainingStage,
         },
         shadow::simulate_shadow_replay,
         training::build_multi_account_projection,
-        training_report::{build_training_outputs, validate_report_boundary},
+        training_report::{
+            build_training_outputs, validate_promotion_report, validate_report_boundary,
+        },
         training_sources::discover_training_sources,
     },
 };
@@ -17,7 +18,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -132,7 +133,6 @@ struct ShadowAggregate {
 
 fn run() -> Result<(), &'static str> {
     let args = parse_args_from(std::env::args_os().skip(1))?;
-    validate_paths(&args)?;
     let shared = SharedAppPaths::from_app_data_dir(&args.app_data_dir);
     let sources = discover_training_sources(&shared).map_err(|_| "无法发现训练账号数据库")?;
     if sources.is_empty() {
@@ -148,6 +148,7 @@ fn run() -> Result<(), &'static str> {
     }) {
         return Err("输入输出不能覆盖训练源数据库");
     }
+    validate_paths(&args)?;
     let projection =
         build_multi_account_projection(&sources).map_err(|_| "无法聚合多账号训练数据")?;
     let promoted_candidates =
@@ -168,6 +169,7 @@ fn run() -> Result<(), &'static str> {
                 .map_or_else(|| "unknown".into(), |value| value.to_string())
         );
     });
+    emit_evaluation_summary(&evaluation);
     let (artifact, report) = build_training_outputs(
         &projection.rows,
         projection.public_audit(),
@@ -245,6 +247,80 @@ fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
+const FIXED_REJECTION_CODES: [&str; 26] = [
+    "account_coverage_limited",
+    "average_adjustment_above_0_10_mmr",
+    "bootstrap_brier_ci_not_below_zero",
+    "bootstrap_completion_below_90_percent",
+    "bootstrap_iterations_zero",
+    "cap_hit_rate_above_5_percent",
+    "critical_coefficient_ci_crosses_zero",
+    "critical_direction_stability_below_90_percent",
+    "ece_worse_than_0_005",
+    "final_weight_not_strictly_above_nonfinal",
+    "hero_loo_mean_brier_delta_above_zero",
+    "hero_loo_row_coverage_below_80_percent",
+    "hero_loo_valid_groups_below_5",
+    "hero_loo_worsened_fraction_above_25_percent",
+    "improved_folds_below_4",
+    "no_eligible_strategy",
+    "no_promoted_candidate",
+    "p95_single_feature_contribution_above_35_percent",
+    "resource_debt_ci_upper_not_below_zero",
+    "role_core_rows_below_500",
+    "season_loo_mean_brier_delta_above_zero",
+    "season_loo_row_coverage_below_80_percent",
+    "season_loo_valid_groups_below_2",
+    "season_loo_worsened_fraction_above_25_percent",
+    "selection_degraded",
+    "zero_reference_coefficient_unstable",
+];
+
+fn evaluation_summary(evaluation: &StabilityEvaluation) -> BTreeMap<&'static str, usize> {
+    let mut counts = BTreeMap::from([
+        ("worker_errors", evaluation.worker_errors.len()),
+        (
+            "cell_shadow",
+            evaluation
+                .cells
+                .iter()
+                .filter(|cell| cell.decision == CellDecision::Shadow)
+                .count(),
+        ),
+        (
+            "cell_outcome_only",
+            evaluation
+                .cells
+                .iter()
+                .filter(|cell| cell.decision == CellDecision::OutcomeOnly)
+                .count(),
+        ),
+        ("other_rejected_reason", 0),
+    ]);
+    for code in FIXED_REJECTION_CODES {
+        counts.insert(code, 0);
+    }
+    for reason in evaluation
+        .cells
+        .iter()
+        .flat_map(|cell| cell.rejected_reasons.iter())
+    {
+        let code = FIXED_REJECTION_CODES
+            .iter()
+            .copied()
+            .find(|code| *code == reason)
+            .unwrap_or("other_rejected_reason");
+        *counts.entry(code).or_default() += 1;
+    }
+    counts
+}
+
+fn emit_evaluation_summary(evaluation: &StabilityEvaluation) {
+    for (reason, count) in evaluation_summary(evaluation) {
+        eprintln!("summary reason={reason} count={count}");
+    }
+}
+
 fn load_promoted_candidates(
     path: Option<&Path>,
     stage: Stage,
@@ -261,7 +337,7 @@ fn load_promoted_candidates(
     if metadata.file_type().is_symlink() || is_reparse(&metadata) || !metadata.is_file() {
         return Err("上一阶段报告无效");
     }
-    let bytes = fs::read(path).map_err(|_| "上一阶段报告无效")?;
+    let bytes = read_pinned_promotion(path, || Ok(())).map_err(|_| "上一阶段报告无效")?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| "上一阶段报告无效")?;
     let expected_stage = if stage == Stage::Candidate {
@@ -269,126 +345,9 @@ fn load_promoted_candidates(
     } else {
         "candidate_1000"
     };
-    let hash = value
-        .get("config_hash")
-        .and_then(|value| value.as_str())
-        .ok_or("上一阶段报告无效")?;
-    if value.get("schema_version").and_then(|value| value.as_u64()) != Some(3)
-        || value.get("seed").and_then(|value| value.as_u64()) != Some(seed)
-        || value
-            .pointer("/training_config/validation/stage")
-            .and_then(|value| value.as_str())
-            != Some(expected_stage)
-        || hash.len() != 64
-        || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-        || value.pointer("/training_config/fit/variants")
-            != Some(&serde_json::json!(["core", "role_full"]))
-        || value.pointer("/training_config/fit/final_hit_multipliers")
-            != Some(&serde_json::json!([1.0, 1.25, 1.5, 1.75, 2.0]))
-        || value.pointer("/training_config/fit/regularization_candidates")
-            != Some(&serde_json::json!([
-                {"lambda_core": 0.02, "lambda_cohort": 0.05},
-                {"lambda_core": 0.05, "lambda_cohort": 0.10}
-            ]))
-    {
-        return Err("上一阶段报告无效");
-    }
-    let cells = value
-        .get("cells")
-        .and_then(|value| value.as_array())
-        .ok_or("上一阶段报告无效")?;
-    let mut by_role = BTreeMap::<Role, PromotedCandidate>::new();
-    for cell in cells
-        .iter()
-        .filter(|cell| cell.get("eligible").and_then(|value| value.as_bool()) == Some(true))
-    {
-        let role = match cell.get("role").and_then(|value| value.as_str()) {
-            Some("tank") => Role::Tank,
-            Some("damage") => Role::Damage,
-            Some("support") => Role::Support,
-            _ => return Err("上一阶段报告无效"),
-        };
-        let reports = cell
-            .pointer("/metrics/strategy_reports")
-            .and_then(|value| value.as_array())
-            .ok_or("上一阶段报告无效")?;
-        let spec = cell.get("model_spec_id").ok_or("上一阶段报告无效")?;
-        let strategy_index = index(spec, "strategy_index", 5)?;
-        let variant_index = index(spec, "variant_index", 2)?;
-        let multiplier_index = index(spec, "multiplier_index", 5)?;
-        let regularization_index = index(spec, "regularization_index", 2)?;
-        let strategies = [
-            "none",
-            "directnegative",
-            "heronormalized",
-            "excesshealing",
-            "resourceconversiondebt",
-        ];
-        let variants = [ModelVariant::Core, ModelVariant::RoleFull];
-        let multipliers = [1.0, 1.25, 1.5, 1.75, 2.0];
-        let regularization = [(0.02, 0.05), (0.05, 0.10)];
-        let strategy = strategies[strategy_index];
-        let variant = variants[variant_index];
-        let final_multiplier = multipliers[multiplier_index];
-        let (lambda_core, lambda_cohort) = regularization[regularization_index];
-        let report = reports
-            .iter()
-            .find(|report| {
-                report.get("strategy").and_then(|value| value.as_str()) == Some(strategy)
-            })
-            .filter(|report| report.get("eligible").and_then(|value| value.as_bool()) == Some(true))
-            .ok_or("上一阶段报告无效")?;
-        if report
-            .pointer("/forward/variant")
-            .and_then(|value| value.as_str())
-            != Some(match variant {
-                ModelVariant::Core => "core",
-                ModelVariant::RoleFull => "role_full",
-            })
-            || finite_number(report, "/forward/final_multiplier")? != final_multiplier
-            || finite_number(report, "/forward/lambda_core")? != lambda_core
-            || finite_number(report, "/forward/lambda_cohort")? != lambda_cohort
-        {
-            return Err("上一阶段报告无效");
-        }
-        let candidate = PromotedCandidate {
-            role,
-            strategy: strategy.into(),
-            variant,
-            final_multiplier,
-            lambda_core,
-            lambda_cohort,
-        };
-        if by_role
-            .get(&role)
-            .is_some_and(|existing| existing != &candidate)
-        {
-            return Err("上一阶段报告无效");
-        }
-        by_role.insert(role, candidate);
-    }
-    let candidates = by_role.into_values().collect::<Vec<_>>();
-    if candidates.is_empty() {
-        return Err("上一阶段报告无效");
-    }
+    let candidates =
+        validate_promotion_report(&value, expected_stage, seed).map_err(|_| "上一阶段报告无效")?;
     Ok(Some(candidates))
-}
-
-fn index(value: &serde_json::Value, field: &str, length: usize) -> Result<usize, &'static str> {
-    let index = value
-        .get(field)
-        .and_then(|value| value.as_u64())
-        .and_then(|value| usize::try_from(value).ok())
-        .ok_or("上一阶段报告无效")?;
-    (index < length).then_some(index).ok_or("上一阶段报告无效")
-}
-
-fn finite_number(value: &serde_json::Value, pointer: &str) -> Result<f64, &'static str> {
-    value
-        .pointer(pointer)
-        .and_then(|value| value.as_f64())
-        .filter(|value| value.is_finite())
-        .ok_or("上一阶段报告无效")
 }
 
 fn validate_paths(args: &CliArgs) -> Result<(), &'static str> {
@@ -415,6 +374,13 @@ fn validate_paths(args: &CliArgs) -> Result<(), &'static str> {
     {
         return Err("输入报告不能与输出路径冲突");
     }
+    let report_parent = fs::canonicalize(args.report.parent().ok_or("输出目录无效")?)
+        .map_err(|_| "输出目录不可写")?;
+    let artifact_parent = fs::canonicalize(args.artifact.parent().ok_or("输出目录无效")?)
+        .map_err(|_| "输出目录不可写")?;
+    if report_parent != artifact_parent {
+        return Err("报告和模型产物必须位于同一目录");
+    }
     for output in [&args.report, &args.artifact] {
         let parent = output.parent().ok_or("输出目录无效")?;
         let metadata = fs::symlink_metadata(parent).map_err(|_| "输出目录不可写")?;
@@ -426,6 +392,7 @@ fn validate_paths(args: &CliArgs) -> Result<(), &'static str> {
             if metadata.file_type().is_symlink() || is_reparse(&metadata) || !metadata.is_file() {
                 return Err("输出路径不安全");
             }
+            return Err("输出文件已存在，拒绝覆盖");
         }
     }
     Ok(())
@@ -442,12 +409,221 @@ fn is_reparse(_metadata: &fs::Metadata) -> bool {
     false
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    #[cfg(windows)]
+    creation_time: u64,
+    #[cfg(windows)]
+    last_write_time: u64,
+    #[cfg(windows)]
+    size: u64,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(not(any(windows, unix)))]
+    size: u64,
+}
+
+fn file_identity(metadata: &fs::Metadata) -> FileIdentity {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        FileIdentity {
+            creation_time: metadata.creation_time(),
+            last_write_time: metadata.last_write_time(),
+            size: metadata.file_size(),
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        FileIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        FileIdentity {
+            size: metadata.len(),
+        }
+    }
+}
+
+fn directory_identity(metadata: &fs::Metadata) -> FileIdentity {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        FileIdentity {
+            creation_time: metadata.creation_time(),
+            last_write_time: 0,
+            size: 0,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        file_identity(metadata)
+    }
+}
+
+#[cfg(windows)]
+fn open_pinned_file(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_pinned_file(path: &Path) -> std::io::Result<fs::File> {
+    OpenOptions::new().read(true).open(path)
+}
+
+#[cfg(windows)]
+fn open_pinned_directory(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_pinned_directory(path: &Path) -> std::io::Result<fs::File> {
+    OpenOptions::new().read(true).open(path)
+}
+
+fn read_pinned_promotion(
+    path: &Path,
+    after_open: impl FnOnce() -> std::io::Result<()>,
+) -> Result<Vec<u8>, &'static str> {
+    let path_metadata = fs::symlink_metadata(path).map_err(|_| "上一阶段报告无效")?;
+    if path_metadata.file_type().is_symlink()
+        || is_reparse(&path_metadata)
+        || !path_metadata.is_file()
+    {
+        return Err("上一阶段报告无效");
+    }
+    let canonical = fs::canonicalize(path).map_err(|_| "上一阶段报告无效")?;
+    let mut file = open_pinned_file(path).map_err(|_| "上一阶段报告无效")?;
+    let identity = file_identity(&file.metadata().map_err(|_| "上一阶段报告无效")?);
+    after_open().map_err(|_| "上一阶段报告无效")?;
+    revalidate_pinned_file(path, &canonical, identity)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| "上一阶段报告无效")?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|_| "上一阶段报告无效")?;
+    if file_identity(&file.metadata().map_err(|_| "上一阶段报告无效")?) != identity {
+        return Err("上一阶段报告无效");
+    }
+    revalidate_pinned_file(path, &canonical, identity)?;
+    Ok(bytes)
+}
+
+fn revalidate_pinned_file(
+    path: &Path,
+    canonical: &Path,
+    identity: FileIdentity,
+) -> Result<(), &'static str> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| "上一阶段报告无效")?;
+    if metadata.file_type().is_symlink()
+        || is_reparse(&metadata)
+        || !metadata.is_file()
+        || file_identity(&metadata) != identity
+        || fs::canonicalize(path).map_err(|_| "上一阶段报告无效")? != canonical
+    {
+        return Err("上一阶段报告无效");
+    }
+    Ok(())
+}
+
+struct PinnedOutputDirectory {
+    canonical: PathBuf,
+    identity: FileIdentity,
+    _guard: fs::File,
+}
+
+impl PinnedOutputDirectory {
+    fn open(parent: &Path) -> Result<Self, &'static str> {
+        let metadata = fs::symlink_metadata(parent).map_err(|_| "输出目录不可写")?;
+        if metadata.file_type().is_symlink() || is_reparse(&metadata) || !metadata.is_dir() {
+            return Err("输出目录不安全");
+        }
+        let canonical = fs::canonicalize(parent).map_err(|_| "输出目录不可写")?;
+        let guard = open_pinned_directory(parent).map_err(|_| "输出目录不安全")?;
+        let guard_metadata = guard.metadata().map_err(|_| "输出目录不安全")?;
+        if is_reparse(&guard_metadata) || !guard_metadata.is_dir() {
+            return Err("输出目录不安全");
+        }
+        let identity = directory_identity(&guard_metadata);
+        let pinned = Self {
+            canonical,
+            identity,
+            _guard: guard,
+        };
+        pinned.revalidate(parent)?;
+        Ok(pinned)
+    }
+
+    fn revalidate(&self, parent: &Path) -> Result<(), &'static str> {
+        let metadata = fs::symlink_metadata(parent).map_err(|_| "输出目录不安全")?;
+        if metadata.file_type().is_symlink()
+            || is_reparse(&metadata)
+            || !metadata.is_dir()
+            || directory_identity(&metadata) != self.identity
+            || fs::canonicalize(parent).map_err(|_| "输出目录不安全")? != self.canonical
+        {
+            return Err("输出目录不安全");
+        }
+        Ok(())
+    }
+}
+
 fn write_pair_atomic(
     report: &Path,
     report_bytes: &[u8],
     artifact: &Path,
     artifact_bytes: &[u8],
 ) -> Result<(), &'static str> {
+    write_pair_atomic_with_hook(report, report_bytes, artifact, artifact_bytes, |_| Ok(()))
+}
+
+fn write_pair_atomic_with_hook(
+    report: &Path,
+    report_bytes: &[u8],
+    artifact: &Path,
+    artifact_bytes: &[u8],
+    mut hook: impl FnMut(&str) -> std::io::Result<()>,
+) -> Result<(), &'static str> {
+    let parent = report.parent().ok_or("输出目录无效")?;
+    let artifact_parent = artifact.parent().ok_or("输出目录无效")?;
+    if fs::canonicalize(parent).map_err(|_| "输出目录不可写")?
+        != fs::canonicalize(artifact_parent).map_err(|_| "输出目录不可写")?
+    {
+        return Err("报告和模型产物必须位于同一目录");
+    }
+    let pinned = PinnedOutputDirectory::open(parent)?;
+    hook("after_pin").map_err(|_| "输出目录在写入前发生变化")?;
+    pinned.revalidate(parent)?;
+    let report = pinned
+        .canonical
+        .join(report.file_name().ok_or("输出路径无效")?);
+    let artifact = pinned
+        .canonical
+        .join(artifact.file_name().ok_or("输出路径无效")?);
+    ensure_missing(&report)?;
+    ensure_missing(&artifact)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "无法创建安全临时输出")?
@@ -455,68 +631,45 @@ fn write_pair_atomic(
     let temp_path = |target: &Path, suffix: &str| {
         target.with_file_name(format!(".career-mmr-{}-{nonce}.tmp", suffix))
     };
-    let report_temp = temp_path(report, "report");
-    let artifact_temp = temp_path(artifact, "artifact");
-    let report_backup = temp_path(report, "report-backup");
-    let artifact_backup = temp_path(artifact, "artifact-backup");
+    let report_temp = temp_path(&report, "report");
+    let artifact_temp = temp_path(&artifact, "artifact");
     let result = (|| -> Result<(), &'static str> {
         write_synced_new(&report_temp, report_bytes)?;
         write_synced_new(&artifact_temp, artifact_bytes)?;
-        let report_existed = report.exists();
-        let artifact_existed = artifact.exists();
-        if artifact_existed {
-            fs::rename(artifact, &artifact_backup).map_err(|_| "无法准备模型产物原子替换")?;
-        }
-        if report_existed && fs::rename(report, &report_backup).is_err() {
-            if artifact_existed {
-                let _ = fs::rename(&artifact_backup, artifact);
-            }
-            return Err("无法准备训练报告原子替换");
-        }
-        if fs::rename(&artifact_temp, artifact).is_err() {
-            if report_existed {
-                let _ = fs::rename(&report_backup, report);
-            }
-            if artifact_existed {
-                let _ = fs::rename(&artifact_backup, artifact);
-            }
+        hook("after_temps").map_err(|_| "输出目录在提交前发生变化")?;
+        pinned.revalidate(parent)?;
+        ensure_missing(&report)?;
+        ensure_missing(&artifact)?;
+        pinned.revalidate(parent)?;
+        if fs::rename(&artifact_temp, &artifact).is_err() {
             return Err("无法提交模型产物");
         }
-        if fs::rename(&report_temp, report).is_err() {
-            let _ = fs::remove_file(artifact);
-            if report_existed {
-                let _ = fs::rename(&report_backup, report);
-            }
-            if artifact_existed {
-                let _ = fs::rename(&artifact_backup, artifact);
-            }
+        if hook("after_artifact").is_err() || pinned.revalidate(parent).is_err() {
+            let _ = fs::remove_file(&artifact);
+            return Err("输出目录在提交期间发生变化");
+        }
+        ensure_missing(&report)?;
+        pinned.revalidate(parent)?;
+        if fs::rename(&report_temp, &report).is_err() {
+            let _ = fs::remove_file(&artifact);
             return Err("无法提交训练报告");
         }
-        sync_parent(report)?;
-        if report.parent() != artifact.parent() {
-            sync_parent(artifact)?;
-        }
-        if report_existed {
-            fs::remove_file(&report_backup).map_err(|_| "无法清理训练报告事务备份")?;
-        }
-        if artifact_existed {
-            fs::remove_file(&artifact_backup).map_err(|_| "无法清理模型产物事务备份")?;
-        }
+        sync_parent(&report)?;
         Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&report_temp);
         let _ = fs::remove_file(&artifact_temp);
-        if report_backup.exists() && !report.exists() {
-            let _ = fs::rename(&report_backup, report);
-        }
-        if artifact_backup.exists() && !artifact.exists() {
-            let _ = fs::rename(&artifact_backup, artifact);
-        }
-        let _ = fs::remove_file(&report_backup);
-        let _ = fs::remove_file(&artifact_backup);
     }
     result
+}
+
+fn ensure_missing(path: &Path) -> Result<(), &'static str> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err("输出文件已存在，拒绝覆盖"),
+        Err(_) => Err("无法确认输出路径状态"),
+    }
 }
 
 fn write_synced_new(path: &Path, bytes: &[u8]) -> Result<(), &'static str> {
@@ -544,5 +697,130 @@ fn main() {
     if let Err(message) = run() {
         eprintln!("错误：{message}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod io_race_tests {
+    use super::*;
+
+    #[test]
+    fn evaluation_summary_uses_only_fixed_reason_codes_and_counts() {
+        let mut config = StabilityConfig::for_stage(TrainingStage::Screen100);
+        config.bootstrap_iterations = 0;
+        let mut evaluation =
+            owstats_desktop_lib::career_mmr::performance_stability::evaluate_stability(&[], config);
+        evaluation.worker_errors = vec!["private-player-guid-path".into()];
+        evaluation.cells[0].decision = CellDecision::OutcomeOnly;
+        evaluation.cells[0].rejected_reasons = vec![
+            "role_core_rows_below_500".into(),
+            "private-player-guid-path".into(),
+        ];
+
+        let summary = evaluation_summary(&evaluation);
+        assert_eq!(summary["worker_errors"], 1);
+        assert_eq!(summary["cell_outcome_only"], 1);
+        assert!(summary["role_core_rows_below_500"] >= 1);
+        assert!(summary["other_rejected_reason"] >= 1);
+        assert!(!summary.keys().any(|code| code.contains("private")));
+        assert!(!summary.keys().any(|code| code.contains("guid")));
+        assert!(!summary.keys().any(|code| code.contains("path")));
+    }
+
+    #[test]
+    fn promotion_regular_file_replacement_after_open_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let promotion = dir.path().join("promotion.json");
+        let replacement = dir.path().join("replacement.json");
+        let moved = dir.path().join("moved.json");
+        fs::write(&promotion, b"original").unwrap();
+        fs::write(&replacement, b"replacement").unwrap();
+        let result = read_pinned_promotion(&promotion, || {
+            fs::rename(&promotion, &moved)?;
+            fs::rename(&replacement, &promotion)
+        });
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn promotion_symlink_replacement_after_open_fails_closed() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let promotion = dir.path().join("promotion.json");
+        let replacement = dir.path().join("replacement.json");
+        let moved = dir.path().join("moved.json");
+        fs::write(&promotion, b"original").unwrap();
+        fs::write(&replacement, b"replacement").unwrap();
+        let result = read_pinned_promotion(&promotion, || {
+            fs::rename(&promotion, &moved)?;
+            symlink(&replacement, &promotion)
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn output_parent_replacement_after_pin_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("outputs");
+        let moved = root.path().join("moved");
+        fs::create_dir(&parent).unwrap();
+        let report = parent.join("report.json");
+        let artifact = parent.join("artifact.json");
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "after_pin" {
+                    fs::rename(&parent, &moved)?;
+                    fs::create_dir(&parent)?;
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!artifact.exists());
+    }
+
+    #[test]
+    fn output_collision_after_temp_creation_leaves_no_writer_half_or_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "after_temps" {
+                    fs::write(&report, b"racer")?;
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&report).unwrap(), b"racer");
+        assert!(!artifact.exists());
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn failure_after_first_rename_removes_the_first_formal_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "after_artifact" {
+                    return Err(std::io::Error::other("synthetic stop"));
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!artifact.exists());
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
     }
 }

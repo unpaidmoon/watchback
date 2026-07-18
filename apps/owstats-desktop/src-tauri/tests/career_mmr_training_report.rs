@@ -1,13 +1,16 @@
 use owstats_desktop_lib::career_mmr::{
     input::{ModeFamily, Role},
     performance::{build_feature_matrix, HealingTakenStrategy},
-    performance_forward::{MetricReport, NestedFoldReport},
+    performance_forward::{MetricReport, ModelVariant, NestedFoldReport},
     performance_model::{fit_model, FitConfig},
     performance_stability::{
-        evaluate_stability, CellDecision, CoefficientStability, StabilityConfig,
+        evaluate_stability, CellDecision, CoefficientStability, PromotedCandidate, StabilityConfig,
     },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
-    training_report::{build_training_outputs, recompute_config_hash, validate_report_boundary},
+    training_report::{
+        build_training_outputs, recompute_config_hash, recompute_promotion_hash,
+        validate_promotion_report, validate_report_boundary,
+    },
 };
 use serde_json::{json, Value};
 
@@ -205,6 +208,129 @@ fn eligible_evaluation(
     (rows, audit, evaluation)
 }
 
+fn promoted_candidate_from_cell(
+    evaluation: &owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation,
+) -> PromotedCandidate {
+    let cell = evaluation
+        .cells
+        .iter()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    let report = cell.reports.iter().find(|report| report.eligible).unwrap();
+    PromotedCandidate {
+        role: Role::Tank,
+        strategy: report.strategy.clone(),
+        variant: report.forward.variant,
+        final_multiplier: report.forward.final_multiplier,
+        lambda_core: report.forward.lambda_core,
+        lambda_cohort: report.forward.lambda_cohort,
+    }
+}
+
+fn restrict_to_promoted(
+    mut evaluation: owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation,
+    candidate: PromotedCandidate,
+    bootstrap_iterations: usize,
+) -> owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation {
+    evaluation.config.bootstrap_iterations = bootstrap_iterations;
+    evaluation.config.promoted_candidates = Some(vec![candidate.clone()]);
+    for cell in &mut evaluation.cells {
+        if cell.role == candidate.role {
+            cell.reports.retain(|report| {
+                report.strategy == candidate.strategy
+                    && report.forward.variant == candidate.variant
+                    && report.forward.final_multiplier == candidate.final_multiplier
+                    && report.forward.lambda_core == candidate.lambda_core
+                    && report.forward.lambda_cohort == candidate.lambda_cohort
+            });
+            for report in &mut cell.reports {
+                report.bootstrap.requested_iterations = bootstrap_iterations;
+                report.bootstrap.completed_iterations = bootstrap_iterations;
+                report.bootstrap.skipped_iterations = 0;
+            }
+        } else {
+            cell.reports.clear();
+        }
+    }
+    evaluation
+}
+
+#[test]
+fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
+    let (rows, audit, mut screen_evaluation) = eligible_evaluation(0x5eed);
+    screen_evaluation.config.stage =
+        owstats_desktop_lib::career_mmr::performance_stability::TrainingStage::Screen100;
+    let (_, screen_report) =
+        build_training_outputs(&rows, &audit, &screen_evaluation, 0x5eed).unwrap();
+    assert!(screen_report
+        .cells
+        .iter()
+        .any(|cell| cell.role == Role::Tank && cell.eligible));
+
+    let dir = tempfile::tempdir().unwrap();
+    let read_promotion =
+        |name: &str,
+         report: &owstats_desktop_lib::career_mmr::training_report::TrainingReport,
+         stage: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, serde_json::to_vec(report).unwrap()).unwrap();
+            let value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(
+                recompute_promotion_hash(&value).unwrap(),
+                value["promotion_hash"].as_str().unwrap()
+            );
+            validate_promotion_report(&value, stage, 0x5eed).unwrap()
+        };
+    let screen_candidates = read_promotion("screen.json", &screen_report, "screen_100");
+    let candidate = promoted_candidate_from_cell(&screen_evaluation);
+    assert_eq!(screen_candidates, vec![candidate.clone()]);
+    let mut candidate_evaluation = restrict_to_promoted(
+        screen_evaluation.clone(),
+        screen_candidates[0].clone(),
+        1_000,
+    );
+    candidate_evaluation.config.stage =
+        owstats_desktop_lib::career_mmr::performance_stability::TrainingStage::Candidate1000;
+    let (_, candidate_report) =
+        build_training_outputs(&rows, &audit, &candidate_evaluation, 0x5eed).unwrap();
+    let candidate_cell = candidate_report
+        .cells
+        .iter()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
+        .unwrap();
+    assert!(candidate_cell.eligible, "{candidate_cell:#?}");
+
+    let candidate_candidates =
+        read_promotion("candidate.json", &candidate_report, "candidate_1000");
+    assert_eq!(candidate_candidates, vec![candidate.clone()]);
+
+    let final_evaluation = restrict_to_promoted(
+        candidate_evaluation,
+        candidate_candidates[0].clone(),
+        10_000,
+    );
+    let (artifact, final_report) =
+        build_training_outputs(&rows, &audit, &final_evaluation, 0x5eed).unwrap();
+    assert!(final_report
+        .cells
+        .iter()
+        .any(|cell| cell.role == Role::Tank && cell.eligible));
+    assert!(artifact.roles[&Role::Tank].model_spec_id.is_some());
+    assert!(!rows.is_empty());
+    assert_eq!(
+        ModelVariant::Core,
+        artifact.roles[&Role::Tank]
+            .selected_variant
+            .as_deref()
+            .map(|variant| if variant == "core" {
+                ModelVariant::Core
+            } else {
+                ModelVariant::RoleFull
+            })
+            .unwrap()
+    );
+}
+
 #[test]
 fn produces_complete_replayable_and_privacy_safe_outputs() {
     let rows = synthetic_rows();
@@ -224,7 +350,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
 
     let (artifact, report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
 
-    assert_eq!(artifact.schema_version, 3);
+    assert_eq!(artifact.schema_version, 4);
     assert!(!artifact.algorithm.is_empty());
     assert!(!artifact.feature_version.is_empty());
     assert_eq!(artifact.seed, 0x5eed);

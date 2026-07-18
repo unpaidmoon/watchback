@@ -7,6 +7,7 @@ use owstats_desktop_lib::{
         AccountRegistryEntry,
     },
     app_paths::SharedAppPaths,
+    career_mmr::training_report::recompute_promotion_hash,
 };
 use std::fs;
 use std::process::Command;
@@ -174,6 +175,9 @@ fn screen_stage_runs_multi_account_pipeline_with_safe_aggregate_outputs() {
         "total=",
         "elapsed_ms=",
         "eta_ms=",
+        "summary reason=worker_errors count=",
+        "summary reason=cell_shadow count=",
+        "summary reason=cell_outcome_only count=",
     ] {
         assert!(stderr.contains(field), "missing {field}: {stderr}");
     }
@@ -216,7 +220,11 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
         .map(|role| {
             serde_json::json!({
                 "role": role,
+                "mode": "role_competitive",
                 "eligible": eligible,
+                "decision": if eligible { "eligible" } else { "shadow" },
+                "rejected_reasons": if eligible { serde_json::json!([]) } else { serde_json::json!(["synthetic_rejected"]) },
+                "role_model_ref": format!("{role}-synthetic-role-model"),
                 "model_spec_id": {
                     "strategy_index": 0,
                     "variant_index": 0,
@@ -236,8 +244,8 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
             })
         })
         .collect::<Vec<_>>();
-    serde_json::json!({
-        "schema_version": 3,
+    let mut value = serde_json::json!({
+        "schema_version": 4,
         "seed": seed,
         "config_hash": "a".repeat(64),
         "training_config": {
@@ -251,8 +259,16 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
                 ]
             }
         },
-        "cells": cells
-    })
+        "cells": cells,
+        "promotable_candidates": if eligible { serde_json::json!([
+            {"role":"tank","strategy":"none","variant":"core","final_multiplier":1.25,"lambda_core":0.02,"lambda_cohort":0.05},
+            {"role":"damage","strategy":"none","variant":"core","final_multiplier":1.25,"lambda_core":0.02,"lambda_cohort":0.05},
+            {"role":"support","strategy":"none","variant":"core","final_multiplier":1.25,"lambda_core":0.02,"lambda_cohort":0.05}
+        ]) } else { serde_json::json!([]) },
+        "promotion_hash": ""
+    });
+    value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
+    value
 }
 
 #[test]
@@ -362,6 +378,31 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
             value["config_hash"] = serde_json::json!("bad");
             value
         }),
+        ("random-config-hash", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["config_hash"] = serde_json::json!("b".repeat(64));
+            value
+        }),
+        ("random-promotion-hash", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["promotion_hash"] = serde_json::json!("c".repeat(64));
+            value
+        }),
+        ("cell", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["cells"][0]["mode"] = serde_json::json!("role_quick");
+            value
+        }),
+        ("eligible", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["cells"][0]["eligible"] = serde_json::json!(false);
+            value
+        }),
+        ("config", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["training_config"]["fit"]["variants"][0] = serde_json::json!("role_full");
+            value
+        }),
         ("schema", {
             let mut value = promotion_report("screen_100", 0x5eed, true);
             value["schema_version"] = serde_json::json!(2);
@@ -396,7 +437,7 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
 }
 
 #[test]
-fn existing_output_pair_is_replaced_without_leaving_transaction_files() {
+fn existing_output_pair_is_rejected_unchanged_without_transaction_files() {
     let app = synthetic_app_data();
     let report = app.path().join("report.json");
     let artifact = app.path().join("artifact.json");
@@ -411,13 +452,12 @@ fn existing_output_pair_is_replaced_without_leaving_transaction_files() {
         .arg(&artifact)
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice::<serde_json::Value>(&fs::read(report).unwrap()).unwrap();
-    serde_json::from_slice::<serde_json::Value>(&fs::read(artifact).unwrap()).unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .ends_with("错误：输出文件已存在，拒绝覆盖\n"));
+    assert_eq!(fs::read(report).unwrap(), b"old-report");
+    assert_eq!(fs::read(artifact).unwrap(), b"old-artifact");
     let leftovers = fs::read_dir(app.path())
         .unwrap()
         .filter_map(Result::ok)
@@ -427,21 +467,12 @@ fn existing_output_pair_is_replaced_without_leaving_transaction_files() {
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
 
-#[cfg(windows)]
 #[test]
-fn locked_second_target_rolls_back_first_target_and_cleans_transaction_files() {
-    use std::os::windows::fs::OpenOptionsExt;
-
+fn output_pair_must_share_one_canonical_parent_directory() {
     let app = synthetic_app_data();
-    let report = app.path().join("report.json");
+    let other = tempfile::tempdir().unwrap();
+    let report = other.path().join("report.json");
     let artifact = app.path().join("artifact.json");
-    fs::write(&report, b"old-report").unwrap();
-    fs::write(&artifact, b"old-artifact").unwrap();
-    let _locked_report = fs::OpenOptions::new()
-        .read(true)
-        .share_mode(0x1)
-        .open(&report)
-        .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
         .arg("--app-data-dir")
         .arg(app.path())
@@ -453,15 +484,10 @@ fn locked_second_target_rolls_back_first_target_and_cleans_transaction_files() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.ends_with("错误：无法准备训练报告原子替换\n"));
+    assert_eq!(stderr, "错误：报告和模型产物必须位于同一目录\n");
     assert!(!stderr.contains(app.path().to_str().unwrap()));
-    assert_eq!(fs::read(&report).unwrap(), b"old-report");
-    assert_eq!(fs::read(&artifact).unwrap(), b"old-artifact");
-    assert!(fs::read_dir(app.path())
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .all(|name| !name.starts_with(".career-mmr-")));
+    assert!(!report.exists());
+    assert!(!artifact.exists());
 }
 
 #[test]
