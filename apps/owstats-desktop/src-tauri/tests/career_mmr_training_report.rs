@@ -5,6 +5,7 @@ use owstats_desktop_lib::career_mmr::{
     performance_model::{fit_model, FitConfig},
     performance_stability::{
         evaluate_stability, CellDecision, CoefficientStability, PromotedCandidate, StabilityConfig,
+        TrainingStage,
     },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
     training_report::{
@@ -80,6 +81,7 @@ fn mark_cell_eligible(
     report_index: usize,
 ) {
     let report = &mut cell.reports[report_index];
+    let requested_iterations = report.bootstrap.requested_iterations.max(1);
     report.eligible = true;
     report.decision = CellDecision::Eligible;
     report.rejected_reasons.clear();
@@ -118,8 +120,8 @@ fn mark_cell_eligible(
     report.leave_one_account_out.evaluated_groups = 1;
     report.leave_one_account_out.mean_brier_delta = Some(-0.01);
     report.leave_one_account_out.worst_brier_delta = Some(-0.005);
-    report.bootstrap.requested_iterations = 10;
-    report.bootstrap.completed_iterations = 10;
+    report.bootstrap.requested_iterations = requested_iterations;
+    report.bootstrap.completed_iterations = requested_iterations;
     report.bootstrap.fixed_variant = Some(report.forward.variant);
     report.bootstrap.fixed_final_multiplier = Some(report.forward.final_multiplier);
     report.bootstrap.fixed_lambda_core = Some(report.forward.lambda_core);
@@ -191,14 +193,9 @@ fn eligible_evaluation(
         projected_rows: rows.len(),
         ..Default::default()
     };
-    let mut evaluation = evaluate_stability(
-        &[],
-        StabilityConfig {
-            bootstrap_iterations: 10,
-            seed,
-            ..Default::default()
-        },
-    );
+    let mut config = StabilityConfig::for_stage(TrainingStage::Screen100);
+    config.seed = seed;
+    let mut evaluation = evaluate_stability(&[], config);
     let cell = evaluation
         .cells
         .iter_mut()
@@ -230,10 +227,11 @@ fn promoted_candidate_from_cell(
 fn restrict_to_promoted(
     mut evaluation: owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation,
     candidate: PromotedCandidate,
-    bootstrap_iterations: usize,
+    stage: TrainingStage,
 ) -> owstats_desktop_lib::career_mmr::performance_stability::StabilityEvaluation {
-    evaluation.config.bootstrap_iterations = bootstrap_iterations;
-    evaluation.config.promoted_candidates = Some(vec![candidate.clone()]);
+    evaluation.config =
+        StabilityConfig::for_stage_with_promoted(stage, vec![candidate.clone()]).snapshot();
+    let bootstrap_iterations = stage.bootstrap_iterations();
     for cell in &mut evaluation.cells {
         if cell.role == candidate.role {
             cell.reports.retain(|report| {
@@ -258,14 +256,22 @@ fn restrict_to_promoted(
 #[test]
 fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
     let (rows, audit, mut screen_evaluation) = eligible_evaluation(0x5eed);
-    screen_evaluation.config.stage =
-        owstats_desktop_lib::career_mmr::performance_stability::TrainingStage::Screen100;
+    let role_quick = screen_evaluation
+        .cells
+        .iter_mut()
+        .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleQuick)
+        .unwrap();
+    mark_cell_eligible(role_quick, 0);
     let (_, screen_report) =
         build_training_outputs(&rows, &audit, &screen_evaluation, 0x5eed).unwrap();
-    assert!(screen_report
-        .cells
-        .iter()
-        .any(|cell| cell.role == Role::Tank && cell.eligible));
+    assert!(
+        screen_report
+            .cells
+            .iter()
+            .filter(|cell| cell.role == Role::Tank && cell.eligible)
+            .count()
+            == 2
+    );
 
     let dir = tempfile::tempdir().unwrap();
     let read_promotion =
@@ -284,13 +290,11 @@ fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
     let screen_candidates = read_promotion("screen.json", &screen_report, "screen_100");
     let candidate = promoted_candidate_from_cell(&screen_evaluation);
     assert_eq!(screen_candidates, vec![candidate.clone()]);
-    let mut candidate_evaluation = restrict_to_promoted(
+    let candidate_evaluation = restrict_to_promoted(
         screen_evaluation.clone(),
         screen_candidates[0].clone(),
-        1_000,
+        TrainingStage::Candidate1000,
     );
-    candidate_evaluation.config.stage =
-        owstats_desktop_lib::career_mmr::performance_stability::TrainingStage::Candidate1000;
     let (_, candidate_report) =
         build_training_outputs(&rows, &audit, &candidate_evaluation, 0x5eed).unwrap();
     let candidate_cell = candidate_report
@@ -299,23 +303,55 @@ fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
         .find(|cell| cell.role == Role::Tank && cell.mode == ModeFamily::RoleCompetitive)
         .unwrap();
     assert!(candidate_cell.eligible, "{candidate_cell:#?}");
+    assert!(candidate_report.cells.iter().any(|cell| {
+        cell.role == Role::Tank && cell.mode == ModeFamily::RoleQuick && cell.eligible
+    }));
 
     let candidate_candidates =
         read_promotion("candidate.json", &candidate_report, "candidate_1000");
     assert_eq!(candidate_candidates, vec![candidate.clone()]);
+    let filtered = evaluate_stability(
+        &[],
+        StabilityConfig::for_stage_with_promoted(
+            TrainingStage::Candidate1000,
+            candidate_candidates.clone(),
+        ),
+    );
+    assert_eq!(filtered.config.bootstrap_iterations, 1_000);
+    assert!(filtered.cells.iter().all(|cell| {
+        if cell.role == Role::Tank {
+            cell.reports.len() == 1
+        } else {
+            cell.reports.is_empty()
+        }
+    }));
 
     let final_evaluation = restrict_to_promoted(
         candidate_evaluation,
         candidate_candidates[0].clone(),
-        10_000,
+        TrainingStage::Final10000,
     );
     let (artifact, final_report) =
         build_training_outputs(&rows, &audit, &final_evaluation, 0x5eed).unwrap();
-    assert!(final_report
-        .cells
-        .iter()
-        .any(|cell| cell.role == Role::Tank && cell.eligible));
+    assert!(
+        final_report
+            .cells
+            .iter()
+            .filter(|cell| cell.role == Role::Tank && cell.eligible)
+            .count()
+            == 2
+    );
     assert!(artifact.roles[&Role::Tank].model_spec_id.is_some());
+    assert_eq!(final_report.training_config.validation.stage, "final_10000");
+    assert_eq!(
+        final_report.training_config.validation.bootstrap_iterations,
+        10_000
+    );
+    let final_value = serde_json::to_value(&final_report).unwrap();
+    assert_eq!(
+        recompute_promotion_hash(&final_value).unwrap(),
+        final_report.promotion_hash
+    );
     assert!(!rows.is_empty());
     assert_eq!(
         ModelVariant::Core,

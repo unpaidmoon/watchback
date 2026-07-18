@@ -153,9 +153,13 @@ fn run() -> Result<(), &'static str> {
         build_multi_account_projection(&sources).map_err(|_| "无法聚合多账号训练数据")?;
     let promoted_candidates =
         load_promoted_candidates(args.promote_from.as_deref(), args.stage, args.seed)?;
-    let mut config = StabilityConfig::for_stage(args.stage.training_stage());
+    let mut config = promoted_candidates.clone().map_or_else(
+        || StabilityConfig::for_stage(args.stage.training_stage()),
+        |candidates| {
+            StabilityConfig::for_stage_with_promoted(args.stage.training_stage(), candidates)
+        },
+    );
     config.seed = args.seed;
-    config.promoted_candidates = promoted_candidates.clone();
     let stage_label = args.stage.label();
     let evaluation = evaluate_stability_with_progress(&projection.rows, config, |event| {
         eprintln!(
@@ -633,6 +637,9 @@ fn write_pair_atomic_with_hook(
     };
     let report_temp = temp_path(&report, "report");
     let artifact_temp = temp_path(&artifact, "artifact");
+    let mut artifact_committed = false;
+    let mut report_committed = false;
+    let mut artifact_guard = None;
     let result = (|| -> Result<(), &'static str> {
         write_synced_new(&report_temp, report_bytes)?;
         write_synced_new(&artifact_temp, artifact_bytes)?;
@@ -644,22 +651,27 @@ fn write_pair_atomic_with_hook(
         if fs::rename(&artifact_temp, &artifact).is_err() {
             return Err("无法提交模型产物");
         }
-        if hook("after_artifact").is_err() || pinned.revalidate(parent).is_err() {
-            let _ = fs::remove_file(&artifact);
-            return Err("输出目录在提交期间发生变化");
-        }
+        artifact_committed = true;
+        artifact_guard = Some(open_pinned_file(&artifact).map_err(|_| "无法锁定已提交的模型产物")?);
+        hook("after_artifact").map_err(|_| "输出目录在提交期间发生变化")?;
+        pinned.revalidate(parent)?;
         ensure_missing(&report)?;
         pinned.revalidate(parent)?;
-        if fs::rename(&report_temp, &report).is_err() {
-            let _ = fs::remove_file(&artifact);
-            return Err("无法提交训练报告");
-        }
+        fs::rename(&report_temp, &report).map_err(|_| "无法提交训练报告")?;
+        report_committed = true;
         sync_parent(&report)?;
         Ok(())
     })();
     if result.is_err() {
+        drop(artifact_guard.take());
         let _ = fs::remove_file(&report_temp);
         let _ = fs::remove_file(&artifact_temp);
+        if report_committed && fs::remove_file(&report).is_err() {
+            return Err("严重错误：输出回滚不完整");
+        }
+        if artifact_committed && fs::remove_file(&artifact).is_err() {
+            return Err("严重错误：输出回滚不完整");
+        }
     }
     result
 }
@@ -818,6 +830,54 @@ mod io_race_tests {
         assert!(!report.exists());
         assert!(!artifact.exists());
         assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn racer_report_after_artifact_commit_is_preserved_and_writer_artifact_is_rolled_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "after_artifact" {
+                    fs::write(&report, b"racer")?;
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&report).unwrap(), b"racer");
+        assert!(!artifact.exists());
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn parent_change_attempt_after_artifact_commit_rolls_back_writer_artifact() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("outputs");
+        let moved = root.path().join("moved");
+        fs::create_dir(&parent).unwrap();
+        let report = parent.join("report.json");
+        let artifact = parent.join("artifact.json");
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "after_artifact" {
+                    fs::rename(&parent, &moved)?;
+                    fs::create_dir(&parent)?;
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!artifact.exists());
+        assert!(fs::read_dir(&parent)
             .unwrap()
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())

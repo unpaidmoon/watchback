@@ -216,7 +216,7 @@ pub fn max_feature_contribution_share(
     parts.into_iter().fold(0.0, f64::max) / total.max(f64::EPSILON)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricReport {
     pub auc: f64,
     pub brier: f64,
@@ -271,7 +271,7 @@ pub fn metrics(actual: &[f64], predicted: &[f64]) -> Option<MetricReport> {
     Some(MetricReport { auc, brier, ece })
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FoldReport {
     pub fold: usize,
     pub training_rows: usize,
@@ -288,7 +288,7 @@ pub struct FoldReport {
     pub inner_validation_rows: usize,
     pub selection_degraded: bool,
 }
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StrategyReport {
     pub role: Role,
     pub strategy: String,
@@ -312,7 +312,7 @@ pub struct StrategyReport {
     pub rejected_reasons: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationScale {
     pub p95_abs_effect: f64,
 }
@@ -973,7 +973,7 @@ pub fn fit_formal_validation_adjustments(
         .collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NestedFoldReport {
     pub fold: usize,
     pub training_rows: usize,
@@ -990,7 +990,7 @@ pub struct NestedFoldReport {
     pub brier_delta: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NestedCellReport {
     pub role: Role,
     pub mode: ModeFamily,

@@ -4,7 +4,7 @@ use super::{
     performance_forward::{CalibrationScale, ModelVariant, NestedCellReport},
     performance_model::{fit_model, predict_probability, FitConfig},
     performance_stability::{
-        CellDecision, CellEvaluation, PromotedCandidate, StabilityConfigSnapshot,
+        CellDecision, CellEvaluation, PromotedCandidate, StabilityConfig, StabilityConfigSnapshot,
         StabilityEvaluation, StabilityReport, TrainingStage,
     },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
@@ -193,7 +193,7 @@ impl Default for PerformanceCaps {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrainingReport {
     pub schema_version: u32,
     pub algorithm: String,
@@ -208,7 +208,7 @@ pub struct TrainingReport {
     pub promotion_hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatasetReport {
     pub account_datasets: usize,
     pub projected_rows: usize,
@@ -217,7 +217,7 @@ pub struct DatasetReport {
     pub mode_rows: BTreeMap<ModeFamily, usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CellReport {
     pub role: Role,
     pub mode: ModeFamily,
@@ -235,7 +235,7 @@ pub struct CellReport {
     pub metrics: CellMetrics,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CellMetrics {
     pub candidate_auc: Option<f64>,
     pub candidate_brier: Option<f64>,
@@ -248,7 +248,7 @@ pub struct CellMetrics {
     pub strategy_reports: Vec<StabilityReport>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutcomeOnlyReport {
     pub mode: ModeFamily,
     pub rows: usize,
@@ -430,6 +430,8 @@ pub fn validate_promotion_report(
     expected_stage: &str,
     expected_seed: u64,
 ) -> Result<Vec<PromotedCandidate>> {
+    let report: TrainingReport = serde_json::from_value(value.clone())?;
+    report.validate_for_promotion(value, expected_stage, expected_seed)?;
     let invalid = || anyhow::anyhow!("上一阶段报告无效");
     let config_hash = value
         .get("config_hash")
@@ -537,6 +539,91 @@ pub fn validate_promotion_report(
         bail!("上一阶段报告无效");
     }
     Ok(candidates)
+}
+
+impl TrainingReport {
+    pub fn validate_for_promotion(
+        &self,
+        raw: &Value,
+        expected_stage: &str,
+        expected_seed: u64,
+    ) -> Result<()> {
+        validate_report_boundary(raw)?;
+        let stage = match expected_stage {
+            "screen_100" => TrainingStage::Screen100,
+            "candidate_1000" => TrainingStage::Candidate1000,
+            "final_10000" => TrainingStage::Final10000,
+            _ => bail!("上一阶段报告无效"),
+        };
+        let mut expected_config = self
+            .training_config
+            .fit
+            .promoted_candidates
+            .clone()
+            .map_or_else(
+                || StabilityConfig::for_stage(stage),
+                |candidates| StabilityConfig::for_stage_with_promoted(stage, candidates),
+            );
+        expected_config.seed = expected_seed;
+        let expected_training_config = training_config(&StabilityEvaluation {
+            config: expected_config.snapshot(),
+            reports: Vec::new(),
+            roles: Vec::new(),
+            cells: Vec::new(),
+            worker_errors: Vec::new(),
+        });
+        if self.schema_version != SCHEMA_VERSION
+            || self.algorithm != ALGORITHM
+            || self.feature_version != FEATURE_VERSION
+            || self.seed != expected_seed
+            || self.training_config.seed != expected_seed
+            || self.training_config.validation.stage != expected_stage
+            || self.training_config != expected_training_config
+            || !is_sha256(&self.config_hash)
+            || !is_sha256(&self.promotion_hash)
+            || recompute_promotion_hash(raw)? != self.promotion_hash
+            || self.dataset.performance_rows > self.dataset.projected_rows
+            || self.stadium_quick.mode != ModeFamily::StadiumQuick
+            || self.stadium_quick.decision != CellDecision::OutcomeOnly
+            || self.stadium_quick.performance_adjustment_mmr != 0
+        {
+            bail!("上一阶段报告无效");
+        }
+        let expected = [Role::Tank, Role::Damage, Role::Support]
+            .into_iter()
+            .flat_map(|role| {
+                super::performance_stability::VALIDATION_MODES
+                    .into_iter()
+                    .map(move |mode| (role, mode))
+            })
+            .collect::<BTreeSet<_>>();
+        let actual = self
+            .cells
+            .iter()
+            .map(|cell| (cell.role, cell.mode))
+            .collect::<BTreeSet<_>>();
+        if self.cells.len() != 15 || actual != expected {
+            bail!("上一阶段报告无效");
+        }
+        for cell in &self.cells {
+            let eligible = cell.decision == CellDecision::Eligible
+                && cell.eligible
+                && cell.rejected_reasons.is_empty()
+                && cell.model_spec_id.is_some();
+            let shadow = cell.decision == CellDecision::Shadow
+                && !cell.eligible
+                && !cell.rejected_reasons.is_empty();
+            if (!eligible && !shadow)
+                || cell.role_model_ref.is_empty()
+                || cell.training_cohort != cell.mode.training_cohort()
+                || cell.metrics.nested_validation.role != cell.role
+                || cell.metrics.nested_validation.mode != cell.mode
+            {
+                bail!("上一阶段报告无效");
+            }
+        }
+        Ok(())
+    }
 }
 
 fn is_sha256(value: &str) -> bool {
@@ -708,11 +795,16 @@ fn promote_role_candidate<'a>(
     config: &StabilityConfigSnapshot,
 ) -> Option<&'a StabilityReport> {
     if let Some(promoted) = promoted_spec_for_role(config, reports.first()?.role) {
-        let mut matches = reports
+        if reports
             .iter()
-            .filter(|report| model_spec_id(report, config) == Some(promoted.clone()));
-        let report = *matches.next()?;
-        return matches.next().is_none().then_some(report);
+            .any(|report| model_spec_id(report, config) != Some(promoted.clone()))
+        {
+            return None;
+        }
+        return reports
+            .iter()
+            .copied()
+            .min_by_key(|report| mode_rank(report.mode));
     }
     let mut candidates = reports
         .iter()
@@ -750,6 +842,17 @@ fn promote_role_candidate<'a>(
             })
     });
     candidates.first().map(|(report, _)| *report)
+}
+
+fn mode_rank(mode: ModeFamily) -> usize {
+    match mode {
+        ModeFamily::RoleCompetitive => 0,
+        ModeFamily::RoleQuick => 1,
+        ModeFamily::OpenCompetitive => 2,
+        ModeFamily::OpenQuick => 3,
+        ModeFamily::StadiumCompetitive => 4,
+        ModeFamily::StadiumQuick => 5,
+    }
 }
 
 fn cell_validates_report(

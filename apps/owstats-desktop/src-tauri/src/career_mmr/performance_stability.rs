@@ -33,7 +33,7 @@ pub enum CellDecision {
     OutcomeOnly,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AccountLooReport {
     pub candidate_groups: usize,
     pub evaluated_groups: usize,
@@ -181,6 +181,16 @@ impl StabilityConfig {
         }
     }
 
+    pub fn for_stage_with_promoted(
+        stage: TrainingStage,
+        promoted_candidates: Vec<PromotedCandidate>,
+    ) -> Self {
+        Self {
+            promoted_candidates: Some(promoted_candidates),
+            ..Self::for_stage(stage)
+        }
+    }
+
     pub fn snapshot(&self) -> StabilityConfigSnapshot {
         let defaults = FitConfig::default();
         StabilityConfigSnapshot {
@@ -254,7 +264,7 @@ fn stage_for_iterations(iterations: usize) -> TrainingStage {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LooReport {
     pub validation_groups: usize,
     pub skipped_groups: usize,
@@ -293,7 +303,7 @@ impl LooReport {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CoefficientStability {
     pub weight: String,
     pub scope: String,
@@ -351,7 +361,7 @@ pub fn bootstrap_work_estimate(
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BootstrapReport {
     pub requested_iterations: usize,
     pub completed_iterations: usize,
@@ -385,7 +395,7 @@ impl BootstrapReport {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StabilityReport {
     pub role: Role,
     pub mode: ModeFamily,

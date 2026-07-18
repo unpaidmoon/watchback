@@ -1,5 +1,6 @@
 use owstats_desktop_lib::career_mmr::performance_stability::{
-    aggregate_progress_schedule, aggregate_progress_schedule_with_outcome, TrainingStage,
+    aggregate_progress_schedule, aggregate_progress_schedule_with_outcome, evaluate_stability,
+    StabilityConfig, TrainingStage,
 };
 use owstats_desktop_lib::{
     account_store::{
@@ -7,7 +8,10 @@ use owstats_desktop_lib::{
         AccountRegistryEntry,
     },
     app_paths::SharedAppPaths,
-    career_mmr::training_report::recompute_promotion_hash,
+    career_mmr::{
+        training::TrainingAudit,
+        training_report::{build_training_outputs, recompute_promotion_hash},
+    },
 };
 use std::fs;
 use std::process::Command;
@@ -215,58 +219,79 @@ fn screen_stage_runs_multi_account_pipeline_with_safe_aggregate_outputs() {
 }
 
 fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value {
-    let cells = ["tank", "damage", "support"]
-        .into_iter()
-        .map(|role| {
-            serde_json::json!({
-                "role": role,
-                "mode": "role_competitive",
-                "eligible": eligible,
-                "decision": if eligible { "eligible" } else { "shadow" },
-                "rejected_reasons": if eligible { serde_json::json!([]) } else { serde_json::json!(["synthetic_rejected"]) },
-                "role_model_ref": format!("{role}-synthetic-role-model"),
-                "model_spec_id": {
-                    "strategy_index": 0,
-                    "variant_index": 0,
-                    "multiplier_index": 1,
-                    "regularization_index": 0
-                },
-                "metrics": {"strategy_reports": [{
-                    "eligible": eligible,
-                    "strategy": "none",
-                    "forward": {
-                        "variant": "core",
-                        "final_multiplier": 1.25,
-                        "lambda_core": 0.02,
-                        "lambda_cohort": 0.05
-                    }
-                }]}
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut value = serde_json::json!({
-        "schema_version": 4,
-        "seed": seed,
-        "config_hash": "a".repeat(64),
-        "training_config": {
-            "validation": {"stage": stage},
-            "fit": {
-                "variants": ["core", "role_full"],
-                "final_hit_multipliers": [1.0, 1.25, 1.5, 1.75, 2.0],
-                "regularization_candidates": [
-                    {"lambda_core": 0.02, "lambda_cohort": 0.05},
-                    {"lambda_core": 0.05, "lambda_cohort": 0.10}
-                ]
-            }
-        },
-        "cells": cells,
-        "promotable_candidates": if eligible { serde_json::json!([
-            {"role":"tank","strategy":"none","variant":"core","final_multiplier":1.25,"lambda_core":0.02,"lambda_cohort":0.05},
-            {"role":"damage","strategy":"none","variant":"core","final_multiplier":1.25,"lambda_core":0.02,"lambda_cohort":0.05},
-            {"role":"support","strategy":"none","variant":"core","final_multiplier":1.25,"lambda_core":0.02,"lambda_cohort":0.05}
-        ]) } else { serde_json::json!([]) },
-        "promotion_hash": ""
-    });
+    let training_stage = match stage {
+        "screen_100" => TrainingStage::Screen100,
+        "candidate_1000" => TrainingStage::Candidate1000,
+        _ => TrainingStage::Final10000,
+    };
+    let mut config = StabilityConfig::for_stage(training_stage);
+    config.seed = seed;
+    let evaluation = evaluate_stability(&[], config);
+    let (_, report) =
+        build_training_outputs(&[], &TrainingAudit::default(), &evaluation, seed).unwrap();
+    let mut value = serde_json::to_value(report).unwrap();
+    if eligible {
+        let mut candidates = Vec::new();
+        for role in ["tank", "damage", "support"] {
+            let cell = value["cells"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|cell| cell["role"] == role && cell["mode"] == "role_competitive")
+                .unwrap();
+            let strategy_report = &mut cell["metrics"]["strategy_reports"][0];
+            strategy_report["eligible"] = serde_json::json!(true);
+            strategy_report["decision"] = serde_json::json!("eligible");
+            strategy_report["rejected_reasons"] = serde_json::json!([]);
+            let strategy = strategy_report["strategy"].as_str().unwrap().to_owned();
+            let variant = strategy_report["forward"]["variant"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let multiplier = strategy_report["forward"]["final_multiplier"]
+                .as_f64()
+                .unwrap();
+            let lambda_core = strategy_report["forward"]["lambda_core"].as_f64().unwrap();
+            let lambda_cohort = strategy_report["forward"]["lambda_cohort"]
+                .as_f64()
+                .unwrap();
+            let strategy_index = [
+                "none",
+                "directnegative",
+                "heronormalized",
+                "excesshealing",
+                "resourceconversiondebt",
+            ]
+            .iter()
+            .position(|value| *value == strategy)
+            .unwrap();
+            let variant_index = ["core", "role_full"]
+                .iter()
+                .position(|value| *value == variant)
+                .unwrap();
+            let multiplier_index = [1.0, 1.25, 1.5, 1.75, 2.0]
+                .iter()
+                .position(|value| *value == multiplier)
+                .unwrap();
+            let regularization_index = [(0.02, 0.05), (0.05, 0.10)]
+                .iter()
+                .position(|value| *value == (lambda_core, lambda_cohort))
+                .unwrap();
+            cell["eligible"] = serde_json::json!(true);
+            cell["decision"] = serde_json::json!("eligible");
+            cell["rejected_reasons"] = serde_json::json!([]);
+            cell["model_spec_id"] = serde_json::json!({
+                "strategy_index": strategy_index, "variant_index": variant_index,
+                "multiplier_index": multiplier_index, "regularization_index": regularization_index
+            });
+            candidates.push(serde_json::json!({
+                "role": role, "strategy": strategy, "variant": variant,
+                "final_multiplier": multiplier, "lambda_core": lambda_core,
+                "lambda_cohort": lambda_cohort
+            }));
+        }
+        value["promotable_candidates"] = serde_json::Value::Array(candidates);
+    }
     value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
     value
 }
@@ -369,6 +394,10 @@ fn final_stage_uses_ten_thousand_bootstraps_only_for_promoted_candidates() {
 
 #[test]
 fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() {
+    let rehash = |mut value: serde_json::Value| {
+        value["promotion_hash"] = serde_json::json!(recompute_promotion_hash(&value).unwrap());
+        value
+    };
     for (name, value) in [
         ("stage", promotion_report("candidate_1000", 0x5eed, true)),
         ("seed", promotion_report("screen_100", 9, true)),
@@ -412,6 +441,36 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
             let mut value = promotion_report("screen_100", 0x5eed, true);
             value["cells"][0]["model_spec_id"]["multiplier_index"] = serde_json::json!(4);
             value
+        }),
+        ("algorithm", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["algorithm"] = serde_json::json!("wrong");
+            rehash(value)
+        }),
+        ("feature", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["feature_version"] = serde_json::json!("wrong");
+            rehash(value)
+        }),
+        ("duplicate-cell", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["cells"][1] = value["cells"][0].clone();
+            rehash(value)
+        }),
+        ("outcome-only", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["stadium_quick"]["decision"] = serde_json::json!("shadow");
+            rehash(value)
+        }),
+        ("decision-mismatch", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["cells"][0]["decision"] = serde_json::json!("shadow");
+            rehash(value)
+        }),
+        ("privacy", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["token"] = serde_json::json!("synthetic-secret");
+            rehash(value)
         }),
     ] {
         let app = synthetic_app_data();
