@@ -6,6 +6,8 @@ use owstats_desktop_lib::career_mmr::{
 
 fn row(hero: &str, role: &str, season: i64, value: f64) -> TrainingRow {
     TrainingRow {
+        account_group: "dataset-001".into(),
+        source_match_group: format!("source-{hero}-{season}-{value}"),
         match_group: format!("match-{hero}-{season}-{value}"),
         season,
         begin_ts: value as i64,

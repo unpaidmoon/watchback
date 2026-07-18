@@ -160,6 +160,8 @@ fn all_role_strategy_combinations_are_preliminary_and_inactive() {
     };
     fn training(role: &str, i: i64) -> TrainingRow {
         TrainingRow {
+            account_group: "dataset-001".into(),
+            source_match_group: format!("source-{role}-{i}"),
             match_group: format!("private-{role}-{i}"),
             season: 23,
             begin_ts: i,
@@ -235,6 +237,8 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
     };
     use owstats_desktop_lib::career_mmr::training::TrainingRow;
     let make = |role: &str, i: i64| TrainingRow {
+        account_group: "dataset-001".into(),
+        source_match_group: format!("source-{role}-{i}"),
         match_group: format!("private-match-{role}-{}", i / 2),
         season: 21 + i % 3,
         begin_ts: i,
@@ -298,6 +302,8 @@ fn bootstrap_cluster_clones_remain_distinct_and_empty_loo_groups_are_skipped() {
     };
     use owstats_desktop_lib::career_mmr::training::TrainingRow;
     let a = TrainingRow {
+        account_group: "dataset-001".into(),
+        source_match_group: "source-a".into(),
         match_group: "secret".into(),
         season: 23,
         begin_ts: 1,

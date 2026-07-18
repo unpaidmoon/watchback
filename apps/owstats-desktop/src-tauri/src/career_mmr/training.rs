@@ -2,15 +2,20 @@ use crate::career_mmr::input::{
     normalize_mode_family, normalize_role as normalize_input_role, stadium_final_snapshot,
     ExtractionContext, ModeFamily, TrainingCohort,
 };
+use crate::career_mmr::training_sources::{
+    open_query_only, validate_training_schema, TrainingSourceSpec,
+};
 use anyhow::{bail, Result};
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrainingRow {
+    pub account_group: String,
+    pub source_match_group: String,
     pub match_group: String,
     pub season: i64,
     pub begin_ts: i64,
@@ -39,7 +44,7 @@ pub struct TrainingRow {
     pub usable_for_resource_debt: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrainingProjection {
     pub rows: Vec<TrainingRow>,
     pub audit: TrainingAudit,
@@ -48,6 +53,38 @@ pub struct TrainingProjection {
 impl TrainingProjection {
     pub fn public_audit(&self) -> &TrainingAudit {
         &self.audit
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.audit.merge(other.audit);
+        self.rows.extend(other.rows);
+        let mut seen = HashSet::new();
+        self.rows.retain(|row| {
+            seen.insert((
+                row.account_group.clone(),
+                row.source_match_group.clone(),
+                row.role.clone(),
+                row.hero_group.clone(),
+                row.begin_ts,
+            ))
+        });
+        self.rows.sort_by(|left, right| {
+            left.begin_ts
+                .cmp(&right.begin_ts)
+                .then_with(|| left.account_group.cmp(&right.account_group))
+                .then_with(|| left.source_match_group.cmp(&right.source_match_group))
+                .then_with(|| left.role.cmp(&right.role))
+                .then_with(|| left.hero_group.cmp(&right.hero_group))
+        });
+        self.audit.projected_rows = self.rows.len();
+        self.audit.performance_eligible_rows =
+            self.rows.iter().filter(|row| row.allow_performance).count();
+        self.audit.resource_debt_eligible_rows = self
+            .rows
+            .iter()
+            .filter(|row| row.usable_for_resource_debt)
+            .count();
+        self.audit.roles = role_audit(&self.rows);
     }
 }
 
@@ -90,6 +127,7 @@ pub struct HealingTakenSemanticsAudit {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct TrainingAudit {
+    pub source_accounts: usize,
     pub ordinary_candidates: usize,
     pub stadium_competitive_candidates: usize,
     pub stadium_quick_outcome_only_rows: usize,
@@ -104,10 +142,72 @@ pub struct TrainingAudit {
     pub healing_taken_semantics: HealingTakenSemanticsAudit,
 }
 
+impl TrainingAudit {
+    pub fn merge(&mut self, other: Self) {
+        self.source_accounts += other.source_accounts;
+        self.ordinary_candidates += other.ordinary_candidates;
+        self.stadium_competitive_candidates += other.stadium_competitive_candidates;
+        self.stadium_quick_outcome_only_rows += other.stadium_quick_outcome_only_rows;
+        self.stadium_performance_eligible_rows += other.stadium_performance_eligible_rows;
+        self.projected_rows += other.projected_rows;
+        self.performance_eligible_rows += other.performance_eligible_rows;
+        self.resource_debt_eligible_rows += other.resource_debt_eligible_rows;
+        self.minor_segment_rows += other.minor_segment_rows;
+        self.stadium_ambiguous_excluded += other.stadium_ambiguous_excluded;
+        self.coverage.merge(other.coverage);
+        self.healing_taken_semantics
+            .merge(other.healing_taken_semantics);
+        let mut roles = BTreeMap::new();
+        for item in self.roles.drain(..).chain(other.roles) {
+            *roles.entry(item.role).or_insert(0) += item.samples;
+        }
+        self.roles = roles
+            .into_iter()
+            .map(|(role, samples)| RoleTrainingAudit { role, samples })
+            .collect();
+    }
+}
+
+impl FeatureCoverage {
+    fn merge(&mut self, other: Self) {
+        self.final_hit += other.final_hit;
+        self.kill += other.kill;
+        self.assist += other.assist;
+        self.death += other.death;
+        self.damage += other.damage;
+        self.healing += other.healing;
+        self.mitigation += other.mitigation;
+        self.healing_taken += other.healing_taken;
+        self.damage_taken += other.damage_taken;
+        self.objective_time += other.objective_time;
+        self.duration += other.duration;
+        self.exact_hero_duration += other.exact_hero_duration;
+        self.final_hero += other.final_hero;
+        self.hero_final_hit += other.hero_final_hit;
+        self.hero_kill += other.hero_kill;
+        self.hero_assist += other.hero_assist;
+        self.hero_death += other.hero_death;
+        self.hero_damage += other.hero_damage;
+        self.hero_healing += other.hero_healing;
+        self.hero_objective_time += other.hero_objective_time;
+    }
+}
+
+impl HealingTakenSemanticsAudit {
+    fn merge(&mut self, other: Self) {
+        self.explicit_self_healing_rows += other.explicit_self_healing_rows;
+        self.explicit_external_healing_rows += other.explicit_external_healing_rows;
+        self.unknown_rows += other.unknown_rows;
+    }
+}
+
 struct RawRow {
     match_id: String,
     season: i64,
     begin_ts: i64,
+    map_guid: String,
+    team_score: i64,
+    opponent_score: i64,
     dictionary_role: String,
     hero: String,
     result: String,
@@ -137,6 +237,13 @@ const STAT_HEALING_PRIMARY: &str = "603482350067646913";
 const STAT_HEALING_FALLBACK: &str = "603482350067647479";
 const STAT_OBJECTIVE_TIME: &str = "603482350067648534";
 pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection> {
+    build_training_projection_for_account(conn, "dataset-001")
+}
+
+pub fn build_training_projection_for_account(
+    conn: &Connection,
+    account_group: &str,
+) -> Result<TrainingProjection> {
     let mut active_events = HashMap::new();
     if table_exists(conn, "career_mmr_events")? && table_exists(conn, "mmr_model_versions")? {
         let mut event_stmt = conn.prepare("SELECT e.match_id,e.role,e.expected_win_rate,e.data_quality FROM career_mmr_events e JOIN mmr_model_versions v ON v.version=e.model_version WHERE v.is_active=1")?;
@@ -162,33 +269,53 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
         [],
         |row| row.get::<_, usize>(0),
     )?;
-    let mut stmt = conn.prepare(
-        r#"SELECT m.match_id,m.season,m.begin_ts,COALESCE(d.role,''),m.hero_guid,m.result,m.game_mode,
+    let map_guid = if column_exists(conn, "matches", "map_guid")? {
+        "COALESCE(m.map_guid,'')"
+    } else {
+        "''"
+    };
+    let team_score = if column_exists(conn, "matches", "team_score")? {
+        "COALESCE(m.team_score,0)"
+    } else {
+        "0"
+    };
+    let opponent_score = if column_exists(conn, "matches", "opponent_score")? {
+        "COALESCE(m.opponent_score,0)"
+    } else {
+        "0"
+    };
+    let ordinary_sql = format!(
+        r#"SELECT m.match_id,m.season,m.begin_ts,{map_guid},{team_score},{opponent_score},
+                  COALESCE(d.role,''),m.hero_guid,m.result,m.game_mode,
                   m.duration_sec,
                   m.raw_entry_json,COALESCE((SELECT p.raw_json FROM match_players p
                     WHERE p.match_id=m.match_id AND p.is_current_player=1
-                    AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1),'{}'),
-                  COALESCE(md.raw_detail_json,'{}')
+                    AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1),'{{}}'),
+                  COALESCE(md.raw_detail_json,'{{}}')
            FROM matches m
            LEFT JOIN hero_dict d ON d.guid=m.hero_guid
            LEFT JOIN match_details md ON md.match_id=m.match_id
            WHERE m.bucket<>'stadium'
            ORDER BY m.begin_ts,m.season,m.match_id"#,
-    )?;
+    );
+    let mut stmt = conn.prepare(&ordinary_sql)?;
     let mut raw: Vec<RawRow> = stmt
         .query_map([], |r| {
             Ok(RawRow {
                 match_id: r.get(0)?,
                 season: r.get(1)?,
                 begin_ts: r.get(2)?,
-                dictionary_role: r.get(3)?,
-                hero: r.get(4)?,
-                result: r.get(5)?,
-                game_mode: r.get(6)?,
-                duration: r.get(7)?,
-                entry: r.get(8)?,
-                player: serde_json::from_str(&r.get::<_, String>(9)?).unwrap_or(Value::Null),
-                detail: r.get(10)?,
+                map_guid: r.get(3)?,
+                team_score: r.get(4)?,
+                opponent_score: r.get(5)?,
+                dictionary_role: r.get(6)?,
+                hero: r.get(7)?,
+                result: r.get(8)?,
+                game_mode: r.get(9)?,
+                duration: r.get(10)?,
+                entry: r.get(11)?,
+                player: serde_json::from_str(&r.get::<_, String>(12)?).unwrap_or(Value::Null),
+                detail: r.get(13)?,
                 bucket: "ordinary".into(),
                 current_player_key: None,
             })
@@ -200,9 +327,10 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
         |row| row.get::<_, usize>(0),
     )?;
     if stadium_candidates > 0 {
-        let mut stadium_stmt = conn.prepare(
-            r#"SELECT m.match_id,m.season,m.begin_ts,COALESCE(d.role,''),m.hero_guid,m.result,m.game_mode,
-                      m.duration_sec,m.raw_entry_json,'{}',COALESCE(md.raw_detail_json,'{}'),m.bucket,
+        let stadium_sql = format!(
+            r#"SELECT m.match_id,m.season,m.begin_ts,{map_guid},{team_score},{opponent_score},
+                      COALESCE(d.role,''),m.hero_guid,m.result,m.game_mode,
+                      m.duration_sec,m.raw_entry_json,'{{}}',COALESCE(md.raw_detail_json,'{{}}'),m.bucket,
                       (SELECT p.bnet_id FROM match_players p
                         WHERE p.match_id=m.match_id AND p.is_current_player=1
                         AND p.bnet_id=TRIM(p.bnet_id) AND TRIM(p.bnet_id)<>''
@@ -212,7 +340,8 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
                LEFT JOIN match_details md ON md.match_id=m.match_id
                WHERE m.bucket='stadium'
                ORDER BY m.begin_ts,m.season,m.match_id"#,
-        )?;
+        );
+        let mut stadium_stmt = conn.prepare(&stadium_sql)?;
         raw.extend(
             stadium_stmt
                 .query_map([], |r| {
@@ -220,16 +349,19 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
                         match_id: r.get(0)?,
                         season: r.get(1)?,
                         begin_ts: r.get(2)?,
-                        dictionary_role: r.get(3)?,
-                        hero: r.get(4)?,
-                        result: r.get(5)?,
-                        game_mode: r.get(6)?,
-                        duration: r.get(7)?,
-                        entry: r.get(8)?,
+                        map_guid: r.get(3)?,
+                        team_score: r.get(4)?,
+                        opponent_score: r.get(5)?,
+                        dictionary_role: r.get(6)?,
+                        hero: r.get(7)?,
+                        result: r.get(8)?,
+                        game_mode: r.get(9)?,
+                        duration: r.get(10)?,
+                        entry: r.get(11)?,
                         player: Value::Null,
-                        detail: r.get(10)?,
-                        bucket: r.get(11)?,
-                        current_player_key: r.get(12)?,
+                        detail: r.get(13)?,
+                        bucket: r.get(14)?,
+                        current_player_key: r.get(15)?,
                     })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?,
@@ -237,6 +369,7 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
     }
 
     let mut audit = TrainingAudit {
+        source_accounts: 1,
         ordinary_candidates,
         ..Default::default()
     };
@@ -300,6 +433,8 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
             audit.stadium_ambiguous_excluded += usize::from(r.bucket == "stadium");
             continue;
         };
+        let match_group = stable_match_key(&r, mode_family);
+        let source_match_group = stable_source_match_key(&r.match_id);
         if r.bucket == "stadium" {
             if mode_family == ModeFamily::StadiumCompetitive {
                 audit.stadium_competitive_candidates += 1;
@@ -401,7 +536,9 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
             let data_quality = base_quality;
             *role_counts.entry(role_name.to_string()).or_default() += 1;
             rows.push(TrainingRow {
-                match_group: stable_match_key(&r.match_id),
+                account_group: account_group.to_owned(),
+                source_match_group: source_match_group.clone(),
+                match_group: match_group.clone(),
                 season: r.season,
                 begin_ts: r.begin_ts,
                 role: role_name.into(),
@@ -550,7 +687,9 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
             }
             *role_counts.entry(role.to_string()).or_default() += 1;
             rows.push(TrainingRow {
-                match_group: stable_match_key(&r.match_id),
+                account_group: account_group.to_owned(),
+                source_match_group: source_match_group.clone(),
+                match_group: match_group.clone(),
                 season: r.season,
                 begin_ts: r.begin_ts,
                 role: role.into(),
@@ -601,10 +740,49 @@ pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection
     Ok(TrainingProjection { rows, audit })
 }
 
+pub fn build_multi_account_projection(
+    sources: &[TrainingSourceSpec],
+) -> Result<TrainingProjection> {
+    let result = (|| -> Result<TrainingProjection> {
+        let mut projection = TrainingProjection::default();
+        for source in sources {
+            let conn = open_query_only(source)?;
+            validate_training_schema(&conn)?;
+            let source_projection =
+                build_training_projection_for_account(&conn, &source.account_group)?;
+            if conn.total_changes() != 0 {
+                bail!("training source was modified");
+            }
+            projection.merge(source_projection);
+        }
+        Ok(projection)
+    })();
+    result.map_err(|_| anyhow::anyhow!("无法聚合多账号训练数据"))
+}
+
+fn role_audit(rows: &[TrainingRow]) -> Vec<RoleTrainingAudit> {
+    let mut roles = BTreeMap::new();
+    for row in rows {
+        *roles.entry(row.role.clone()).or_insert(0) += 1;
+    }
+    roles
+        .into_iter()
+        .map(|(role, samples)| RoleTrainingAudit { role, samples })
+        .collect()
+}
+
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
         [table],
+        |row| row.get(0),
+    )?)
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+        [table, column],
         |row| row.get(0),
     )?)
 }
@@ -697,6 +875,29 @@ fn stable_hero_key(hero: &str) -> String {
     )
 }
 
-fn stable_match_key(match_id: &str) -> String {
+fn stable_source_match_key(match_id: &str) -> String {
     format!("{:x}", Sha256::digest(match_id.as_bytes()))
+}
+
+// The cross-account cluster deliberately excludes the source-local match id and
+// perspective-dependent result. Exact timestamp, normalized mode, map, duration,
+// season, and unordered scores make accidental merges substantially less likely
+// while allowing two participants' copies of the same match to converge.
+fn stable_match_key(row: &RawRow, mode_family: ModeFamily) -> String {
+    let (low_score, high_score) = if row.team_score <= row.opponent_score {
+        (row.team_score, row.opponent_score)
+    } else {
+        (row.opponent_score, row.team_score)
+    };
+    let fingerprint = format!(
+        "career-mmr-match-v1\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+        row.season,
+        row.begin_ts,
+        mode_family.as_str(),
+        row.map_guid.trim().to_ascii_lowercase(),
+        row.duration,
+        low_score,
+        high_score,
+    );
+    format!("{:x}", Sha256::digest(fingerprint.as_bytes()))
 }
