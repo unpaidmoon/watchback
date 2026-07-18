@@ -33,6 +33,7 @@ fn row(group: &str, ts: i64, _role: Role, value: f64) -> MatrixRow {
         begin_ts: ts,
         result: if value > 0.0 { 1.0 } else { 0.0 },
         expected_win_rate: 0.5,
+        data_quality: 1.0,
         mode_family: ModeFamily::RoleCompetitive,
         per_ten: features.clone(),
         standardized: features,
@@ -279,6 +280,16 @@ fn missing_value_count_matches_each_roles_actual_vector_inputs_and_strategy() {
             HealingTakenStrategy::None
         ),
         1
+    );
+    support.standardized.abnormal_damage_taken = None;
+    assert_eq!(
+        missing_values(
+            &support,
+            Role::Support,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None
+        ),
+        2
     );
 
     for strategy in [

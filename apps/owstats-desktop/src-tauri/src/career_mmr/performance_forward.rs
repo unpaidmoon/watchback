@@ -1,5 +1,6 @@
 use super::{
     performance::{build_feature_matrix, HealingTakenStrategy as MatrixStrategy, MatrixRow},
+    performance_model::{fit_model, predict_probability, FitConfig, HierarchicalModel},
     training::TrainingRow,
 };
 use serde::Serialize;
@@ -11,13 +12,7 @@ const MULTIPLIERS: [f64; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 const DIRECT_EXPOSURE_SCALE: f64 = 10_000.0;
 const MAX_DIRECT_EXPOSURE: f64 = 3.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Tank,
-    Damage,
-    Support,
-}
+pub use super::input::Role;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -162,16 +157,13 @@ pub fn role_vector_with_multiplier(
             ]),
             Role::Damage => {
                 let conversion = damage_conversion(row, final_multiplier);
-                pairs.extend([
-                    ("objective", value(f.objective_time)),
-                    ("damage_conversion", value(conversion)),
-                ]);
+                pairs.push(("damage_conversion", value(conversion)));
             }
             Role::Support => pairs.extend([
                 ("healing", value(f.healing)),
                 ("damage", value(f.damage)),
-                ("objective", value(f.objective_time)),
                 ("survival", value(f.survival)),
+                ("abnormal_damage_taken", value(f.abnormal_damage_taken)),
             ]),
         }
     }
@@ -295,65 +287,30 @@ pub(crate) fn fit(
     strategy: MatrixStrategy,
     multiplier: f64,
 ) -> Vec<f64> {
-    fit_with_steps(rows, role, variant, strategy, multiplier, 300)
+    fit_hierarchical(rows, role, variant, strategy, multiplier, 300)
+        .map(|model| model.core_weights)
+        .unwrap_or_default()
 }
 
-pub(crate) fn fit_with_steps(
+fn fit_hierarchical(
     rows: &[&MatrixRow],
     role: Role,
     variant: ModelVariant,
     strategy: MatrixStrategy,
     multiplier: f64,
-    gradient_steps: usize,
-) -> Vec<f64> {
-    if rows.is_empty() {
-        return Vec::new();
-    }
-    let prototype = role_vector_with_multiplier(rows[0], role, variant, strategy, multiplier);
-    let p = prototype.values.len();
-    let mut w = vec![0.0; p];
-    for _ in 0..gradient_steps {
-        let mut g = vec![0.0; p];
-        for row in rows {
-            let x = role_vector_with_multiplier(row, role, variant, strategy, multiplier);
-            let y = row.result - row.expected_win_rate;
-            let e = w.iter().zip(&x.values).map(|(a, b)| a * b).sum::<f64>() - y;
-            if !e.is_finite() {
-                return Vec::new();
-            }
-            for j in 0..p {
-                g[j] += 2.0 * e * x.values[j];
-            }
-        }
-        for j in 0..p {
-            g[j] = g[j] / rows.len() as f64 + 0.02 * w[j];
-            if !g[j].is_finite() {
-                return Vec::new();
-            }
-            w[j] -= 0.02 * g[j];
-            if !w[j].is_finite() {
-                return Vec::new();
-            }
-        }
-        if let Some(j) = prototype.final_index {
-            w[j] = w[j].max(0.0)
-        }
-        if let Some(j) = prototype.nonfinal_index {
-            w[j] = w[j].max(0.0)
-        }
-        if let Some(j) = prototype.death_index {
-            w[j] = w[j].min(0.0)
-        }
-        if let Some(j) = prototype.debt_index {
-            w[j] = w[j].min(0.0)
-        }
-    }
-    if let (Some(f), Some(n)) = (prototype.final_index, prototype.nonfinal_index) {
-        if w[n] > 0.0 {
-            w[f] = w[f].max(w[n] * multiplier)
-        }
-    }
-    w
+    steps: usize,
+) -> Option<HierarchicalModel> {
+    fit_model(
+        rows,
+        role,
+        variant,
+        strategy,
+        &FitConfig {
+            steps,
+            final_multiplier: multiplier,
+            ..FitConfig::default()
+        },
+    )
 }
 pub(crate) fn predict(
     row: &MatrixRow,
@@ -364,9 +321,15 @@ pub(crate) fn predict(
     w: &[f64],
 ) -> f64 {
     let x = role_vector_with_multiplier(row, role, variant, strategy, multiplier);
-    (row.expected_win_rate
-        + w.iter().zip(x.values).map(|(a, b)| a * b).sum::<f64>() * x.conservative_scale)
-        .clamp(0.0, 1.0)
+    let expected = row.expected_win_rate.clamp(1.0e-6, 1.0 - 1.0e-6);
+    let offset = (expected / (1.0 - expected)).ln();
+    let linear = offset + w.iter().zip(x.values).map(|(a, b)| a * b).sum::<f64>();
+    if linear >= 0.0 {
+        1.0 / (1.0 + (-linear).exp())
+    } else {
+        let exp = linear.exp();
+        exp / (1.0 + exp)
+    }
 }
 
 pub fn evaluate_strategy(
@@ -396,9 +359,12 @@ pub fn evaluate_strategy(
             let mut score = 0.0;
             let mut n = 0;
             let train = rows.iter().collect::<Vec<_>>();
-            let w = fit(&train, role, variant, strategy, multiplier);
+            let Some(model) = fit_hierarchical(&train, role, variant, strategy, multiplier, 300)
+            else {
+                continue;
+            };
             for row in &rows {
-                let p = predict(row, role, variant, strategy, multiplier, &w);
+                let p = predict_probability(&model, row);
                 score += (row.result - p).powi(2);
                 n += 1;
             }
@@ -407,9 +373,9 @@ pub fn evaluate_strategy(
                 .map(|r| role_vector(r, role, variant, strategy));
             let identifiable = proto
                 .and_then(|p| {
-                    p.final_index
-                        .zip(p.nonfinal_index)
-                        .map(|(f, n)| w[f] > 0.0 && w[f] > w[n])
+                    p.final_index.zip(p.nonfinal_index).map(|(f, n)| {
+                        model.core_weights[f] > 0.0 && model.core_weights[f] > model.core_weights[n]
+                    })
                 })
                 .unwrap_or(false);
             if !identifiable {
@@ -423,7 +389,10 @@ pub fn evaluate_strategy(
     }
     for (number, fold) in folds.iter().enumerate() {
         let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
-        let w = fit(&train, role, selected.0, strategy, selected.1);
+        let Some(model) = fit_hierarchical(&train, role, selected.0, strategy, selected.1, 300)
+        else {
+            continue;
+        };
         let a = fold
             .validation
             .iter()
@@ -432,7 +401,7 @@ pub fn evaluate_strategy(
         let p = fold
             .validation
             .iter()
-            .map(|&i| predict(&rows[i], role, selected.0, strategy, selected.1, &w))
+            .map(|&i| predict_probability(&model, &rows[i]))
             .collect::<Vec<_>>();
         let base = a
             .iter()
@@ -450,12 +419,14 @@ pub fn evaluate_strategy(
             .iter()
             .map(|&i| {
                 let x = role_vector(&rows[i], role, selected.0, strategy);
-                let total = w
+                let effective = model.effective_weights(rows[i].mode_family.training_cohort());
+                let total = effective
                     .iter()
                     .zip(&x.values)
                     .map(|(a, b)| (a * b).abs())
                     .sum::<f64>();
-                w.iter()
+                effective
+                    .iter()
                     .zip(x.values)
                     .map(|(a, b)| (a * b).abs())
                     .fold(0.0, f64::max)
@@ -474,7 +445,7 @@ pub fn evaluate_strategy(
         let weights = role_vector(&rows[fold.validation[0]], role, selected.0, strategy)
             .names
             .into_iter()
-            .zip(w.iter().copied())
+            .zip(model.core_weights.iter().copied())
             .map(|(n, v)| (n.into(), v))
             .collect();
         reports.push(FoldReport {
@@ -493,7 +464,7 @@ pub fn evaluate_strategy(
         });
     }
     let full = rows.iter().collect::<Vec<_>>();
-    let w = fit(&full, role, selected.0, strategy, selected.1);
+    let model = fit_hierarchical(&full, role, selected.0, strategy, selected.1, 300);
     let proto = rows
         .first()
         .map(|r| role_vector(r, role, selected.0, strategy));
@@ -501,14 +472,25 @@ pub fn evaluate_strategy(
         .map(|p| {
             p.names
                 .into_iter()
-                .zip(w.iter().copied())
+                .zip(
+                    model
+                        .as_ref()
+                        .map(|model| model.core_weights.as_slice())
+                        .unwrap_or_default()
+                        .iter()
+                        .copied(),
+                )
                 .map(|(n, v)| (n.into(), v))
                 .collect()
         })
         .unwrap_or_default();
     let adjustments = rows
         .iter()
-        .map(|r| predict(r, role, selected.0, strategy, selected.1, &w) - r.expected_win_rate)
+        .filter_map(|r| {
+            model
+                .as_ref()
+                .map(|model| predict_probability(model, r) - r.expected_win_rate)
+        })
         .collect::<Vec<_>>();
     let mut rejected_reasons = Vec::new();
     if improved < 4 {
@@ -568,8 +550,10 @@ pub fn missing_values(
                 f.mitigation,
                 f.abnormal_damage_taken,
             ]),
-            Role::Damage => values.extend([f.objective_time, damage_conversion(row, 1.0)]),
-            Role::Support => values.extend([f.healing, f.damage, f.objective_time, f.survival]),
+            Role::Damage => values.push(damage_conversion(row, 1.0)),
+            Role::Support => {
+                values.extend([f.healing, f.damage, f.survival, f.abnormal_damage_taken])
+            }
         }
     }
     values.iter().filter(|v| v.is_none()).count()
@@ -692,11 +676,14 @@ fn evaluate_raw_strategy(
         }
         let selected = select_candidate(&train, role, strategy);
         let refs = train_rows.iter().collect::<Vec<_>>();
-        let w = fit(&refs, role, selected.0, strategy, selected.1);
+        let Some(model) = fit_hierarchical(&refs, role, selected.0, strategy, selected.1, 300)
+        else {
+            continue;
+        };
         let a = valid_rows.iter().map(|r| r.result).collect::<Vec<_>>();
         let p = valid_rows
             .iter()
-            .map(|r| predict(r, role, selected.0, strategy, selected.1, &w))
+            .map(|r| predict_probability(&model, r))
             .collect::<Vec<_>>();
         let base = valid_rows
             .iter()
@@ -709,7 +696,8 @@ fn evaluate_raw_strategy(
             .iter()
             .map(|r| {
                 let x = role_vector(r, role, selected.0, strategy);
-                let parts = w
+                let effective = model.effective_weights(r.mode_family.training_cohort());
+                let parts = effective
                     .iter()
                     .zip(x.values)
                     .map(|(a, b)| (a * b).abs())
@@ -726,7 +714,7 @@ fn evaluate_raw_strategy(
         let names = role_vector(&valid_rows[0], role, selected.0, strategy).names;
         let weights = names
             .into_iter()
-            .zip(w)
+            .zip(model.core_weights.iter().copied())
             .map(|(n, v)| (n.into(), v))
             .collect();
         missing += valid_rows
@@ -761,14 +749,21 @@ fn evaluate_raw_strategy(
         .unwrap_or_default();
     let selected = select_candidate(source, role, strategy);
     let refs = full_rows.iter().collect::<Vec<_>>();
-    let w = fit(&refs, role, selected.0, strategy, selected.1);
+    let model = fit_hierarchical(&refs, role, selected.0, strategy, selected.1, 300);
     let names = full_rows
         .first()
         .map(|r| role_vector(r, role, selected.0, strategy).names)
         .unwrap_or_default();
     let full_refit_weights: BTreeMap<String, f64> = names
         .into_iter()
-        .zip(w.iter().copied())
+        .zip(
+            model
+                .as_ref()
+                .map(|model| model.core_weights.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .copied(),
+        )
         .map(|(n, v)| (n.into(), v))
         .collect();
     let improved = fold_reports
@@ -795,7 +790,11 @@ fn evaluate_raw_strategy(
     }
     let adjustments = full_rows
         .iter()
-        .map(|r| predict(r, role, selected.0, strategy, selected.1, &w) - r.expected_win_rate)
+        .filter_map(|r| {
+            model
+                .as_ref()
+                .map(|model| predict_probability(model, r) - r.expected_win_rate)
+        })
         .collect::<Vec<_>>();
     StrategyReport {
         role,
@@ -866,17 +865,23 @@ pub(crate) fn select_candidate(
                     break;
                 }
                 let train = train_rows.iter().collect::<Vec<_>>();
-                let w = fit(&train, role, variant, strategy, multiplier);
+                let Some(model) =
+                    fit_hierarchical(&train, role, variant, strategy, multiplier, 300)
+                else {
+                    valid = false;
+                    break;
+                };
                 let proto = train_rows
                     .first()
                     .map(|r| role_vector(r, role, variant, strategy));
-                let identifiable = w.len()
+                let identifiable = model.core_weights.len()
                     == proto.as_ref().map(|p| p.values.len()).unwrap_or(usize::MAX)
                     && proto
                         .and_then(|p| {
-                            p.final_index
-                                .zip(p.nonfinal_index)
-                                .map(|(f, n)| w[f] > 0.0 && w[f] > w[n])
+                            p.final_index.zip(p.nonfinal_index).map(|(f, n)| {
+                                model.core_weights[f] > 0.0
+                                    && model.core_weights[f] > model.core_weights[n]
+                            })
                         })
                         .unwrap_or(false);
                 if !identifiable {
@@ -884,7 +889,7 @@ pub(crate) fn select_candidate(
                     break;
                 }
                 for row in &validation_rows {
-                    let p = predict(row, role, variant, strategy, multiplier, &w);
+                    let p = predict_probability(&model, row);
                     let e = (row.result - p).powi(2);
                     if !e.is_finite() {
                         valid = false;
