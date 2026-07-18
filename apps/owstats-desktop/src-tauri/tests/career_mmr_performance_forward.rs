@@ -2,8 +2,9 @@ use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     performance::{BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        build_forward_folds, metrics, missing_values, role_vector, role_vector_with_multiplier,
-        HealingTakenStrategy, ModelVariant, Role,
+        build_forward_folds, evaluate_forward, max_feature_contribution_share, metrics,
+        missing_values, role_vector, role_vector_with_multiplier, HealingTakenStrategy,
+        ModelVariant, Role,
     },
     training::TrainingEnvironment,
 };
@@ -40,6 +41,43 @@ fn row(group: &str, ts: i64, _role: Role, value: f64) -> MatrixRow {
         baselines: BTreeMap::<_, BaselineLevel>::new(),
         healing_taken_derived: Some(value.abs()),
         damage_baseline_median_per_ten: Some(100.0),
+    }
+}
+
+fn training(role: &str, i: i64) -> owstats_desktop_lib::career_mmr::training::TrainingRow {
+    use owstats_desktop_lib::career_mmr::training::TrainingRow;
+    TrainingRow {
+        account_group: "dataset-001".into(),
+        source_match_group: format!("source-{role}-{i}"),
+        match_group: format!("private-{role}-{i}"),
+        season: 23,
+        begin_ts: i,
+        role: role.into(),
+        mode_family: ModeFamily::RoleCompetitive,
+        environment: TrainingEnvironment::Ordinary,
+        hero_group: Some(format!("hero-{role}")),
+        outcome_only: false,
+        allow_performance: true,
+        allow_performance_by_hero: true,
+        result: if i % 2 == 0 { 1.0 } else { 0.0 },
+        expected_win_rate: 0.5,
+        data_quality: 1.0,
+        base_delta: Some(10.0),
+        final_hit: Some((i % 5 + 1) as f64),
+        kill: Some((i % 7 + 3) as f64),
+        assist: Some((i % 4 + 1) as f64),
+        death: Some((i % 3 + 1) as f64),
+        damage: Some((i % 9 + 1) as f64 * 100.0),
+        healing: Some((i % 8 + 1) as f64 * 100.0),
+        mitigation: Some((i % 6 + 1) as f64 * 100.0),
+        healing_taken: Some((i % 10 + 1) as f64 * 100.0),
+        available_team_healing: Some((i % 8 + 2) as f64 * 100.0),
+        damage_taken: Some((i % 11 + 1) as f64 * 100.0),
+        objective_time_sec: Some((i % 6 + 1) as f64),
+        duration_sec: 600.0,
+        hero_duration_sec: Some(600.0),
+        healing_taken_semantic: "external",
+        usable_for_resource_debt: true,
     }
 }
 
@@ -177,6 +215,44 @@ fn damage_conversion_uses_selected_final_multiplier_and_penalizes_empty_volume()
         1.0,
     );
     assert!(raw.values[slot] < base.values[slot]);
+}
+
+#[test]
+fn contribution_share_uses_the_selected_non_unit_final_multiplier() {
+    let mut source = row("contribution", 1, Role::Damage, 1.0);
+    source.per_ten.final_hit = Some(10.0);
+    source.per_ten.non_final_eliminations = Some(1.0);
+    source.per_ten.damage = Some(100.0);
+    source.damage_baseline_median_per_ten = Some(100.0);
+    let weights = vec![
+        0.1;
+        role_vector_with_multiplier(
+            &source,
+            Role::Damage,
+            ModelVariant::RoleFull,
+            HealingTakenStrategy::None,
+            2.0,
+        )
+        .values
+        .len()
+    ];
+    let unit = max_feature_contribution_share(
+        &source,
+        Role::Damage,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+        1.0,
+        &weights,
+    );
+    let selected = max_feature_contribution_share(
+        &source,
+        Role::Damage,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+        2.0,
+        &weights,
+    );
+    assert_ne!(unit, selected);
 }
 
 #[test]
@@ -328,44 +404,6 @@ fn internal_fold_debug_serialization_does_not_expose_private_keys() {
 
 #[test]
 fn all_role_strategy_combinations_are_preliminary_and_inactive() {
-    use owstats_desktop_lib::career_mmr::{
-        performance_forward::evaluate_forward, training::TrainingRow,
-    };
-    fn training(role: &str, i: i64) -> TrainingRow {
-        TrainingRow {
-            account_group: "dataset-001".into(),
-            source_match_group: format!("source-{role}-{i}"),
-            match_group: format!("private-{role}-{i}"),
-            season: 23,
-            begin_ts: i,
-            role: role.into(),
-            mode_family: ModeFamily::RoleCompetitive,
-            environment: TrainingEnvironment::Ordinary,
-            hero_group: Some(format!("hero-{role}")),
-            outcome_only: false,
-            allow_performance: true,
-            allow_performance_by_hero: true,
-            result: if i % 2 == 0 { 1.0 } else { 0.0 },
-            expected_win_rate: 0.5,
-            data_quality: 1.0,
-            base_delta: Some(10.0),
-            final_hit: Some((i % 5 + 1) as f64),
-            kill: Some((i % 7 + 3) as f64),
-            assist: Some((i % 4 + 1) as f64),
-            death: Some((i % 3 + 1) as f64),
-            damage: Some((i % 9 + 1) as f64 * 100.0),
-            healing: Some((i % 8 + 1) as f64 * 100.0),
-            mitigation: Some((i % 6 + 1) as f64 * 100.0),
-            healing_taken: Some((i % 10 + 1) as f64 * 100.0),
-            available_team_healing: Some((i % 8 + 2) as f64 * 100.0),
-            damage_taken: Some((i % 11 + 1) as f64 * 100.0),
-            objective_time_sec: Some((i % 6 + 1) as f64),
-            duration_sec: 600.0,
-            hero_duration_sec: Some(600.0),
-            healing_taken_semantic: "external",
-            usable_for_resource_debt: true,
-        }
-    }
     let rows = ["tank", "damage", "support"]
         .into_iter()
         .flat_map(|role| (0..40).map(move |i| training(role, i)))
@@ -393,6 +431,34 @@ fn all_role_strategy_combinations_are_preliminary_and_inactive() {
         .map(|item| item.strategy.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(strategies.len(), 5);
+}
+
+#[test]
+fn outcome_only_extremes_cannot_change_any_forward_result() {
+    let base = (0..80).map(|i| training("damage", i)).collect::<Vec<_>>();
+    let expected = evaluate_forward(&base);
+    let mut contaminated = base;
+    contaminated.extend((0..120).map(|i| {
+        let mut row = training("damage", 1_000 + i);
+        row.mode_family = ModeFamily::StadiumQuick;
+        row.environment = TrainingEnvironment::Stadium;
+        row.outcome_only = true;
+        row.final_hit = Some(1.0e12);
+        row.kill = Some(1.0e12);
+        row.damage = Some(1.0e15);
+        row.healing_taken = Some(1.0e15);
+        row.result = if i % 2 == 0 { 0.0 } else { 1.0 };
+        row
+    }));
+    contaminated.extend((0..20).map(|i| {
+        let mut row = training("damage", 2_000 + i);
+        row.outcome_only = true;
+        row.allow_performance = true;
+        row.final_hit = Some(1.0e12);
+        row.damage = Some(1.0e15);
+        row
+    }));
+    assert_eq!(evaluate_forward(&contaminated), expected);
 }
 
 #[test]

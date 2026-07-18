@@ -1,7 +1,20 @@
 use crate::career_mmr::{
-    input::ModeFamily,
+    input::{ModeFamily, TrainingCohort},
     training::{TrainingEnvironment, TrainingRow},
 };
+
+fn eligible_for_performance(row: &TrainingRow) -> bool {
+    row.allow_performance
+        && !row.outcome_only
+        && row.mode_family.training_cohort() != TrainingCohort::OutcomeOnly
+}
+
+pub(crate) fn eligible_performance_rows(rows: &[TrainingRow]) -> Vec<TrainingRow> {
+    rows.iter()
+        .filter(|row| eligible_for_performance(row))
+        .cloned()
+        .collect()
+}
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -180,7 +193,7 @@ struct Prepared<'a> {
 }
 
 fn prepared(row: &TrainingRow) -> Option<Prepared<'_>> {
-    if !row.allow_performance {
+    if !eligible_for_performance(row) {
         return None;
     }
     let hero = row.hero_group.as_deref()?;

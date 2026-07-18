@@ -1,5 +1,7 @@
 use super::{
-    performance::{build_feature_matrix, HealingTakenStrategy, MatrixRow},
+    performance::{
+        build_feature_matrix, eligible_performance_rows, HealingTakenStrategy, MatrixRow,
+    },
     performance_forward::{
         evaluate_forward, fit, metrics, predict, role_vector, select_candidate, MetricReport,
         ModelVariant, Role, StrategyReport,
@@ -298,8 +300,10 @@ pub struct StabilityEvaluation {
 }
 
 pub fn evaluate_stability(source: &[TrainingRow], config: StabilityConfig) -> StabilityEvaluation {
-    let forwards = evaluate_forward(source);
+    let source = eligible_performance_rows(source);
+    let forwards = evaluate_forward(&source);
     let (mut reports, worker_errors) = std::thread::scope(|scope| {
+        let source = &source;
         let handles = [Role::Tank, Role::Damage, Role::Support].map(|role| {
             let role_forwards = forwards
                 .iter()

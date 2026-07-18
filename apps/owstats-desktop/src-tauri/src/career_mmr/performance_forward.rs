@@ -1,5 +1,8 @@
 use super::{
-    performance::{build_feature_matrix, HealingTakenStrategy as MatrixStrategy, MatrixRow},
+    performance::{
+        build_feature_matrix, eligible_performance_rows, HealingTakenStrategy as MatrixStrategy,
+        MatrixRow,
+    },
     performance_model::{fit_model, predict_probability, FitConfig, HierarchicalModel},
     training::TrainingRow,
 };
@@ -193,6 +196,24 @@ pub fn role_vector_with_multiplier(
     }
 }
 
+pub fn max_feature_contribution_share(
+    row: &MatrixRow,
+    role: Role,
+    variant: ModelVariant,
+    strategy: MatrixStrategy,
+    final_multiplier: f64,
+    weights: &[f64],
+) -> f64 {
+    let vector = role_vector_with_multiplier(row, role, variant, strategy, final_multiplier);
+    let parts = weights
+        .iter()
+        .zip(vector.values)
+        .map(|(weight, value)| (weight * value).abs())
+        .collect::<Vec<_>>();
+    let total = parts.iter().sum::<f64>();
+    parts.into_iter().fold(0.0, f64::max) / total.max(f64::EPSILON)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MetricReport {
     pub auc: f64,
@@ -344,7 +365,10 @@ pub fn evaluate_strategy(
     };
     let rows = rows
         .iter()
-        .filter(|row| row.role == role_name)
+        .filter(|row| {
+            row.role == role_name
+                && row.mode_family.training_cohort() != super::input::TrainingCohort::OutcomeOnly
+        })
         .cloned()
         .collect::<Vec<_>>();
     let folds = build_forward_folds(&rows, 5);
@@ -418,19 +442,10 @@ pub fn evaluate_strategy(
             .validation
             .iter()
             .map(|&i| {
-                let x = role_vector(&rows[i], role, selected.0, strategy);
                 let effective = model.effective_weights(rows[i].mode_family.training_cohort());
-                let total = effective
-                    .iter()
-                    .zip(&x.values)
-                    .map(|(a, b)| (a * b).abs())
-                    .sum::<f64>();
-                effective
-                    .iter()
-                    .zip(x.values)
-                    .map(|(a, b)| (a * b).abs())
-                    .fold(0.0, f64::max)
-                    > 0.35 * total.max(f64::EPSILON)
+                max_feature_contribution_share(
+                    &rows[i], role, selected.0, strategy, selected.1, &effective,
+                ) > 0.35
             })
             .collect::<Vec<_>>()
             .tap_mut(|v| v.sort())
@@ -561,6 +576,8 @@ pub fn missing_values(
 }
 
 pub fn evaluate_forward(source: &[TrainingRow]) -> Vec<StrategyReport> {
+    let source = eligible_performance_rows(source);
+    let source = &source;
     let strategies = [
         MatrixStrategy::None,
         MatrixStrategy::DirectNegative,
@@ -695,15 +712,10 @@ fn evaluate_raw_strategy(
         let mut ratios = valid_rows
             .iter()
             .map(|r| {
-                let x = role_vector(r, role, selected.0, strategy);
                 let effective = model.effective_weights(r.mode_family.training_cohort());
-                let parts = effective
-                    .iter()
-                    .zip(x.values)
-                    .map(|(a, b)| (a * b).abs())
-                    .collect::<Vec<_>>();
-                let total = parts.iter().sum::<f64>();
-                parts.into_iter().fold(0.0, f64::max) / total.max(f64::EPSILON)
+                max_feature_contribution_share(
+                    r, role, selected.0, strategy, selected.1, &effective,
+                )
             })
             .collect::<Vec<_>>();
         ratios.sort_by(f64::total_cmp);
@@ -822,7 +834,8 @@ pub(crate) fn select_candidate(
     role: Role,
     strategy: MatrixStrategy,
 ) -> (ModelVariant, f64, bool) {
-    let inner = raw_folds(rows, 3);
+    let rows = eligible_performance_rows(rows);
+    let inner = raw_folds(&rows, 3);
     if inner.len() < 2 {
         return (ModelVariant::Core, 1.25, true);
     }

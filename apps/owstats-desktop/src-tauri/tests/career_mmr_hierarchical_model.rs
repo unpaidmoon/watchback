@@ -36,12 +36,14 @@ fn row(index: usize, mode_family: ModeFamily, positive_pattern: bool) -> MatrixR
 }
 
 #[test]
-fn constrained_hierarchy_shares_queue_offsets_and_zeros_sparse_cohorts() {
+fn constrained_hierarchy_shares_all_queue_offsets_and_never_trains_outcome_only() {
     let mut rows = Vec::new();
     rows.extend((0..100).map(|i| row(i, ModeFamily::RoleCompetitive, true)));
     rows.extend((100..200).map(|i| row(i, ModeFamily::RoleQuick, true)));
-    rows.extend((200..300).map(|i| row(i, ModeFamily::OpenCompetitive, true)));
-    rows.extend((300..500).map(|i| row(i, ModeFamily::StadiumCompetitive, false)));
+    rows.extend((200..280).map(|i| row(i, ModeFamily::OpenCompetitive, true)));
+    rows.extend((280..360).map(|i| row(i, ModeFamily::OpenQuick, true)));
+    rows.extend((360..560).map(|i| row(i, ModeFamily::StadiumCompetitive, false)));
+    rows.extend((560..760).map(|i| row(i, ModeFamily::StadiumQuick, false)));
     let model = fit_model(
         &rows.iter().collect::<Vec<_>>(),
         Role::Damage,
@@ -57,7 +59,7 @@ fn constrained_hierarchy_shares_queue_offsets_and_zeros_sparse_cohorts() {
     assert!(model.core_weight("final").unwrap() > model.core_weight("nonfinal").unwrap());
     assert!(model.core_weight("nonfinal").unwrap() > 0.0);
     assert!(model.core_weight("death").unwrap() < 0.0);
-    assert!(model.cohort_offset(TrainingCohort::OpenQueue).is_none());
+    assert!(model.cohort_offset(TrainingCohort::OpenQueue).is_some());
     assert!(model.cohort_offset(TrainingCohort::RoleQueue).is_some());
     assert!(model
         .cohort_offset(TrainingCohort::StadiumCompetitive)
@@ -66,6 +68,9 @@ fn constrained_hierarchy_shares_queue_offsets_and_zeros_sparse_cohorts() {
         model.cohort_offset(TrainingCohort::RoleQueue),
         model.cohort_offset(TrainingCohort::StadiumCompetitive)
     );
+    assert!(!model
+        .cohort_samples
+        .contains_key(&TrainingCohort::OutcomeOnly));
 
     for cohort in [
         TrainingCohort::RoleQueue,
@@ -85,11 +90,31 @@ fn constrained_hierarchy_shares_queue_offsets_and_zeros_sparse_cohorts() {
     let role_comp = predict_probability(&model, &row(700, ModeFamily::RoleCompetitive, true));
     let role_quick = predict_probability(&model, &row(700, ModeFamily::RoleQuick, true));
     assert!((role_comp - role_quick).abs() < 1e-12);
+    let open_comp = predict_probability(&model, &row(702, ModeFamily::OpenCompetitive, true));
+    let open_quick = predict_probability(&model, &row(702, ModeFamily::OpenQuick, true));
+    assert!((open_comp - open_quick).abs() < 1e-12);
 
     let mut offset_only = row(702, ModeFamily::RoleCompetitive, true);
     offset_only.expected_win_rate = 0.8;
     offset_only.standardized = FeatureValues::default();
     assert!((predict_probability(&model, &offset_only) - 0.8).abs() < 1e-12);
+}
+
+#[test]
+fn sparse_cohort_offset_remains_forced_to_zero() {
+    let rows = (0..149)
+        .map(|i| row(i, ModeFamily::OpenCompetitive, true))
+        .chain((149..349).map(|i| row(i, ModeFamily::RoleCompetitive, true)))
+        .collect::<Vec<_>>();
+    let model = fit_model(
+        &rows.iter().collect::<Vec<_>>(),
+        Role::Damage,
+        ModelVariant::Core,
+        HealingTakenStrategy::None,
+        &FitConfig::default(),
+    )
+    .unwrap();
+    assert!(model.cohort_offset(TrainingCohort::OpenQueue).is_none());
 }
 
 #[test]
