@@ -107,6 +107,16 @@ pub fn role_vector(
     variant: ModelVariant,
     strategy: MatrixStrategy,
 ) -> RoleVector {
+    role_vector_with_multiplier(row, role, variant, strategy, 1.0)
+}
+
+pub fn role_vector_with_multiplier(
+    row: &MatrixRow,
+    role: Role,
+    variant: ModelVariant,
+    strategy: MatrixStrategy,
+    final_multiplier: f64,
+) -> RoleVector {
     let f = &row.standardized;
     let mut pairs = match role {
         Role::Tank => vec![
@@ -131,46 +141,38 @@ pub fn role_vector(
     if variant == ModelVariant::RoleFull {
         match role {
             Role::Tank => pairs.extend([
-                ("damage", value(f.damage)),
+                ("frontline_conversion", value(f.frontline_conversion)),
                 ("mitigation", value(f.mitigation)),
-                ("damage_taken", value(f.damage_taken)),
-                ("objective", value(f.objective_time)),
+                ("abnormal_damage_taken", value(f.abnormal_damage_taken)),
             ]),
             Role::Damage => {
-                let damage = value(f.damage);
-                let conversion = value(f.final_hit) + value(f.non_final_eliminations);
+                let damage = value(row.per_ten.damage);
+                let floor = row
+                    .damage_baseline_median_per_ten
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|v| v * 0.25)
+                    .unwrap_or(0.0);
+                let conversion = (value(row.per_ten.final_hit) * final_multiplier
+                    + value(row.per_ten.non_final_eliminations))
+                    / damage.max(floor).max(f64::EPSILON);
                 pairs.extend([
-                    ("damage", damage),
                     ("objective", value(f.objective_time)),
-                    ("damage_conversion", damage * conversion),
+                    ("damage_conversion", conversion),
                 ]);
             }
             Role::Support => pairs.extend([
                 ("healing", value(f.healing)),
                 ("damage", value(f.damage)),
                 ("objective", value(f.objective_time)),
+                ("survival", value(f.survival)),
             ]),
         }
     }
     let mut debt_index = None;
     if strategy != MatrixStrategy::None {
         let exposure = value(row.healing_taken_derived);
-        let positive = |v: Option<f64>| value(v).clamp(0.0, 3.0);
-        let outputs = match role {
-            Role::Tank => vec![
-                f.final_hit,
-                f.non_final_eliminations,
-                f.assist,
-                f.damage,
-                f.mitigation,
-            ],
-            Role::Damage => vec![f.final_hit, f.non_final_eliminations, f.damage],
-            Role::Support => vec![f.assist, f.healing, f.final_hit],
-        };
-        let normalized_conversion =
-            outputs.iter().map(|&v| positive(v)).sum::<f64>() / (outputs.len() as f64 * 3.0);
         let debt = if strategy == MatrixStrategy::ResourceConversionDebt {
-            exposure.max(0.0) * (1.0 - normalized_conversion.clamp(0.0, 1.0))
+            exposure.max(0.0)
         } else if strategy == MatrixStrategy::DirectNegative {
             (exposure / DIRECT_EXPOSURE_SCALE).clamp(0.0, MAX_DIRECT_EXPOSURE)
         } else {
@@ -300,13 +302,13 @@ pub(crate) fn fit_with_steps(
     if rows.is_empty() {
         return Vec::new();
     }
-    let prototype = role_vector(rows[0], role, variant, strategy);
+    let prototype = role_vector_with_multiplier(rows[0], role, variant, strategy, multiplier);
     let p = prototype.values.len();
     let mut w = vec![0.0; p];
     for _ in 0..gradient_steps {
         let mut g = vec![0.0; p];
         for row in rows {
-            let x = role_vector(row, role, variant, strategy);
+            let x = role_vector_with_multiplier(row, role, variant, strategy, multiplier);
             let y = row.result - row.expected_win_rate;
             let e = w.iter().zip(&x.values).map(|(a, b)| a * b).sum::<f64>() - y;
             if !e.is_finite() {
@@ -351,9 +353,10 @@ pub(crate) fn predict(
     role: Role,
     variant: ModelVariant,
     strategy: MatrixStrategy,
+    multiplier: f64,
     w: &[f64],
 ) -> f64 {
-    let x = role_vector(row, role, variant, strategy);
+    let x = role_vector_with_multiplier(row, role, variant, strategy, multiplier);
     (row.expected_win_rate
         + w.iter().zip(x.values).map(|(a, b)| a * b).sum::<f64>() * x.conservative_scale)
         .clamp(0.0, 1.0)
@@ -388,7 +391,7 @@ pub fn evaluate_strategy(
             let train = rows.iter().collect::<Vec<_>>();
             let w = fit(&train, role, variant, strategy, multiplier);
             for row in &rows {
-                let p = predict(row, role, variant, strategy, &w);
+                let p = predict(row, role, variant, strategy, multiplier, &w);
                 score += (row.result - p).powi(2);
                 n += 1;
             }
@@ -422,7 +425,7 @@ pub fn evaluate_strategy(
         let p = fold
             .validation
             .iter()
-            .map(|&i| predict(&rows[i], role, selected.0, strategy, &w))
+            .map(|&i| predict(&rows[i], role, selected.0, strategy, selected.1, &w))
             .collect::<Vec<_>>();
         let base = a
             .iter()
@@ -498,7 +501,7 @@ pub fn evaluate_strategy(
         .unwrap_or_default();
     let adjustments = rows
         .iter()
-        .map(|r| predict(r, role, selected.0, strategy, &w) - r.expected_win_rate)
+        .map(|r| predict(r, role, selected.0, strategy, selected.1, &w) - r.expected_win_rate)
         .collect::<Vec<_>>();
     let mut rejected_reasons = Vec::new();
     if improved < 4 {
@@ -682,7 +685,7 @@ fn evaluate_raw_strategy(
         let a = valid_rows.iter().map(|r| r.result).collect::<Vec<_>>();
         let p = valid_rows
             .iter()
-            .map(|r| predict(r, role, selected.0, strategy, &w))
+            .map(|r| predict(r, role, selected.0, strategy, selected.1, &w))
             .collect::<Vec<_>>();
         let base = valid_rows
             .iter()
@@ -781,7 +784,7 @@ fn evaluate_raw_strategy(
     }
     let adjustments = full_rows
         .iter()
-        .map(|r| predict(r, role, selected.0, strategy, &w) - r.expected_win_rate)
+        .map(|r| predict(r, role, selected.0, strategy, selected.1, &w) - r.expected_win_rate)
         .collect::<Vec<_>>();
     StrategyReport {
         role,
@@ -870,7 +873,7 @@ pub(crate) fn select_candidate(
                     break;
                 }
                 for row in &validation_rows {
-                    let p = predict(row, role, variant, strategy, &w);
+                    let p = predict(row, role, variant, strategy, multiplier, &w);
                     let e = (row.result - p).powi(2);
                     if !e.is_finite() {
                         valid = false;

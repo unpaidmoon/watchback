@@ -528,7 +528,7 @@ fn validate_split(
     let actual = va.iter().map(|r| r.result).collect::<Vec<_>>();
     let predicted = va
         .iter()
-        .map(|r| predict(r, role, selected.0, strategy, &weights))
+        .map(|r| predict(r, role, selected.0, strategy, selected.1, &weights))
         .collect::<Vec<_>>();
     let Some(model) = metrics(&actual, &predicted).map(|m| m.brier) else {
         return (None, va.len());
@@ -694,7 +694,7 @@ fn bootstrap(
         let actual = va.iter().map(|r| r.result).collect::<Vec<_>>();
         let predicted = va
             .iter()
-            .map(|r| predict(r, role, variant, strategy, &w))
+            .map(|r| predict(r, role, variant, strategy, multiplier, &w))
             .collect::<Vec<_>>();
         let Some(m) = metrics(&actual, &predicted) else {
             skipped += 1;

@@ -2,6 +2,7 @@ use crate::career_mmr::input::{
     normalize_mode_family, normalize_role as normalize_input_role, stadium_final_snapshot,
     ExtractionContext, ModeFamily, TrainingCohort,
 };
+use crate::career_mmr::rating::{outcome_delta_for_expected, INITIAL_SIGMA};
 use crate::career_mmr::training_sources::{
     open_query_only, validate_training_schema, TrainingSourceSpec,
 };
@@ -21,6 +22,7 @@ pub struct TrainingRow {
     pub begin_ts: i64,
     pub role: String,
     pub mode_family: ModeFamily,
+    pub environment: TrainingEnvironment,
     pub hero_group: Option<String>,
     pub outcome_only: bool,
     pub allow_performance: bool,
@@ -28,6 +30,7 @@ pub struct TrainingRow {
     pub result: f64,
     pub expected_win_rate: f64,
     pub data_quality: f64,
+    pub base_delta: Option<f64>,
     pub final_hit: Option<f64>,
     pub kill: Option<f64>,
     pub assist: Option<f64>,
@@ -36,12 +39,28 @@ pub struct TrainingRow {
     pub healing: Option<f64>,
     pub mitigation: Option<f64>,
     pub healing_taken: Option<f64>,
+    pub available_team_healing: Option<f64>,
     pub damage_taken: Option<f64>,
     pub objective_time_sec: Option<f64>,
     pub duration_sec: f64,
     pub hero_duration_sec: Option<f64>,
     pub healing_taken_semantic: &'static str,
     pub usable_for_resource_debt: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TrainingEnvironment {
+    Ordinary,
+    Stadium,
+}
+
+impl TrainingEnvironment {
+    fn for_mode(mode: ModeFamily) -> Self {
+        match mode {
+            ModeFamily::StadiumCompetitive | ModeFamily::StadiumQuick => Self::Stadium,
+            _ => Self::Ordinary,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -258,18 +277,19 @@ pub fn build_training_projection_for_account(
 ) -> Result<TrainingProjection> {
     let mut active_events = HashMap::new();
     if table_exists(conn, "career_mmr_events")? && table_exists(conn, "mmr_model_versions")? {
-        let mut event_stmt = conn.prepare("SELECT e.match_id,e.role,e.expected_win_rate,e.data_quality FROM career_mmr_events e JOIN mmr_model_versions v ON v.version=e.model_version WHERE v.is_active=1")?;
+        let mut event_stmt = conn.prepare("SELECT e.match_id,e.role,e.expected_win_rate,e.data_quality,e.base_delta FROM career_mmr_events e JOIN mmr_model_versions v ON v.version=e.model_version WHERE v.is_active=1")?;
         for item in event_stmt.query_map([], |q| {
             Ok((
                 q.get::<_, String>(0)?,
                 q.get::<_, String>(1)?,
                 q.get::<_, f64>(2)?,
                 q.get::<_, f64>(3)?,
+                q.get::<_, f64>(4)?,
             ))
         })? {
-            let (match_id, role, expected, quality) = item?;
+            let (match_id, role, expected, quality, base_delta) = item?;
             if active_events
-                .insert((match_id, role), (expected, quality))
+                .insert((match_id, role), (expected, quality, base_delta))
                 .is_some()
             {
                 bail!("存在重复的 active MMR 基准事件");
@@ -474,23 +494,30 @@ pub fn build_training_projection_for_account(
                 .get("roleType")
                 .and_then(Value::as_str)
                 .and_then(|role| normalize_input_role(Some(role)));
-            let (role, hero, statistics, base_quality, has_performance_fields) =
-                if let Some(snapshot) = snapshot {
-                    let base_quality = snapshot.data_quality();
-                    let has_performance_fields = snapshot.has_valid_performance_fields();
-                    (
-                        snapshot.role,
-                        Some(snapshot.hero_guid),
-                        Some(snapshot.statistics),
-                        base_quality,
-                        has_performance_fields,
-                    )
-                } else if let Some(role) = fallback_role {
-                    (role, None, None, 0.35, false)
-                } else {
-                    audit.stadium_ambiguous_excluded += 1;
-                    continue;
-                };
+            let (
+                role,
+                hero,
+                statistics,
+                available_team_healing,
+                base_quality,
+                has_performance_fields,
+            ) = if let Some(snapshot) = snapshot {
+                let base_quality = snapshot.data_quality();
+                let has_performance_fields = snapshot.has_valid_performance_fields();
+                (
+                    snapshot.role,
+                    Some(snapshot.hero_guid),
+                    Some(snapshot.statistics),
+                    snapshot.available_team_healing,
+                    base_quality,
+                    has_performance_fields,
+                )
+            } else if let Some(role) = fallback_role {
+                (role, None, None, None, 0.35, false)
+            } else {
+                audit.stadium_ambiguous_excluded += 1;
+                continue;
+            };
             let training_cohort = mode_family.training_cohort();
             let stats = statistics.as_ref();
             let allow_performance = mode_family.trains_performance()
@@ -549,9 +576,22 @@ pub fn build_training_projection_for_account(
             let role_name = role.as_str();
             let expected_win_rate = active_events
                 .get(&(r.match_id.clone(), role_name.to_string()))
-                .map(|(expected, _quality)| *expected)
+                .map(|(expected, _quality, _base_delta)| *expected)
                 .unwrap_or(0.5);
             let data_quality = base_quality;
+            let base_delta = active_events
+                .get(&(r.match_id.clone(), role_name.to_string()))
+                .map(|(_, _, base_delta)| *base_delta)
+                .unwrap_or_else(|| {
+                    outcome_delta_for_expected(
+                        INITIAL_SIGMA,
+                        mode_family,
+                        1.0,
+                        data_quality,
+                        result,
+                        expected_win_rate,
+                    )
+                });
             rows.push(TrainingRow {
                 account_group: account_group.to_owned(),
                 source_match_group: source_match_group.clone(),
@@ -560,6 +600,7 @@ pub fn build_training_projection_for_account(
                 begin_ts: r.begin_ts,
                 role: role_name.into(),
                 mode_family,
+                environment: TrainingEnvironment::for_mode(mode_family),
                 hero_group: hero.as_deref().map(stable_hero_key),
                 outcome_only,
                 allow_performance,
@@ -567,6 +608,7 @@ pub fn build_training_projection_for_account(
                 result,
                 expected_win_rate,
                 data_quality,
+                base_delta: Some(base_delta),
                 final_hit: performance_stat(allow_performance, stats, "finalHit"),
                 kill: performance_stat(allow_performance, stats, "kill"),
                 assist: performance_stat(allow_performance, stats, "assist"),
@@ -575,6 +617,9 @@ pub fn build_training_projection_for_account(
                 healing: performance_stat(allow_performance, stats, "cure"),
                 mitigation: performance_stat(allow_performance, stats, "resistDamage"),
                 healing_taken: allow_resource_debt.then_some(healing_taken).flatten(),
+                available_team_healing: allow_performance
+                    .then_some(available_team_healing)
+                    .flatten(),
                 damage_taken: performance_stat(allow_performance, stats, "damageTaken"),
                 objective_time_sec: performance_stat(
                     allow_performance,
@@ -704,13 +749,24 @@ pub fn build_training_projection_for_account(
                 healing_taken_semantic,
                 &mut row_audit.healing_taken_semantics,
             );
-            let (expected_win_rate, mut data_quality) = active_events
+            let (expected_win_rate, mut data_quality, event_base_delta) = active_events
                 .get(&(r.match_id.clone(), role.to_string()))
                 .copied()
-                .unwrap_or((0.5, if allow_performance { 1.0 } else { 0.55 }));
+                .map(|(expected, quality, delta)| (expected, quality, Some(delta)))
+                .unwrap_or((0.5, if allow_performance { 1.0 } else { 0.55 }, None));
             if !allow_performance {
                 data_quality = data_quality.min(0.55);
             }
+            let base_delta = event_base_delta.unwrap_or_else(|| {
+                outcome_delta_for_expected(
+                    INITIAL_SIGMA,
+                    mode_family,
+                    1.0,
+                    data_quality,
+                    result,
+                    expected_win_rate,
+                )
+            });
             rows.push(TrainingRow {
                 account_group: account_group.to_owned(),
                 source_match_group: source_match_group.clone(),
@@ -719,6 +775,7 @@ pub fn build_training_projection_for_account(
                 begin_ts: r.begin_ts,
                 role: role.into(),
                 mode_family,
+                environment: TrainingEnvironment::for_mode(mode_family),
                 hero_group: hero_duration_sec.map(|_| stable_hero_key(hero)),
                 outcome_only: !allow_performance,
                 allow_performance,
@@ -726,6 +783,7 @@ pub fn build_training_projection_for_account(
                 result,
                 expected_win_rate,
                 data_quality,
+                base_delta: Some(base_delta),
                 final_hit: performance_stat(allow_performance, stats, STAT_FINAL_HIT),
                 kill: performance_stat(allow_performance, stats, STAT_KILL),
                 assist: performance_stat(allow_performance, stats, STAT_ASSIST),
@@ -741,6 +799,7 @@ pub fn build_training_projection_for_account(
                     .flatten(),
                 mitigation: None,
                 healing_taken: allow_resource_debt.then_some(healing_taken).flatten(),
+                available_team_healing: None,
                 damage_taken: (allow_performance && segment_count == 1)
                     .then_some(damage_taken)
                     .flatten(),

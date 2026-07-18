@@ -86,6 +86,7 @@ pub(crate) struct StadiumFinalSnapshot {
     pub role: Role,
     pub hero_guid: String,
     pub statistics: Value,
+    pub available_team_healing: Option<f64>,
 }
 
 impl StadiumFinalSnapshot {
@@ -401,17 +402,34 @@ pub(crate) fn stadium_final_snapshot(
     current_player_key: &str,
     context: &ExtractionContext,
 ) -> Option<StadiumFinalSnapshot> {
-    let player = current_player_row(
-        last_structurally_valid_stadium_round(rounds)?,
-        current_player_key,
-    )?;
+    let round = last_structurally_valid_stadium_round(rounds)?;
+    let player = current_player_row(round, current_player_key)?;
     let hero_guid = scalar_text(player.get("heroGuid"))?;
     let role = context.hero_roles.get(&hero_guid).copied()?;
     Some(StadiumFinalSnapshot {
         role,
         hero_guid,
         statistics: stadium_performance_features(player),
+        available_team_healing: available_team_healing(round, current_player_key),
     })
+}
+
+fn available_team_healing(round: &Value, current_player_key: &str) -> Option<f64> {
+    let team = ["teammateList", "enemyList"]
+        .into_iter()
+        .filter_map(|key| round.get(key).and_then(Value::as_array))
+        .find(|players| {
+            players.iter().any(|player| {
+                scalar_text(player.get("bnetId")).as_deref() == Some(current_player_key)
+            })
+        })?;
+    let values = team
+        .iter()
+        .filter(|player| scalar_text(player.get("bnetId")).as_deref() != Some(current_player_key))
+        .filter_map(|player| player.get("cure").and_then(json_number))
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.into_iter().sum())
 }
 
 fn structurally_valid_stadium_round(round: &Value) -> bool {

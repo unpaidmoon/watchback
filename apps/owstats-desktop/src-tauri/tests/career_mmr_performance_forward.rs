@@ -2,8 +2,10 @@ use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     performance::{BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        build_forward_folds, metrics, role_vector, HealingTakenStrategy, ModelVariant, Role,
+        build_forward_folds, metrics, role_vector, role_vector_with_multiplier,
+        HealingTakenStrategy, ModelVariant, Role,
     },
+    training::TrainingEnvironment,
 };
 use std::collections::BTreeMap;
 
@@ -36,6 +38,7 @@ fn row(group: &str, ts: i64, _role: Role, value: f64) -> MatrixRow {
         standardized: features,
         baselines: BTreeMap::<_, BaselineLevel>::new(),
         healing_taken_derived: Some(value.abs()),
+        damage_baseline_median_per_ten: Some(100.0),
     }
 }
 
@@ -110,10 +113,11 @@ fn direct_exposure_is_fixed_scaled_and_clamped_without_training_statistics() {
 }
 
 #[test]
-fn resource_debt_falls_toward_zero_only_with_positive_conversion() {
+fn role_vector_consumes_fold_local_resource_debt_without_recomputing_it() {
     let mut low = row("low", 1, Role::Tank, 0.0);
     low.healing_taken_derived = Some(2.0);
     let mut high = low.clone();
+    high.healing_taken_derived = Some(0.0);
     high.standardized.final_hit = Some(3.0);
     high.standardized.non_final_eliminations = Some(3.0);
     high.standardized.assist = Some(3.0);
@@ -133,6 +137,45 @@ fn resource_debt_falls_toward_zero_only_with_positive_conversion() {
     );
     assert_eq!(low_v.values[low_v.debt_index.unwrap()], 2.0);
     assert_eq!(high_v.values[high_v.debt_index.unwrap()], 0.0);
+}
+
+#[test]
+fn damage_conversion_uses_selected_final_multiplier_and_penalizes_empty_volume() {
+    let mut source = row("damage-conversion", 1, Role::Damage, 1.0);
+    source.per_ten.final_hit = Some(10.0);
+    source.per_ten.non_final_eliminations = Some(5.0);
+    source.per_ten.damage = Some(1000.0);
+    source.damage_baseline_median_per_ten = Some(2000.0);
+    let base = role_vector_with_multiplier(
+        &source,
+        Role::Damage,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+        1.0,
+    );
+    let boosted = role_vector_with_multiplier(
+        &source,
+        Role::Damage,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+        2.0,
+    );
+    let slot = base
+        .names
+        .iter()
+        .position(|name| *name == "damage_conversion")
+        .unwrap();
+    assert!(boosted.values[slot] > base.values[slot]);
+    let mut raw_damage_only = source.clone();
+    raw_damage_only.per_ten.damage = Some(10_000.0);
+    let raw = role_vector_with_multiplier(
+        &raw_damage_only,
+        Role::Damage,
+        ModelVariant::RoleFull,
+        HealingTakenStrategy::None,
+        1.0,
+    );
+    assert!(raw.values[slot] < base.values[slot]);
 }
 
 #[test]
@@ -167,6 +210,7 @@ fn all_role_strategy_combinations_are_preliminary_and_inactive() {
             begin_ts: i,
             role: role.into(),
             mode_family: ModeFamily::RoleCompetitive,
+            environment: TrainingEnvironment::Ordinary,
             hero_group: Some(format!("hero-{role}")),
             outcome_only: false,
             allow_performance: true,
@@ -174,6 +218,7 @@ fn all_role_strategy_combinations_are_preliminary_and_inactive() {
             result: if i % 2 == 0 { 1.0 } else { 0.0 },
             expected_win_rate: 0.5,
             data_quality: 1.0,
+            base_delta: Some(10.0),
             final_hit: Some((i % 5 + 1) as f64),
             kill: Some((i % 7 + 3) as f64),
             assist: Some((i % 4 + 1) as f64),
@@ -182,6 +227,7 @@ fn all_role_strategy_combinations_are_preliminary_and_inactive() {
             healing: Some((i % 8 + 1) as f64 * 100.0),
             mitigation: Some((i % 6 + 1) as f64 * 100.0),
             healing_taken: Some((i % 10 + 1) as f64 * 100.0),
+            available_team_healing: Some((i % 8 + 2) as f64 * 100.0),
             damage_taken: Some((i % 11 + 1) as f64 * 100.0),
             objective_time_sec: Some((i % 6 + 1) as f64),
             duration_sec: 600.0,
@@ -244,6 +290,7 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
         begin_ts: i,
         role: role.into(),
         mode_family: ModeFamily::RoleCompetitive,
+        environment: TrainingEnvironment::Ordinary,
         hero_group: Some(format!("private-hero-{}", i % 4)),
         outcome_only: false,
         allow_performance: true,
@@ -251,6 +298,7 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
         result: if i % 2 == 0 { 1.0 } else { 0.0 },
         expected_win_rate: 0.5,
         data_quality: 1.0,
+        base_delta: Some(10.0),
         final_hit: Some((i % 5 + 1) as f64),
         kill: Some((i % 7 + 3) as f64),
         assist: Some((i % 4 + 1) as f64),
@@ -259,6 +307,7 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
         healing: Some((i % 8 + 1) as f64 * 100.0),
         mitigation: Some((i % 6 + 1) as f64 * 100.0),
         healing_taken: Some((i % 10 + 1) as f64 * 100.0),
+        available_team_healing: Some((i % 8 + 2) as f64 * 100.0),
         damage_taken: Some((i % 11 + 1) as f64 * 100.0),
         objective_time_sec: Some((i % 6 + 1) as f64),
         duration_sec: 600.0,
@@ -309,6 +358,7 @@ fn bootstrap_cluster_clones_remain_distinct_and_empty_loo_groups_are_skipped() {
         begin_ts: 1,
         role: "tank".into(),
         mode_family: ModeFamily::RoleCompetitive,
+        environment: TrainingEnvironment::Ordinary,
         hero_group: Some("hero".into()),
         outcome_only: false,
         allow_performance: true,
@@ -316,6 +366,7 @@ fn bootstrap_cluster_clones_remain_distinct_and_empty_loo_groups_are_skipped() {
         result: 1.0,
         expected_win_rate: 0.5,
         data_quality: 1.0,
+        base_delta: Some(10.0),
         final_hit: Some(1.0),
         kill: Some(2.0),
         assist: Some(1.0),
@@ -324,6 +375,7 @@ fn bootstrap_cluster_clones_remain_distinct_and_empty_loo_groups_are_skipped() {
         healing: Some(1.0),
         mitigation: Some(1.0),
         healing_taken: Some(1.0),
+        available_team_healing: Some(2.0),
         damage_taken: Some(1.0),
         objective_time_sec: Some(1.0),
         duration_sec: 600.0,

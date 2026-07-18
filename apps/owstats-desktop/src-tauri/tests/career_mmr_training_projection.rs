@@ -138,7 +138,10 @@ fn stadium_competitive_projects_only_the_final_snapshot() -> Result<()> {
             {
                 "roundIndex": 2,
                 "startTime": 200,
-                "teammateList": [{"bnetId":"current-local","heroGuid":"support-hero","finalHit":7}],
+                "teammateList": [
+                    {"bnetId":"current-local","heroGuid":"support-hero","finalHit":7,"cure":500},
+                    {"bnetId":"ally-local","heroGuid":"support-hero","cure":3200}
+                ],
                 "enemyList": []
             }
         ]),
@@ -159,6 +162,7 @@ fn stadium_competitive_projects_only_the_final_snapshot() -> Result<()> {
     assert_eq!(row.final_hit, Some(7.0));
     assert_ne!(row.final_hit, Some(99.0));
     assert_eq!(row.duration_sec, 600.0);
+    assert_eq!(row.available_team_healing, Some(3200.0));
     assert_eq!(row.hero_duration_sec, Some(600.0));
     assert!(!row.outcome_only);
     assert!(row.allow_performance);
@@ -494,10 +498,9 @@ fn expected_rate_comes_only_from_active_model() -> Result<()> {
         )?;
         conn.execute("INSERT INTO career_mmr_events VALUES(?1,'private-match','damage',22,100,'role_competitive',1,1,?2,.8,0,2500,200,1,1,2501,199,.8,'hash','now')", params![version,expected])?;
     }
-    assert_eq!(
-        build_training_projection(&conn)?.rows[0].expected_win_rate,
-        0.4
-    );
+    let row = build_training_projection(&conn)?.rows.remove(0);
+    assert_eq!(row.expected_win_rate, 0.4);
+    assert_eq!(row.base_delta, Some(1.0));
     Ok(())
 }
 
@@ -568,6 +571,20 @@ fn audit_projection_supports_pre_mmr_databases() -> Result<()> {
     let projection = build_training_projection(&conn)?;
     assert_eq!(projection.rows.len(), 1);
     assert_eq!(projection.rows[0].expected_win_rate, 0.5);
+    let row = &projection.rows[0];
+    assert_eq!(
+        row.base_delta,
+        Some(
+            owstats_desktop_lib::career_mmr::rating::outcome_delta_for_expected(
+                owstats_desktop_lib::career_mmr::rating::INITIAL_SIGMA,
+                row.mode_family,
+                1.0,
+                row.data_quality,
+                row.result,
+                row.expected_win_rate,
+            )
+        )
+    );
     Ok(())
 }
 

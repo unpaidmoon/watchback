@@ -1,7 +1,7 @@
 use owstats_desktop_lib::career_mmr::{
     evaluation::{evaluate_outcome_baselines, ECE_BINS, MIN_REPORT_SAMPLES},
     input::ModeFamily,
-    training::TrainingRow,
+    training::{TrainingEnvironment, TrainingRow},
 };
 
 fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> TrainingRow {
@@ -13,6 +13,14 @@ fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> Tra
         begin_ts: ts,
         role: role.into(),
         mode_family: mode,
+        environment: if matches!(
+            mode,
+            ModeFamily::StadiumCompetitive | ModeFamily::StadiumQuick
+        ) {
+            TrainingEnvironment::Stadium
+        } else {
+            TrainingEnvironment::Ordinary
+        },
         hero_group: None,
         outcome_only: true,
         allow_performance: false,
@@ -20,6 +28,7 @@ fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> Tra
         result,
         expected_win_rate: expected,
         data_quality: 0.55,
+        base_delta: Some(10.0),
         final_hit: None,
         kill: None,
         assist: None,
@@ -28,6 +37,7 @@ fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> Tra
         healing: None,
         mitigation: None,
         healing_taken: None,
+        available_team_healing: None,
         damage_taken: None,
         objective_time_sec: None,
         duration_sec: 600.0,
