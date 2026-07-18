@@ -2,10 +2,11 @@ use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     performance::{build_feature_matrix, BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        bounded_performance_adjustment, bounded_single_feature_share, build_forward_folds,
-        evaluate_cell_strategy, evaluate_forward, evaluate_nested_cell, evaluate_strategy,
-        fit_formal_validation_adjustments, max_feature_contribution_share, metrics, missing_values,
-        role_vector, role_vector_with_multiplier, HealingTakenStrategy, ModelVariant, Role,
+        bounded_feature_attribution, bounded_performance_adjustment, bounded_single_feature_share,
+        build_forward_folds, evaluate_cell_strategy, evaluate_forward, evaluate_nested_cell,
+        evaluate_strategy, fit_formal_validation_adjustments, max_feature_contribution_share,
+        metrics, missing_values, role_vector, role_vector_with_multiplier, HealingTakenStrategy,
+        ModelVariant, Role,
     },
     training::TrainingEnvironment,
 };
@@ -569,6 +570,52 @@ fn fitted_counterfactuals_flow_through_requested_effect_and_the_formal_limiter()
 }
 
 #[test]
+fn validation_extremes_cannot_change_the_train_only_calibration_scale() {
+    let train = (0..80).map(|i| training("damage", i)).collect::<Vec<_>>();
+    let anchor = training("damage", 1_000);
+    let baseline = fit_formal_validation_adjustments(
+        &train,
+        std::slice::from_ref(&anchor),
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+        HealingTakenStrategy::None,
+    );
+    let mut extreme = anchor.clone();
+    extreme.match_group = "validation-only-extreme".into();
+    extreme.damage = Some(1.0e15);
+    extreme.final_hit = Some(1.0e12);
+    let together = fit_formal_validation_adjustments(
+        &train,
+        &[anchor, extreme],
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+        HealingTakenStrategy::None,
+    );
+    assert_eq!(baseline[0], together[0]);
+}
+
+#[test]
+fn support_healing_counterfactual_saturates_through_fit_scale_and_limiter() {
+    let train = (0..80).map(|i| training("support", i)).collect::<Vec<_>>();
+    let anchor = training("support", 1_000);
+    let mut high = anchor.clone();
+    high.match_group = "support-healing-high".into();
+    high.healing = Some(1.0e9);
+    let mut higher = high.clone();
+    higher.match_group = "support-healing-higher".into();
+    higher.healing = Some(1.0e15);
+    let adjustments = fit_formal_validation_adjustments(
+        &train,
+        &[anchor, high, higher],
+        Role::Support,
+        ModeFamily::RoleCompetitive,
+        HealingTakenStrategy::None,
+    );
+    assert_eq!(adjustments.len(), 3);
+    assert!(adjustments[2] <= adjustments[1] + 1e-12);
+}
+
+#[test]
 fn outcome_only_extremes_cannot_change_any_forward_result() {
     let base = (0..80).map(|i| training("damage", i)).collect::<Vec<_>>();
     let expected = evaluate_forward(&base);
@@ -967,7 +1014,7 @@ fn formal_limiter_is_the_reusable_task8_contract() {
 }
 
 #[test]
-fn p95_feature_share_uses_base_delta_and_formal_total_adjustment() {
+fn p95_feature_share_is_additive_after_the_single_formal_limiter() {
     let contributions = [0.8, 0.4];
     let raw_logit_ratio = 0.8 / (0.8 + 0.4);
     let generous = bounded_single_feature_share(
@@ -983,17 +1030,26 @@ fn p95_feature_share_uses_base_delta_and_formal_total_adjustment() {
         ModeFamily::RoleCompetitive,
     );
     assert!((generous - 0.8 / 1.2).abs() < 1e-12);
-    assert_eq!(constrained, 1.0);
-    assert_ne!(constrained, raw_logit_ratio);
-    assert_eq!(
-        bounded_single_feature_share(
-            10.0,
-            &[0.5, -0.5],
-            Role::Damage,
-            ModeFamily::RoleCompetitive,
-        ),
-        1.0
+    assert!((constrained - 2.0 / 3.0).abs() < 1e-12);
+    assert_eq!(constrained, raw_logit_ratio);
+    let cancellation = bounded_feature_attribution(
+        10.0,
+        &[0.5, -0.5],
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
     );
+    assert_eq!(cancellation.final_adjustment, 0.0);
+    assert_eq!(cancellation.gross_absolute_exposure, 1.0);
+    assert_eq!(cancellation.shares, vec![0.5, 0.5]);
+    assert_eq!(cancellation.allocated_absolute_mmr, vec![0.0, 0.0]);
+    let capped = bounded_feature_attribution(
+        4.0,
+        &contributions,
+        Role::Damage,
+        ModeFamily::RoleCompetitive,
+    );
+    assert_eq!(capped.final_adjustment, 0.4);
+    assert!((capped.allocated_absolute_mmr.iter().sum::<f64>() - 0.4).abs() < 1e-12);
     assert_eq!(
         bounded_single_feature_share(10.0, &[0.0, 0.0], Role::Damage, ModeFamily::RoleCompetitive,),
         0.0

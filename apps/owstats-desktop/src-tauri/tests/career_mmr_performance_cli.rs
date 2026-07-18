@@ -1,5 +1,5 @@
 use owstats_desktop_lib::career_mmr::performance_stability::{
-    aggregate_progress_schedule, TrainingStage,
+    aggregate_progress_schedule, aggregate_progress_schedule_with_outcome, TrainingStage,
 };
 use std::process::Command;
 
@@ -32,7 +32,7 @@ fn staged_progress_uses_exact_aggregate_work_and_safe_eta_batches() {
     ] {
         assert_eq!(stage.bootstrap_iterations(), iterations);
         let events = aggregate_progress_schedule(stage, 137);
-        let total = iterations * 3 * 5;
+        let total = iterations * 3 * 5 + 15;
         assert_eq!(events.first().unwrap().completed, 0);
         assert_eq!(events.first().unwrap().total, total);
         assert_eq!(events.last().unwrap().completed, total);
@@ -50,6 +50,10 @@ fn staged_progress_uses_exact_aggregate_work_and_safe_eta_batches() {
             assert!(!json.contains(forbidden));
         }
     }
+
+    let failed = aggregate_progress_schedule_with_outcome(TrainingStage::Screen100, 137, 0, false);
+    assert!(failed.last().unwrap().completed < failed.last().unwrap().total);
+    assert_ne!(failed.last().unwrap().eta_ms, Some(0));
 }
 
 #[test]

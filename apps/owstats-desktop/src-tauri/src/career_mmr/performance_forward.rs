@@ -302,12 +302,48 @@ pub struct StrategyReport {
     pub metrics: Option<MetricReport>,
     pub baseline_metrics: Option<MetricReport>,
     pub full_refit_weights: BTreeMap<String, f64>,
+    pub calibration_scale: CalibrationScale,
     pub average_adjustment: f64,
     pub p95_single_feature_share: f64,
     pub upper_cap_rate: f64,
     pub lower_cap_rate: f64,
     pub missing_values: usize,
     pub rejected_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct CalibrationScale {
+    pub p95_abs_effect: f64,
+}
+
+impl CalibrationScale {
+    pub fn fit(effects: impl IntoIterator<Item = f64>) -> Self {
+        let mut absolute = effects
+            .into_iter()
+            .filter(|effect| effect.is_finite())
+            .map(f64::abs)
+            .collect::<Vec<_>>();
+        absolute.sort_by(f64::total_cmp);
+        let p95_abs_effect = absolute
+            .get(((absolute.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+            .copied()
+            .unwrap_or(1.0)
+            .max(f64::EPSILON);
+        Self { p95_abs_effect }
+    }
+
+    pub fn apply(self, effect: f64) -> f64 {
+        effect / self.p95_abs_effect
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundedFeatureAttribution {
+    pub final_adjustment: f64,
+    pub gross_absolute_exposure: f64,
+    pub allocated_absolute_mmr: Vec<f64>,
+    pub shares: Vec<f64>,
+    pub max_share: f64,
 }
 
 /// Single formal limiter used by validation now and by shadow replay in Task 8.
@@ -352,23 +388,40 @@ pub fn bounded_single_feature_share(
     role: Role,
     mode: ModeFamily,
 ) -> f64 {
+    bounded_feature_attribution(base_delta, normalized_contributions, role, mode).max_share
+}
+
+pub fn bounded_feature_attribution(
+    base_delta: f64,
+    normalized_contributions: &[f64],
+    role: Role,
+    mode: ModeFamily,
+) -> BoundedFeatureAttribution {
     let requested_total = normalized_contributions.iter().sum::<f64>();
-    let formal_total =
-        bounded_performance_adjustment(base_delta, requested_total, role, mode).abs();
-    let max_feature = normalized_contributions
+    let final_adjustment = bounded_performance_adjustment(base_delta, requested_total, role, mode);
+    let gross_absolute_exposure = normalized_contributions
         .iter()
-        .map(|contribution| {
-            bounded_performance_adjustment(base_delta, *contribution, role, mode).abs()
-        })
-        .fold(0.0, f64::max);
-    if formal_total <= f64::EPSILON {
-        if max_feature <= f64::EPSILON {
-            0.0
-        } else {
-            1.0
-        }
+        .map(|v| v.abs())
+        .sum::<f64>();
+    let shares = if gross_absolute_exposure <= f64::EPSILON {
+        vec![0.0; normalized_contributions.len()]
     } else {
-        max_feature / formal_total
+        normalized_contributions
+            .iter()
+            .map(|value| value.abs() / gross_absolute_exposure)
+            .collect::<Vec<_>>()
+    };
+    let allocated_absolute_mmr = shares
+        .iter()
+        .map(|share| share * final_adjustment.abs())
+        .collect::<Vec<_>>();
+    let max_share = shares.iter().copied().fold(0.0, f64::max);
+    BoundedFeatureAttribution {
+        final_adjustment,
+        gross_absolute_exposure,
+        allocated_absolute_mmr,
+        shares,
+        max_share,
     }
 }
 
@@ -393,6 +446,38 @@ pub(crate) fn fit_hierarchical_model_regularized(
             ..FitConfig::default()
         },
     )
+}
+
+fn model_contributions(
+    model: &HierarchicalModel,
+    row: &MatrixRow,
+    role: Role,
+    variant: ModelVariant,
+    strategy: MatrixStrategy,
+    multiplier: f64,
+) -> Vec<f64> {
+    let effective = model.effective_weights(row.mode_family.training_cohort());
+    let vector = role_vector_with_multiplier(row, role, variant, strategy, multiplier);
+    effective
+        .iter()
+        .zip(vector.values)
+        .map(|(weight, value)| weight * value)
+        .collect()
+}
+
+fn fit_calibration_scale(
+    model: &HierarchicalModel,
+    rows: &[MatrixRow],
+    role: Role,
+    variant: ModelVariant,
+    strategy: MatrixStrategy,
+    multiplier: f64,
+) -> CalibrationScale {
+    CalibrationScale::fit(rows.iter().map(|row| {
+        model_contributions(model, row, role, variant, strategy, multiplier)
+            .iter()
+            .sum()
+    }))
 }
 
 #[derive(Clone, Copy)]
@@ -631,6 +716,19 @@ pub fn evaluate_strategy(
                 .map(|model| predict_probability(model, r) - r.expected_win_rate)
         })
         .collect::<Vec<_>>();
+    let calibration_scale = model
+        .as_ref()
+        .map(|model| {
+            fit_calibration_scale(
+                model,
+                &rows,
+                role,
+                selected.variant,
+                strategy,
+                selected.multiplier,
+            )
+        })
+        .unwrap_or_else(|| CalibrationScale::fit([]));
     let mut rejected_reasons = Vec::new();
     if improved < 4 {
         rejected_reasons.push("improved_folds_below_4".into());
@@ -661,6 +759,7 @@ pub fn evaluate_strategy(
         metrics: metrics(&all_a, &all_p),
         baseline_metrics: metrics(&all_a, &all_base),
         full_refit_weights,
+        calibration_scale,
         average_adjustment: if adjustments.is_empty() {
             0.0
         } else {
@@ -839,6 +938,14 @@ pub fn fit_formal_validation_adjustments(
     ) else {
         return Vec::new();
     };
+    let calibration = fit_calibration_scale(
+        &model,
+        &train,
+        role,
+        selected.variant,
+        strategy,
+        selected.multiplier,
+    );
     let raw = validation
         .iter()
         .map(|row| (row.match_group.as_str(), row))
@@ -847,36 +954,23 @@ pub fn fit_formal_validation_adjustments(
         .iter()
         .filter_map(|row| {
             let base_delta = raw.get(row.match_group.as_str())?.base_delta?;
-            let effective = model.effective_weights(row.mode_family.training_cohort());
-            let vector = role_vector_with_multiplier(
+            let effect = model_contributions(
+                &model,
                 row,
                 role,
                 selected.variant,
                 strategy,
                 selected.multiplier,
-            );
-            let effect = effective
-                .iter()
-                .zip(vector.values)
-                .map(|(weight, value)| weight * value)
-                .sum::<f64>();
-            Some((base_delta, effect, row.mode_family))
+            )
+            .iter()
+            .sum::<f64>();
+            Some((base_delta, calibration.apply(effect), row.mode_family))
         })
         .collect::<Vec<_>>();
-    let mut absolute = effects
-        .iter()
-        .map(|sample| sample.1.abs())
-        .collect::<Vec<_>>();
-    absolute.sort_by(f64::total_cmp);
-    let p95 = absolute
-        .get(((absolute.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
-        .copied()
-        .unwrap_or(1.0)
-        .max(f64::EPSILON);
     effects
         .into_iter()
         .map(|(base_delta, effect, mode)| {
-            bounded_performance_adjustment(base_delta, effect / p95, role, mode)
+            bounded_performance_adjustment(base_delta, effect, role, mode)
         })
         .collect()
 }
@@ -1181,7 +1275,7 @@ fn evaluate_raw_strategy(
     let mut all_p = Vec::new();
     let mut all_base = Vec::new();
     let mut missing = 0;
-    let mut diagnostic_effects = Vec::new();
+    let mut diagnostic_effects: Vec<(f64, f64, ModeFamily, Vec<f64>)> = Vec::new();
     for (number, fold) in folds.iter().enumerate() {
         let train = fold
             .training
@@ -1224,6 +1318,14 @@ fn evaluate_raw_strategy(
         ) else {
             continue;
         };
+        let calibration = fit_calibration_scale(
+            &model,
+            &train_rows,
+            role,
+            selected.variant,
+            strategy,
+            selected.multiplier,
+        );
         let a = valid_rows.iter().map(|r| r.result).collect::<Vec<_>>();
         let p = valid_rows
             .iter()
@@ -1236,19 +1338,17 @@ fn evaluate_raw_strategy(
         diagnostic_effects.extend(valid_rows.iter().filter_map(|row| {
             let raw = raw_validation.get(row.match_group.as_str())?;
             let base_delta = raw.base_delta?;
-            let effective = model.effective_weights(row.mode_family.training_cohort());
-            let vector = role_vector_with_multiplier(
+            let contributions = model_contributions(
+                &model,
                 row,
                 role,
                 selected.variant,
                 strategy,
                 selected.multiplier,
-            );
-            let contributions = effective
-                .iter()
-                .zip(vector.values)
-                .map(|(weight, value)| weight * value)
-                .collect::<Vec<_>>();
+            )
+            .into_iter()
+            .map(|contribution| calibration.apply(contribution))
+            .collect::<Vec<_>>();
             let effect = contributions.iter().sum::<f64>();
             Some((base_delta, effect, row.mode_family, contributions))
         }));
@@ -1309,6 +1409,19 @@ fn evaluate_raw_strategy(
         selected.lambda_core,
         selected.lambda_cohort,
     );
+    let calibration_scale = model
+        .as_ref()
+        .map(|model| {
+            fit_calibration_scale(
+                model,
+                &full_rows,
+                role,
+                selected.variant,
+                strategy,
+                selected.multiplier,
+            )
+        })
+        .unwrap_or_else(|| CalibrationScale::fit([]));
     let names = full_rows
         .first()
         .map(|r| role_vector(r, role, selected.variant, strategy).names)
@@ -1344,30 +1457,14 @@ fn evaluate_raw_strategy(
     {
         rejected.push("final_weight_not_strictly_above_nonfinal".into())
     }
-    let mut absolute_effects = diagnostic_effects
-        .iter()
-        .map(|sample| sample.1.abs())
-        .collect::<Vec<_>>();
-    absolute_effects.sort_by(f64::total_cmp);
-    let p95_effect = absolute_effects
-        .get(((absolute_effects.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
-        .copied()
-        .unwrap_or(1.0)
-        .max(f64::EPSILON);
     let adjustment_samples = diagnostic_effects
         .iter()
-        .map(|(base, effect, mode, _)| {
-            formal_diagnostic_adjustment(*base, effect / p95_effect, role, *mode)
-        })
+        .map(|(base, effect, mode, _)| formal_diagnostic_adjustment(*base, *effect, role, *mode))
         .collect::<Vec<_>>();
     let mut bounded_feature_shares = diagnostic_effects
         .iter()
         .map(|(base, _, mode, contributions)| {
-            let normalized = contributions
-                .iter()
-                .map(|contribution| contribution / p95_effect)
-                .collect::<Vec<_>>();
-            bounded_single_feature_share(*base, &normalized, role, *mode)
+            bounded_single_feature_share(*base, contributions, role, *mode)
         })
         .collect::<Vec<_>>();
     bounded_feature_shares.sort_by(f64::total_cmp);
@@ -1392,6 +1489,7 @@ fn evaluate_raw_strategy(
         metrics: metrics(&all_a, &all_p),
         baseline_metrics: metrics(&all_a, &all_base),
         full_refit_weights,
+        calibration_scale,
         average_adjustment: if adjustment_samples.is_empty() {
             0.0
         } else {

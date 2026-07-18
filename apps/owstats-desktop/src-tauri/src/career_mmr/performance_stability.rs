@@ -3,8 +3,8 @@ use super::{
     performance::{build_feature_matrix, eligible_performance_rows, HealingTakenStrategy},
     performance_forward::{
         evaluate_cell_strategy, evaluate_nested_cell, evaluate_nested_cell_shadow,
-        fit_hierarchical_model_regularized, metrics, select_candidate_detailed, CandidateSelection,
-        MetricReport, ModelVariant, NestedCellReport, Role, StrategyReport,
+        fit_hierarchical_model_regularized, metrics, select_candidate_detailed, CalibrationScale,
+        CandidateSelection, MetricReport, ModelVariant, NestedCellReport, Role, StrategyReport,
     },
     performance_model::{predict_probability, HierarchicalModel},
     training::TrainingRow,
@@ -91,21 +91,42 @@ fn aggregate_progress_event(
 }
 
 pub fn aggregate_progress_schedule(stage: TrainingStage, batch_size: usize) -> Vec<ProgressEvent> {
-    let total = stage
+    aggregate_progress_schedule_with_outcome(stage, batch_size, 15, true)
+}
+
+pub fn aggregate_progress_schedule_with_outcome(
+    stage: TrainingStage,
+    batch_size: usize,
+    nested_cells_completed: usize,
+    success: bool,
+) -> Vec<ProgressEvent> {
+    let bootstrap_total = stage
         .bootstrap_iterations()
         .saturating_mul(3)
         .saturating_mul(5);
+    let total = bootstrap_total.saturating_add(15);
     let batch_size = batch_size.max(1);
     let mut events = vec![aggregate_progress_event(stage, 0, total, 0)];
     let mut completed = 0usize;
-    while completed < total {
-        completed = completed.saturating_add(batch_size).min(total);
+    while completed < bootstrap_total {
+        completed = completed.saturating_add(batch_size).min(bootstrap_total);
         events.push(aggregate_progress_event(
             stage,
             completed,
             total,
             completed as u128 * 2,
         ));
+    }
+    if success {
+        for cell in 1..=nested_cells_completed.min(15) {
+            let completed = bootstrap_total + cell;
+            events.push(aggregate_progress_event(
+                stage,
+                completed,
+                total,
+                completed as u128 * 2,
+            ));
+        }
     }
     events
 }
@@ -310,6 +331,7 @@ impl StabilityReport {
                 ece: 0.1,
             }),
             full_refit_weights: BTreeMap::new(),
+            calibration_scale: CalibrationScale::fit([]),
             average_adjustment: 0.0,
             p95_single_feature_share: 0.0,
             upper_cap_rate: 0.0,
@@ -497,10 +519,11 @@ pub fn evaluate_stability_with_progress(
         101..=1_000 => TrainingStage::Candidate1000,
         _ => TrainingStage::Final10000,
     };
-    let total = config
+    let bootstrap_total = config
         .bootstrap_iterations
         .saturating_mul(3)
         .saturating_mul(5);
+    let total = bootstrap_total.saturating_add(15);
     let started = std::time::Instant::now();
     on_progress(aggregate_progress_event(stage, 0, total, 0));
     let source = eligible_performance_rows(source);
@@ -597,7 +620,7 @@ pub fn evaluate_stability_with_progress(
         let mut emitted_completed = 0usize;
         while let Ok(batch) = progress_rx.recv() {
             raw_completed = raw_completed.saturating_add(batch);
-            let completed = raw_completed.min(total);
+            let completed = raw_completed.min(bootstrap_total);
             if completed > emitted_completed {
                 emitted_completed = completed;
                 let elapsed_ms = started.elapsed().as_millis();
@@ -727,12 +750,16 @@ pub fn evaluate_stability_with_progress(
         cells,
         worker_errors,
     };
-    on_progress(aggregate_progress_event(
-        stage,
-        total,
-        total,
-        started.elapsed().as_millis(),
-    ));
+    if evaluation.worker_errors.is_empty() && evaluation.cells.len() == 15 {
+        for cell in 1..=15 {
+            on_progress(aggregate_progress_event(
+                stage,
+                bootstrap_total + cell,
+                total,
+                started.elapsed().as_millis(),
+            ));
+        }
+    }
     evaluation
 }
 
@@ -935,10 +962,15 @@ fn account_loo_split(
     held: &str,
     mode: ModeFamily,
 ) -> (Vec<TrainingRow>, Vec<TrainingRow>) {
+    let held_matches = source
+        .iter()
+        .filter(|row| row.account_group == held)
+        .map(|row| row.match_group.as_str())
+        .collect::<BTreeSet<_>>();
     (
         source
             .iter()
-            .filter(|row| row.account_group != held)
+            .filter(|row| !held_matches.contains(row.match_group.as_str()))
             .cloned()
             .collect(),
         source
@@ -1532,6 +1564,29 @@ mod hierarchical_bootstrap_tests {
         assert!(account_valid
             .iter()
             .all(|row| row.mode_family == ModeFamily::RoleCompetitive));
+    }
+
+    #[test]
+    fn account_loo_excludes_complete_matches_seen_by_the_held_account() {
+        let mut held = row(2_000, ModeFamily::RoleCompetitive);
+        held.account_group = "held-account".into();
+        held.match_group = "shared-match".into();
+        let mut duplicate = row(2_001, ModeFamily::RoleQuick);
+        duplicate.account_group = "other-account".into();
+        duplicate.match_group = "shared-match".into();
+        duplicate.final_hit = Some(1.0e15);
+        let mut ordinary = row(2_002, ModeFamily::RoleQuick);
+        ordinary.account_group = "other-account".into();
+        ordinary.match_group = "ordinary-match".into();
+        let (train, valid) = account_loo_split(
+            &[held, duplicate, ordinary],
+            "held-account",
+            ModeFamily::RoleCompetitive,
+        );
+        assert!(train.iter().all(|row| row.match_group != "shared-match"));
+        assert_eq!(valid.len(), 1);
+        assert_eq!(valid[0].account_group, "held-account");
+        assert_eq!(valid[0].mode_family, ModeFamily::RoleCompetitive);
     }
 
     #[test]
