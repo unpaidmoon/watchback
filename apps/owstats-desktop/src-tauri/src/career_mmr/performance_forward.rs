@@ -301,19 +301,7 @@ pub struct StrategyReport {
     pub rejected_reasons: Vec<String>,
 }
 
-pub(crate) fn fit(
-    rows: &[&MatrixRow],
-    role: Role,
-    variant: ModelVariant,
-    strategy: MatrixStrategy,
-    multiplier: f64,
-) -> Vec<f64> {
-    fit_hierarchical(rows, role, variant, strategy, multiplier, 300)
-        .map(|model| model.core_weights)
-        .unwrap_or_default()
-}
-
-fn fit_hierarchical(
+pub(crate) fn fit_hierarchical_model(
     rows: &[&MatrixRow],
     role: Role,
     variant: ModelVariant,
@@ -333,24 +321,47 @@ fn fit_hierarchical(
         },
     )
 }
-pub(crate) fn predict(
-    row: &MatrixRow,
+fn select_matrix_candidate(
+    rows: &[MatrixRow],
     role: Role,
-    variant: ModelVariant,
     strategy: MatrixStrategy,
-    multiplier: f64,
-    w: &[f64],
-) -> f64 {
-    let x = role_vector_with_multiplier(row, role, variant, strategy, multiplier);
-    let expected = row.expected_win_rate.clamp(1.0e-6, 1.0 - 1.0e-6);
-    let offset = (expected / (1.0 - expected)).ln();
-    let linear = offset + w.iter().zip(x.values).map(|(a, b)| a * b).sum::<f64>();
-    if linear >= 0.0 {
-        1.0 / (1.0 + (-linear).exp())
-    } else {
-        let exp = linear.exp();
-        exp / (1.0 + exp)
+) -> (ModelVariant, f64, bool) {
+    let inner = build_forward_folds(rows, 3);
+    if inner.len() < 2 {
+        return (ModelVariant::Core, 1.25, true);
     }
+    let mut selected = (ModelVariant::Core, 1.25, false);
+    let mut best = f64::INFINITY;
+    for variant in [ModelVariant::Core, ModelVariant::RoleFull] {
+        for multiplier in MULTIPLIERS {
+            let mut loss = 0.0;
+            let mut count = 0usize;
+            let mut valid = true;
+            for fold in &inner {
+                let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
+                let Some(model) =
+                    fit_hierarchical_model(&train, role, variant, strategy, multiplier, 300)
+                else {
+                    valid = false;
+                    break;
+                };
+                for &index in &fold.validation {
+                    let error = rows[index].result - predict_probability(&model, &rows[index]);
+                    if !error.is_finite() {
+                        valid = false;
+                        break;
+                    }
+                    loss += error.powi(2);
+                    count += 1;
+                }
+            }
+            if valid && count > 0 && loss / (count as f64) < best {
+                best = loss / count as f64;
+                selected = (variant, multiplier, false);
+            }
+        }
+    }
+    selected
 }
 
 pub fn evaluate_strategy(
@@ -376,45 +387,18 @@ pub fn evaluate_strategy(
     let mut all_a = Vec::new();
     let mut all_p = Vec::new();
     let mut improved = 0;
-    let mut selected = (ModelVariant::Core, 1.0);
-    let mut best = f64::INFINITY;
-    for variant in [ModelVariant::Core, ModelVariant::RoleFull] {
-        for multiplier in MULTIPLIERS {
-            let mut score = 0.0;
-            let mut n = 0;
-            let train = rows.iter().collect::<Vec<_>>();
-            let Some(model) = fit_hierarchical(&train, role, variant, strategy, multiplier, 300)
-            else {
-                continue;
-            };
-            for row in &rows {
-                let p = predict_probability(&model, row);
-                score += (row.result - p).powi(2);
-                n += 1;
-            }
-            let proto = rows
-                .first()
-                .map(|r| role_vector(r, role, variant, strategy));
-            let identifiable = proto
-                .and_then(|p| {
-                    p.final_index.zip(p.nonfinal_index).map(|(f, n)| {
-                        model.core_weights[f] > 0.0 && model.core_weights[f] > model.core_weights[n]
-                    })
-                })
-                .unwrap_or(false);
-            if !identifiable {
-                continue;
-            }
-            if n > 0 && score / (n as f64) < best {
-                best = score / n as f64;
-                selected = (variant, multiplier)
-            }
-        }
-    }
     for (number, fold) in folds.iter().enumerate() {
         let train = fold.training.iter().map(|&i| &rows[i]).collect::<Vec<_>>();
-        let Some(model) = fit_hierarchical(&train, role, selected.0, strategy, selected.1, 300)
-        else {
+        let train_rows = train.iter().map(|row| (*row).clone()).collect::<Vec<_>>();
+        let fold_selected = select_matrix_candidate(&train_rows, role, strategy);
+        let Some(model) = fit_hierarchical_model(
+            &train,
+            role,
+            fold_selected.0,
+            strategy,
+            fold_selected.1,
+            300,
+        ) else {
             continue;
         };
         let a = fold
@@ -444,7 +428,12 @@ pub fn evaluate_strategy(
             .map(|&i| {
                 let effective = model.effective_weights(rows[i].mode_family.training_cohort());
                 max_feature_contribution_share(
-                    &rows[i], role, selected.0, strategy, selected.1, &effective,
+                    &rows[i],
+                    role,
+                    fold_selected.0,
+                    strategy,
+                    fold_selected.1,
+                    &effective,
                 ) > 0.35
             })
             .collect::<Vec<_>>()
@@ -457,12 +446,18 @@ pub fn evaluate_strategy(
             .unwrap_or(false);
         all_a.extend(&a);
         all_p.extend(&p);
-        let weights = role_vector(&rows[fold.validation[0]], role, selected.0, strategy)
-            .names
-            .into_iter()
-            .zip(model.core_weights.iter().copied())
-            .map(|(n, v)| (n.into(), v))
-            .collect();
+        let weights = role_vector_with_multiplier(
+            &rows[fold.validation[0]],
+            role,
+            fold_selected.0,
+            strategy,
+            fold_selected.1,
+        )
+        .names
+        .into_iter()
+        .zip(model.core_weights.iter().copied())
+        .map(|(n, v)| (n.into(), v))
+        .collect();
         reports.push(FoldReport {
             fold: number + 1,
             training_rows: fold.training.len(),
@@ -472,14 +467,19 @@ pub fn evaluate_strategy(
             brier_delta: delta,
             rejected_35_percent: rejected,
             weights,
-            variant: selected.0,
-            final_multiplier: selected.1,
-            inner_validation_rows: 0,
-            selection_degraded: true,
+            variant: fold_selected.0,
+            final_multiplier: fold_selected.1,
+            inner_validation_rows: build_forward_folds(&train_rows, 3)
+                .iter()
+                .map(|fold| fold.validation.len())
+                .sum(),
+            selection_degraded: fold_selected.2,
         });
     }
     let full = rows.iter().collect::<Vec<_>>();
-    let model = fit_hierarchical(&full, role, selected.0, strategy, selected.1, 300);
+    let full_selected = select_matrix_candidate(&rows, role, strategy);
+    let selected = (full_selected.0, full_selected.1);
+    let model = fit_hierarchical_model(&full, role, selected.0, strategy, selected.1, 300);
     let proto = rows
         .first()
         .map(|r| role_vector(r, role, selected.0, strategy));
@@ -693,7 +693,8 @@ fn evaluate_raw_strategy(
         }
         let selected = select_candidate(&train, role, strategy);
         let refs = train_rows.iter().collect::<Vec<_>>();
-        let Some(model) = fit_hierarchical(&refs, role, selected.0, strategy, selected.1, 300)
+        let Some(model) =
+            fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1, 300)
         else {
             continue;
         };
@@ -761,7 +762,7 @@ fn evaluate_raw_strategy(
         .unwrap_or_default();
     let selected = select_candidate(source, role, strategy);
     let refs = full_rows.iter().collect::<Vec<_>>();
-    let model = fit_hierarchical(&refs, role, selected.0, strategy, selected.1, 300);
+    let model = fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1, 300);
     let names = full_rows
         .first()
         .map(|r| role_vector(r, role, selected.0, strategy).names)
@@ -879,7 +880,7 @@ pub(crate) fn select_candidate(
                 }
                 let train = train_rows.iter().collect::<Vec<_>>();
                 let Some(model) =
-                    fit_hierarchical(&train, role, variant, strategy, multiplier, 300)
+                    fit_hierarchical_model(&train, role, variant, strategy, multiplier, 300)
                 else {
                     valid = false;
                     break;

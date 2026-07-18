@@ -2,8 +2,8 @@ use owstats_desktop_lib::career_mmr::{
     input::ModeFamily,
     performance::{BaselineLevel, FeatureValues, MatrixRow},
     performance_forward::{
-        build_forward_folds, evaluate_forward, max_feature_contribution_share, metrics,
-        missing_values, role_vector, role_vector_with_multiplier, HealingTakenStrategy,
+        build_forward_folds, evaluate_forward, evaluate_strategy, max_feature_contribution_share,
+        metrics, missing_values, role_vector, role_vector_with_multiplier, HealingTakenStrategy,
         ModelVariant, Role,
     },
     training::TrainingEnvironment,
@@ -462,6 +462,38 @@ fn outcome_only_extremes_cannot_change_any_forward_result() {
 }
 
 #[test]
+fn matrix_api_future_extreme_cannot_change_the_earliest_fold_model() {
+    let base = (0..6)
+        .map(|i| {
+            row(
+                &format!("past-{i}"),
+                i,
+                Role::Damage,
+                if i % 2 == 0 { 2.0 } else { -2.0 },
+            )
+        })
+        .collect::<Vec<_>>();
+    let before = evaluate_strategy(&base, Role::Damage, HealingTakenStrategy::None);
+    let mut with_future = base;
+    let mut extreme = row("future", 10_000, Role::Damage, 1.0e9);
+    extreme.result = 0.0;
+    with_future.push(extreme);
+    let after = evaluate_strategy(&with_future, Role::Damage, HealingTakenStrategy::None);
+    assert_eq!(before.folds.first(), after.folds.first());
+}
+
+#[test]
+fn loo_and_bootstrap_source_contains_only_the_shared_hierarchical_fit_path() {
+    let source = include_str!("../src/career_mmr/performance_stability.rs");
+    assert!(!source.contains("fit_bootstrap"));
+    assert!(!source.contains("let mut gram"));
+    assert!(!source.contains("row.result - row.expected_win_rate"));
+    assert!(source.matches("fit_hierarchical_model(").count() >= 3);
+    assert!(source.contains("predict_probability(&model"));
+    assert!(source.contains("scope: \"core\""));
+}
+
+#[test]
 fn auc_ignores_draw_rows() {
     let report = metrics(&[1.0, 0.0, 0.5], &[0.9, 0.1, 1.0]).unwrap();
     assert_eq!(report.auc, 1.0);
@@ -619,6 +651,7 @@ fn stability_gates_require_enough_loo_groups_and_every_coefficient_ci() {
         brier_delta_ci95_high: Some(-0.01),
         coefficients: vec![CoefficientStability {
             weight: "damage".into(),
+            scope: "core".into(),
             direction_stability: 0.95,
             ci95_low: -0.1,
             ci95_high: 0.2,
@@ -657,8 +690,8 @@ fn bootstrap_work_estimate_and_hundred_iteration_smoke_are_bounded() {
     };
     let estimate = bootstrap_work_estimate(60, 9, 100, StabilityConfig::default().optimizer_passes);
     assert_eq!(estimate.baseline_rebuilds, 100);
-    assert!(estimate.normal_equation_cells <= 60 * 9 * 9 * 100);
-    assert!(estimate.coordinate_updates <= 9 * 20 * 100);
+    assert!(estimate.weighted_gradient_cells <= 60 * 9 * 20 * 100);
+    assert!(estimate.projected_updates <= 9 * 20 * 100);
 }
 
 #[test]

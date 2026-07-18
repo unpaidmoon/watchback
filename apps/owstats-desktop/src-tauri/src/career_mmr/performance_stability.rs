@@ -1,11 +1,10 @@
 use super::{
-    performance::{
-        build_feature_matrix, eligible_performance_rows, HealingTakenStrategy, MatrixRow,
-    },
+    performance::{build_feature_matrix, eligible_performance_rows, HealingTakenStrategy},
     performance_forward::{
-        evaluate_forward, fit, metrics, predict, role_vector, select_candidate, MetricReport,
+        evaluate_forward, fit_hierarchical_model, metrics, select_candidate, MetricReport,
         ModelVariant, Role, StrategyReport,
     },
+    performance_model::{predict_probability, HierarchicalModel},
     training::TrainingRow,
 };
 use serde::Serialize;
@@ -20,7 +19,7 @@ pub struct StabilityConfig {
     pub seed: u64,
     pub max_loo_worsened_fraction: f64,
     pub max_abs_average_adjustment: f64,
-    /// Cheap projected coordinate passes over a precomputed small Gram matrix.
+    /// Deterministic projected-gradient steps for each hierarchical bootstrap refit.
     pub optimizer_passes: usize,
 }
 impl Default for StabilityConfig {
@@ -77,6 +76,7 @@ impl LooReport {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CoefficientStability {
     pub weight: String,
+    pub scope: String,
     pub direction_stability: f64,
     pub ci95_low: f64,
     pub ci95_high: f64,
@@ -87,8 +87,8 @@ pub struct CoefficientStability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BootstrapWorkEstimate {
     pub baseline_rebuilds: usize,
-    pub normal_equation_cells: usize,
-    pub coordinate_updates: usize,
+    pub weighted_gradient_cells: usize,
+    pub projected_updates: usize,
 }
 pub fn bootstrap_work_estimate(
     rows: usize,
@@ -98,11 +98,11 @@ pub fn bootstrap_work_estimate(
 ) -> BootstrapWorkEstimate {
     BootstrapWorkEstimate {
         baseline_rebuilds: iterations,
-        normal_equation_cells: rows
+        weighted_gradient_cells: rows
             .saturating_mul(features)
-            .saturating_mul(features)
+            .saturating_mul(passes)
             .saturating_mul(iterations),
-        coordinate_updates: features.saturating_mul(passes).saturating_mul(iterations),
+        projected_updates: features.saturating_mul(passes).saturating_mul(iterations),
     }
 }
 
@@ -113,6 +113,7 @@ pub struct BootstrapReport {
     pub skipped_iterations: usize,
     pub fixed_variant: Option<ModelVariant>,
     pub fixed_final_multiplier: Option<f64>,
+    pub hierarchical_offset_iterations: usize,
     pub coefficients: Vec<CoefficientStability>,
     pub mean_brier_delta: Option<f64>,
     pub brier_delta_ci95_low: Option<f64>,
@@ -125,6 +126,7 @@ impl BootstrapReport {
         Self {
             coefficients: vec![CoefficientStability {
                 weight: "final".into(),
+                scope: "core".into(),
                 direction_stability: rate,
                 ci95_low: 0.0,
                 ci95_high: 0.0,
@@ -524,15 +526,13 @@ fn validate_split(
         let x = select_candidate(train, role, strategy);
         (x.0, x.1)
     });
-    let refs = tr.iter().collect::<Vec<_>>();
-    let weights = fit(&refs, role, selected.0, strategy, selected.1);
-    if weights.is_empty() {
+    let Some(model) = fit_split_model(tr, role, strategy, selected) else {
         return (None, va.len());
-    }
+    };
     let actual = va.iter().map(|r| r.result).collect::<Vec<_>>();
     let predicted = va
         .iter()
-        .map(|r| predict(r, role, selected.0, strategy, selected.1, &weights))
+        .map(|r| predict_probability(&model, r))
         .collect::<Vec<_>>();
     let Some(model) = metrics(&actual, &predicted).map(|m| m.brier) else {
         return (None, va.len());
@@ -545,6 +545,16 @@ fn validate_split(
     (Some(model - base), va.len())
 }
 
+fn fit_split_model(
+    training: &[super::performance::MatrixRow],
+    role: Role,
+    strategy: HealingTakenStrategy,
+    selected: (ModelVariant, f64),
+) -> Option<HierarchicalModel> {
+    let refs = training.iter().collect::<Vec<_>>();
+    fit_hierarchical_model(&refs, role, selected.0, strategy, selected.1, 300)
+}
+
 pub fn clone_cluster_for_bootstrap(rows: &[TrainingRow], instance: usize) -> Vec<TrainingRow> {
     rows.iter()
         .cloned()
@@ -553,64 +563,6 @@ pub fn clone_cluster_for_bootstrap(rows: &[TrainingRow], instance: usize) -> Vec
             r
         })
         .collect()
-}
-
-fn fit_bootstrap(
-    rows: &[&MatrixRow],
-    role: Role,
-    variant: ModelVariant,
-    strategy: HealingTakenStrategy,
-    multiplier: f64,
-    passes: usize,
-) -> Vec<f64> {
-    let Some(first) = rows.first() else {
-        return Vec::new();
-    };
-    let prototype = role_vector(first, role, variant, strategy);
-    let p = prototype.values.len();
-    let mut gram = vec![vec![0.0; p]; p];
-    let mut target = vec![0.0; p];
-    for row in rows {
-        let vector = role_vector(row, role, variant, strategy);
-        let y = row.result - row.expected_win_rate;
-        for j in 0..p {
-            target[j] += vector.values[j] * y;
-            for k in j..p {
-                gram[j][k] += vector.values[j] * vector.values[k];
-            }
-        }
-    }
-    let n = rows.len() as f64;
-    for j in 0..p {
-        target[j] /= n;
-        for k in j..p {
-            gram[j][k] /= n;
-            gram[k][j] = gram[j][k];
-        }
-        gram[j][j] += 0.01;
-    }
-    let mut weights = vec![0.0; p];
-    for _ in 0..passes.max(1) {
-        for j in 0..p {
-            let other = (0..p)
-                .filter(|&k| k != j)
-                .map(|k| gram[j][k] * weights[k])
-                .sum::<f64>();
-            weights[j] = (target[j] - other) / gram[j][j].max(f64::EPSILON);
-            if Some(j) == prototype.final_index || Some(j) == prototype.nonfinal_index {
-                weights[j] = weights[j].max(0.0);
-            }
-            if Some(j) == prototype.death_index || Some(j) == prototype.debt_index {
-                weights[j] = weights[j].min(0.0);
-            }
-        }
-        if let (Some(f), Some(n)) = (prototype.final_index, prototype.nonfinal_index) {
-            if weights[n] > 0.0 {
-                weights[f] = weights[f].max(weights[n] * multiplier);
-            }
-        }
-    }
-    weights
 }
 
 fn bootstrap(
@@ -634,16 +586,24 @@ fn bootstrap(
         .cloned()
         .unwrap_or_default();
     let full_refs = full_rows.iter().collect::<Vec<_>>();
-    let full_w = fit(&full_refs, role, variant, strategy, multiplier);
-    let names = full_rows
-        .first()
-        .map(|r| role_vector(r, role, variant, strategy).names)
-        .unwrap_or_default();
+    let Some(full_model) =
+        fit_hierarchical_model(&full_refs, role, variant, strategy, multiplier, 300)
+    else {
+        return BootstrapReport {
+            requested_iterations: config.bootstrap_iterations,
+            skipped_iterations: config.bootstrap_iterations,
+            fixed_variant: Some(variant),
+            fixed_final_multiplier: Some(multiplier),
+            ..Default::default()
+        };
+    };
+    let names = full_model.feature_names.clone();
     let mut samples = vec![Vec::new(); names.len()];
     let mut deltas = Vec::new();
     let mut aucs = Vec::new();
     let mut eces = Vec::new();
     let mut skipped = 0;
+    let mut hierarchical_offset_iterations = 0;
     for iteration in 0..config.bootstrap_iterations {
         if clusters.is_empty() {
             skipped += 1;
@@ -681,24 +641,30 @@ fn bootstrap(
             continue;
         }
         let refs = tr.iter().collect::<Vec<_>>();
-        // Bootstrap fixes Task2A's full-data hyperparameters and uses fewer deterministic
-        // optimizer steps; every resample still rebuilds its own robust baselines and refits.
-        let w = fit_bootstrap(
+        // Each resample rebuilds fold-local baselines and refits the exact Task 5
+        // hierarchical logit model with fixed selected hyperparameters.
+        let Some(model) = fit_hierarchical_model(
             &refs,
             role,
             variant,
             strategy,
             multiplier,
-            config.optimizer_passes,
-        );
-        if w.len() != names.len() {
+            config.optimizer_passes.max(1),
+        ) else {
             skipped += 1;
             continue;
+        };
+        if model.feature_names != names {
+            skipped += 1;
+            continue;
+        }
+        if !model.cohort_offsets.is_empty() {
+            hierarchical_offset_iterations += 1;
         }
         let actual = va.iter().map(|r| r.result).collect::<Vec<_>>();
         let predicted = va
             .iter()
-            .map(|r| predict(r, role, variant, strategy, multiplier, &w))
+            .map(|r| predict_probability(&model, r))
             .collect::<Vec<_>>();
         let Some(m) = metrics(&actual, &predicted) else {
             skipped += 1;
@@ -712,7 +678,7 @@ fn bootstrap(
         deltas.push(m.brier - base);
         aucs.push(m.auc);
         eces.push(m.ece);
-        for (i, v) in w.into_iter().enumerate() {
+        for (i, v) in model.core_weights.into_iter().enumerate() {
             samples[i].push(v)
         }
     }
@@ -721,19 +687,22 @@ fn bootstrap(
         .enumerate()
         .map(|(i, name)| {
             let mut s = samples[i].clone();
-            let reference = full_w.get(i).copied().unwrap_or(0.0);
-            let expected_positive = matches!(name, "final" | "nonfinal")
-                || (!matches!(name, "death" | "debt") && reference > 0.0);
+            let reference = full_model.core_weights.get(i).copied().unwrap_or(0.0);
+            let expected_positive = matches!(name.as_str(), "final" | "nonfinal")
+                || (!matches!(name.as_str(), "death" | "debt") && reference > 0.0);
             let stable = s
                 .iter()
                 .filter(|&&v| if expected_positive { v > 0.0 } else { v < 0.0 })
                 .count();
+            let critical_constraint =
+                matches!(name.as_str(), "final" | "nonfinal" | "death" | "debt");
             CoefficientStability {
-                weight: name.into(),
+                weight: name,
+                scope: "core".into(),
                 direction_stability: stable as f64 / s.len().max(1) as f64,
                 ci95_low: quantile(&mut s, 0.025).unwrap_or(0.0),
                 ci95_high: quantile(&mut s, 0.975).unwrap_or(0.0),
-                critical_constraint: matches!(name, "final" | "nonfinal" | "death" | "debt"),
+                critical_constraint,
                 reference_nonzero: reference.abs() > 1e-12,
             }
         })
@@ -745,6 +714,7 @@ fn bootstrap(
         skipped_iterations: skipped,
         fixed_variant: Some(variant),
         fixed_final_multiplier: Some(multiplier),
+        hierarchical_offset_iterations,
         coefficients,
         mean_brier_delta: mean(&deltas),
         brier_delta_ci95_low: quantile(&mut d, 0.025),
@@ -802,5 +772,116 @@ fn strategy_order(s: &str) -> usize {
 fn push_once(v: &mut Vec<String>, s: &str) {
     if !v.iter().any(|x| x == s) {
         v.push(s.into())
+    }
+}
+
+#[cfg(test)]
+mod hierarchical_bootstrap_tests {
+    use super::*;
+    use crate::career_mmr::{
+        input::ModeFamily,
+        training::{TrainingEnvironment, TrainingRow},
+    };
+
+    fn row(index: usize, mode_family: ModeFamily) -> TrainingRow {
+        let positive = index % 2 == 0;
+        let opposite = mode_family == ModeFamily::StadiumCompetitive;
+        let strong = if positive != opposite { 20.0 } else { 1.0 };
+        TrainingRow {
+            account_group: "synthetic-account".into(),
+            source_match_group: format!("synthetic-source-{index}"),
+            match_group: format!("synthetic-match-{index}"),
+            season: 20 + (index % 3) as i64,
+            begin_ts: index as i64,
+            role: "damage".into(),
+            mode_family,
+            environment: if mode_family == ModeFamily::StadiumCompetitive {
+                TrainingEnvironment::Stadium
+            } else {
+                TrainingEnvironment::Ordinary
+            },
+            hero_group: Some("synthetic-hero".into()),
+            outcome_only: false,
+            allow_performance: true,
+            allow_performance_by_hero: true,
+            result: f64::from(positive),
+            expected_win_rate: 0.5,
+            data_quality: 1.0,
+            base_delta: Some(10.0),
+            final_hit: Some(strong),
+            kill: Some(strong + 2.0),
+            assist: Some(2.0),
+            death: Some(if strong > 1.0 { 1.0 } else { 5.0 }),
+            damage: Some(strong * 100.0),
+            healing: Some(0.0),
+            mitigation: Some(0.0),
+            healing_taken: Some(100.0),
+            available_team_healing: Some(500.0),
+            damage_taken: Some(200.0),
+            objective_time_sec: Some(10.0),
+            duration_sec: 600.0,
+            hero_duration_sec: Some(600.0),
+            healing_taken_semantic: "external",
+            usable_for_resource_debt: true,
+        }
+    }
+
+    #[test]
+    fn bootstrap_refits_hierarchical_offsets_with_the_selected_multiplier() {
+        let rows = (0..160)
+            .map(|i| row(i, ModeFamily::RoleCompetitive))
+            .chain((160..320).map(|i| row(i, ModeFamily::StadiumCompetitive)))
+            .collect::<Vec<_>>();
+        let report = bootstrap(
+            &rows,
+            Role::Damage,
+            HealingTakenStrategy::None,
+            ModelVariant::RoleFull,
+            2.0,
+            &StabilityConfig {
+                bootstrap_iterations: 3,
+                optimizer_passes: 3,
+                seed: 17,
+                ..Default::default()
+            },
+        );
+        assert_eq!(report.fixed_final_multiplier, Some(2.0));
+        assert!(report.hierarchical_offset_iterations > 0);
+        assert!(report
+            .coefficients
+            .iter()
+            .all(|coefficient| coefficient.scope == "core"));
+        assert!(report
+            .coefficients
+            .iter()
+            .any(|coefficient| coefficient.weight == "damage_conversion"));
+    }
+
+    #[test]
+    fn loo_split_model_keeps_cohort_offsets_in_validation_predictions() {
+        let training = (0..160)
+            .map(|i| row(i, ModeFamily::RoleCompetitive))
+            .chain((160..320).map(|i| row(i, ModeFamily::StadiumCompetitive)))
+            .collect::<Vec<_>>();
+        let matrix = build_feature_matrix(&training, &[], HealingTakenStrategy::None);
+        let rows = matrix.training_by_role.get("damage").unwrap();
+        let model = fit_split_model(
+            rows,
+            Role::Damage,
+            HealingTakenStrategy::None,
+            (ModelVariant::Core, 1.5),
+        )
+        .unwrap();
+        let role_row = rows
+            .iter()
+            .find(|row| row.mode_family == ModeFamily::RoleCompetitive)
+            .unwrap()
+            .clone();
+        let mut stadium_row = role_row.clone();
+        stadium_row.mode_family = ModeFamily::StadiumCompetitive;
+        assert_ne!(
+            predict_probability(&model, &role_row),
+            predict_probability(&model, &stadium_row)
+        );
     }
 }

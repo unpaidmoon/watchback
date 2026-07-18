@@ -93,6 +93,10 @@ fn constrained_hierarchy_shares_all_queue_offsets_and_never_trains_outcome_only(
     let open_comp = predict_probability(&model, &row(702, ModeFamily::OpenCompetitive, true));
     let open_quick = predict_probability(&model, &row(702, ModeFamily::OpenQuick, true));
     assert!((open_comp - open_quick).abs() < 1e-12);
+    let role_prediction = predict_probability(&model, &row(704, ModeFamily::RoleCompetitive, true));
+    let stadium_prediction =
+        predict_probability(&model, &row(704, ModeFamily::StadiumCompetitive, true));
+    assert_ne!(role_prediction, stadium_prediction);
 
     let mut offset_only = row(702, ModeFamily::RoleCompetitive, true);
     offset_only.expected_win_rate = 0.8;
