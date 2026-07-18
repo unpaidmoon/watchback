@@ -428,3 +428,45 @@ fn healing_expectation_uses_fold_local_irls_after_one_hundred_samples() {
             < 50.0
     );
 }
+
+#[test]
+fn derived_role_features_are_none_when_any_required_input_is_missing() {
+    let mut training = Vec::new();
+    for i in 0..30 {
+        for role in ["tank", "support"] {
+            let mut item = row("hero-required", role, 23, 10.0 + (i % 2) as f64 * 2.0);
+            item.damage_taken = Some(1000.0 + (i % 2) as f64 * 200.0);
+            item.objective_time_sec = Some(20.0 + (i % 2) as f64 * 4.0);
+            training.push(item);
+        }
+    }
+    let mut tank_missing_output = validation_row("hero-required", "tank", 23, 12.0);
+    tank_missing_output.damage_taken = Some(1200.0);
+    tank_missing_output.objective_time_sec = None;
+    let mut tank_missing_death = validation_row("hero-required", "tank", 23, 12.0);
+    tank_missing_death.match_group = "validation-tank-missing-death".into();
+    tank_missing_death.damage_taken = Some(1200.0);
+    tank_missing_death.objective_time_sec = Some(24.0);
+    tank_missing_death.death = None;
+    let mut support_missing_death = validation_row("hero-required", "support", 23, 12.0);
+    support_missing_death.death = None;
+    let result = build_feature_matrix(
+        &training,
+        &[
+            tank_missing_output,
+            tank_missing_death,
+            support_missing_death,
+        ],
+        HealingTakenStrategy::None,
+    );
+    let tank = &result.validation_by_role["tank"];
+    assert_eq!(tank[0].standardized.frontline_conversion, None);
+    assert_eq!(tank[1].standardized.frontline_conversion, None);
+    assert_eq!(tank[1].standardized.abnormal_damage_taken, None);
+    assert_eq!(
+        result.validation_by_role["support"][0]
+            .standardized
+            .survival,
+        None
+    );
+}

@@ -589,6 +589,62 @@ fn audit_projection_supports_pre_mmr_databases() -> Result<()> {
 }
 
 #[test]
+fn fallback_base_delta_uses_each_roles_share_of_valid_hero_duration() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    conn.execute(
+        "INSERT INTO hero_dict(guid,name,role,updated_at) VALUES('hero-b','匿名重装','tank','now')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES('private-match','normal',?1,'now')",
+        [r#"{"payload":{"data":{"heroList":[{"heroId":"hero-a","userTimeSec":360,"useTimeRate":0.6,"statMap":{"603482350067646507":6,"603482350067646495":8}},{"heroId":"hero-b","userTimeSec":240,"useTimeRate":0.4,"statMap":{"603482350067646507":3,"603482350067646495":5}}]}}}"#],
+    )?;
+    conn.execute_batch("DROP TABLE career_mmr_events; DROP TABLE mmr_model_versions;")?;
+    let projection = build_training_projection(&conn)?;
+    let damage = projection
+        .rows
+        .iter()
+        .find(|row| row.role == "damage")
+        .unwrap();
+    let tank = projection
+        .rows
+        .iter()
+        .find(|row| row.role == "tank")
+        .unwrap();
+    let damage_share = 0.6;
+    let tank_share = 0.4;
+    assert!(damage_share < 1.0 && tank_share < 1.0);
+    assert!((damage_share + tank_share - 1.0_f64).abs() < 1.0e-12);
+    assert_eq!(
+        damage.base_delta,
+        Some(
+            owstats_desktop_lib::career_mmr::rating::outcome_delta_for_expected(
+                owstats_desktop_lib::career_mmr::rating::INITIAL_SIGMA,
+                damage.mode_family,
+                damage_share,
+                damage.data_quality,
+                damage.result,
+                damage.expected_win_rate,
+            )
+        )
+    );
+    assert_eq!(
+        tank.base_delta,
+        Some(
+            owstats_desktop_lib::career_mmr::rating::outcome_delta_for_expected(
+                owstats_desktop_lib::career_mmr::rating::INITIAL_SIGMA,
+                tank.mode_family,
+                tank_share,
+                tank.data_quality,
+                tank.result,
+                tank.expected_win_rate,
+            )
+        )
+    );
+    Ok(())
+}
+
+#[test]
 fn exact_segment_without_dictionary_role_is_skipped_instead_of_guessed() -> Result<()> {
     let (_dir, conn) = fixture()?;
     conn.execute(

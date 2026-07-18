@@ -581,17 +581,7 @@ pub fn build_training_projection_for_account(
             let data_quality = base_quality;
             let base_delta = active_events
                 .get(&(r.match_id.clone(), role_name.to_string()))
-                .map(|(_, _, base_delta)| *base_delta)
-                .unwrap_or_else(|| {
-                    outcome_delta_for_expected(
-                        INITIAL_SIGMA,
-                        mode_family,
-                        1.0,
-                        data_quality,
-                        result,
-                        expected_win_rate,
-                    )
-                });
+                .map(|(_, _, base_delta)| *base_delta);
             rows.push(TrainingRow {
                 account_group: account_group.to_owned(),
                 source_match_group: source_match_group.clone(),
@@ -608,7 +598,7 @@ pub fn build_training_projection_for_account(
                 result,
                 expected_win_rate,
                 data_quality,
-                base_delta: Some(base_delta),
+                base_delta,
                 final_hit: performance_stat(allow_performance, stats, "finalHit"),
                 kill: performance_stat(allow_performance, stats, "kill"),
                 assist: performance_stat(allow_performance, stats, "assist"),
@@ -757,16 +747,6 @@ pub fn build_training_projection_for_account(
             if !allow_performance {
                 data_quality = data_quality.min(0.55);
             }
-            let base_delta = event_base_delta.unwrap_or_else(|| {
-                outcome_delta_for_expected(
-                    INITIAL_SIGMA,
-                    mode_family,
-                    1.0,
-                    data_quality,
-                    result,
-                    expected_win_rate,
-                )
-            });
             rows.push(TrainingRow {
                 account_group: account_group.to_owned(),
                 source_match_group: source_match_group.clone(),
@@ -783,7 +763,7 @@ pub fn build_training_projection_for_account(
                 result,
                 expected_win_rate,
                 data_quality,
-                base_delta: Some(base_delta),
+                base_delta: event_base_delta,
                 final_hit: performance_stat(allow_performance, stats, STAT_FINAL_HIT),
                 kill: performance_stat(allow_performance, stats, STAT_KILL),
                 assist: performance_stat(allow_performance, stats, STAT_ASSIST),
@@ -817,6 +797,7 @@ pub fn build_training_projection_for_account(
             row_audits.push(row_audit);
         }
     }
+    fill_missing_base_deltas(&mut rows);
     let mut projection = TrainingProjection {
         rows,
         audit,
@@ -824,6 +805,51 @@ pub fn build_training_projection_for_account(
     };
     projection.deduplicate_rows();
     Ok(projection)
+}
+
+fn fill_missing_base_deltas(rows: &mut [TrainingRow]) {
+    let mut durations: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    let mut roles: HashMap<String, HashSet<String>> = HashMap::new();
+    for row in rows.iter() {
+        roles
+            .entry(row.match_group.clone())
+            .or_default()
+            .insert(row.role.clone());
+        if let Some(duration) = row
+            .hero_duration_sec
+            .filter(|value| value.is_finite() && *value > 0.0)
+        {
+            *durations
+                .entry(row.match_group.clone())
+                .or_default()
+                .entry(row.role.clone())
+                .or_default() += duration;
+        }
+    }
+    for row in rows.iter_mut().filter(|row| row.base_delta.is_none()) {
+        let by_role = durations.get(&row.match_group);
+        let total = by_role
+            .map(|items| items.values().sum::<f64>())
+            .unwrap_or(0.0);
+        let role_share = if total > 0.0 {
+            by_role
+                .and_then(|items| items.get(&row.role))
+                .copied()
+                .unwrap_or(0.0)
+                / total
+        } else {
+            let role_count = roles.get(&row.match_group).map(HashSet::len).unwrap_or(1);
+            1.0 / role_count.max(1) as f64
+        };
+        row.base_delta = Some(outcome_delta_for_expected(
+            INITIAL_SIGMA,
+            row.mode_family,
+            role_share,
+            row.data_quality,
+            row.result,
+            row.expected_win_rate,
+        ));
+    }
 }
 
 pub fn build_multi_account_projection(

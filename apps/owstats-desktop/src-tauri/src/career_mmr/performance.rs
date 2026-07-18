@@ -647,19 +647,42 @@ fn transform(
             }
         };
         let feature_values = |source: &BTreeMap<FeatureName, Option<f64>>, derived: bool| {
-            let positive = |feature| source[&feature].unwrap_or(0.0).max(0.0);
-            let mean_positive = [
+            let required_outputs = [
                 FeatureName::FinalHit,
                 FeatureName::NonFinalEliminations,
                 FeatureName::Assist,
                 FeatureName::ObjectiveTime,
-            ]
-            .into_iter()
-            .map(positive)
-            .sum::<f64>()
-                / 4.0;
+            ];
             let death_z = source[&FeatureName::Death];
             let damage_taken_z = source[&FeatureName::DamageTaken];
+            let frontline_conversion = derived
+                .then(|| {
+                    let damage_taken = damage_taken_z?;
+                    let death = death_z?;
+                    let outputs = required_outputs
+                        .into_iter()
+                        .map(|feature| source[&feature].map(|value| value.max(0.0)))
+                        .collect::<Option<Vec<_>>>()?;
+                    let mean_positive = outputs.into_iter().sum::<f64>() / 4.0;
+                    Some(
+                        damage_taken.max(0.0)
+                            * (0.5 + 0.5 * (-death / 3.0).clamp(0.0, 1.0))
+                            * mean_positive,
+                    )
+                })
+                .flatten()
+                .filter(|_| row.source.role == "tank");
+            let survival = derived
+                .then(|| death_z.map(|death| (-death).clamp(-3.0, 3.0)))
+                .flatten()
+                .filter(|_| row.source.role == "support");
+            let abnormal_damage_taken = derived
+                .then(|| {
+                    damage_taken_z
+                        .zip(death_z)
+                        .map(|(damage_taken, death)| damage_taken.max(0.0) * death.max(0.0))
+                })
+                .flatten();
             FeatureValues {
                 final_hit: source[&FeatureName::FinalHit],
                 non_final_eliminations: source[&FeatureName::NonFinalEliminations],
@@ -670,19 +693,9 @@ fn transform(
                 mitigation: source[&FeatureName::Mitigation],
                 damage_taken: source[&FeatureName::DamageTaken],
                 objective_time: source[&FeatureName::ObjectiveTime],
-                frontline_conversion: derived
-                    .then(|| {
-                        positive(FeatureName::DamageTaken)
-                            * (0.5 + 0.5 * (-death_z.unwrap_or(0.0) / 3.0).clamp(0.0, 1.0))
-                            * mean_positive
-                    })
-                    .filter(|_| row.source.role == "tank"),
-                survival: derived
-                    .then(|| (-death_z.unwrap_or(0.0)).clamp(-3.0, 3.0))
-                    .filter(|_| row.source.role == "support"),
-                abnormal_damage_taken: derived.then(|| {
-                    damage_taken_z.unwrap_or(0.0).max(0.0) * death_z.unwrap_or(0.0).max(0.0)
-                }),
+                frontline_conversion,
+                survival,
+                abnormal_damage_taken,
             }
         };
         let damage_baseline_median_per_ten = choose_baseline(baselines, row, FeatureName::Damage)
