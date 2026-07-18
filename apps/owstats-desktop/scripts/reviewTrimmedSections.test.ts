@@ -5,7 +5,7 @@ import { qaRegionsForPath } from "../src/shared/qaFeedback";
 const source = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
 const reviewRegions = qaRegionsForPath("/review").map((region) => region.id);
 
-assert.equal(source.includes("phase6AchievementWall"), true, "review page should keep the achievement wall");
+assert.equal(source.includes("phase6AchievementWall"), false, "review page should keep achievements on their dedicated route");
 assert.equal(source.includes("phase6RoleRankGrid"), true, "review page should keep role rank overview");
 assert.equal(source.includes("phase6ConclusionList"), false, "review page should remove review evidence conclusions");
 assert.equal(source.includes("phase6BestList"), false, "review page should remove evidence-backed personal best panel");
@@ -27,4 +27,5 @@ assert.ok(
   source.indexOf('className="reviewHeroSummary"') < source.indexOf('className="reviewRoleRankGroup"'),
   "season facts should lead the role panel before rank groups",
 );
+assert.match(source, /<div className="reviewReportFlow">[\s\S]*?<RoleAndHeroView[\s\S]*?<FriendAnalysisModules[\s\S]*?<MapAnalysisModules/);
 assert.deepEqual(reviewRegions, ["NAV-CAPSULE", "REV-RANKS", "FRD-BOARDS", "FRD-LINEUP", "FRD-MAPS"], "removed review sections should not remain as QA feedback regions");

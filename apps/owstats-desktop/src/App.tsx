@@ -1,5 +1,5 @@
 import { CircleDot, Sparkles } from "lucide-react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useSearchParams } from "react-router-dom";
 import { FriendAnalyticsPage } from "./pages/FriendAnalyticsPage";
 import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
@@ -14,6 +14,13 @@ import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
 import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
 import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
+import { legacyReviewRedirectHref } from "./features/review/reviewNavigation";
+
+function PersonalReviewRoute() {
+  const [params] = useSearchParams();
+  const redirect = legacyReviewRedirectHref(params);
+  return redirect ? <Navigate to={redirect} replace /> : <PersonalReviewPage />;
+}
 
 export function App() {
   const { guardNavigation } = useUnsavedChangesGuard();
@@ -57,7 +64,7 @@ export function App() {
             <Route path="/phase6-style-board" element={<Phase6StyleBoardPage />} />
             <Route path="/matches" element={<MatchesPage />} />
             <Route path="/matches/:matchId" element={<MatchDetailPage />} />
-            <Route path="/review" element={<PersonalReviewPage />} />
+            <Route path="/review" element={<PersonalReviewRoute />} />
             <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />

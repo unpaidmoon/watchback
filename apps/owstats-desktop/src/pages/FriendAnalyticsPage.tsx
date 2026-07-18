@@ -4,7 +4,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   buildFriendDetailState,
   buildReviewRankingHref,
-  type ReviewView,
 } from "../features/review/reviewNavigation";
 import { getSeasonAnalysis } from "../shared/api";
 import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
@@ -148,7 +147,6 @@ export function FriendAnalyticsPage() {
         loading={loading}
         error={error}
         season={selectedSeason ?? analysis?.season ?? undefined}
-        sourceView="friends"
       />
     </section>
   );
@@ -160,14 +158,12 @@ export function SeasonAnalysisModules({
   loading,
   error,
   season,
-  sourceView = "friends",
 }: {
   analysis: SeasonAnalysis | null;
   analytics: FriendAnalytics | null;
   loading: boolean;
   error: string | null;
   season?: number;
-  sourceView?: ReviewView;
 }) {
   if (error) {
     return (
@@ -185,7 +181,7 @@ export function SeasonAnalysisModules({
 
   return (
     <>
-      <FriendAnalysisModules analytics={analytics} loading={false} error={null} season={resolvedSeason} sourceView={sourceView} />
+      <FriendAnalysisModules analytics={analytics} loading={false} error={null} season={resolvedSeason} />
       <MapAnalysisModules analysis={analysis} loading={false} error={null} season={resolvedSeason} />
     </>
   );
@@ -196,13 +192,11 @@ export function FriendAnalysisModules({
   loading,
   error,
   season,
-  sourceView,
 }: {
   analytics: FriendAnalytics | null;
   loading: boolean;
   error: string | null;
   season: number;
-  sourceView: ReviewView;
 }) {
   if (error) {
     return (
@@ -221,7 +215,7 @@ export function FriendAnalysisModules({
       <FriendPhase5Summary analytics={analytics} />
       <div className="boardGrid topGap phase6FriendBoardGrid">
         {analytics.boards.map((board) => (
-          <FriendBoardCard key={board.key} board={board} season={season} sourceView={sourceView} />
+          <FriendBoardCard key={board.key} board={board} season={season} />
         ))}
       </div>
     </>
@@ -388,11 +382,9 @@ function MapAnalysisCardView({
 function FriendBoardCard({
   board,
   season,
-  sourceView,
 }: {
   board: FriendBoard;
   season: number;
-  sourceView: ReviewView;
 }) {
   const navigate = useNavigate();
 
@@ -407,8 +399,8 @@ function FriendBoardCard({
       <div className="friendCardList">
         {board.friends.slice(0, 2).map((friend) => {
           function detailState() {
-            if (typeof window === "undefined") return buildFriendDetailState(friend.bnetId, season, sourceView, 0);
-            return buildFriendDetailState(friend.bnetId, season, sourceView, window.scrollY);
+            if (typeof window === "undefined") return buildFriendDetailState(friend.bnetId, season, 0);
+            return buildFriendDetailState(friend.bnetId, season, window.scrollY);
           }
 
           return (

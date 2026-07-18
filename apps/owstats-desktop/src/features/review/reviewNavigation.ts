@@ -1,7 +1,3 @@
-export const reviewViews = ["overview", "friends", "achievements"] as const;
-
-export type ReviewView = (typeof reviewViews)[number];
-
 export type ReviewReturnContext = {
   href: string;
   scrollKey: string;
@@ -14,13 +10,21 @@ export type FriendDetailLocationState = {
   returnTo: ReviewReturnContext;
 };
 
-export function parseReviewView(value: string | null): ReviewView {
-  return reviewViews.includes(value as ReviewView) ? (value as ReviewView) : "overview";
+export function buildReviewHref(season: number) {
+  const params = new URLSearchParams({ season: String(season) });
+  return `/review?${params.toString()}`;
 }
 
-export function buildReviewHref(season: number, view: ReviewView) {
-  const params = new URLSearchParams({ season: String(season), view });
-  return `/review?${params.toString()}`;
+export function buildAchievementsHref(season: number) {
+  return `/achievements?season=${season}`;
+}
+
+export function legacyReviewRedirectHref(params: URLSearchParams) {
+  const view = params.get("view");
+  if (view === null) return null;
+  const season = params.get("season");
+  const suffix = season ? `?season=${encodeURIComponent(season)}` : "";
+  return view === "achievements" ? `/achievements${suffix}` : `/review${suffix}`;
 }
 
 export function buildReviewRankingHref(season: number) {
@@ -68,10 +72,9 @@ export function scheduleReviewScrollRestore(scrollY: number, runtime: ReviewScro
 export function buildFriendDetailState(
   bnetId: string,
   season: number,
-  view: ReviewView,
   scrollY: number,
 ): FriendDetailLocationState {
-  const href = buildReviewHref(season, view);
+  const href = buildReviewHref(season);
   return {
     bnetId,
     season,
@@ -97,8 +100,7 @@ export function parseFriendDetailState(value: unknown): FriendDetailLocationStat
   } catch {
     return null;
   }
-  const view = parseReviewView(parsed.searchParams.get("view"));
-  if (`${parsed.pathname}${parsed.search}` !== buildReviewHref(candidate.season, view)) return null;
+  if (`${parsed.pathname}${parsed.search}` !== buildReviewHref(candidate.season)) return null;
   if (scrollKey !== reviewScrollKey(href)) return null;
 
   return candidate as FriendDetailLocationState;

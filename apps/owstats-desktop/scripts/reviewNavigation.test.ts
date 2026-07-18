@@ -1,32 +1,32 @@
 import assert from "node:assert/strict";
 import {
   buildFriendDetailState,
+  buildAchievementsHref,
   buildReviewHref,
   buildReviewRankingHref,
+  legacyReviewRedirectHref,
   parseFriendDetailState,
-  parseReviewView,
   reviewScrollKey,
   scheduleReviewScrollRestore,
 } from "../src/features/review/reviewNavigation";
 
-assert.equal(parseReviewView(null), "overview");
-assert.equal(parseReviewView("roles"), "overview");
-assert.equal(parseReviewView("friends"), "friends");
-assert.equal(parseReviewView("maps"), "overview");
-assert.equal(parseReviewView("achievements"), "achievements");
-assert.equal(parseReviewView("invalid"), "overview");
-assert.equal(buildReviewHref(23, "friends"), "/review?season=23&view=friends");
+assert.equal(buildReviewHref(23), "/review?season=23");
+assert.equal(buildAchievementsHref(23), "/achievements?season=23");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements?season=23");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=friends")), "/review?season=23");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=unknown")), "/review?season=23");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23")), null);
 assert.equal(buildReviewRankingHref(22), "/ranking?tab=maps&season=22");
 
-const detailState = buildFriendDetailState("private-id", 21, "friends", 640);
+const detailState = buildFriendDetailState("private-id", 21, 640);
 assert.equal(detailState.bnetId, "private-id");
 assert.equal(detailState.season, 21);
 assert.deepEqual(detailState.returnTo, {
-  href: "/review?season=21&view=friends",
-  scrollKey: "review-scroll:/review?season=21&view=friends",
+  href: "/review?season=21",
+  scrollKey: "review-scroll:/review?season=21",
   scrollY: 640,
 });
-assert.equal(reviewScrollKey("/review?season=21&view=friends"), detailState.returnTo.scrollKey);
+assert.equal(reviewScrollKey("/review?season=21"), detailState.returnTo.scrollKey);
 assert.equal(detailState.returnTo.href.includes("private-id"), false);
 assert.equal(parseFriendDetailState(null), null);
 assert.equal(parseFriendDetailState({ ...detailState, season: 0 }), null);

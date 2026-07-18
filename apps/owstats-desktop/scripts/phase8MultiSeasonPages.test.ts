@@ -127,7 +127,8 @@ assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S
 assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
 assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
 assert.match(analyticsSource, /buildReviewRankingHref\(season\)/);
-assert.match(analyticsSource, /buildFriendDetailState\(friend\.bnetId, season, sourceView, window\.scrollY\)/);
+assert.match(analyticsSource, /buildFriendDetailState\(friend\.bnetId, season, window\.scrollY\)/);
+assert.doesNotMatch(analyticsSource, /sourceView|ReviewView/);
 assert.match(analyticsSource, /event\.preventDefault\(\)/, "好友详情点击应阻止使用渲染期旧 state 的默认导航");
 assert.match(
   analyticsSource,

@@ -3,64 +3,14 @@
   gap: var(--space-4);
 }
 
-.reviewTabs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  width: fit-content;
-  max-width: 100%;
-  padding: var(--space-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  background: var(--surface-control);
-  overflow-x: auto;
-}
-
-.reviewWorkspace .reviewTabs button {
-  min-height: 40px;
-  padding: var(--space-2) var(--space-4);
-  border: 0;
-  border-radius: calc(var(--radius-control) - 4px);
-  background: transparent;
-  color: var(--text-secondary);
-  box-shadow: none;
-  white-space: nowrap;
-}
-
-.reviewWorkspace .reviewTabs button:hover {
-  background: color-mix(in srgb, var(--action-primary) 6%, transparent);
-  color: var(--text-primary);
-}
-
-.reviewWorkspace .reviewTabs button.active,
-.reviewWorkspace .reviewTabs button[aria-current="page"] {
-  background: var(--action-primary);
-  color: var(--action-on-primary);
-}
-
-.reviewViewGrid {
+.reviewReportFlow {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   min-width: 0;
 }
 
-.reviewViewGrid[data-view="overview"] {
-  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
-  align-items: start;
-}
-
-.reviewViewGrid[data-view="overview"] > .reviewRoleHeroPanel,
-.reviewMapAnalysis {
-  grid-column: 1 / -1;
-}
-
-.reviewMapAnalysis {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.reviewViewGrid > * {
+.reviewReportFlow > * {
   min-width: 0;
 }
 
@@ -134,10 +84,6 @@
 
 .reviewStadiumRankGrid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.reviewViewGrid .phase6AchievementPanel {
-  width: 100%;
 }
 
 .reviewWorkspace .phase6FriendIntimacyCard {
@@ -341,10 +287,6 @@
 }
 
 @media (max-width: 899px) {
-  .reviewViewGrid[data-view="overview"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .reviewHeroSummary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -368,10 +310,6 @@
 }
 
 @media (max-width: 640px) {
-  .reviewTabs {
-    width: 100%;
-  }
-
   .reviewHeroSummary {
     grid-template-columns: minmax(0, 1fr);
   }
