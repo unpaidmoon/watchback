@@ -1,9 +1,27 @@
-use crate::career_mmr::{input::ModeFamily, training::TrainingRow};
+use crate::career_mmr::{
+    input::{ModeFamily, TrainingCohort},
+    training::{TrainingEnvironment, TrainingRow},
+};
+
+fn eligible_for_performance(row: &TrainingRow) -> bool {
+    row.allow_performance
+        && !row.outcome_only
+        && row.mode_family.training_cohort() != TrainingCohort::OutcomeOnly
+}
+
+pub(crate) fn eligible_performance_rows(rows: &[TrainingRow]) -> Vec<TrainingRow> {
+    rows.iter()
+        .filter(|row| eligible_for_performance(row))
+        .cloned()
+        .collect()
+}
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const MIN_HERO_BASELINE_SAMPLES: usize = 30;
 const MAD_SCALE: f64 = 0.6745;
+const MAD_FLOOR_ABSOLUTE: f64 = 1.0e-6;
+const MAD_FLOOR_RELATIVE: f64 = 1.0e-6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealingTakenStrategy {
@@ -26,6 +44,7 @@ pub enum FeatureName {
     Mitigation,
     DamageTaken,
     ObjectiveTime,
+    AvailableTeamHealing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -33,8 +52,9 @@ pub enum FeatureName {
 pub enum BaselineLevel {
     HeroModeSeason,
     HeroMode,
-    Hero,
+    HeroEnvironment,
     RoleMode,
+    RoleEnvironment,
     Unavailable,
 }
 
@@ -49,6 +69,9 @@ pub struct FeatureValues {
     pub mitigation: Option<f64>,
     pub damage_taken: Option<f64>,
     pub objective_time: Option<f64>,
+    pub frontline_conversion: Option<f64>,
+    pub survival: Option<f64>,
+    pub abnormal_damage_taken: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,11 +83,13 @@ pub struct MatrixRow {
     pub begin_ts: i64,
     pub result: f64,
     pub expected_win_rate: f64,
+    pub data_quality: f64,
     pub mode_family: ModeFamily,
     pub per_ten: FeatureValues,
     pub standardized: FeatureValues,
     pub baselines: BTreeMap<FeatureName, BaselineLevel>,
     pub healing_taken_derived: Option<f64>,
+    pub damage_baseline_median_per_ten: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -110,8 +135,16 @@ pub fn build_feature_matrix(
         .collect();
     let eligible_training: Vec<_> = training.iter().filter_map(prepared).collect();
     let baselines = fit_baselines(&eligible_training);
+    let healing_models = fit_healing_models(&eligible_training, &baselines);
     let mut audit = FeatureMatrixAudit::default();
-    let training_by_role = transform(&eligible_training, &baselines, strategy, true, &mut audit);
+    let training_by_role = transform(
+        &eligible_training,
+        &baselines,
+        &healing_models,
+        strategy,
+        true,
+        &mut audit,
+    );
     audit.overlap_excluded_rows = validation
         .iter()
         .filter(|row| training_groups.contains(row.match_group.as_str()))
@@ -124,6 +157,7 @@ pub fn build_feature_matrix(
     let validation_by_role = transform(
         &eligible_validation,
         &baselines,
+        &healing_models,
         strategy,
         false,
         &mut audit,
@@ -159,7 +193,7 @@ struct Prepared<'a> {
 }
 
 fn prepared(row: &TrainingRow) -> Option<Prepared<'_>> {
-    if !row.allow_performance {
+    if !eligible_for_performance(row) {
         return None;
     }
     let hero = row.hero_group.as_deref()?;
@@ -191,6 +225,10 @@ fn prepared(row: &TrainingRow) -> Option<Prepared<'_>> {
         (FeatureName::Mitigation, scaled(row.mitigation)),
         (FeatureName::DamageTaken, scaled(row.damage_taken)),
         (FeatureName::ObjectiveTime, scaled(row.objective_time_sec)),
+        (
+            FeatureName::AvailableTeamHealing,
+            scaled(row.available_team_healing),
+        ),
     ]);
     Some(Prepared {
         source: row,
@@ -202,6 +240,7 @@ fn prepared(row: &TrainingRow) -> Option<Prepared<'_>> {
 type BaselineKey = (
     String,
     FeatureName,
+    TrainingEnvironment,
     Option<String>,
     Option<ModeFamily>,
     Option<i64>,
@@ -220,6 +259,7 @@ fn fit_baselines(rows: &[Prepared<'_>]) -> HashMap<BaselineKey, Vec<f64>> {
                 (
                     role.clone(),
                     feature,
+                    row.source.environment,
                     Some(row.hero.into()),
                     Some(row.source.mode_family),
                     Some(row.source.season),
@@ -227,16 +267,33 @@ fn fit_baselines(rows: &[Prepared<'_>]) -> HashMap<BaselineKey, Vec<f64>> {
                 (
                     role.clone(),
                     feature,
+                    row.source.environment,
                     Some(row.hero.into()),
                     Some(row.source.mode_family),
                     None,
                 ),
-                (role.clone(), feature, Some(row.hero.into()), None, None),
                 (
                     role.clone(),
                     feature,
+                    row.source.environment,
+                    Some(row.hero.into()),
+                    None,
+                    None,
+                ),
+                (
+                    role.clone(),
+                    feature,
+                    row.source.environment,
                     None,
                     Some(row.source.mode_family),
+                    None,
+                ),
+                (
+                    role.clone(),
+                    feature,
+                    row.source.environment,
+                    None,
+                    None,
                     None,
                 ),
             ] {
@@ -258,6 +315,7 @@ fn choose_baseline(
             (
                 role.clone(),
                 feature,
+                row.source.environment,
                 Some(row.hero.into()),
                 Some(row.source.mode_family),
                 Some(row.source.season),
@@ -269,6 +327,7 @@ fn choose_baseline(
             (
                 role.clone(),
                 feature,
+                row.source.environment,
                 Some(row.hero.into()),
                 Some(row.source.mode_family),
                 None,
@@ -277,13 +336,32 @@ fn choose_baseline(
             true,
         ),
         (
-            (role.clone(), feature, Some(row.hero.into()), None, None),
-            BaselineLevel::Hero,
+            (
+                role.clone(),
+                feature,
+                row.source.environment,
+                Some(row.hero.into()),
+                None,
+                None,
+            ),
+            BaselineLevel::HeroEnvironment,
             true,
         ),
         (
-            (role, feature, None, Some(row.source.mode_family), None),
+            (
+                role.clone(),
+                feature,
+                row.source.environment,
+                None,
+                Some(row.source.mode_family),
+                None,
+            ),
             BaselineLevel::RoleMode,
+            false,
+        ),
+        (
+            (role, feature, row.source.environment, None, None, None),
+            BaselineLevel::RoleEnvironment,
             false,
         ),
     ];
@@ -306,8 +384,9 @@ fn robust_baseline(values: &[f64]) -> Option<Baseline> {
         return None;
     }
     let center = median(values.to_vec());
-    let mad = median(values.iter().map(|value| (value - center).abs()).collect());
-    (mad > f64::EPSILON).then_some(Baseline {
+    let observed_mad = median(values.iter().map(|value| (value - center).abs()).collect());
+    let mad = observed_mad.max((center.abs() * MAD_FLOOR_RELATIVE).max(MAD_FLOOR_ABSOLUTE));
+    Some(Baseline {
         median: center,
         mad,
     })
@@ -323,9 +402,201 @@ fn median(mut values: Vec<f64>) -> f64 {
     }
 }
 
+#[derive(Clone)]
+struct HealingExpectationModel {
+    fallback_median: f64,
+    coefficients: Option<[f64; 5]>,
+}
+
+impl HealingExpectationModel {
+    fn fit(samples: &[([f64; 4], f64)]) -> Option<Self> {
+        if samples.is_empty() {
+            return None;
+        }
+        let fallback_median = median(samples.iter().map(|(_, target)| *target).collect());
+        if samples.len() < 100 {
+            return Some(Self {
+                fallback_median,
+                coefficients: None,
+            });
+        }
+        let mut beta = [0.0; 5];
+        beta[0] = fallback_median;
+        for _ in 0..8 {
+            let residuals = samples
+                .iter()
+                .map(|(x, y)| y - predict_linear(beta, *x))
+                .collect::<Vec<_>>();
+            let scale =
+                (median(residuals.iter().map(|r| r.abs()).collect()) / MAD_SCALE).max(1.0e-6);
+            let mut normal = [[0.0; 5]; 5];
+            let mut rhs = [0.0; 5];
+            for ((x, y), residual) in samples.iter().zip(residuals) {
+                let design = [1.0, x[0], x[1], x[2], x[3]];
+                let scaled = residual.abs() / scale;
+                let weight = if scaled <= 1.345 { 1.0 } else { 1.345 / scaled };
+                for i in 0..5 {
+                    rhs[i] += weight * design[i] * y;
+                    for j in 0..5 {
+                        normal[i][j] += weight * design[i] * design[j];
+                    }
+                }
+            }
+            for (i, row) in normal.iter_mut().enumerate().skip(1) {
+                row[i] += 0.1;
+            }
+            let Some(next) = solve_5(normal, rhs) else {
+                return Some(Self {
+                    fallback_median,
+                    coefficients: None,
+                });
+            };
+            beta = next;
+        }
+        Some(Self {
+            fallback_median,
+            coefficients: Some(beta),
+        })
+    }
+
+    fn predict(&self, inputs: [f64; 4]) -> f64 {
+        predict_healing_expectation(self.coefficients, self.fallback_median, inputs)
+    }
+}
+
+pub fn predict_healing_expectation(
+    coefficients: Option<[f64; 5]>,
+    fallback_median: f64,
+    inputs: [f64; 4],
+) -> f64 {
+    coefficients
+        .map(|beta| predict_linear(beta, inputs))
+        .filter(|value| value.is_finite())
+        .or_else(|| fallback_median.is_finite().then_some(fallback_median))
+        .unwrap_or(0.0)
+        .max(0.0)
+}
+
+fn predict_linear(beta: [f64; 5], x: [f64; 4]) -> f64 {
+    beta[0] + beta[1] * x[0] + beta[2] * x[1] + beta[3] * x[2] + beta[4] * x[3]
+}
+
+fn solve_5(mut matrix: [[f64; 5]; 5], mut rhs: [f64; 5]) -> Option<[f64; 5]> {
+    for column in 0..5 {
+        let pivot = (column..5)
+            .max_by(|&a, &b| matrix[a][column].abs().total_cmp(&matrix[b][column].abs()))?;
+        if matrix[pivot][column].abs() <= 1.0e-12 {
+            return None;
+        }
+        matrix.swap(column, pivot);
+        rhs.swap(column, pivot);
+        let divisor = matrix[column][column];
+        for value in &mut matrix[column][column..] {
+            *value /= divisor;
+        }
+        rhs[column] /= divisor;
+        for row in 0..5 {
+            if row == column {
+                continue;
+            }
+            let factor = matrix[row][column];
+            for index in column..5 {
+                matrix[row][index] -= factor * matrix[column][index];
+            }
+            rhs[row] -= factor * rhs[column];
+        }
+    }
+    Some(rhs)
+}
+
+fn healing_inputs(row: &Prepared<'_>, baselines: &HashMap<BaselineKey, Vec<f64>>) -> [f64; 4] {
+    let z = |feature| {
+        let value = row.values[&feature];
+        let (baseline, _) = choose_baseline(baselines, row, feature);
+        value
+            .zip(baseline)
+            .map(|(value, baseline)| {
+                (MAD_SCALE * (value - baseline.median) / baseline.mad).clamp(-3.0, 3.0)
+            })
+            .unwrap_or(0.0)
+    };
+    [
+        (row.source.duration_sec / 600.0).max(0.0),
+        z(FeatureName::DamageTaken),
+        z(FeatureName::Death),
+        z(FeatureName::AvailableTeamHealing),
+    ]
+}
+
+type HealingModelKey = (
+    String,
+    TrainingEnvironment,
+    Option<String>,
+    Option<ModeFamily>,
+    Option<i64>,
+);
+
+fn healing_model_key(
+    row: &Prepared<'_>,
+    baselines: &HashMap<BaselineKey, Vec<f64>>,
+) -> Option<HealingModelKey> {
+    let (_, level) = choose_baseline(baselines, row, FeatureName::HealingTaken);
+    let role = row.source.role.clone();
+    let environment = row.source.environment;
+    Some(match level {
+        BaselineLevel::HeroModeSeason => (
+            role,
+            environment,
+            Some(row.hero.into()),
+            Some(row.source.mode_family),
+            Some(row.source.season),
+        ),
+        BaselineLevel::HeroMode => (
+            role,
+            environment,
+            Some(row.hero.into()),
+            Some(row.source.mode_family),
+            None,
+        ),
+        BaselineLevel::HeroEnvironment => (role, environment, Some(row.hero.into()), None, None),
+        BaselineLevel::RoleMode => (role, environment, None, Some(row.source.mode_family), None),
+        BaselineLevel::RoleEnvironment => (role, environment, None, None, None),
+        BaselineLevel::Unavailable => return None,
+    })
+}
+
+fn fit_healing_models(
+    rows: &[Prepared<'_>],
+    baselines: &HashMap<BaselineKey, Vec<f64>>,
+) -> HashMap<HealingModelKey, HealingExpectationModel> {
+    let mut grouped: HashMap<HealingModelKey, Vec<([f64; 4], f64)>> = HashMap::new();
+    for row in rows {
+        if !row.source.usable_for_resource_debt {
+            continue;
+        }
+        let Some(actual) = row.values[&FeatureName::HealingTaken] else {
+            continue;
+        };
+        let Some(key) = healing_model_key(row, baselines) else {
+            continue;
+        };
+        grouped
+            .entry(key)
+            .or_default()
+            .push((healing_inputs(row, baselines), actual));
+    }
+    grouped
+        .into_iter()
+        .filter_map(|(key, samples)| {
+            HealingExpectationModel::fit(&samples).map(|model| (key, model))
+        })
+        .collect()
+}
+
 fn transform(
     rows: &[Prepared<'_>],
     baselines: &HashMap<BaselineKey, Vec<f64>>,
+    healing_models: &HashMap<HealingModelKey, HealingExpectationModel>,
     strategy: HealingTakenStrategy,
     training: bool,
     audit: &mut FeatureMatrixAudit,
@@ -356,13 +627,45 @@ fn transform(
         let safe = row.source.usable_for_resource_debt;
         let healing_raw = row.values[&FeatureName::HealingTaken];
         let healing_z = standardized[&FeatureName::HealingTaken];
+        let expected_healing = healing_model_key(row, baselines)
+            .and_then(|key| healing_models.get(&key))
+            .map(|model| model.predict(healing_inputs(row, baselines)));
+        let excess_healing = healing_raw
+            .zip(expected_healing)
+            .map(|(actual, expected)| (actual - expected).max(0.0));
+        let conversion_features = match row.source.role.as_str() {
+            "tank" => [
+                FeatureName::FinalHit,
+                FeatureName::NonFinalEliminations,
+                FeatureName::Assist,
+                FeatureName::ObjectiveTime,
+            ],
+            "damage" => [
+                FeatureName::FinalHit,
+                FeatureName::NonFinalEliminations,
+                FeatureName::Assist,
+                FeatureName::ObjectiveTime,
+            ],
+            _ => [
+                FeatureName::Assist,
+                FeatureName::FinalHit,
+                FeatureName::NonFinalEliminations,
+                FeatureName::ObjectiveTime,
+            ],
+        }
+        .into_iter()
+        .map(|feature| standardized[&feature].map(|value| value.max(0.0)))
+        .collect::<Option<Vec<_>>>();
+        let role_conversion =
+            conversion_features.map(|values| values.into_iter().sum::<f64>() / 12.0);
         let healing_taken_derived = match strategy {
             HealingTakenStrategy::None => None,
             HealingTakenStrategy::DirectNegative if safe => healing_raw,
             HealingTakenStrategy::HeroNormalized if safe => healing_z,
-            HealingTakenStrategy::ExcessHealing if safe => healing_z.map(|value| value.max(0.0)),
-            // The final conversion formula belongs to model fitting; this slot carries its leak-free input.
-            HealingTakenStrategy::ResourceConversionDebt if safe => healing_z,
+            HealingTakenStrategy::ExcessHealing if safe => excess_healing,
+            HealingTakenStrategy::ResourceConversionDebt if safe => excess_healing
+                .zip(role_conversion)
+                .map(|(excess, conversion)| excess * (1.0 - conversion.clamp(0.0, 1.0)).max(0.0)),
             _ => {
                 if healing_raw.is_some() {
                     audit.unsafe_healing_taken_excluded += 1;
@@ -370,17 +673,61 @@ fn transform(
                 None
             }
         };
-        let feature_values = |source: &BTreeMap<FeatureName, Option<f64>>| FeatureValues {
-            final_hit: source[&FeatureName::FinalHit],
-            non_final_eliminations: source[&FeatureName::NonFinalEliminations],
-            assist: source[&FeatureName::Assist],
-            death: source[&FeatureName::Death],
-            damage: source[&FeatureName::Damage],
-            healing: source[&FeatureName::Healing],
-            mitigation: source[&FeatureName::Mitigation],
-            damage_taken: source[&FeatureName::DamageTaken],
-            objective_time: source[&FeatureName::ObjectiveTime],
+        let feature_values = |source: &BTreeMap<FeatureName, Option<f64>>, derived: bool| {
+            let required_outputs = [
+                FeatureName::FinalHit,
+                FeatureName::NonFinalEliminations,
+                FeatureName::Assist,
+                FeatureName::ObjectiveTime,
+            ];
+            let death_z = source[&FeatureName::Death];
+            let damage_taken_z = source[&FeatureName::DamageTaken];
+            let frontline_conversion = derived
+                .then(|| {
+                    let damage_taken = damage_taken_z?;
+                    let death = death_z?;
+                    let outputs = required_outputs
+                        .into_iter()
+                        .map(|feature| source[&feature].map(|value| value.max(0.0)))
+                        .collect::<Option<Vec<_>>>()?;
+                    let mean_positive = outputs.into_iter().sum::<f64>() / 4.0;
+                    Some(
+                        damage_taken.max(0.0)
+                            * (0.5 + 0.5 * (-death / 3.0).clamp(0.0, 1.0))
+                            * mean_positive,
+                    )
+                })
+                .flatten()
+                .filter(|_| row.source.role == "tank");
+            let survival = derived
+                .then(|| death_z.map(|death| (-death).clamp(-3.0, 3.0)))
+                .flatten()
+                .filter(|_| row.source.role == "support");
+            let abnormal_damage_taken = derived
+                .then(|| {
+                    damage_taken_z
+                        .zip(death_z)
+                        .map(|(damage_taken, death)| damage_taken.max(0.0) * death.max(0.0))
+                })
+                .flatten();
+            FeatureValues {
+                final_hit: source[&FeatureName::FinalHit],
+                non_final_eliminations: source[&FeatureName::NonFinalEliminations],
+                assist: source[&FeatureName::Assist],
+                death: source[&FeatureName::Death],
+                damage: source[&FeatureName::Damage],
+                healing: source[&FeatureName::Healing],
+                mitigation: source[&FeatureName::Mitigation],
+                damage_taken: source[&FeatureName::DamageTaken],
+                objective_time: source[&FeatureName::ObjectiveTime],
+                frontline_conversion,
+                survival,
+                abnormal_damage_taken,
+            }
         };
+        let damage_baseline_median_per_ten = choose_baseline(baselines, row, FeatureName::Damage)
+            .0
+            .map(|baseline| baseline.median);
         grouped
             .entry(row.source.role.clone())
             .or_insert_with(Vec::new)
@@ -392,11 +739,13 @@ fn transform(
                 begin_ts: row.source.begin_ts,
                 result: row.source.result,
                 expected_win_rate: row.source.expected_win_rate,
+                data_quality: row.source.data_quality,
                 mode_family: row.source.mode_family,
-                per_ten: feature_values(&row.values),
-                standardized: feature_values(&standardized),
+                per_ten: feature_values(&row.values, false),
+                standardized: feature_values(&standardized, true),
                 baselines: levels,
                 healing_taken_derived,
+                damage_baseline_median_per_ten,
             });
     }
     grouped

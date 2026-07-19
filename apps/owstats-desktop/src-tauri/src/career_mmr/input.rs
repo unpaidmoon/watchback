@@ -1,22 +1,77 @@
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Role {
     Tank,
     Damage,
     Support,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModeFamily {
     RoleCompetitive,
+    RoleQuick,
     OpenCompetitive,
+    OpenQuick,
     StadiumCompetitive,
-    QuickPlay,
+    StadiumQuick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrainingCohort {
+    RoleQueue,
+    OpenQueue,
+    StadiumCompetitive,
+    OutcomeOnly,
+}
+
+impl ModeFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RoleCompetitive => "role_competitive",
+            Self::RoleQuick => "role_quick",
+            Self::OpenCompetitive => "open_competitive",
+            Self::OpenQuick => "open_quick",
+            Self::StadiumCompetitive => "stadium_competitive",
+            Self::StadiumQuick => "stadium_quick",
+        }
+    }
+
+    pub fn from_stored_str(value: &str) -> Option<Self> {
+        match value {
+            "role_competitive" => Some(Self::RoleCompetitive),
+            "role_quick" | "quick_play" => Some(Self::RoleQuick),
+            "open_competitive" => Some(Self::OpenCompetitive),
+            "open_quick" => Some(Self::OpenQuick),
+            "stadium_competitive" => Some(Self::StadiumCompetitive),
+            "stadium_quick" => Some(Self::StadiumQuick),
+            _ => None,
+        }
+    }
+
+    pub fn training_cohort(self) -> TrainingCohort {
+        match self {
+            Self::RoleCompetitive | Self::RoleQuick => TrainingCohort::RoleQueue,
+            Self::OpenCompetitive | Self::OpenQuick => TrainingCohort::OpenQueue,
+            Self::StadiumCompetitive => TrainingCohort::StadiumCompetitive,
+            Self::StadiumQuick => TrainingCohort::OutcomeOnly,
+        }
+    }
+
+    pub fn trains_performance(self) -> bool {
+        self != Self::StadiumQuick
+    }
+
+    pub fn is_quick(self) -> bool {
+        matches!(self, Self::RoleQuick | Self::OpenQuick | Self::StadiumQuick)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,6 +79,29 @@ pub enum StadiumStatShape {
     RoundLocal,
     Cumulative,
     Ambiguous,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StadiumFinalSnapshot {
+    pub role: Role,
+    pub hero_guid: String,
+    pub statistics: Value,
+    pub available_team_healing: Option<f64>,
+}
+
+impl StadiumFinalSnapshot {
+    pub(crate) fn valid_performance_field_count(&self) -> usize {
+        self.statistics.as_object().map_or(0, serde_json::Map::len)
+    }
+
+    pub(crate) fn has_valid_performance_fields(&self) -> bool {
+        self.valid_performance_field_count() > 0
+    }
+
+    pub(crate) fn data_quality(&self) -> f64 {
+        0.55 + 0.35 * self.valid_performance_field_count() as f64
+            / STADIUM_PERFORMANCE_FIELDS.len() as f64
+    }
 }
 
 pub struct ExtractionContext {
@@ -74,7 +152,10 @@ pub fn normalize_mode_family(game_mode: &str, instance_type: Option<&str>) -> Op
     match game_mode.trim().to_ascii_lowercase().as_str() {
         "sportpreset" => Some(ModeFamily::RoleCompetitive),
         "sportopen" => Some(ModeFamily::OpenCompetitive),
-        "leisurepreset" | "leisure6v6" | "leisure" => Some(ModeFamily::QuickPlay),
+        "leisurepreset" | "leisure" => Some(ModeFamily::RoleQuick),
+        "leisure6v6" => Some(ModeFamily::OpenQuick),
+        "sportfight" => Some(ModeFamily::StadiumCompetitive),
+        "leisurefight" | "quickfight" => Some(ModeFamily::StadiumQuick),
         "sport" => match instance_type?.trim().to_ascii_lowercase().as_str() {
             "it_ranked" => Some(ModeFamily::RoleCompetitive),
             "it_ruleset" => Some(ModeFamily::OpenCompetitive),
@@ -165,7 +246,7 @@ pub fn extract_stadium_match_with_context(
     let row = conn
         .query_row(
             r#"
-            SELECT m.match_id, m.season, m.begin_ts, m.result, m.duration_sec,
+            SELECT m.match_id, m.season, m.begin_ts, m.game_mode, m.result, m.duration_sec,
                    m.raw_entry_json, d.raw_detail_json
             FROM matches m
             LEFT JOIN match_details d ON d.match_id = m.match_id
@@ -178,14 +259,16 @@ pub fn extract_stadium_match_with_context(
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()?;
-    let Some((match_id, season, begin_ts, result, duration_sec, raw_entry, raw_detail)) = row
+    let Some((match_id, season, begin_ts, game_mode, result, duration_sec, raw_entry, raw_detail)) =
+        row
     else {
         return Ok(None);
     };
@@ -193,6 +276,12 @@ pub fn extract_stadium_match_with_context(
         return Ok(None);
     };
     let entry = serde_json::from_str::<Value>(&raw_entry).unwrap_or(Value::Null);
+    let Some(mode_family) = normalize_mode_family(
+        &game_mode,
+        entry.get("instanceType").and_then(Value::as_str),
+    ) else {
+        return Ok(None);
+    };
     let detail = raw_detail
         .as_deref()
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
@@ -203,59 +292,24 @@ pub fn extract_stadium_match_with_context(
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let current_player_key: Option<String> = conn
-        .query_row(
-            "SELECT bnet_id FROM match_players WHERE match_id=?1 AND is_current_player=1 LIMIT 1",
-            [&match_id],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let Some(current_player_key) = unique_current_player_key(conn, &match_id)? else {
+        return Ok(None);
+    };
     let entry_role = entry
         .get("roleType")
         .and_then(Value::as_str)
         .and_then(|value| normalize_role(Some(value)));
     let (team_strength, opponent_strength, rank_coverage) = stadium_strengths(data, &entry);
 
-    let selected = last_structurally_valid_stadium_round(rounds).and_then(|round| {
-        current_player_key
-            .as_deref()
-            .and_then(|key| current_player_row(round, key).map(|player| (round, player)))
-    });
-    let (role, role_source, data_quality, performance_features) = if let Some((_round, player)) =
-        selected
-    {
-        let hero = scalar_text(player.get("heroGuid"));
-        let Some(role) = hero
-            .as_deref()
-            .and_then(|hero| context.hero_roles.get(hero).copied())
-        else {
-            return Ok(entry_role.map(|role| {
-                stadium_outcome_only(
-                    match_id,
-                    season,
-                    begin_ts,
-                    result,
-                    duration_sec,
-                    role,
-                    team_strength,
-                    opponent_strength,
-                    rank_coverage,
-                )
-            }));
-        };
-        let shape =
-            classify_stadium_stat_shape(rounds, current_player_key.as_deref().unwrap_or_default());
-        let features = if shape == StadiumStatShape::Ambiguous {
-            Value::Object(Default::default())
-        } else {
-            stadium_performance_features(player)
-        };
-        let quality = if shape == StadiumStatShape::Ambiguous {
-            0.6
-        } else {
-            0.9
-        };
-        (role, "stadium_last_round", quality, features)
+    let selected = stadium_final_snapshot(rounds, &current_player_key, context);
+    let (role, role_source, data_quality, performance_features) = if let Some(snapshot) = selected {
+        let data_quality = snapshot.data_quality();
+        (
+            snapshot.role,
+            "stadium_last_round",
+            data_quality,
+            snapshot.statistics,
+        )
     } else {
         let Some(role) = entry_role else {
             return Ok(None);
@@ -266,6 +320,7 @@ pub fn extract_stadium_match_with_context(
             begin_ts,
             result,
             duration_sec,
+            mode_family,
             role,
             team_strength,
             opponent_strength,
@@ -277,7 +332,7 @@ pub fn extract_stadium_match_with_context(
         match_id,
         season,
         begin_ts,
-        mode_family: ModeFamily::StadiumCompetitive,
+        mode_family,
         result,
         duration_sec,
         role,
@@ -297,6 +352,7 @@ fn stadium_outcome_only(
     begin_ts: i64,
     result: f64,
     duration_sec: i64,
+    mode_family: ModeFamily,
     role: Role,
     team_strength: Option<f64>,
     opponent_strength: Option<f64>,
@@ -306,7 +362,7 @@ fn stadium_outcome_only(
         match_id,
         season,
         begin_ts,
-        mode_family: ModeFamily::StadiumCompetitive,
+        mode_family,
         result,
         duration_sec,
         role,
@@ -329,8 +385,51 @@ fn normalize_result(result: &str) -> Option<f64> {
     }
 }
 
+fn unique_current_player_key(conn: &Connection, match_id: &str) -> Result<Option<String>> {
+    Ok(conn.query_row(
+        "SELECT CASE WHEN COUNT(*)=1 AND MIN(bnet_id)=TRIM(MIN(bnet_id)) AND TRIM(MIN(bnet_id))<>'' THEN MIN(bnet_id) END FROM match_players WHERE match_id=?1 AND is_current_player=1",
+        [match_id],
+        |row| row.get(0),
+    )?)
+}
+
 fn last_structurally_valid_stadium_round(rounds: &[Value]) -> Option<&Value> {
     ordered_structurally_valid_stadium_rounds(rounds).pop()
+}
+
+pub(crate) fn stadium_final_snapshot(
+    rounds: &[Value],
+    current_player_key: &str,
+    context: &ExtractionContext,
+) -> Option<StadiumFinalSnapshot> {
+    let round = last_structurally_valid_stadium_round(rounds)?;
+    let player = current_player_row(round, current_player_key)?;
+    let hero_guid = scalar_text(player.get("heroGuid"))?;
+    let role = context.hero_roles.get(&hero_guid).copied()?;
+    Some(StadiumFinalSnapshot {
+        role,
+        hero_guid,
+        statistics: stadium_performance_features(player),
+        available_team_healing: available_team_healing(round, current_player_key),
+    })
+}
+
+fn available_team_healing(round: &Value, current_player_key: &str) -> Option<f64> {
+    let team = ["teammateList", "enemyList"]
+        .into_iter()
+        .filter_map(|key| round.get(key).and_then(Value::as_array))
+        .find(|players| {
+            players.iter().any(|player| {
+                scalar_text(player.get("bnetId")).as_deref() == Some(current_player_key)
+            })
+        })?;
+    let values = team
+        .iter()
+        .filter(|player| scalar_text(player.get("bnetId")).as_deref() != Some(current_player_key))
+        .filter_map(|player| player.get("cure").and_then(json_number))
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.into_iter().sum())
 }
 
 fn structurally_valid_stadium_round(round: &Value) -> bool {
@@ -365,7 +464,7 @@ fn json_i64_field(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(json_i64_value)
 }
 
-const STADIUM_PERFORMANCE_FIELDS: &[&str] = &[
+pub(crate) const STADIUM_PERFORMANCE_FIELDS: &[&str] = &[
     "kill",
     "assist",
     "death",
@@ -382,9 +481,12 @@ fn stadium_performance_features(player: &Value) -> Value {
     let mut features = serde_json::Map::new();
     for key in STADIUM_PERFORMANCE_FIELDS {
         if let Some(value) = player.get(*key) {
+            let Some(number) = json_number(value).filter(|number| *number >= 0.0) else {
+                continue;
+            };
             if value.is_number() {
                 features.insert((*key).to_string(), value.clone());
-            } else if let Some(number) = json_number(value) {
+            } else {
                 features.insert((*key).to_string(), Value::from(number));
             }
         }
@@ -564,12 +666,18 @@ pub fn audit_career_mmr_inputs(conn: &Connection) -> Result<CareerMmrInputAudit>
     let mut stadium_ambiguous_matches = 0;
     let mut stadium = conn.prepare(
         r#"
-        SELECT d.raw_detail_json, p.bnet_id
+        SELECT d.raw_detail_json,
+               (SELECT CASE
+                    WHEN COUNT(*)=1
+                     AND MIN(p.bnet_id)=TRIM(MIN(p.bnet_id))
+                     AND TRIM(MIN(p.bnet_id))<>''
+                    THEN MIN(p.bnet_id)
+                END
+                FROM match_players p
+                WHERE p.match_id=m.match_id AND p.is_current_player=1)
         FROM matches m
         LEFT JOIN match_details d ON d.match_id=m.match_id
-        LEFT JOIN match_players p ON p.match_id=m.match_id AND p.is_current_player=1
         WHERE m.bucket='stadium'
-        GROUP BY m.match_id
         "#,
     )?;
     for row in stadium.query_map([], |row| {

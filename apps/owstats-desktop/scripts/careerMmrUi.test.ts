@@ -4,9 +4,24 @@ import {
   buildCareerMmrChart,
   buildCareerMmrChartSummary,
   buildCareerMmrYAxisTicks,
+  careerModeLabels,
   createCareerMmrRequestGuard,
   formatCareerMmrTooltip,
 } from "../src/shared/careerMmrFormat";
+
+assert.deepEqual(
+  careerModeLabels,
+  {
+    role_competitive: "职责竞技",
+    role_quick: "职责快速",
+    open_competitive: "开放竞技",
+    open_quick: "开放快速",
+    stadium_competitive: "角斗竞技",
+    stadium_quick: "角斗快速",
+    quick_play: "快速比赛",
+  },
+  "六种实际模式必须有差异化中文标签，并保留旧 quick_play 显示兼容",
+);
 
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("../src/shared/phase6Shell.ts", import.meta.url), "utf8");
@@ -57,8 +72,12 @@ assert.match(pageSource, /formatCareerDate\(summary\?\.peakAt/, "职责卡必须
 assert.match(apiSource, /invoke<CareerMmrOverview>\("get_career_mmr_overview"\)/);
 assert.match(apiSource, /invoke<CareerMmrHistory>\("get_role_mmr_history"/);
 assert.match(apiSource, /invoke\("rebuild_career_mmr"\)/, "前端必须能够触发隐私安全的本地 MMR 重建");
-assert.match(pageSource, /nextStatus\.modelVersion === null[\s\S]*rebuildCareerMmr\(\)/, "首次打开旧库升级后的页面必须自动重建一次 MMR");
+assert.match(pageSource, /nextStatus\.needsRebuild[\s\S]*rebuildCareerMmr\(\)/, "首次打开旧模型页面必须自动重建到目标 MMR 版本");
+assert.doesNotMatch(pageSource, /nextStatus\.modelVersion === null/, "不能只在完全没有 active 模型时才重建");
+assert.doesNotMatch(pageSource, /nextStatus\.isBuilt[\s\S]*rebuildCareerMmr\(\)/, "少职责账号不能因 isBuilt=false 反复重建");
 assert.match(typeSource, /export type CareerRole = "tank" \| "damage" \| "support"/);
+assert.match(typeSource, /targetModelVersion: number/);
+assert.match(typeSource, /needsRebuild: boolean/);
 assert.match(typeSource, /peakAt: number \| null/);
 assert.doesNotMatch(pageSource, /胜负、对局难度与数据质量共同形成/, "不能用通用文案伪装单场解释");
 assert.doesNotMatch(pageSource, /cursorHash/, "页面不能读取或展示内部游标哈希");

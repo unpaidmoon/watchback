@@ -1,7 +1,7 @@
 use super::{
     input::{
         extract_ordinary_match_with_context, extract_stadium_match_with_context, ExtractionContext,
-        MmrMatchInput, ModeFamily, Role,
+        MmrMatchInput, Role,
     },
     rating::{apply_inactivity, confidence, update_rating, RatingInput, RoleRatingState},
 };
@@ -13,9 +13,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-pub const BASELINE_MODEL_VERSION: i64 = 1;
-const ALGORITHM: &str = "role_bayesian_outcome_v1";
-const CONFIG_JSON: &str = r#"{"performanceWeight":0.0}"#;
+pub const BASELINE_MODEL_VERSION: i64 = 2;
+const ALGORITHM: &str = "role_bayesian_outcome_six_mode_v2";
+const CONFIG_JSON: &str = r#"{"performanceWeight":0.0,"trainingCohorts":{"role_competitive":"role_queue","role_quick":"role_queue","open_competitive":"open_queue","open_quick":"open_queue","stadium_competitive":"stadium_competitive","stadium_quick":"outcome_only"},"modeWeights":{"role_competitive":1.0,"role_quick":0.3,"open_competitive":1.0,"open_quick":0.3,"stadium_competitive":0.5,"stadium_quick":0.1},"modeCaps":{"competitive":30.0,"quick":10.0}}"#;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +112,7 @@ fn replace_inputs(tx: &Transaction<'_>, inputs: &[MmrMatchInput]) -> Result<()> 
         let hash = input_hash(input);
         tx.execute(
             "INSERT INTO mmr_match_inputs(match_id, role, season, begin_ts, mode_family, result, duration_sec, role_share, role_source, data_quality, team_strength, opponent_strength, rank_coverage, performance_features_json, input_hash) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
-            params![input.match_id, input.role.as_str(), input.season, input.begin_ts, mode_name(input.mode_family), input.result, input.duration_sec, input.role_share, input.role_source, input.data_quality, input.team_strength, input.opponent_strength, input.rank_coverage, canonical_json(&input.performance_features), hash],
+            params![input.match_id, input.role.as_str(), input.season, input.begin_ts, input.mode_family.as_str(), input.result, input.duration_sec, input.role_share, input.role_source, input.data_quality, input.team_strength, input.opponent_strength, input.rank_coverage, canonical_json(&input.performance_features), hash],
         )?;
     }
     Ok(())
@@ -155,7 +155,7 @@ fn replay_events(
         let hash = input_hash(input);
         tx.execute(
             "INSERT INTO career_mmr_events(model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0.0,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
-            params![BASELINE_MODEL_VERSION,input.match_id,input.role.as_str(),input.season,input.begin_ts,mode_name(input.mode_family),input.role_share,input.result,update.expected_win_rate,input.data_quality,before.mu,update.prepared_sigma_before,update.base_delta,update.delta,update.new_state.mu,update.new_state.sigma,update.confidence,hash,computed_at],
+            params![BASELINE_MODEL_VERSION,input.match_id,input.role.as_str(),input.season,input.begin_ts,input.mode_family.as_str(),input.role_share,input.result,update.expected_win_rate,input.data_quality,before.mu,update.prepared_sigma_before,update.base_delta,update.delta,update.new_state.mu,update.new_state.sigma,update.confidence,hash,computed_at],
         )?;
         digest_material.push_str(&format!(
             "{}|{}|{}|{:.9}|{:.9}|{:.9};",
@@ -392,14 +392,6 @@ fn median(values: &mut [f64]) -> f64 {
     }
 }
 
-fn mode_name(mode: ModeFamily) -> &'static str {
-    match mode {
-        ModeFamily::RoleCompetitive => "role_competitive",
-        ModeFamily::OpenCompetitive => "open_competitive",
-        ModeFamily::StadiumCompetitive => "stadium_competitive",
-        ModeFamily::QuickPlay => "quick_play",
-    }
-}
 fn canonical_json(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
 }
@@ -409,7 +401,7 @@ fn input_hash(input: &MmrMatchInput) -> String {
         sha256_hex(&input.match_id),
         input.season,
         input.begin_ts,
-        mode_name(input.mode_family),
+        input.mode_family.as_str(),
         input.result,
         input.duration_sec,
         input.role_share,

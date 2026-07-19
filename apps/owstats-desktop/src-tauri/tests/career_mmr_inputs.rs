@@ -2,6 +2,7 @@ use owstats_desktop_lib::career_mmr::input::{
     audit_career_mmr_inputs, classify_stadium_stat_shape, extract_ordinary_match,
     extract_ordinary_match_with_context, extract_stadium_match, extract_stadium_match_with_context,
     normalize_mode_family, normalize_role, ExtractionContext, ModeFamily, Role, StadiumStatShape,
+    TrainingCohort,
 };
 use owstats_desktop_lib::OwDatabase;
 use rusqlite::{Connection, OpenFlags};
@@ -13,6 +14,91 @@ fn database() -> (tempfile::TempDir, Connection) {
     db.initialize().unwrap();
     let conn = db.connect().unwrap();
     (dir, conn)
+}
+
+#[test]
+fn maps_every_upstream_mode_to_a_distinct_actual_mode() {
+    for (game_mode, instance_type, expected) in [
+        ("SportPreset", None, ModeFamily::RoleCompetitive),
+        ("sport", Some("IT_RANKED"), ModeFamily::RoleCompetitive),
+        ("LeisurePreset", None, ModeFamily::RoleQuick),
+        ("leisure", None, ModeFamily::RoleQuick),
+        ("SportOpen", None, ModeFamily::OpenCompetitive),
+        ("sport", Some("IT_RULESET"), ModeFamily::OpenCompetitive),
+        ("Leisure6v6", None, ModeFamily::OpenQuick),
+        ("SportFight", None, ModeFamily::StadiumCompetitive),
+        ("LeisureFight", None, ModeFamily::StadiumQuick),
+        ("QuickFight", None, ModeFamily::StadiumQuick),
+    ] {
+        assert_eq!(
+            normalize_mode_family(game_mode, instance_type),
+            Some(expected),
+            "{game_mode} {instance_type:?}"
+        );
+    }
+    assert_ne!(ModeFamily::RoleQuick, ModeFamily::OpenQuick);
+}
+
+#[test]
+fn modes_have_stable_names_training_cohorts_and_training_flags() {
+    let cases = [
+        (
+            ModeFamily::RoleCompetitive,
+            "role_competitive",
+            TrainingCohort::RoleQueue,
+            false,
+            true,
+        ),
+        (
+            ModeFamily::RoleQuick,
+            "role_quick",
+            TrainingCohort::RoleQueue,
+            true,
+            true,
+        ),
+        (
+            ModeFamily::OpenCompetitive,
+            "open_competitive",
+            TrainingCohort::OpenQueue,
+            false,
+            true,
+        ),
+        (
+            ModeFamily::OpenQuick,
+            "open_quick",
+            TrainingCohort::OpenQueue,
+            true,
+            true,
+        ),
+        (
+            ModeFamily::StadiumCompetitive,
+            "stadium_competitive",
+            TrainingCohort::StadiumCompetitive,
+            false,
+            true,
+        ),
+        (
+            ModeFamily::StadiumQuick,
+            "stadium_quick",
+            TrainingCohort::OutcomeOnly,
+            true,
+            false,
+        ),
+    ];
+    for (mode, name, cohort, quick, trains_performance) in cases {
+        assert_eq!(mode.as_str(), name);
+        assert_eq!(mode.training_cohort(), cohort);
+        assert_eq!(mode.is_quick(), quick);
+        assert_eq!(mode.trains_performance(), trains_performance);
+    }
+
+    let mut modes = cases.map(|case| case.0);
+    modes.sort();
+    let serialized = serde_json::to_string(&modes).unwrap();
+    assert_eq!(
+        serialized,
+        "[\"role_competitive\",\"role_quick\",\"open_competitive\",\"open_quick\",\"stadium_competitive\",\"stadium_quick\"]"
+    );
 }
 
 fn audit_read_only(
@@ -138,6 +224,72 @@ fn stadium_uses_only_last_valid_round_role_and_performance() {
 }
 
 #[test]
+fn stadium_snapshot_quality_tracks_only_valid_performance_fields() {
+    let cases = [
+        ("empty", serde_json::json!({}), 0, 0.55),
+        (
+            "invalid",
+            serde_json::json!({
+                "kill":-1,"assist":"-2","death":"NaN","heroDamage":"bad",
+                "cure":-3,"resistDamage":"-4","finalHit":-5,
+                "targetCompetingTime":"invalid","healingTaken":-6,"damageTaken":"-7"
+            }),
+            0,
+            0.55,
+        ),
+        (
+            "partial",
+            serde_json::json!({"finalHit":"7","kill":3,"assist":-1}),
+            2,
+            0.62,
+        ),
+        (
+            "complete",
+            serde_json::json!({
+                "kill":1,"assist":"2","death":3,"heroDamage":"4",
+                "cure":5,"resistDamage":"6","finalHit":7,
+                "targetCompetingTime":"8","healingTaken":9,"damageTaken":"10"
+            }),
+            10,
+            0.90,
+        ),
+    ];
+    for (suffix, statistics, valid_count, expected_quality) in cases {
+        let (_dir, conn) = database();
+        install_stadium_roles(&conn);
+        let mut player = serde_json::json!({
+            "bnetId":"current-local",
+            "heroGuid":"support-hero"
+        });
+        player
+            .as_object_mut()
+            .unwrap()
+            .extend(statistics.as_object().unwrap().clone());
+        let id = format!("stadium-quality-{suffix}");
+        insert_stadium(
+            &conn,
+            &id,
+            serde_json::json!({"roleType":"tank"}),
+            serde_json::json!({
+                "roundCountList":[{"roundIndex":1,"teammateList":[player],"enemyList":[]}]
+            }),
+        );
+
+        let input = extract_stadium_match(&conn, &id).unwrap().unwrap();
+        assert_eq!(
+            input.performance_features.as_object().unwrap().len(),
+            valid_count,
+            "{suffix}"
+        );
+        assert!(
+            (input.data_quality - expected_quality).abs() < 1e-12,
+            "{suffix}: {}",
+            input.data_quality
+        );
+    }
+}
+
+#[test]
 fn stadium_missing_current_player_rounds_never_borrows_previous_performance() {
     let (_dir, conn) = database();
     install_stadium_roles(&conn);
@@ -168,6 +320,78 @@ fn stadium_missing_current_player_rounds_never_borrows_previous_performance() {
     assert!(extract_stadium_match(&conn, "stadium-outcome-only")
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn stadium_duplicate_current_player_markers_fail_closed() {
+    let (_dir, conn) = database();
+    install_stadium_roles(&conn);
+    insert_stadium(
+        &conn,
+        "stadium-duplicate-current",
+        serde_json::json!({"roleType":"tank"}),
+        serde_json::json!({
+            "roundCountList":[{
+                "roundIndex":1,
+                "teammateList":[
+                    {"bnetId":"current-local","heroGuid":"support-hero","finalHit":7},
+                    {"bnetId":"duplicate-current","heroGuid":"damage-hero","finalHit":99}
+                ],
+                "enemyList":[]
+            }]
+        }),
+    );
+    insert_player(
+        &conn,
+        "stadium-duplicate-current",
+        23,
+        "duplicate-current",
+        "damage-hero",
+        Some("damage"),
+        0,
+        99,
+    );
+
+    let context = ExtractionContext::build(&conn).unwrap();
+    assert!(
+        extract_stadium_match_with_context(&conn, "stadium-duplicate-current", &context)
+            .unwrap()
+            .is_none()
+    );
+    assert!(extract_stadium_match(&conn, "stadium-duplicate-current")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn stadium_blank_or_padded_current_player_keys_fail_closed() {
+    for (id, invalid_key) in [
+        ("stadium-empty-current", ""),
+        ("stadium-space-current", "   "),
+        ("stadium-padded-current", " current-local "),
+    ] {
+        let (_dir, conn) = database();
+        install_stadium_roles(&conn);
+        insert_stadium(
+            &conn,
+            id,
+            serde_json::json!({"roleType":"tank"}),
+            serde_json::json!({
+                "roundCountList":[stadium_round(Some(1), None, "support-hero", 7)]
+            }),
+        );
+        conn.execute(
+            "UPDATE match_players SET bnet_id=?1 WHERE match_id=?2 AND is_current_player=1",
+            (invalid_key, id),
+        )
+        .unwrap();
+
+        let context = ExtractionContext::build(&conn).unwrap();
+        assert!(extract_stadium_match_with_context(&conn, id, &context)
+            .unwrap()
+            .is_none());
+        assert!(extract_stadium_match(&conn, id).unwrap().is_none());
+    }
 }
 
 #[test]
@@ -400,10 +624,53 @@ fn stadium_audit_exposes_only_aggregate_shape_counts() {
         );
     }
 
+    insert_stadium(
+        &conn,
+        "duplicate-current-audit",
+        serde_json::json!({"roleType":"tank"}),
+        serde_json::json!({
+            "roundCountList":[
+                stadium_round(Some(1), None, "tank-hero", 8),
+                stadium_round(Some(2), None, "tank-hero", 3)
+            ]
+        }),
+    );
+    insert_player(
+        &conn,
+        "duplicate-current-audit",
+        23,
+        "duplicate-current",
+        "damage-hero",
+        Some("damage"),
+        0,
+        0,
+    );
+    for (id, invalid_key) in [
+        ("blank-current-audit", ""),
+        ("padded-current-audit", " current-local "),
+    ] {
+        insert_stadium(
+            &conn,
+            id,
+            serde_json::json!({"roleType":"tank"}),
+            serde_json::json!({
+                "roundCountList":[
+                    stadium_round(Some(1), None, "tank-hero", 8),
+                    stadium_round(Some(2), None, "tank-hero", 3)
+                ]
+            }),
+        );
+        conn.execute(
+            "UPDATE match_players SET bnet_id=?1 WHERE match_id=?2 AND is_current_player=1",
+            (invalid_key, id),
+        )
+        .unwrap();
+    }
+
     let audit = audit_read_only(conn);
     assert_eq!(audit.stadium_round_local_matches, 1);
     assert_eq!(audit.stadium_cumulative_matches, 1);
-    assert_eq!(audit.stadium_ambiguous_matches, 1);
+    assert_eq!(audit.stadium_ambiguous_matches, 4);
 }
 
 #[test]
@@ -686,11 +953,11 @@ fn ordinary_mode_variants_follow_existing_product_semantics() {
     );
     assert_eq!(
         normalize_mode_family("LeisurePreset", None),
-        Some(ModeFamily::QuickPlay)
+        Some(ModeFamily::RoleQuick)
     );
     assert_eq!(
         normalize_mode_family("leisure6V6", None),
-        Some(ModeFamily::QuickPlay)
+        Some(ModeFamily::OpenQuick)
     );
     assert_eq!(
         normalize_mode_family("sport", Some("IT_RANKED")),

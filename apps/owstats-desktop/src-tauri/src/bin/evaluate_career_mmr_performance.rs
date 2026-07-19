@@ -17,12 +17,14 @@ struct CliArgs {
 struct AlgorithmConfig {
     bootstrap_iterations: usize,
     seed: u64,
-    optimizer_passes: usize,
+    model_fit_steps: usize,
 }
 
 #[derive(Serialize)]
 struct EvaluationReport<'a> {
     audit: &'a TrainingAudit,
+    dataset_scope: &'static str,
+    account_loo_status: &'static str,
     algorithm_config: AlgorithmConfig,
     elapsed_ms: u128,
     #[serde(flatten)]
@@ -76,11 +78,13 @@ fn run() -> Result<String, &'static str> {
     let algorithm_config = AlgorithmConfig {
         bootstrap_iterations: config.bootstrap_iterations,
         seed: config.seed,
-        optimizer_passes: config.optimizer_passes,
+        model_fit_steps: owstats_desktop_lib::career_mmr::performance_model::MODEL_FIT_STEPS,
     };
     let evaluation = evaluate_stability(&projection.rows, config);
     let report = EvaluationReport {
         audit: projection.public_audit(),
+        dataset_scope: "single_dataset_research",
+        account_loo_status: "coverage_limited_not_formal_multi_account",
         algorithm_config,
         elapsed_ms: started.elapsed().as_millis(),
         evaluation,

@@ -1,16 +1,26 @@
 use owstats_desktop_lib::career_mmr::{
     evaluation::{evaluate_outcome_baselines, ECE_BINS, MIN_REPORT_SAMPLES},
     input::ModeFamily,
-    training::TrainingRow,
+    training::{TrainingEnvironment, TrainingRow},
 };
 
 fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> TrainingRow {
     TrainingRow {
+        account_group: "dataset-001".into(),
+        source_match_group: format!("source-{ts}"),
         match_group: format!("group-{ts}"),
         season: 22,
         begin_ts: ts,
         role: role.into(),
         mode_family: mode,
+        environment: if matches!(
+            mode,
+            ModeFamily::StadiumCompetitive | ModeFamily::StadiumQuick
+        ) {
+            TrainingEnvironment::Stadium
+        } else {
+            TrainingEnvironment::Ordinary
+        },
         hero_group: None,
         outcome_only: true,
         allow_performance: false,
@@ -18,6 +28,7 @@ fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> Tra
         result,
         expected_win_rate: expected,
         data_quality: 0.55,
+        base_delta: Some(10.0),
         final_hit: None,
         kill: None,
         assist: None,
@@ -26,6 +37,7 @@ fn row(ts: i64, role: &str, mode: ModeFamily, result: f64, expected: f64) -> Tra
         healing: None,
         mitigation: None,
         healing_taken: None,
+        available_team_healing: None,
         damage_taken: None,
         objective_time_sec: None,
         duration_sec: 600.0,
@@ -100,7 +112,7 @@ fn a_match_spanning_time_is_grouped_with_every_overlapping_time_component() {
         rows.push(row(
             ts,
             "damage",
-            ModeFamily::QuickPlay,
+            ModeFamily::RoleQuick,
             (ts % 2) as f64,
             0.5,
         ));
@@ -142,7 +154,7 @@ fn reports_brier_auc_and_ten_bin_ece_by_role_and_mode() {
             i,
             if i % 2 == 0 { "tank" } else { "support" },
             if i % 3 == 0 {
-                ModeFamily::QuickPlay
+                ModeFamily::RoleQuick
             } else {
                 ModeFamily::RoleCompetitive
             },
@@ -161,7 +173,7 @@ fn reports_brier_auc_and_ten_bin_ece_by_role_and_mode() {
     assert!(report
         .groups
         .iter()
-        .any(|g| g.dimension == "mode" && g.key == "quick_play"));
+        .any(|g| g.dimension == "mode" && g.key == "role_quick"));
     let overall = report
         .groups
         .iter()

@@ -4,7 +4,7 @@
 //! TrueSkill or any other official Overwatch rating system. All timestamps are
 //! Unix seconds.
 
-use super::input::ModeFamily;
+use super::input::{ModeFamily, Role};
 use std::{error::Error, fmt};
 
 pub const INITIAL_MU: f64 = 2500.0;
@@ -140,8 +140,46 @@ pub fn update_rating(
     state: RoleRatingState,
     input: RatingInput,
 ) -> Result<RatingUpdate, RatingError> {
-    validate_state(&state)?;
     let expected = expected_win(input.team_strength, input.opponent_strength);
+    update_rating_for_expected(state, input, expected, 0.0)
+}
+
+pub fn bounded_performance_adjustment(
+    base_delta: f64,
+    requested: f64,
+    role: Role,
+    mode: ModeFamily,
+) -> f64 {
+    if !base_delta.is_finite()
+        || !requested.is_finite()
+        || base_delta == 0.0
+        || mode == ModeFamily::StadiumQuick
+    {
+        return 0.0;
+    }
+    let absolute: f64 = match (role, mode.is_quick()) {
+        (_, true) => 1.0,
+        (Role::Support, false) => 2.0,
+        _ => 3.0,
+    };
+    requested
+        .clamp(-0.1 * base_delta.abs(), 0.1 * base_delta.abs())
+        .clamp(-absolute, absolute)
+}
+
+pub fn update_rating_for_expected(
+    state: RoleRatingState,
+    input: RatingInput,
+    expected: f64,
+    performance_adjustment: f64,
+) -> Result<RatingUpdate, RatingError> {
+    validate_state(&state)?;
+    if !expected.is_finite()
+        || !(0.0..=1.0).contains(&expected)
+        || !performance_adjustment.is_finite()
+    {
+        return Ok(no_op_update(state, finite_or(expected, 0.5)));
+    }
     if !validate_update_input(&state, &input) {
         return Ok(no_op_update(state, expected));
     }
@@ -157,7 +195,18 @@ pub fn update_rating(
         input.result,
         expected,
     );
-    let delta = base_delta;
+    let performance_adjustment = if base_delta == 0.0 {
+        0.0
+    } else {
+        performance_adjustment
+    };
+    let requested_delta = base_delta + performance_adjustment;
+    let delta = if base_delta != 0.0 && requested_delta.signum() != base_delta.signum() {
+        base_delta
+    } else {
+        requested_delta.clamp(-mode_cap(input.mode), mode_cap(input.mode))
+    };
+    let performance_adjustment = delta - base_delta;
     let information = role_share * data_quality;
     let sigma_reduction = (1.0 - 0.025 * information).clamp(0.90, 1.0);
     let new_sigma = (state.sigma * sigma_reduction).clamp(MIN_SIGMA, INITIAL_SIGMA);
@@ -178,7 +227,7 @@ pub fn update_rating(
         expected_win_rate: expected,
         confidence: confidence(new_state, data_quality),
         base_delta,
-        performance_adjustment: 0.0,
+        performance_adjustment,
     })
 }
 
@@ -231,19 +280,18 @@ pub fn confidence(state: RoleRatingState, data_quality: f64) -> f64 {
 
 fn mode_weight(mode: ModeFamily) -> f64 {
     match mode {
-        ModeFamily::QuickPlay => 0.5,
-        ModeFamily::RoleCompetitive
-        | ModeFamily::OpenCompetitive
-        | ModeFamily::StadiumCompetitive => 1.0,
+        ModeFamily::RoleCompetitive | ModeFamily::OpenCompetitive => 1.0,
+        ModeFamily::StadiumCompetitive => 0.5,
+        ModeFamily::RoleQuick | ModeFamily::OpenQuick => 0.3,
+        ModeFamily::StadiumQuick => 0.1,
     }
 }
 
 fn mode_cap(mode: ModeFamily) -> f64 {
-    match mode {
-        ModeFamily::QuickPlay => 10.0,
-        ModeFamily::RoleCompetitive
-        | ModeFamily::OpenCompetitive
-        | ModeFamily::StadiumCompetitive => 30.0,
+    if mode.is_quick() {
+        10.0
+    } else {
+        30.0
     }
 }
 

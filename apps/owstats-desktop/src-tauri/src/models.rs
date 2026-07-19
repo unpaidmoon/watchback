@@ -131,6 +131,8 @@ pub struct CareerMmrExplanationFactor {
 #[serde(rename_all = "camelCase")]
 pub struct CareerMmrBuildStatus {
     pub model_version: Option<i64>,
+    pub target_model_version: i64,
+    pub needs_rebuild: bool,
     pub summary_count: i64,
     pub is_built: bool,
 }
