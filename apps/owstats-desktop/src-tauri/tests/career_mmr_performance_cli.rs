@@ -396,6 +396,10 @@ fn candidate_stage_validates_promotion_and_reduces_actual_evaluation_work() {
         1_000
     );
     assert_eq!(report_json["promotion"]["candidate_count"], 3);
+    assert_eq!(
+        report_json["promotion_checksum"],
+        recompute_promotion_checksum(&report_json).unwrap()
+    );
     let artifact_json: serde_json::Value =
         serde_json::from_slice(&fs::read(artifact).unwrap()).unwrap();
     let promoted = artifact_json["training_config"]["fit"]["promoted_candidates"]
@@ -409,6 +413,43 @@ fn candidate_stage_validates_promotion_and_reduces_actual_evaluation_work() {
             && candidate["lambda_core"] == 0.02
             && candidate["lambda_cohort"] == 0.05
     }));
+}
+
+#[test]
+fn real_screen_bundle_reaches_candidate_loader_before_no_candidates_rejection() {
+    let app = synthetic_app_data();
+    let screen_report = app.path().join("screen-report.json");
+    let screen_artifact = app.path().join("screen-artifact.json");
+    let screen = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "screen", "--report"])
+        .arg(&screen_report)
+        .arg("--artifact")
+        .arg(&screen_artifact)
+        .output()
+        .unwrap();
+    assert!(
+        screen.status.success(),
+        "{}",
+        String::from_utf8_lossy(&screen.stderr)
+    );
+
+    let candidate = Command::new(env!("CARGO_BIN_EXE_train_career_mmr"))
+        .arg("--app-data-dir")
+        .arg(app.path())
+        .args(["--stage", "candidate", "--promote-from"])
+        .arg(&screen_report)
+        .arg("--report")
+        .arg(app.path().join("candidate-report.json"))
+        .arg("--artifact")
+        .arg(app.path().join("candidate-artifact.json"))
+        .output()
+        .unwrap();
+    assert!(!candidate.status.success());
+    let stderr = String::from_utf8(candidate.stderr).unwrap();
+    assert!(stderr.contains("无可晋级候选"), "{stderr}");
+    assert!(!stderr.contains("上一阶段报告无效"), "{stderr}");
 }
 
 #[test]
@@ -557,10 +598,12 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
             .output()
             .unwrap();
         assert!(!output.status.success(), "{name}");
-        assert_eq!(
-            String::from_utf8(output.stderr).unwrap(),
+        let expected = if name == "empty" {
+            "错误：无可晋级候选\n"
+        } else {
             "错误：上一阶段报告无效\n"
-        );
+        };
+        assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
     }
 }
 

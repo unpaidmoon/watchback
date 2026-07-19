@@ -463,7 +463,7 @@ pub fn validate_promotion_report(
             .cloned()
             .ok_or_else(&invalid)?,
     )?;
-    if candidates.is_empty() || declared != candidates {
+    if declared != candidates {
         bail!("上一阶段报告无效");
     }
     Ok(candidates)

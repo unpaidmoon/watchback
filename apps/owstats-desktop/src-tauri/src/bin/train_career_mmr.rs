@@ -47,6 +47,14 @@ impl Stage {
             Self::Final => "final",
         }
     }
+
+    fn promotion_label(self) -> &'static str {
+        match self {
+            Self::Screen => "screen_100",
+            Self::Candidate => "candidate_1000",
+            Self::Final => "final_10000",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -270,14 +278,31 @@ fn run() -> Result<(), &'static str> {
             );
     }
     let artifact_value = serde_json::to_value(artifact).map_err(|_| "无法序列化模型产物")?;
-    validate_report_boundary(&report_value).map_err(|_| "训练报告包含不允许的字段")?;
     validate_report_boundary(&artifact_value).map_err(|_| "模型产物包含不允许的字段")?;
     let report_bytes =
-        serde_json::to_vec_pretty(&report_value).map_err(|_| "无法序列化训练报告")?;
+        finalize_report_for_write(report_value, args.stage.promotion_label(), args.seed)?;
     let artifact_bytes =
         serde_json::to_vec_pretty(&artifact_value).map_err(|_| "无法序列化模型产物")?;
     write_pair_atomic(&args.report, &report_bytes, &args.artifact, &artifact_bytes)?;
     Ok(())
+}
+
+fn finalize_report_for_write(
+    mut report: serde_json::Value,
+    expected_stage: &str,
+    expected_seed: u64,
+) -> Result<Vec<u8>, &'static str> {
+    let checksum =
+        owstats_desktop_lib::career_mmr::training_report::recompute_promotion_checksum(&report)
+            .map_err(|_| "无法生成训练报告校验和")?;
+    report.as_object_mut().ok_or("训练报告结构无效")?.insert(
+        "promotion_checksum".into(),
+        serde_json::Value::String(checksum),
+    );
+    validate_report_boundary(&report).map_err(|_| "训练报告包含不允许的字段")?;
+    validate_promotion_report(&report, expected_stage, expected_seed)
+        .map_err(|_| "训练报告结构无效")?;
+    serde_json::to_vec_pretty(&report).map_err(|_| "无法序列化训练报告")
 }
 
 #[cfg(windows)]
@@ -430,6 +455,9 @@ fn load_promoted_candidates(
             != Some(manifest.artifact_config_hash.as_str())
     {
         return Err("上一阶段报告无效");
+    }
+    if candidates.is_empty() {
+        return Err("无可晋级候选");
     }
     Ok(Some(candidates))
 }
@@ -690,6 +718,79 @@ impl OwnedTempFile {
             identity: self.identity,
         }
     }
+
+    fn fail_and_delete(self, error: &'static str) -> Result<OwnedCommittedFile, &'static str> {
+        if self.into_committed().delete().is_err() {
+            Err("严重错误：输出回滚不完整")
+        } else {
+            Err(error)
+        }
+    }
+
+    fn rename_into(
+        self,
+        parent: &PinnedOutputDirectory,
+        basename: &std::ffi::OsStr,
+    ) -> Result<OwnedCommittedFile, &'static str> {
+        use std::{mem::size_of, os::windows::ffi::OsStrExt, os::windows::io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileRenameInfoEx, SetFileInformationByHandle, FILE_RENAME_INFO, FILE_RENAME_INFO_0,
+        };
+        if Path::new(basename).components().count() != 1 {
+            return self.fail_and_delete("输出路径无效");
+        }
+        let target = parent.canonical.join(basename);
+        if parent.revalidate(&parent.canonical).is_err() {
+            return self.fail_and_delete("输出目录不安全");
+        }
+        if ensure_missing(&target).is_err() {
+            return self.fail_and_delete("输出文件已存在");
+        }
+        let name = target.as_os_str().encode_wide().collect::<Vec<_>>();
+        if name.is_empty() || name.iter().any(|unit| *unit == 0) {
+            return self.fail_and_delete("输出路径无效");
+        }
+        let bytes =
+            std::mem::offset_of!(FILE_RENAME_INFO, FileName) + (name.len() + 1) * size_of::<u16>();
+        let mut buffer = vec![0u64; bytes.div_ceil(size_of::<u64>())];
+        let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        unsafe {
+            (*info).Anonymous = FILE_RENAME_INFO_0 { Flags: 0 };
+            // Win32 SetFileInformationByHandle requires RootDirectory=NULL; the
+            // already-pinned canonical parent supplies the absolute target instead.
+            (*info).RootDirectory = std::ptr::null_mut();
+            (*info).FileNameLength = (name.len() * size_of::<u16>()) as u32;
+            std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
+            *(*info).FileName.as_mut_ptr().add(name.len()) = 0;
+            let renamed = SetFileInformationByHandle(
+                self.file.as_raw_handle(),
+                FileRenameInfoEx,
+                info.cast(),
+                bytes as u32,
+            ) != 0;
+            if !renamed {
+                return self.fail_and_delete("无法提交输出文件");
+            }
+        }
+        let committed = self.into_committed();
+        let valid = parent.revalidate(&parent.canonical).is_ok()
+            && fs::symlink_metadata(&target).is_ok_and(|metadata| {
+                !is_reparse(&metadata)
+                    && file_identity(&metadata) == committed.identity
+                    && committed
+                        .file
+                        .metadata()
+                        .is_ok_and(|owned| file_identity(&owned) == committed.identity)
+            });
+        if !valid {
+            return if committed.delete().is_err() {
+                Err("严重错误：输出回滚不完整")
+            } else {
+                Err("无法验证已提交输出")
+            };
+        }
+        Ok(committed)
+    }
 }
 
 #[cfg(not(windows))]
@@ -874,16 +975,15 @@ fn write_pair_atomic_with_hook(
             .as_ref()
             .ok_or("临时输出已发生变化")?
             .verify_path(&artifact_temp)?;
-        if fs::rename(&artifact_temp, &artifact).is_err() {
-            return Err("无法提交模型产物");
-        }
-        artifact_committed = true;
+        hook("before_artifact_rename").map_err(|_| "无法提交模型产物")?;
         artifact_guard = Some(
             artifact_temp_guard
                 .take()
                 .ok_or("临时输出已发生变化")?
-                .into_committed(),
+                .rename_into(&pinned, artifact.file_name().ok_or("输出路径无效")?)
+                .map_err(|_| "无法提交模型产物")?,
         );
+        artifact_committed = true;
         hook("after_artifact").map_err(|_| "输出目录在提交期间发生变化")?;
         pinned.revalidate(parent)?;
         ensure_missing(&report)?;
@@ -892,14 +992,14 @@ fn write_pair_atomic_with_hook(
             .as_ref()
             .ok_or("临时输出已发生变化")?
             .verify_path(&report_temp)?;
-        fs::rename(&report_temp, &report).map_err(|_| "无法提交训练报告")?;
-        report_committed = true;
         report_guard = Some(
             report_temp_guard
                 .take()
                 .ok_or("临时输出已发生变化")?
-                .into_committed(),
+                .rename_into(&pinned, report.file_name().ok_or("输出路径无效")?)
+                .map_err(|_| "无法提交训练报告")?,
         );
+        report_committed = true;
         let report_value: serde_json::Value =
             serde_json::from_slice(report_bytes).map_err(|_| "无法生成阶段提交标记")?;
         let artifact_value: serde_json::Value =
@@ -936,14 +1036,14 @@ fn write_pair_atomic_with_hook(
             .as_ref()
             .ok_or("临时输出已发生变化")?
             .verify_path(&manifest_temp)?;
-        fs::rename(&manifest_temp, &manifest).map_err(|_| "无法提交阶段标记")?;
-        manifest_committed = true;
         manifest_guard = Some(
             manifest_temp_guard
                 .take()
                 .ok_or("临时输出已发生变化")?
-                .into_committed(),
+                .rename_into(&pinned, manifest.file_name().ok_or("输出路径无效")?)
+                .map_err(|_| "无法提交阶段标记")?,
         );
+        manifest_committed = true;
         pinned.flush_best_effort();
         sync_parent(&report)?;
         Ok(())
@@ -1123,6 +1223,39 @@ mod io_race_tests {
     }
 
     #[test]
+    fn artifact_collision_at_handle_rename_preserves_racer_and_deletes_writer_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let mut racer_guard = None;
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "before_artifact_rename" {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    let mut file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create_new(true)
+                        .share_mode(0x1 | 0x2)
+                        .open(&artifact)?;
+                    file.write_all(b"racer")?;
+                    file.sync_all()?;
+                    racer_guard = Some(file);
+                }
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(racer_guard.is_some(), "hook not reached: {result:?}");
+        assert_eq!(fs::read(&artifact).unwrap(), b"racer");
+        assert!(!report.exists());
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
     fn failure_after_first_rename_removes_the_first_formal_output() {
         let dir = tempfile::tempdir().unwrap();
         let report = dir.path().join("report.json");
@@ -1264,6 +1397,53 @@ mod io_race_tests {
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
             .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn temp_path_racer_cannot_replace_the_handle_owned_artifact_at_publish() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let moved_temp = dir.path().join("moved-writer-artifact.tmp");
+        let mut hook_reached = false;
+        let mut racer_path = None;
+        let report_bytes = br#"{"training_config":{"validation":{"stage":"test"}},"seed":0}"#;
+        let artifact_bytes = format!(r#"{{"config_hash":"{}"}}"#, "0".repeat(64));
+        let result = write_pair_atomic_with_hook(
+            &report,
+            report_bytes,
+            &artifact,
+            artifact_bytes.as_bytes(),
+            |stage| {
+                if stage == "before_artifact_rename" {
+                    hook_reached = true;
+                    let temp = fs::read_dir(dir.path())?
+                        .filter_map(Result::ok)
+                        .map(|entry| entry.path())
+                        .find(|path| {
+                            path.file_name()
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| name.starts_with(".career-mmr-artifact-"))
+                        })
+                        .ok_or_else(|| std::io::Error::other("artifact temp missing"))?;
+                    fs::rename(&temp, &moved_temp)?;
+                    fs::write(&temp, b"racer")?;
+                    racer_path = Some(temp);
+                }
+                Ok(())
+            },
+        );
+        assert!(hook_reached);
+        if result.is_ok() {
+            assert_eq!(fs::read(&artifact).unwrap(), artifact_bytes.as_bytes());
+            assert!(!moved_temp.exists());
+            assert!(commit_sidecar(&report).unwrap().exists());
+        } else {
+            assert!(!artifact.exists());
+            assert!(!commit_sidecar(&report).unwrap().exists());
+            assert_eq!(fs::read(racer_path.unwrap()).unwrap(), b"racer");
+            assert_eq!(fs::read(&moved_temp).unwrap(), artifact_bytes.as_bytes());
+        }
     }
 }
 
