@@ -207,6 +207,8 @@ pub struct TrainingReport {
     pub promotable_candidates: Vec<PromotedCandidate>,
     pub integrity_kind: String,
     pub promotion_checksum: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<super::shadow::ShadowAggregate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -317,6 +319,7 @@ pub fn build_training_outputs(
         promotable_candidates,
         integrity_kind: "checksum_not_authentication".into(),
         promotion_checksum: String::new(),
+        shadow: None,
     };
     report.promotion_checksum = recompute_promotion_checksum(&serde_json::to_value(&report)?)?;
     validate_report_boundary(&serde_json::to_value(&artifact)?)?;
@@ -538,6 +541,13 @@ impl TrainingReport {
             || self.stadium_quick.mode != ModeFamily::StadiumQuick
             || self.stadium_quick.decision != CellDecision::OutcomeOnly
             || self.stadium_quick.performance_adjustment_mmr != 0
+        {
+            bail!("上一阶段报告无效");
+        }
+        if self
+            .shadow
+            .as_ref()
+            .is_some_and(|shadow| shadow.validate(self.dataset.account_datasets).is_err())
         {
             bail!("上一阶段报告无效");
         }

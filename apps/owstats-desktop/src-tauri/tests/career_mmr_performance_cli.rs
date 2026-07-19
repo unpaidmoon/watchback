@@ -108,7 +108,8 @@ fn synthetic_app_data() -> tempfile::TempDir {
     let entries = ids
         .iter()
         .zip(tags)
-        .map(|(id, tag)| {
+        .enumerate()
+        .map(|(index, (id, tag))| {
             let paths = shared.account(id);
             fs::create_dir_all(paths.root()).unwrap();
             write_manifest_atomic(
@@ -129,6 +130,29 @@ fn synthetic_app_data() -> tempfile::TempDir {
                  CREATE TABLE hero_dict(guid TEXT, role TEXT);
                  CREATE TABLE match_players(match_id TEXT, is_current_player INTEGER, raw_json TEXT);
                  CREATE TABLE match_details(match_id TEXT, raw_detail_json TEXT);",
+            )
+            .unwrap();
+            let role = if index == 0 { "damage" } else { "support" };
+            let hero = format!("synthetic-hero-{index}");
+            let match_key = format!("synthetic-row-{index}");
+            conn.execute(
+                "INSERT INTO hero_dict(guid, role) VALUES(?1, ?2)",
+                rusqlite::params![hero, role],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO matches VALUES(?1, 24, ?2, ?3, 'win', 'SportPreset', 600, ?4, 'preset')",
+                rusqlite::params![
+                    match_key,
+                    1_000 + index as i64,
+                    hero,
+                    format!(r#"{{"roleType":"{role}","heroPlayTimeList":[{{"heroGuid":"{hero}","durationSec":600}}]}}"#),
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO match_players VALUES(?1, 1, '{}')",
+                rusqlite::params![match_key],
             )
             .unwrap();
             AccountRegistryEntry {
@@ -204,7 +228,14 @@ fn screen_stage_runs_multi_account_pipeline_with_safe_aggregate_outputs() {
         100
     );
     assert_eq!(report_json["dataset"]["account_datasets"], 2);
-    assert!(report_json["shadow"].is_array());
+    assert_eq!(report_json["shadow"]["account_count"], 2);
+    assert!(report_json["shadow"]["role_state_count"].as_u64().unwrap() > 0);
+    assert!(report_json["shadow"]["match_count"].as_u64().unwrap() > 0);
+    assert!(report_json["shadow"]["mean_baseline_mmr"].is_number());
+    assert!(report_json["shadow"]["mean_shadow_mmr"].is_number());
+    assert!(report_json["shadow"]["mean_difference"].is_number());
+    assert!(report_json["shadow"]["roles"].is_array());
+    assert!(report_json["shadow"]["cap_hits"].is_array());
     let combined = format!("{report_json}{artifact_json}{stderr}").to_ascii_lowercase();
     for forbidden in [
         "syntheticalpha",
@@ -212,6 +243,9 @@ fn screen_stage_runs_multi_account_pipeline_with_safe_aggregate_outputs() {
         "11111111-1111",
         "22222222-2222",
         "match_id",
+        "account_group",
+        "match_group",
+        "account_index",
         "app-data",
     ] {
         assert!(!combined.contains(forbidden), "leaked {forbidden}");
@@ -306,6 +340,20 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
         }
         value["promotable_candidates"] = serde_json::Value::Array(candidates);
     }
+    value["shadow"] = serde_json::json!({
+        "account_count": 0,
+        "role_state_count": 0,
+        "match_count": 0,
+        "mean_baseline_mmr": null,
+        "mean_shadow_mmr": null,
+        "mean_difference": null,
+        "roles": [
+            {"role":"tank","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null},
+            {"role":"damage","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null},
+            {"role":"support","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null}
+        ],
+        "cap_hits": []
+    });
     value["promotion_checksum"] = serde_json::json!(recompute_promotion_checksum(&value).unwrap());
     value
 }
@@ -574,6 +622,11 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
         ("privacy", {
             let mut value = promotion_report("screen_100", 0x5eed, true);
             value["token"] = serde_json::json!("synthetic-secret");
+            rehash(value)
+        }),
+        ("invalid-shadow-aggregate", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["shadow"]["role_state_count"] = serde_json::json!(1);
             rehash(value)
         }),
         ("screen-with-promoted", {

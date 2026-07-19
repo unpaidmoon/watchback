@@ -5,7 +5,7 @@ use owstats_desktop_lib::{
             evaluate_stability_with_progress, CellDecision, PromotedCandidate, StabilityConfig,
             StabilityEvaluation, TrainingStage,
         },
-        shadow::simulate_shadow_replay,
+        shadow::{aggregate_shadow_summaries, simulate_shadow_replay},
         training::build_multi_account_projection,
         training_report::{
             build_training_outputs, recompute_config_hash, validate_promotion_report,
@@ -133,13 +133,6 @@ fn parse_args_from(args: impl IntoIterator<Item = OsString>) -> Result<CliArgs, 
     })
 }
 
-#[derive(Serialize)]
-struct ShadowAggregate {
-    account_index: usize,
-    role_matches: BTreeMap<String, usize>,
-    total_cap_hits: usize,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct StageCommitManifest {
     schema_version: u32,
@@ -218,13 +211,13 @@ fn run() -> Result<(), &'static str> {
         args.seed,
     )
     .map_err(|_| "无法生成训练产物")?;
-    let mut shadow = Vec::new();
+    let mut account_shadows = Vec::new();
     let account_groups = projection
         .rows
         .iter()
         .map(|row| row.account_group.clone())
         .collect::<BTreeSet<_>>();
-    for (account_index, account_group) in account_groups.into_iter().enumerate() {
+    for account_group in account_groups {
         let rows = projection
             .rows
             .iter()
@@ -233,33 +226,10 @@ fn run() -> Result<(), &'static str> {
             .collect::<Vec<_>>();
         let summary =
             simulate_shadow_replay(&rows, &artifact).map_err(|_| "无法完成全账号影子重放")?;
-        shadow.push(ShadowAggregate {
-            account_index: account_index + 1,
-            role_matches: summary
-                .roles
-                .into_iter()
-                .map(|role| {
-                    (
-                        format!("{:?}", role.role).to_ascii_lowercase(),
-                        role.matches,
-                    )
-                })
-                .collect(),
-            total_cap_hits: summary
-                .cap_hits
-                .values()
-                .map(|hits| hits.upper + hits.lower)
-                .sum(),
-        });
+        account_shadows.push(summary);
     }
-    // Empty datasets still get one aggregate shadow row per registered source.
-    while shadow.len() < sources.len() {
-        shadow.push(ShadowAggregate {
-            account_index: shadow.len() + 1,
-            role_matches: BTreeMap::new(),
-            total_cap_hits: 0,
-        });
-    }
+    let shadow = aggregate_shadow_summaries(&account_shadows, sources.len())
+        .map_err(|_| "无法生成安全的影子聚合结果")?;
     let mut report_value = serde_json::to_value(report).map_err(|_| "无法序列化训练报告")?;
     report_value
         .as_object_mut()

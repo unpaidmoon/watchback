@@ -3,7 +3,7 @@ use owstats_desktop_lib::career_mmr::{
     input::{ModeFamily, Role},
     performance::{build_feature_matrix, HealingTakenStrategy},
     performance_stability::{evaluate_stability, StabilityConfig},
-    shadow::{matrix_row_from_artifact, simulate_shadow_replay},
+    shadow::{aggregate_shadow_summaries, matrix_row_from_artifact, simulate_shadow_replay},
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
     training_report::{
         build_training_outputs, AggregateSampleBucket, BaselineArtifact, CellArtifact,
@@ -440,6 +440,132 @@ fn zero_effect_matches_baseline_exactly_and_caps_are_reported() {
             .upper,
         1
     );
+}
+
+#[test]
+fn privacy_safe_shadow_aggregate_preserves_exact_role_and_overall_mmr_means() {
+    let mut model = artifact();
+    model
+        .cells
+        .iter_mut()
+        .filter(|cell| cell.role == Role::Support)
+        .for_each(|cell| cell.performance_enabled = false);
+    let damage = simulate_shadow_replay(
+        &[row(
+            "private-account-a",
+            "private-match-a",
+            "damage",
+            ModeFamily::RoleCompetitive,
+            100,
+            600.0,
+        )],
+        &model,
+    )
+    .unwrap();
+    let support = simulate_shadow_replay(
+        &[
+            row(
+                "private-account-b",
+                "private-match-b",
+                "support",
+                ModeFamily::RoleCompetitive,
+                100,
+                600.0,
+            ),
+            row(
+                "private-account-b",
+                "private-match-c",
+                "support",
+                ModeFamily::StadiumQuick,
+                200,
+                600.0,
+            ),
+        ],
+        &model,
+    )
+    .unwrap();
+    let damage_state = damage
+        .roles
+        .iter()
+        .find(|state| state.role == Role::Damage)
+        .unwrap();
+    let support_state = support
+        .roles
+        .iter()
+        .find(|state| state.role == Role::Support)
+        .unwrap();
+    assert_ne!(damage_state.shadow_mmr, damage_state.baseline_mmr);
+    assert_eq!(support_state.shadow_mmr, support_state.baseline_mmr);
+    assert_eq!(
+        support
+            .replayed_matches
+            .iter()
+            .find(|item| item.mode == ModeFamily::StadiumQuick)
+            .unwrap()
+            .performance_adjustment,
+        0.0
+    );
+
+    let aggregate = aggregate_shadow_summaries(&[damage.clone(), support.clone()], 2).unwrap();
+    assert_eq!(aggregate.account_count, 2);
+    assert_eq!(aggregate.role_state_count, 2);
+    assert_eq!(aggregate.match_count, 3);
+    let damage_aggregate = aggregate
+        .roles
+        .iter()
+        .find(|item| item.role == Role::Damage)
+        .unwrap();
+    assert_eq!(damage_aggregate.account_count, 1);
+    assert_eq!(damage_aggregate.match_count, 1);
+    assert_eq!(
+        damage_aggregate.mean_baseline_mmr,
+        Some(damage_state.baseline_mmr)
+    );
+    assert_eq!(
+        damage_aggregate.mean_shadow_mmr,
+        Some(damage_state.shadow_mmr)
+    );
+    assert_eq!(
+        damage_aggregate.mean_difference,
+        Some(damage_state.shadow_mmr - damage_state.baseline_mmr)
+    );
+    let support_aggregate = aggregate
+        .roles
+        .iter()
+        .find(|item| item.role == Role::Support)
+        .unwrap();
+    assert_eq!(support_aggregate.account_count, 1);
+    assert_eq!(support_aggregate.match_count, 2);
+    assert_eq!(support_aggregate.mean_difference, Some(0.0));
+    assert_eq!(
+        aggregate.mean_baseline_mmr,
+        Some((damage_state.baseline_mmr + support_state.baseline_mmr) / 2.0)
+    );
+    assert_eq!(
+        aggregate.mean_shadow_mmr,
+        Some((damage_state.shadow_mmr + support_state.shadow_mmr) / 2.0)
+    );
+    assert_eq!(
+        aggregate.mean_difference,
+        Some(
+            ((damage_state.shadow_mmr - damage_state.baseline_mmr)
+                + (support_state.shadow_mmr - support_state.baseline_mmr))
+                / 2.0
+        )
+    );
+    let json = serde_json::to_string(&aggregate)
+        .unwrap()
+        .to_ascii_lowercase();
+    for forbidden in [
+        "private-account",
+        "private-match",
+        "account_group",
+        "match_group",
+        "database_path",
+        "account_index",
+    ] {
+        assert!(!json.contains(forbidden), "leaked {forbidden}: {json}");
+    }
 }
 
 #[test]

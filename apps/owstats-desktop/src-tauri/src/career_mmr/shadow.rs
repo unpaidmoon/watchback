@@ -18,6 +18,7 @@ use super::{
     },
 };
 use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,6 +60,198 @@ pub struct ShadowAccountSummary {
     pub roles: Vec<ShadowRoleSummary>,
     pub cap_hits: BTreeMap<CellKey, CapHitSummary>,
     pub replayed_matches: Vec<ShadowReplayMatch>,
+}
+
+/// Privacy-safe aggregate over played account-role states. Unplayed roles are
+/// excluded from MMR means so the initial rating cannot dilute observed drift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowAggregate {
+    pub account_count: usize,
+    pub role_state_count: usize,
+    pub match_count: usize,
+    pub mean_baseline_mmr: Option<f64>,
+    pub mean_shadow_mmr: Option<f64>,
+    pub mean_difference: Option<f64>,
+    pub roles: Vec<ShadowRoleAggregate>,
+    pub cap_hits: Vec<ShadowCapHitAggregate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowRoleAggregate {
+    pub role: Role,
+    pub account_count: usize,
+    pub match_count: usize,
+    pub mean_baseline_mmr: Option<f64>,
+    pub mean_shadow_mmr: Option<f64>,
+    pub mean_difference: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShadowCapHitAggregate {
+    pub role: Role,
+    pub mode: ModeFamily,
+    pub upper: usize,
+    pub lower: usize,
+}
+
+pub fn aggregate_shadow_summaries(
+    summaries: &[ShadowAccountSummary],
+    registered_account_count: usize,
+) -> Result<ShadowAggregate> {
+    if summaries.len() > registered_account_count {
+        bail!("影子汇总的数据集数量超过已注册数据集数量");
+    }
+    let unique_accounts = summaries
+        .iter()
+        .map(|summary| summary.account_group.as_str())
+        .collect::<BTreeSet<_>>();
+    if unique_accounts.len() != summaries.len() {
+        bail!("影子汇总不能重复计入同一匿名数据集");
+    }
+
+    let played_states = summaries
+        .iter()
+        .flat_map(|summary| summary.roles.iter())
+        .filter(|state| state.matches > 0)
+        .collect::<Vec<_>>();
+    if played_states.iter().any(|state| {
+        !state.baseline_mmr.is_finite()
+            || !state.shadow_mmr.is_finite()
+            || !(state.shadow_mmr - state.baseline_mmr).is_finite()
+            || !state.total_performance_adjustment.is_finite()
+    }) {
+        bail!("影子汇总包含非有限数值");
+    }
+
+    let roles = [Role::Tank, Role::Damage, Role::Support]
+        .into_iter()
+        .map(|role| {
+            let states = played_states
+                .iter()
+                .copied()
+                .filter(|state| state.role == role)
+                .collect::<Vec<_>>();
+            ShadowRoleAggregate {
+                role,
+                account_count: states.len(),
+                match_count: states.iter().map(|state| state.matches).sum(),
+                mean_baseline_mmr: finite_mean(states.iter().map(|state| state.baseline_mmr)),
+                mean_shadow_mmr: finite_mean(states.iter().map(|state| state.shadow_mmr)),
+                mean_difference: finite_mean(
+                    states
+                        .iter()
+                        .map(|state| state.shadow_mmr - state.baseline_mmr),
+                ),
+            }
+        })
+        .collect();
+
+    let mut cap_hits = BTreeMap::<CellKey, CapHitSummary>::new();
+    for summary in summaries {
+        for (cell, hits) in &summary.cap_hits {
+            let aggregate = cap_hits.entry(*cell).or_default();
+            aggregate.upper = aggregate
+                .upper
+                .checked_add(hits.upper)
+                .ok_or_else(|| anyhow::anyhow!("影子限幅计数溢出"))?;
+            aggregate.lower = aggregate
+                .lower
+                .checked_add(hits.lower)
+                .ok_or_else(|| anyhow::anyhow!("影子限幅计数溢出"))?;
+        }
+    }
+    let cap_hits = cap_hits
+        .into_iter()
+        .map(|(cell, hits)| ShadowCapHitAggregate {
+            role: cell.role,
+            mode: cell.mode,
+            upper: hits.upper,
+            lower: hits.lower,
+        })
+        .collect();
+
+    Ok(ShadowAggregate {
+        account_count: registered_account_count,
+        role_state_count: played_states.len(),
+        match_count: played_states.iter().map(|state| state.matches).sum(),
+        mean_baseline_mmr: finite_mean(played_states.iter().map(|state| state.baseline_mmr)),
+        mean_shadow_mmr: finite_mean(played_states.iter().map(|state| state.shadow_mmr)),
+        mean_difference: finite_mean(
+            played_states
+                .iter()
+                .map(|state| state.shadow_mmr - state.baseline_mmr),
+        ),
+        roles,
+        cap_hits,
+    })
+}
+
+impl ShadowAggregate {
+    pub fn validate(&self, expected_account_count: usize) -> Result<()> {
+        let valid_mean = |value: Option<f64>, has_states: bool| match value {
+            Some(value) => has_states && value.is_finite(),
+            None => !has_states,
+        };
+        if self.account_count != expected_account_count
+            || self.roles.len() != 3
+            || self.role_state_count
+                != self
+                    .roles
+                    .iter()
+                    .map(|role| role.account_count)
+                    .sum::<usize>()
+            || self.match_count
+                != self
+                    .roles
+                    .iter()
+                    .map(|role| role.match_count)
+                    .sum::<usize>()
+            || !valid_mean(self.mean_baseline_mmr, self.role_state_count > 0)
+            || !valid_mean(self.mean_shadow_mmr, self.role_state_count > 0)
+            || !valid_mean(self.mean_difference, self.role_state_count > 0)
+        {
+            bail!("影子汇总结构无效");
+        }
+        let mut roles = BTreeSet::new();
+        for role in &self.roles {
+            if !roles.insert(role.role)
+                || role.account_count > self.account_count
+                || (role.account_count == 0) != (role.match_count == 0)
+                || !valid_mean(role.mean_baseline_mmr, role.account_count > 0)
+                || !valid_mean(role.mean_shadow_mmr, role.account_count > 0)
+                || !valid_mean(role.mean_difference, role.account_count > 0)
+            {
+                bail!("影子职责汇总结构无效");
+            }
+        }
+        if roles != BTreeSet::from([Role::Tank, Role::Damage, Role::Support]) {
+            bail!("影子职责汇总不完整");
+        }
+        let mut cells = BTreeSet::new();
+        for hit in &self.cap_hits {
+            if !cells.insert((hit.role, hit.mode))
+                || (hit.upper == 0 && hit.lower == 0)
+                || hit.mode == ModeFamily::StadiumQuick
+            {
+                bail!("影子限幅汇总结构无效");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn finite_mean(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        None
+    } else {
+        let mut mean = values[0];
+        for (index, value) in values.iter().copied().enumerate().skip(1) {
+            let count = (index + 1) as f64;
+            mean = mean * (count - 1.0) / count + value / count;
+        }
+        Some(mean)
+    }
 }
 
 struct ReplayGroup<'a> {
