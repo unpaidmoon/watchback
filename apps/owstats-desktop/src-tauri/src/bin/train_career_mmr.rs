@@ -613,6 +613,44 @@ fn open_pinned_directory(path: &Path) -> std::io::Result<fs::File> {
 }
 
 #[cfg(windows)]
+fn delete_file_by_handle(file: &fs::File) -> std::io::Result<()> {
+    use std::{mem::size_of, os::windows::io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
+    };
+    #[cfg(test)]
+    if FAIL_NEXT_DELETE_DISPOSITION.with(|fail| fail.replace(false)) {
+        return Err(std::io::Error::other(
+            "synthetic SetFileInformationByHandle failure",
+        ));
+    }
+    let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
+    let result = unsafe {
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileDispositionInfo,
+            (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+            size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
+    static FAIL_NEXT_DELETE_DISPOSITION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(all(test, windows))]
+fn fail_next_delete_disposition() {
+    FAIL_NEXT_DELETE_DISPOSITION.with(|fail| fail.set(true));
+}
+
+#[cfg(windows)]
 struct OwnedCommittedFile {
     file: fs::File,
     identity: FileIdentity,
@@ -621,25 +659,10 @@ struct OwnedCommittedFile {
 #[cfg(windows)]
 impl OwnedCommittedFile {
     fn delete(self) -> std::io::Result<()> {
-        use std::{mem::size_of, os::windows::io::AsRawHandle};
-        use windows_sys::Win32::Storage::FileSystem::{
-            FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
-        };
         if file_identity(&self.file.metadata()?) != self.identity {
             return Err(std::io::Error::other("owned file identity changed"));
         }
-        let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
-        let result = unsafe {
-            SetFileInformationByHandle(
-                self.file.as_raw_handle(),
-                FileDispositionInfo,
-                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
-                size_of::<FILE_DISPOSITION_INFO>() as u32,
-            )
-        };
-        if result == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        delete_file_by_handle(&self.file)?;
         drop(self);
         Ok(())
     }
@@ -649,6 +672,24 @@ impl OwnedCommittedFile {
 struct OwnedTempFile {
     file: fs::File,
     identity: FileIdentity,
+}
+
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+enum HandlePublishError {
+    CommitFailure(&'static str),
+    RollbackIncomplete,
+}
+
+#[cfg(windows)]
+fn map_handle_publish_error(
+    error: HandlePublishError,
+    commit_message: &'static str,
+) -> &'static str {
+    match error {
+        HandlePublishError::CommitFailure(_reason) => commit_message,
+        HandlePublishError::RollbackIncomplete => "严重错误：输出回滚不完整",
+    }
 }
 
 #[cfg(windows)]
@@ -691,21 +732,8 @@ impl OwnedTempFile {
     }
 
     fn cleanup(self, path: &Path) -> Result<(), &'static str> {
-        use std::{mem::size_of, os::windows::io::AsRawHandle};
-        use windows_sys::Win32::Storage::FileSystem::{
-            FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
-        };
         self.verify_path(path)?;
-        let disposition = FILE_DISPOSITION_INFO { DeleteFile: 1 };
-        let result = unsafe {
-            SetFileInformationByHandle(
-                self.file.as_raw_handle(),
-                FileDispositionInfo,
-                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
-                size_of::<FILE_DISPOSITION_INFO>() as u32,
-            )
-        };
-        if result == 0 {
+        if delete_file_by_handle(&self.file).is_err() {
             return Err("严重错误：输出回滚不完整");
         }
         drop(self);
@@ -719,11 +747,14 @@ impl OwnedTempFile {
         }
     }
 
-    fn fail_and_delete(self, error: &'static str) -> Result<OwnedCommittedFile, &'static str> {
+    fn fail_and_delete(
+        self,
+        error: &'static str,
+    ) -> Result<OwnedCommittedFile, HandlePublishError> {
         if self.into_committed().delete().is_err() {
-            Err("严重错误：输出回滚不完整")
+            Err(HandlePublishError::RollbackIncomplete)
         } else {
-            Err(error)
+            Err(HandlePublishError::CommitFailure(error))
         }
     }
 
@@ -731,7 +762,7 @@ impl OwnedTempFile {
         self,
         parent: &PinnedOutputDirectory,
         basename: &std::ffi::OsStr,
-    ) -> Result<OwnedCommittedFile, &'static str> {
+    ) -> Result<OwnedCommittedFile, HandlePublishError> {
         use std::{mem::size_of, os::windows::ffi::OsStrExt, os::windows::io::AsRawHandle};
         use windows_sys::Win32::Storage::FileSystem::{
             FileRenameInfoEx, SetFileInformationByHandle, FILE_RENAME_INFO, FILE_RENAME_INFO_0,
@@ -784,9 +815,9 @@ impl OwnedTempFile {
             });
         if !valid {
             return if committed.delete().is_err() {
-                Err("严重错误：输出回滚不完整")
+                Err(HandlePublishError::RollbackIncomplete)
             } else {
-                Err("无法验证已提交输出")
+                Err(HandlePublishError::CommitFailure("无法验证已提交输出"))
             };
         }
         Ok(committed)
@@ -963,6 +994,9 @@ fn write_pair_atomic_with_hook(
     let mut report_temp_guard = None;
     let mut artifact_temp_guard = None;
     let mut manifest_temp_guard = None;
+    // A successful `take()` transfers both the handle and every cleanup obligation
+    // into `rename_into`. The outer rollback only touches guards that remain `Some`;
+    // it never assumes that a consumed temp handle can still be cleaned by pathname.
     let result = (|| -> Result<(), &'static str> {
         report_temp_guard = Some(OwnedTempFile::create(&report_temp, report_bytes)?);
         artifact_temp_guard = Some(OwnedTempFile::create(&artifact_temp, artifact_bytes)?);
@@ -981,7 +1015,7 @@ fn write_pair_atomic_with_hook(
                 .take()
                 .ok_or("临时输出已发生变化")?
                 .rename_into(&pinned, artifact.file_name().ok_or("输出路径无效")?)
-                .map_err(|_| "无法提交模型产物")?,
+                .map_err(|error| map_handle_publish_error(error, "无法提交模型产物"))?,
         );
         artifact_committed = true;
         hook("after_artifact").map_err(|_| "输出目录在提交期间发生变化")?;
@@ -997,7 +1031,7 @@ fn write_pair_atomic_with_hook(
                 .take()
                 .ok_or("临时输出已发生变化")?
                 .rename_into(&pinned, report.file_name().ok_or("输出路径无效")?)
-                .map_err(|_| "无法提交训练报告")?,
+                .map_err(|error| map_handle_publish_error(error, "无法提交训练报告"))?,
         );
         report_committed = true;
         let report_value: serde_json::Value =
@@ -1041,7 +1075,7 @@ fn write_pair_atomic_with_hook(
                 .take()
                 .ok_or("临时输出已发生变化")?
                 .rename_into(&pinned, manifest.file_name().ok_or("输出路径无效")?)
-                .map_err(|_| "无法提交阶段标记")?,
+                .map_err(|error| map_handle_publish_error(error, "无法提交阶段标记"))?,
         );
         manifest_committed = true;
         pinned.flush_best_effort();
@@ -1253,6 +1287,54 @@ mod io_race_tests {
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
             .all(|name| !name.starts_with(".career-mmr-")));
+    }
+
+    #[test]
+    fn consumed_temp_handle_delete_failure_remains_a_severe_rollback_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("report.json");
+        let artifact = dir.path().join("artifact.json");
+        let marker = commit_sidecar(&report).unwrap();
+        let mut racer_guard = None;
+        let result =
+            write_pair_atomic_with_hook(&report, b"report", &artifact, b"artifact", |stage| {
+                if stage == "before_artifact_rename" {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    let mut file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create_new(true)
+                        .share_mode(0x1 | 0x2)
+                        .open(&artifact)?;
+                    file.write_all(b"racer")?;
+                    file.sync_all()?;
+                    racer_guard = Some(file);
+                    fail_next_delete_disposition();
+                }
+                Ok(())
+            });
+        assert_eq!(result, Err("严重错误：输出回滚不完整"));
+        assert!(!marker.exists());
+        assert_eq!(
+            load_promoted_candidates(Some(&report), Stage::Candidate, 0x5eed),
+            Err("上一阶段报告无效")
+        );
+        let writer_temp = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(".career-mmr-artifact-"))
+            })
+            .expect("failed delete should leave the writer temp for operator recovery");
+        assert_eq!(fs::read(&writer_temp).unwrap(), b"artifact");
+        assert_eq!(fs::read(&artifact).unwrap(), b"racer");
+
+        drop(racer_guard);
+        fs::remove_file(&artifact).unwrap();
+        fs::remove_file(writer_temp).unwrap();
     }
 
     #[test]
