@@ -275,8 +275,16 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
     };
     config.seed = seed;
     let evaluation = evaluate_stability(&[], config);
-    let (_, report) =
-        build_training_outputs(&[], &TrainingAudit::default(), &evaluation, seed).unwrap();
+    let (_, report) = build_training_outputs(
+        &[],
+        &TrainingAudit {
+            source_accounts: 1,
+            ..Default::default()
+        },
+        &evaluation,
+        seed,
+    )
+    .unwrap();
     let mut value = serde_json::to_value(report).unwrap();
     if eligible {
         let mut candidates = Vec::new();
@@ -341,15 +349,15 @@ fn promotion_report(stage: &str, seed: u64, eligible: bool) -> serde_json::Value
         value["promotable_candidates"] = serde_json::Value::Array(candidates);
     }
     value["shadow"] = serde_json::json!({
-        "account_count": 0,
-        "role_state_count": 0,
-        "match_count": 0,
-        "mean_baseline_mmr": null,
-        "mean_shadow_mmr": null,
-        "mean_difference": null,
+        "account_count": 1,
+        "role_state_count": 1,
+        "match_count": 2,
+        "mean_baseline_mmr": 1000.0,
+        "mean_shadow_mmr": 1001.0,
+        "mean_difference": 1.0,
         "roles": [
             {"role":"tank","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null},
-            {"role":"damage","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null},
+            {"role":"damage","account_count":1,"match_count":2,"mean_baseline_mmr":1000.0,"mean_shadow_mmr":1001.0,"mean_difference":1.0},
             {"role":"support","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null}
         ],
         "cap_hits": []
@@ -626,7 +634,27 @@ fn promotion_is_fail_closed_for_wrong_stage_seed_hash_schema_or_no_candidates() 
         }),
         ("invalid-shadow-aggregate", {
             let mut value = promotion_report("screen_100", 0x5eed, true);
-            value["shadow"]["role_state_count"] = serde_json::json!(1);
+            value["shadow"]["role_state_count"] = serde_json::json!(2);
+            rehash(value)
+        }),
+        ("missing-shadow", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value.as_object_mut().unwrap().remove("shadow");
+            rehash(value)
+        }),
+        ("invalid-shadow-role-difference", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["shadow"]["roles"][1]["mean_difference"] = serde_json::json!(2.0);
+            rehash(value)
+        }),
+        ("invalid-shadow-overall-difference", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["shadow"]["mean_difference"] = serde_json::json!(2.0);
+            rehash(value)
+        }),
+        ("invalid-shadow-weighted-mean", {
+            let mut value = promotion_report("screen_100", 0x5eed, true);
+            value["shadow"]["mean_baseline_mmr"] = serde_json::json!(999.0);
             rehash(value)
         }),
         ("screen-with-promoted", {

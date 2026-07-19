@@ -262,6 +262,9 @@ fn finalize_report_for_write(
     expected_stage: &str,
     expected_seed: u64,
 ) -> Result<Vec<u8>, &'static str> {
+    if report.get("shadow").is_none() {
+        return Err("训练报告缺少影子聚合结果");
+    }
     let checksum =
         owstats_desktop_lib::career_mmr::training_report::recompute_promotion_checksum(&report)
             .map_err(|_| "无法生成训练报告校验和")?;

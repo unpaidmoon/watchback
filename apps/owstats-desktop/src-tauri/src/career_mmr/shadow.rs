@@ -223,6 +223,14 @@ impl ShadowAggregate {
             {
                 bail!("影子职责汇总结构无效");
             }
+            if role.account_count > 0
+                && !approximately_equal(
+                    role.mean_difference.unwrap(),
+                    role.mean_shadow_mmr.unwrap() - role.mean_baseline_mmr.unwrap(),
+                )
+            {
+                bail!("影子职责差值汇总不一致");
+            }
         }
         if roles != BTreeSet::from([Role::Tank, Role::Damage, Role::Support]) {
             bail!("影子职责汇总不完整");
@@ -236,8 +244,42 @@ impl ShadowAggregate {
                 bail!("影子限幅汇总结构无效");
             }
         }
+        if self.role_state_count > 0 {
+            let weighted_mean = |field: fn(&ShadowRoleAggregate) -> Option<f64>| {
+                self.roles
+                    .iter()
+                    .filter(|role| role.account_count > 0)
+                    .map(|role| {
+                        field(role).unwrap() * role.account_count as f64
+                            / self.role_state_count as f64
+                    })
+                    .sum::<f64>()
+            };
+            let expected_baseline = weighted_mean(|role| role.mean_baseline_mmr);
+            let expected_shadow = weighted_mean(|role| role.mean_shadow_mmr);
+            let expected_difference = weighted_mean(|role| role.mean_difference);
+            if !expected_baseline.is_finite()
+                || !expected_shadow.is_finite()
+                || !expected_difference.is_finite()
+                || !approximately_equal(self.mean_baseline_mmr.unwrap(), expected_baseline)
+                || !approximately_equal(self.mean_shadow_mmr.unwrap(), expected_shadow)
+                || !approximately_equal(self.mean_difference.unwrap(), expected_difference)
+                || !approximately_equal(
+                    self.mean_difference.unwrap(),
+                    self.mean_shadow_mmr.unwrap() - self.mean_baseline_mmr.unwrap(),
+                )
+            {
+                bail!("影子整体加权汇总不一致");
+            }
+        }
         Ok(())
     }
+}
+
+fn approximately_equal(left: f64, right: f64) -> bool {
+    left.is_finite()
+        && right.is_finite()
+        && (left - right).abs() <= 1e-9 * left.abs().max(right.abs()).max(1.0)
 }
 
 fn finite_mean(values: impl Iterator<Item = f64>) -> Option<f64> {

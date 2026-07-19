@@ -566,6 +566,24 @@ fn privacy_safe_shadow_aggregate_preserves_exact_role_and_overall_mmr_means() {
     ] {
         assert!(!json.contains(forbidden), "leaked {forbidden}: {json}");
     }
+
+    for case in ["role-difference", "overall-difference", "weighted-baseline"] {
+        let mut invalid = aggregate.clone();
+        match case {
+            "role-difference" => {
+                invalid
+                    .roles
+                    .iter_mut()
+                    .find(|role| role.role == Role::Damage)
+                    .unwrap()
+                    .mean_difference = Some(99.0)
+            }
+            "overall-difference" => invalid.mean_difference = Some(99.0),
+            "weighted-baseline" => invalid.mean_baseline_mmr = Some(99.0),
+            _ => unreachable!(),
+        }
+        assert!(invalid.validate(2).is_err(), "accepted {case}");
+    }
 }
 
 #[test]

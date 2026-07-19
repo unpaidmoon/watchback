@@ -547,7 +547,9 @@ impl TrainingReport {
         if self
             .shadow
             .as_ref()
-            .is_some_and(|shadow| shadow.validate(self.dataset.account_datasets).is_err())
+            .ok_or_else(|| anyhow::anyhow!("上一阶段报告无效"))?
+            .validate(self.dataset.account_datasets)
+            .is_err()
         {
             bail!("上一阶段报告无效");
         }

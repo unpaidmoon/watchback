@@ -280,7 +280,23 @@ fn screen_candidate_final_chain_keeps_the_exact_promoted_model_eligible() {
          stage: &str| {
             let path = dir.path().join(name);
             std::fs::write(&path, serde_json::to_vec(report).unwrap()).unwrap();
-            let value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            let mut value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            value["shadow"] = serde_json::json!({
+                "account_count": value["dataset"]["account_datasets"],
+                "role_state_count": 0,
+                "match_count": 0,
+                "mean_baseline_mmr": null,
+                "mean_shadow_mmr": null,
+                "mean_difference": null,
+                "roles": [
+                    {"role":"tank","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null},
+                    {"role":"damage","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null},
+                    {"role":"support","account_count":0,"match_count":0,"mean_baseline_mmr":null,"mean_shadow_mmr":null,"mean_difference":null}
+                ],
+                "cap_hits": []
+            });
+            value["promotion_checksum"] =
+                serde_json::json!(recompute_promotion_checksum(&value).unwrap());
             assert_eq!(
                 recompute_promotion_checksum(&value).unwrap(),
                 value["promotion_checksum"].as_str().unwrap()
