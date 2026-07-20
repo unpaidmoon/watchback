@@ -1,8 +1,14 @@
 use crate::DeepSeekKeyStatus;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
+#[cfg(any(windows, test))]
+use std::ffi::c_void;
+#[cfg(any(windows, test))]
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(any(windows, test))]
+use zeroize::Zeroizing;
 
 pub const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 pub const DEEPSEEK_CREDENTIAL_TARGET: &str = "OWStatsLocal/DeepSeekApiKey";
@@ -141,12 +147,57 @@ fn status_for(configured: bool) -> DeepSeekKeyStatus {
     }
 }
 
+#[cfg(any(windows, test))]
+type CredentialReleaser = unsafe extern "system" fn(*const c_void);
+
+#[cfg(any(windows, test))]
+struct OwnedCredential<T> {
+    pointer: NonNull<T>,
+    release: CredentialReleaser,
+}
+
+#[cfg(any(windows, test))]
+impl<T> OwnedCredential<T> {
+    /// A successful Win32 read transfers ownership only when it returns a non-null pointer.
+    /// A success-plus-null result owns no allocation, so there is nothing safe to pass to CredFree.
+    unsafe fn from_raw(pointer: *mut T, release: CredentialReleaser) -> Option<Self> {
+        NonNull::new(pointer).map(|pointer| Self { pointer, release })
+    }
+
+    fn as_ref(&self) -> &T {
+        unsafe { self.pointer.as_ref() }
+    }
+}
+
+#[cfg(any(windows, test))]
+impl<T> Drop for OwnedCredential<T> {
+    fn drop(&mut self) {
+        unsafe { (self.release)(self.pointer.as_ptr().cast::<c_void>()) };
+    }
+}
+
+#[cfg(any(windows, test))]
+fn prepare_api_key_blob(api_key: &str) -> Result<(Zeroizing<Vec<u8>>, u32)> {
+    prepare_api_key_blob_with_size_conversion(api_key, |length| {
+        u32::try_from(length).map_err(|_| anyhow!("DeepSeek API Key 过长"))
+    })
+}
+
+#[cfg(any(windows, test))]
+fn prepare_api_key_blob_with_size_conversion(
+    api_key: &str,
+    convert_size: impl FnOnce(usize) -> Result<u32>,
+) -> Result<(Zeroizing<Vec<u8>>, u32)> {
+    let blob = Zeroizing::new(api_key.as_bytes().to_vec());
+    let blob_size = convert_size(blob.len())?;
+    Ok((blob, blob_size))
+}
+
 struct WindowsDeepSeekCredentialStore;
 
 #[cfg(windows)]
 impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
     fn read(&self) -> Result<Option<String>> {
-        use std::ffi::c_void;
         use std::ptr::null_mut;
         use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
         use windows_sys::Win32::Security::Credentials::{
@@ -163,11 +214,10 @@ impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
             }
             return Err(anyhow!("无法读取 Windows 凭据管理器中的 DeepSeek API Key"));
         }
-        if raw.is_null() {
-            return Err(anyhow!("Windows 凭据管理器返回了无效结果"));
-        }
+        let raw = unsafe { OwnedCredential::from_raw(raw, CredFree) }
+            .ok_or_else(|| anyhow!("Windows 凭据管理器返回了无效结果"))?;
         let result = unsafe {
-            let credential = &*raw;
+            let credential = raw.as_ref();
             if credential.CredentialBlobSize == 0 || credential.CredentialBlob.is_null() {
                 Err(anyhow!("Windows 凭据管理器中的 DeepSeek API Key 无效"))
             } else {
@@ -181,7 +231,6 @@ impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
                 }
             }
         };
-        unsafe { CredFree(raw.cast::<c_void>()) };
         result
     }
 
@@ -192,8 +241,7 @@ impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
 
         let mut target = wide(DEEPSEEK_CREDENTIAL_TARGET);
         let mut user_name = wide("OWStatsLocal");
-        let mut blob = api_key.as_bytes().to_vec();
-        let blob_size = u32::try_from(blob.len()).map_err(|_| anyhow!("DeepSeek API Key 过长"))?;
+        let (mut blob, blob_size) = prepare_api_key_blob(api_key)?;
         let mut credential: CREDENTIALW = unsafe { std::mem::zeroed() };
         credential.Type = CRED_TYPE_GENERIC;
         credential.TargetName = target.as_mut_ptr();
@@ -203,11 +251,106 @@ impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
         credential.UserName = user_name.as_mut_ptr();
 
         let succeeded = unsafe { CredWriteW(&credential, 0) };
-        blob.fill(0);
         if succeeded == 0 {
             return Err(anyhow!("无法将 DeepSeek API Key 保存到 Windows 凭据管理器"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prepare_api_key_blob, prepare_api_key_blob_with_size_conversion, OwnedCredential};
+    use anyhow::{anyhow, Result};
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use zeroize::Zeroizing;
+
+    static ERROR_RELEASES: AtomicUsize = AtomicUsize::new(0);
+    static PANIC_RELEASES: AtomicUsize = AtomicUsize::new(0);
+    static NULL_RELEASES: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "system" fn release_error_pointer(pointer: *const c_void) {
+        ERROR_RELEASES.fetch_add(1, Ordering::SeqCst);
+        drop(Box::from_raw(pointer.cast_mut().cast::<u8>()));
+    }
+
+    unsafe extern "system" fn release_panic_pointer(pointer: *const c_void) {
+        PANIC_RELEASES.fetch_add(1, Ordering::SeqCst);
+        drop(Box::from_raw(pointer.cast_mut().cast::<u8>()));
+    }
+
+    unsafe extern "system" fn record_null_release(_pointer: *const c_void) {
+        NULL_RELEASES.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn owned_credential_releases_non_null_pointer_on_error_return() {
+        ERROR_RELEASES.store(0, Ordering::SeqCst);
+
+        fn fail_after_ownership() -> Result<()> {
+            let pointer = Box::into_raw(Box::new(7_u8));
+            let _credential = unsafe {
+                OwnedCredential::from_raw(pointer, release_error_pointer)
+                    .expect("non-null pointers must become owned")
+            };
+            Err(anyhow!("synthetic failure"))
+        }
+
+        assert!(fail_after_ownership().is_err());
+        assert_eq!(ERROR_RELEASES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn owned_credential_releases_non_null_pointer_during_panic_unwind() {
+        PANIC_RELEASES.store(0, Ordering::SeqCst);
+
+        let unwind = std::panic::catch_unwind(|| {
+            let pointer = Box::into_raw(Box::new(9_u8));
+            let credential = unsafe {
+                OwnedCredential::from_raw(pointer, release_panic_pointer)
+                    .expect("non-null pointers must become owned")
+            };
+            assert_eq!(*credential.as_ref(), 9);
+            panic!("synthetic panic");
+        });
+
+        assert!(unwind.is_err());
+        assert_eq!(PANIC_RELEASES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn successful_null_pointer_has_no_owned_allocation_to_release() {
+        NULL_RELEASES.store(0, Ordering::SeqCst);
+
+        let credential =
+            unsafe { OwnedCredential::<u8>::from_raw(null_mut(), record_null_release) };
+
+        assert!(credential.is_none());
+        assert_eq!(NULL_RELEASES.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn prepared_api_key_blob_uses_zeroizing_storage() {
+        let (blob, blob_size) = prepare_api_key_blob("synthetic-key").unwrap();
+
+        fn assert_zeroizing_vec(_blob: &Zeroizing<Vec<u8>>) {}
+        assert_zeroizing_vec(&blob);
+        assert_eq!(blob.as_slice(), b"synthetic-key");
+        assert_eq!(blob_size, 13);
+    }
+
+    #[test]
+    fn size_conversion_failure_occurs_after_bytes_enter_zeroizing_storage() {
+        let error = prepare_api_key_blob_with_size_conversion("synthetic-key", |_| {
+            Err(anyhow!("DeepSeek API Key 过长"))
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("DeepSeek API Key"));
+        assert!(!error.contains("synthetic-key"));
     }
 }
 
