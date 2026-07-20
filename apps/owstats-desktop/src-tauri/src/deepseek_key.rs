@@ -9,7 +9,7 @@ pub const DEEPSEEK_CREDENTIAL_TARGET: &str = "OWStatsLocal/DeepSeekApiKey";
 pub const DEEPSEEK_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub trait DeepSeekCredentialStore: Send + Sync {
-    fn exists(&self) -> Result<bool>;
+    fn read(&self) -> Result<Option<String>>;
     fn write(&self, api_key: &str) -> Result<()>;
 }
 
@@ -92,7 +92,32 @@ impl DeepSeekKeyManager {
     }
 
     pub fn status(&self) -> Result<DeepSeekKeyStatus> {
-        Ok(status_for(self.store.exists()?))
+        let configured = match self
+            .store
+            .read()
+            .map_err(|_| anyhow!("无法安全读取 DeepSeek API Key"))?
+        {
+            Some(key) if key.trim().is_empty() => {
+                return Err(anyhow!("无法安全读取 DeepSeek API Key"));
+            }
+            Some(_) => true,
+            None => false,
+        };
+        Ok(status_for(configured))
+    }
+
+    /// Returns the credential only to Rust backend callers. This method is not a Tauri command
+    /// and its value must never be placed in a DTO, event, or log.
+    pub fn backend_api_key(&self) -> Result<String> {
+        let key = self
+            .store
+            .read()
+            .map_err(|_| anyhow!("无法安全读取 DeepSeek API Key"))?
+            .ok_or_else(|| anyhow!("尚未配置 DeepSeek API Key"))?;
+        if key.trim().is_empty() {
+            return Err(anyhow!("无法安全读取 DeepSeek API Key"));
+        }
+        Ok(key)
     }
 
     pub async fn save(&self, api_key: &str) -> Result<DeepSeekKeyStatus> {
@@ -120,7 +145,7 @@ struct WindowsDeepSeekCredentialStore;
 
 #[cfg(windows)]
 impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
-    fn exists(&self) -> Result<bool> {
+    fn read(&self) -> Result<Option<String>> {
         use std::ffi::c_void;
         use std::ptr::null_mut;
         use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
@@ -134,15 +159,30 @@ impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
         if succeeded == 0 {
             let error = std::io::Error::last_os_error();
             if error.raw_os_error() == Some(ERROR_NOT_FOUND as i32) {
-                return Ok(false);
+                return Ok(None);
             }
             return Err(anyhow!("无法读取 Windows 凭据管理器中的 DeepSeek API Key"));
         }
         if raw.is_null() {
             return Err(anyhow!("Windows 凭据管理器返回了无效结果"));
         }
+        let result = unsafe {
+            let credential = &*raw;
+            if credential.CredentialBlobSize == 0 || credential.CredentialBlob.is_null() {
+                Err(anyhow!("Windows 凭据管理器中的 DeepSeek API Key 无效"))
+            } else {
+                let blob = std::slice::from_raw_parts(
+                    credential.CredentialBlob,
+                    credential.CredentialBlobSize as usize,
+                );
+                match std::str::from_utf8(blob) {
+                    Ok(key) if !key.trim().is_empty() => Ok(Some(key.to_owned())),
+                    _ => Err(anyhow!("Windows 凭据管理器中的 DeepSeek API Key 无效")),
+                }
+            }
+        };
         unsafe { CredFree(raw.cast::<c_void>()) };
-        Ok(true)
+        result
     }
 
     fn write(&self, api_key: &str) -> Result<()> {
@@ -162,7 +202,9 @@ impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
         credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
         credential.UserName = user_name.as_mut_ptr();
 
-        if unsafe { CredWriteW(&credential, 0) } == 0 {
+        let succeeded = unsafe { CredWriteW(&credential, 0) };
+        blob.fill(0);
+        if succeeded == 0 {
             return Err(anyhow!("无法将 DeepSeek API Key 保存到 Windows 凭据管理器"));
         }
         Ok(())
@@ -176,7 +218,7 @@ fn wide(value: &str) -> Vec<u16> {
 
 #[cfg(not(windows))]
 impl DeepSeekCredentialStore for WindowsDeepSeekCredentialStore {
-    fn exists(&self) -> Result<bool> {
+    fn read(&self) -> Result<Option<String>> {
         Err(anyhow!("DeepSeek API Key 安全存储仅支持 Windows"))
     }
 
