@@ -849,6 +849,13 @@ pub struct CredentialStatus {
     pub saved_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeepSeekKeyStatus {
+    pub state: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSummary {

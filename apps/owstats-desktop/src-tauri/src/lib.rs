@@ -16,6 +16,7 @@ pub mod dashen_auth;
 pub mod dashen_client;
 mod database;
 mod db;
+pub mod deepseek_key;
 mod importer;
 pub mod login_flow;
 pub mod login_target;
@@ -88,6 +89,10 @@ pub fn run() {
             let account_context = account_context::AccountContextManager::load(shared)
                 .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
             app.manage(account_context.clone());
+            app.manage(
+                deepseek_key::DeepSeekKeyManager::new()
+                    .map_err(|error| anyhow::anyhow!("无法初始化 DeepSeek 配置: {error}"))?,
+            );
             let manager = app.state::<background_sync::BackgroundSeasonSyncManager>();
             let registry = account_context.registry_snapshot()?;
             for entry in registry.accounts {
@@ -124,6 +129,8 @@ pub fn run() {
             commands::get_onboarding_status,
             commands::get_personal_season_review,
             commands::get_credential_status,
+            commands::get_deepseek_key_status,
+            commands::save_deepseek_key,
             commands::get_player_profile,
             commands::get_user_settings,
             commands::save_user_settings,
