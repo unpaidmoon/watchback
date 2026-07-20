@@ -51,7 +51,8 @@ const HYBRID_SUPPORTS: &[&str] = &[
 pub struct RoastMaterial {
     pub material_version: i64,
     pub evaluation: RoastEvaluation,
-    pub relationship: RoastRelationship,
+    pub selected_facts: Vec<RoastFact>,
+    pub relationship: Option<RoastRelationship>,
     pub streak: RoastStreakContext,
 }
 
@@ -81,7 +82,6 @@ pub enum RoastFactEvidence {
     Contribution,
     StatComparison,
     Result,
-    Availability,
     Counterpoint,
 }
 
@@ -92,7 +92,6 @@ pub enum RoastRelationshipKind {
     Carry,
     Scapegoat,
     SelfRoast,
-    Neutral,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -150,6 +149,12 @@ struct FactCandidate {
     score: f64,
 }
 
+#[derive(Debug, Clone)]
+struct RelationshipSelection {
+    relationship: RoastRelationship,
+    candidates: Vec<FactCandidate>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SeasonAverage {
     kills: f64,
@@ -164,11 +169,30 @@ pub fn build_roast_material(conn: &Connection, match_id: &str) -> Result<RoastMa
         .map(|value| safe_evaluation(value, &context.result))
         .unwrap_or_else(|| neutral_evaluation(&context.result));
     let players = teammate_metrics(conn, match_id)?;
-    let relationship = select_relationship(conn, &context, &evaluation, &players)?;
+    let relationship_selection = select_relationship(conn, &context, &evaluation, &players)?;
+    let mut selected_candidates = vec![result_fact_candidate(&context.result)?];
+    if let Some(current) = players.iter().find(|player| player.current) {
+        selected_candidates.extend(fact_candidates(
+            conn,
+            &context,
+            &evaluation,
+            &players,
+            current,
+            None,
+        )?);
+    }
+    if let Some(selection) = &relationship_selection {
+        selected_candidates.extend(selection.candidates.clone());
+    }
+    let selected_facts = select_facts(selected_candidates);
+    if selected_facts.len() < 3 {
+        return Err(anyhow!("当前对局缺少足够的可核验锐评细节"));
+    }
     let material = RoastMaterial {
         material_version: MATERIAL_VERSION,
         evaluation,
-        relationship,
+        selected_facts,
+        relationship: relationship_selection.map(|selection| selection.relationship),
         streak: streak_context(conn, match_id, &context)?,
     };
     assert_material_privacy(&material)?;
@@ -372,9 +396,9 @@ fn select_relationship(
     context: &MatchContext,
     evaluation: &RoastEvaluation,
     players: &[PlayerMetrics],
-) -> Result<RoastRelationship> {
+) -> Result<Option<RelationshipSelection>> {
     if players.len() < 2 {
-        return Ok(neutral_relationship(&context.result));
+        return Ok(None);
     }
     let current = players.iter().find(|player| player.current);
     let weakest = ranked(players, false).into_iter().next();
@@ -399,15 +423,14 @@ fn select_relationship(
             weakest.filter(|player| !player.current),
         )
     } else {
-        return Ok(neutral_relationship(&context.result));
+        return Ok(None);
     };
     let Some(subject) = subject else {
-        return Ok(neutral_relationship(&context.result));
+        return Ok(None);
     };
-    let facts = select_facts(fact_candidates(
-        conn, context, evaluation, players, subject, &kind,
-    )?);
-    if facts.len() < 3
+    let candidates = fact_candidates(conn, context, evaluation, players, subject, Some(&kind))?;
+    let facts = select_facts(candidates.clone());
+    if facts.len() < 2
         || !facts.iter().any(|fact| {
             matches!(
                 fact.evidence,
@@ -415,7 +438,7 @@ fn select_relationship(
             )
         })
     {
-        return Ok(neutral_relationship(&context.result));
+        return Ok(None);
     }
     let counter_facts = if kind == RoastRelationshipKind::Scapegoat {
         counter_facts(players, subject)
@@ -424,13 +447,16 @@ fn select_relationship(
     };
     let confidence =
         (facts.iter().map(|fact| fact.strength).sum::<f64>() / facts.len() as f64).clamp(0.0, 1.0);
-    Ok(RoastRelationship {
-        kind,
-        subject: subject.subject.clone(),
-        facts,
-        counter_facts,
-        confidence,
-    })
+    Ok(Some(RelationshipSelection {
+        relationship: RoastRelationship {
+            kind,
+            subject: subject.subject.clone(),
+            facts,
+            counter_facts,
+            confidence,
+        },
+        candidates,
+    }))
 }
 
 fn ranked(players: &[PlayerMetrics], descending: bool) -> Vec<&PlayerMetrics> {
@@ -456,7 +482,7 @@ fn fact_candidates(
     evaluation: &RoastEvaluation,
     players: &[PlayerMetrics],
     subject: &PlayerMetrics,
-    kind: &RoastRelationshipKind,
+    kind: Option<&RoastRelationshipKind>,
 ) -> Result<Vec<FactCandidate>> {
     let mut facts = Vec::new();
     let team_rank = ranked(players, true)
@@ -578,7 +604,7 @@ fn fact_candidates(
             fact.score += 0.15;
         }
     }
-    if *kind == RoastRelationshipKind::Carry {
+    if kind == Some(&RoastRelationshipKind::Carry) {
         for fact in &mut facts {
             if fact.metric == "composite_rank" || fact.metric == "role_primary" {
                 fact.score += 0.08;
@@ -841,39 +867,23 @@ fn counter_facts(players: &[PlayerMetrics], subject: &PlayerMetrics) -> Vec<Roas
     }]
 }
 
-fn neutral_relationship(result: &str) -> RoastRelationship {
-    let result_text = match result {
+fn result_fact_candidate(result: &str) -> Result<FactCandidate> {
+    let text = match result {
         "win" => "本场结果为胜利",
         "loss" => "本场结果为失利",
         "draw" => "本场结果为平局",
-        _ => "本场结果暂不明确",
+        _ => return Err(anyhow!("当前对局结果无法形成可核验锐评事实")),
     };
-    RoastRelationship {
-        kind: RoastRelationshipKind::Neutral,
-        subject: "本场整体".to_string(),
-        facts: vec![
-            RoastFact {
-                id: "result_neutral".to_string(),
-                text: result_text.to_string(),
-                strength: 0.60,
-                evidence: RoastFactEvidence::Result,
-            },
-            RoastFact {
-                id: "evidence_neutral".to_string(),
-                text: "现有数据不足以稳定归因到单个位置".to_string(),
-                strength: 0.58,
-                evidence: RoastFactEvidence::Availability,
-            },
-            RoastFact {
-                id: "relationship_neutral".to_string(),
-                text: "本次仅保留结果层面的中性材料".to_string(),
-                strength: 0.56,
-                evidence: RoastFactEvidence::Availability,
-            },
-        ],
-        counter_facts: Vec::new(),
-        confidence: 0.55,
-    }
+    Ok(FactCandidate {
+        fact: RoastFact {
+            id: "match_result".to_string(),
+            text: text.to_string(),
+            strength: 0.88,
+            evidence: RoastFactEvidence::Result,
+        },
+        metric: "match_result",
+        score: 0.88,
+    })
 }
 
 fn streak_context(
@@ -953,24 +963,41 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
     if material.material_version != MATERIAL_VERSION {
         return Err(anyhow!("锐评材料版本无效"));
     }
-    if material.relationship.facts.len() < 3 || material.relationship.facts.len() > 4 {
-        return Err(anyhow!("锐评关系事实数量无效"));
+    if material.selected_facts.len() < 3 || material.selected_facts.len() > 4 {
+        return Err(anyhow!("锐评事实数量无效"));
     }
-    if material.relationship.kind != RoastRelationshipKind::Neutral
-        && !material.relationship.facts.iter().any(|fact| {
-            matches!(
-                fact.evidence,
-                RoastFactEvidence::Rank | RoastFactEvidence::SameRole
-            )
-        })
+    if material
+        .selected_facts
+        .iter()
+        .any(|fact| fact.strength < 0.35)
     {
-        return Err(anyhow!("锐评关系缺少排名或同位置比较"));
+        return Err(anyhow!("锐评事实强度无效"));
     }
-    if material.relationship.kind != RoastRelationshipKind::Neutral
-        && !(material.relationship.subject.starts_with("我方")
-            || material.relationship.subject.starts_with("当前玩家（"))
-    {
-        return Err(anyhow!("锐评主体不是匿名位置描述"));
+    let selected_ids = material
+        .selected_facts
+        .iter()
+        .map(|fact| fact.id.as_str())
+        .collect::<HashSet<_>>();
+    if selected_ids.len() != material.selected_facts.len() {
+        return Err(anyhow!("锐评事实未去重"));
+    }
+    if let Some(relationship) = &material.relationship {
+        if relationship.facts.len() < 2
+            || relationship.facts.len() > 4
+            || !relationship.facts.iter().any(|fact| {
+                matches!(
+                    fact.evidence,
+                    RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+                )
+            })
+        {
+            return Err(anyhow!("锐评关系缺少足够的排名或同位置证据"));
+        }
+        if !(relationship.subject.starts_with("我方")
+            || relationship.subject.starts_with("当前玩家（"))
+        {
+            return Err(anyhow!("锐评主体不是匿名位置描述"));
+        }
     }
     let value = serde_json::to_value(material)?;
     scan_value(&value)

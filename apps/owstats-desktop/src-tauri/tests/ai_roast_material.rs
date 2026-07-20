@@ -2,7 +2,7 @@ use anyhow::Result;
 use owstats_desktop_lib::{
     ai_roast::material::{
         assert_material_privacy, build_roast_material, RoastFactEvidence, RoastMaterial,
-        RoastRelationshipKind, MATERIAL_VERSION,
+        RoastRelationship, RoastRelationshipKind, MATERIAL_VERSION,
     },
     OwDatabase,
 };
@@ -143,28 +143,39 @@ fn seed_team(conn: &Connection, match_id: &str, rows: &[(&str, bool, Stats)]) ->
     Ok(())
 }
 
-fn assert_grounded(material: &RoastMaterial, kind: RoastRelationshipKind) {
+fn assert_grounded(material: &RoastMaterial, kind: RoastRelationshipKind) -> &RoastRelationship {
     assert_eq!(material.material_version, MATERIAL_VERSION);
-    assert_eq!(material.relationship.kind, kind);
-    assert!((3..=4).contains(&material.relationship.facts.len()));
+    assert!((3..=4).contains(&material.selected_facts.len()));
     assert!(material
-        .relationship
-        .facts
+        .selected_facts
         .iter()
         .all(|fact| fact.strength >= 0.35));
     let fact_ids = material
-        .relationship
-        .facts
+        .selected_facts
         .iter()
         .map(|fact| fact.id.as_str())
         .collect::<HashSet<_>>();
-    assert_eq!(fact_ids.len(), material.relationship.facts.len());
-    if kind != RoastRelationshipKind::Neutral {
-        assert!(material.relationship.facts.iter().any(|fact| matches!(
-            fact.evidence,
-            RoastFactEvidence::Rank | RoastFactEvidence::SameRole
-        )));
-    }
+    assert_eq!(fact_ids.len(), material.selected_facts.len());
+    let relationship = material
+        .relationship
+        .as_ref()
+        .expect("expected relationship");
+    assert_eq!(relationship.kind, kind);
+    assert!(relationship.facts.len() >= 2);
+    assert!(relationship.facts.iter().any(|fact| matches!(
+        fact.evidence,
+        RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+    )));
+    relationship
+}
+
+fn assert_neutral(material: &RoastMaterial) {
+    assert_eq!(material.material_version, MATERIAL_VERSION);
+    assert!(material.relationship.is_none());
+    assert!((3..=4).contains(&material.selected_facts.len()));
+    assert!(material.selected_facts.iter().all(|fact| {
+        fact.strength >= 0.35 && !fact.text.contains("数据不足") && !fact.text.contains("仅保留")
+    }));
 }
 
 fn assert_private(material: &RoastMaterial, forbidden: &[&str]) -> Result<()> {
@@ -212,8 +223,8 @@ fn selects_weak_link_with_reused_evaluation_and_grounded_facts() -> Result<()> {
     let material = build_roast_material(&conn, match_id)?;
 
     assert_eq!(material.evaluation.primary_tag, "带飞局");
-    assert_grounded(&material, RoastRelationshipKind::WeakLink);
-    assert_eq!(material.relationship.subject, "我方输出位2号");
+    let relationship = assert_grounded(&material, RoastRelationshipKind::WeakLink);
+    assert_eq!(relationship.subject, "我方输出位2号");
     assert_private(
         &material,
         &[match_id, "SyntheticPlayer#2", "synthetic-secret-token"],
@@ -247,8 +258,8 @@ fn selects_carry_big_daddy_and_reports_stable_streak_context() -> Result<()> {
 
     let material = build_roast_material(&conn, "synthetic-current-carry")?;
 
-    assert_grounded(&material, RoastRelationshipKind::Carry);
-    assert_eq!(material.relationship.subject, "我方输出位2号");
+    let relationship = assert_grounded(&material, RoastRelationshipKind::Carry);
+    assert_eq!(relationship.subject, "我方输出位2号");
     assert_eq!(material.streak.before_current, 2);
     assert_eq!(material.streak.current_event, "将连胜延长到3场");
     assert_private(&material, &["synthetic-current-carry", "SyntheticPlayer#2"])
@@ -275,9 +286,9 @@ fn selects_main_scapegoat_on_loss() -> Result<()> {
 
     let material = build_roast_material(&conn, match_id)?;
 
-    assert_grounded(&material, RoastRelationshipKind::Scapegoat);
-    assert_eq!(material.relationship.subject, "我方输出位2号");
-    assert!(!material.relationship.counter_facts.is_empty());
+    let relationship = assert_grounded(&material, RoastRelationshipKind::Scapegoat);
+    assert_eq!(relationship.subject, "我方输出位2号");
+    assert!(!relationship.counter_facts.is_empty());
     assert_private(&material, &[match_id, "SyntheticPlayer#2"])
 }
 
@@ -362,30 +373,26 @@ fn self_roasts_output_heavy_support_using_same_role_season_average() -> Result<(
 
     let material = build_roast_material(&conn, match_id)?;
 
-    assert_grounded(&material, RoastRelationshipKind::SelfRoast);
-    assert_eq!(material.relationship.subject, "当前玩家（支援位1号）");
+    let relationship = assert_grounded(&material, RoastRelationshipKind::SelfRoast);
+    assert_eq!(relationship.subject, "当前玩家（支援位1号）");
     assert!(material
-        .relationship
-        .facts
+        .selected_facts
         .iter()
         .any(|fact| fact.id.contains("same_role_healing")));
     assert!(
         material
-            .relationship
-            .facts
+            .selected_facts
             .iter()
             .any(|fact| fact.text.contains("治疗") && fact.text.contains("伤害")),
         "selected facts: {:?}",
-        material.relationship.facts
+        material.selected_facts
     );
     assert!(material
-        .relationship
-        .facts
+        .selected_facts
         .iter()
         .all(|fact| !fact.text.contains("导致")));
     assert!(material
-        .relationship
-        .facts
+        .selected_facts
         .iter()
         .all(|fact| !fact.text.contains("当前英雄均值")));
     assert_private(&material, &[match_id, "SyntheticSelf#0"])
@@ -419,15 +426,15 @@ fn seed_team_enemies(conn: &Connection, match_id: &str) -> Result<()> {
 }
 
 #[test]
-fn lazily_evaluates_current_match_and_uses_neutral_win_loss_draw_fallbacks() -> Result<()> {
+fn lazily_evaluates_current_match_and_uses_safe_win_loss_draw_fallbacks() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;
     for (index, (match_id, result, expected_tag, expected_event)) in [
-        ("synthetic-neutral-win", "win", "胜利局", "本场获胜"),
+        ("synthetic-neutral-win", "win", "带飞局", "本场获胜"),
         (
             "synthetic-neutral-loss",
             "loss",
-            "失败局",
+            "尽力局",
             "结束1场连胜并失利",
         ),
         ("synthetic-neutral-draw", "draw", "平局", "平局中断连续结果"),
@@ -436,9 +443,29 @@ fn lazily_evaluates_current_match_and_uses_neutral_win_loss_draw_fallbacks() -> 
     .enumerate()
     {
         seed_match(&conn, match_id, 23, result, 2_000 + index as i64)?;
+        seed_team(
+            &conn,
+            match_id,
+            &[
+                ("tank", true, stats(8, 5, 4, 7_000, 0, 9_000)),
+                ("dps", false, stats(12, 4, 5, 9_000, 0, 0)),
+                ("dps", false, stats(7, 3, 7, 6_000, 0, 0)),
+                ("healer", false, stats(4, 12, 5, 2_500, 8_000, 0)),
+                ("healer", false, stats(3, 10, 6, 2_000, 7_000, 0)),
+            ],
+        )?;
         let material = build_roast_material(&conn, match_id)?;
         assert_eq!(material.evaluation.primary_tag, expected_tag);
-        assert_grounded(&material, RoastRelationshipKind::Neutral);
+        match result {
+            "win" => {
+                assert_grounded(&material, RoastRelationshipKind::WeakLink);
+            }
+            "loss" => {
+                assert_grounded(&material, RoastRelationshipKind::Scapegoat);
+            }
+            "draw" => assert_neutral(&material),
+            _ => unreachable!(),
+        }
         assert_eq!(material.streak.current_event, expected_event);
         assert_private(&material, &[match_id, "synthetic-secret-token"])?;
     }
@@ -457,7 +484,7 @@ fn lazily_evaluates_current_match_and_uses_neutral_win_loss_draw_fallbacks() -> 
 }
 
 #[test]
-fn falls_back_to_neutral_when_only_two_distinct_relationship_facts_are_grounded() -> Result<()> {
+fn keeps_relationship_when_two_distinct_supporting_facts_are_grounded() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;
     let match_id = "synthetic-two-facts";
@@ -474,32 +501,52 @@ fn falls_back_to_neutral_when_only_two_distinct_relationship_facts_are_grounded(
 
     let material = build_roast_material(&conn, match_id)?;
 
-    assert_grounded(&material, RoastRelationshipKind::Neutral);
-    assert_eq!(material.relationship.facts.len(), 3);
-    assert!(material.relationship.facts.iter().all(|fact| !matches!(
-        fact.evidence,
-        RoastFactEvidence::Rank | RoastFactEvidence::SameRole
-    )));
+    let relationship = assert_grounded(&material, RoastRelationshipKind::WeakLink);
+    assert_eq!(relationship.facts.len(), 2);
     assert_private(&material, &[match_id])
 }
 
 #[test]
-fn neutral_material_needs_no_relationship_evidence_but_still_needs_three_facts() -> Result<()> {
+fn neutral_material_has_grounded_facts_without_relationship_or_meta_padding() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;
     let match_id = "synthetic-neutral-evidence";
     seed_match(&conn, match_id, 23, "draw", 2_600)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, stats(8, 4, 2, 7_500, 0, 9_000)),
+            ("dps", false, stats(12, 3, 4, 10_000, 0, 0)),
+            ("dps", false, stats(6, 2, 8, 5_000, 0, 0)),
+            ("healer", false, stats(3, 11, 5, 2_000, 8_000, 0)),
+            ("healer", false, stats(4, 10, 6, 2_500, 7_000, 0)),
+        ],
+    )?;
 
     let material = build_roast_material(&conn, match_id)?;
 
-    assert_grounded(&material, RoastRelationshipKind::Neutral);
-    assert!(material.relationship.facts.iter().all(|fact| !matches!(
-        fact.evidence,
-        RoastFactEvidence::Rank | RoastFactEvidence::SameRole
-    )));
+    assert_neutral(&material);
+    assert!(material
+        .selected_facts
+        .iter()
+        .any(|fact| fact.evidence == RoastFactEvidence::Result));
     let mut too_short = material;
-    too_short.relationship.facts.truncate(2);
+    too_short.selected_facts.truncate(2);
     assert!(assert_material_privacy(&too_short).is_err());
+    Ok(())
+}
+
+#[test]
+fn rejects_material_when_fewer_than_three_grounded_facts_exist() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-insufficient-detail";
+    seed_match(&conn, match_id, 23, "draw", 2_650)?;
+
+    let error = build_roast_material(&conn, match_id).unwrap_err();
+
+    assert!(error.to_string().contains("可核验锐评细节"));
     Ok(())
 }
 
@@ -537,6 +584,11 @@ fn non_ordinary_history_does_not_change_ordinary_streak() -> Result<()> {
     seed_match_with_kind(&conn, "synthetic-stadium-loss", 23, "loss", 250, "fight")?;
     let match_id = "synthetic-ordinary-target";
     seed_match(&conn, match_id, 23, "win", 300)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[("tank", true, stats(8, 5, 4, 7_000, 0, 9_000))],
+    )?;
 
     let material = build_roast_material(&conn, match_id)?;
 
@@ -550,6 +602,14 @@ fn rejects_unsafe_cached_evaluation_strings_before_serialization() -> Result<()>
     let conn = db.connect()?;
     let match_id = "synthetic-unsafe-evaluation";
     seed_match(&conn, match_id, 23, "win", 3_000)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, stats(8, 5, 4, 7_000, 0, 9_000)),
+            ("dps", false, stats(0, 0, 12, 0, 0, 0)),
+        ],
+    )?;
     conn.execute(
         r#"INSERT INTO match_evaluations(match_id,mode,rule_version,grade,primary_tag,evidence_tags_json,reasons_json,confidence,computed_at) VALUES(?1,'SportPreset',1,'A','SyntheticLeak#1000','["synthetic-account-id"]','[]',0.9,'now')"#,
         params![match_id],
@@ -563,8 +623,16 @@ fn rejects_unsafe_cached_evaluation_strings_before_serialization() -> Result<()>
         &material,
         &[match_id, "SyntheticLeak#1000", "synthetic-account-id"],
     )?;
-    let mut unsafe_material = material;
-    unsafe_material.relationship.facts[0].text = "customerToken=synthetic-secret-token".to_string();
-    assert!(assert_material_privacy(&unsafe_material).is_err());
+    let mut unsafe_selected = material.clone();
+    unsafe_selected.selected_facts[0].text = "customerToken=synthetic-secret-token".to_string();
+    assert!(assert_material_privacy(&unsafe_selected).is_err());
+    let mut unsafe_relationship = material;
+    unsafe_relationship
+        .relationship
+        .as_mut()
+        .expect("expected synthetic relationship")
+        .facts[0]
+        .text = "cookie=synthetic-secret-cookie".to_string();
+    assert!(assert_material_privacy(&unsafe_relationship).is_err());
     Ok(())
 }
