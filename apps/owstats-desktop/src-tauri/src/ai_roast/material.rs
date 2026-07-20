@@ -45,6 +45,7 @@ const HYBRID_SUPPORTS: &[&str] = &[
     "207165582859043377",
     "207165582859043685",
 ];
+const MIN_MEANINGFUL_RELATIVE_CONTRAST: f64 = 0.01;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -69,9 +70,30 @@ pub struct RoastEvaluation {
 #[serde(rename_all = "camelCase")]
 pub struct RoastFact {
     pub id: String,
+    pub subject: FactSubject,
     pub text: String,
     pub strength: f64,
     pub evidence: RoastFactEvidence,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum FactSubject {
+    CurrentPlayer,
+    RelationshipSubject,
+    Team,
+    Match,
+}
+
+impl FactSubject {
+    pub fn id_prefix(self) -> &'static str {
+        match self {
+            Self::CurrentPlayer => "current_player:",
+            Self::RelationshipSubject => "relationship_subject:",
+            Self::Team => "team:",
+            Self::Match => "match:",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,7 +167,7 @@ enum Role {
 #[derive(Debug, Clone)]
 struct FactCandidate {
     fact: RoastFact,
-    metric: &'static str,
+    metric: String,
     score: f64,
 }
 
@@ -178,6 +200,7 @@ pub fn build_roast_material(conn: &Connection, match_id: &str) -> Result<RoastMa
             &evaluation,
             &players,
             current,
+            FactSubject::CurrentPlayer,
             None,
         )?);
     }
@@ -401,8 +424,8 @@ fn select_relationship(
         return Ok(None);
     }
     let current = players.iter().find(|player| player.current);
-    let weakest = ranked(players, false).into_iter().next();
-    let strongest = ranked(players, true).into_iter().next();
+    let weakest = unique_extreme(players, false);
+    let strongest = unique_extreme(players, true);
     let (kind, subject) = if current
         .is_some_and(|player| weakest.is_some_and(|weakest| weakest.rowid == player.rowid))
     {
@@ -428,7 +451,15 @@ fn select_relationship(
     let Some(subject) = subject else {
         return Ok(None);
     };
-    let candidates = fact_candidates(conn, context, evaluation, players, subject, Some(&kind))?;
+    let candidates = fact_candidates(
+        conn,
+        context,
+        evaluation,
+        players,
+        subject,
+        FactSubject::RelationshipSubject,
+        Some(&kind),
+    )?;
     let facts = select_facts(candidates.clone());
     if facts.len() < 2
         || !facts.iter().any(|fact| {
@@ -465,8 +496,7 @@ fn ranked(players: &[PlayerMetrics], descending: bool) -> Vec<&PlayerMetrics> {
         let order = left
             .composite
             .partial_cmp(&right.composite)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| left.rowid.cmp(&right.rowid));
+            .unwrap_or(Ordering::Equal);
         if descending {
             order.reverse()
         } else {
@@ -476,35 +506,68 @@ fn ranked(players: &[PlayerMetrics], descending: bool) -> Vec<&PlayerMetrics> {
     ranked
 }
 
+fn unique_extreme(players: &[PlayerMetrics], descending: bool) -> Option<&PlayerMetrics> {
+    let ranked = ranked(players, descending);
+    let extreme = ranked.first().copied()?;
+    let next = ranked.get(1).copied()?;
+    meaningful_relative_contrast(extreme.composite, next.composite).then_some(extreme)
+}
+
+fn competition_rank(players: &[PlayerMetrics], subject: &PlayerMetrics) -> (usize, usize) {
+    let rank = players
+        .iter()
+        .filter(|player| player.composite > subject.composite)
+        .count()
+        + 1;
+    let tied = players
+        .iter()
+        .filter(|player| player.composite == subject.composite)
+        .count();
+    (rank, tied)
+}
+
+fn maximum_relative_contrast(subject_value: f64, peer_values: impl Iterator<Item = f64>) -> f64 {
+    peer_values
+        .map(|peer_value| relative_contrast(subject_value, peer_value))
+        .fold(0.0, f64::max)
+}
+
 fn fact_candidates(
     conn: &Connection,
     context: &MatchContext,
     evaluation: &RoastEvaluation,
     players: &[PlayerMetrics],
     subject: &PlayerMetrics,
+    fact_subject: FactSubject,
     kind: Option<&RoastRelationshipKind>,
 ) -> Result<Vec<FactCandidate>> {
     let mut facts = Vec::new();
-    let team_rank = ranked(players, true)
-        .iter()
-        .position(|player| player.rowid == subject.rowid)
-        .unwrap_or(players.len() - 1)
-        + 1;
-    let rank_text = match team_rank {
-        1 => "综合表现位列全队第1".to_string(),
-        rank if rank == players.len() => format!("综合表现位列全队第{rank}"),
-        rank => format!("综合表现位列全队第{rank}"),
-    };
-    push_fact(
-        &mut facts,
-        "team_rank_composite",
-        rank_text,
-        RoastFactEvidence::Rank,
-        "composite_rank",
-        0.98,
-        rank_contrast(team_rank, players.len()),
-        evaluation,
+    let composite_contrast = maximum_relative_contrast(
+        subject.composite,
+        players
+            .iter()
+            .filter(|player| player.rowid != subject.rowid)
+            .map(|player| player.composite),
     );
+    if players.len() >= 2 && composite_contrast >= MIN_MEANINGFUL_RELATIVE_CONTRAST {
+        let (team_rank, _) = competition_rank(players, subject);
+        let rank_text = match team_rank {
+            1 => "综合表现位列全队第1".to_string(),
+            rank if rank == players.len() => format!("综合表现位列全队第{rank}"),
+            rank => format!("综合表现位列全队第{rank}"),
+        };
+        push_fact(
+            &mut facts,
+            fact_subject,
+            "team_rank_composite",
+            rank_text,
+            RoastFactEvidence::Rank,
+            "composite_rank",
+            0.98,
+            composite_contrast,
+            evaluation,
+        );
+    }
 
     let role_peers = players
         .iter()
@@ -519,21 +582,25 @@ fn fact_candidates(
             .sum::<f64>()
             / (role_peers.len() - 1) as f64;
         let delta = role_metric - peer_average;
-        let metric_name = primary_role_metric_name(subject.role);
-        let direction = if delta >= 0.0 { "高" } else { "低" };
-        push_fact(
-            &mut facts,
-            "same_role_primary_delta",
-            format!(
-                "{metric_name}比同位置队友平均{direction}{}",
-                format_metric(delta.abs())
-            ),
-            RoastFactEvidence::SameRole,
-            "role_primary",
-            0.90,
-            relative_contrast(role_metric, peer_average),
-            evaluation,
-        );
+        let role_contrast = relative_contrast(role_metric, peer_average);
+        if role_contrast >= MIN_MEANINGFUL_RELATIVE_CONTRAST {
+            let metric_name = primary_role_metric_name(subject.role);
+            let direction = if delta >= 0.0 { "高" } else { "低" };
+            push_fact(
+                &mut facts,
+                fact_subject,
+                "same_role_primary_delta",
+                format!(
+                    "{metric_name}比同位置队友平均{direction}{}",
+                    format_metric(delta.abs())
+                ),
+                RoastFactEvidence::SameRole,
+                "role_primary",
+                0.90,
+                role_contrast,
+                evaluation,
+            );
+        }
     }
 
     let damage_total = players.iter().map(|player| player.damage).sum::<i64>();
@@ -544,42 +611,59 @@ fn fact_candidates(
         }
         _ => ("team_share_damage", "伤害", subject.damage, damage_total),
     };
-    if contribution.3 > 0 {
+    if players.len() >= 2 && contribution.3 > 0 {
         let share = contribution.2 as f64 / contribution.3 as f64;
+        let contribution_contrast = relative_contrast(share, 1.0 / players.len() as f64);
+        if contribution_contrast >= MIN_MEANINGFUL_RELATIVE_CONTRAST {
+            push_fact(
+                &mut facts,
+                fact_subject,
+                contribution.0,
+                format!("贡献全队{}的{:.0}%", contribution.1, share * 100.0),
+                RoastFactEvidence::Contribution,
+                "team_share",
+                0.78,
+                contribution_contrast,
+                evaluation,
+            );
+        }
+    }
+
+    let death_contrast = maximum_relative_contrast(
+        subject.deaths as f64,
+        players
+            .iter()
+            .filter(|player| player.rowid != subject.rowid)
+            .map(|player| player.deaths as f64),
+    );
+    if players.len() >= 2 && death_contrast >= MIN_MEANINGFUL_RELATIVE_CONTRAST {
+        let death_rank = players
+            .iter()
+            .filter(|player| player.deaths > subject.deaths)
+            .count()
+            + 1;
         push_fact(
             &mut facts,
-            contribution.0,
-            format!("贡献全队{}的{:.0}%", contribution.1, share * 100.0),
-            RoastFactEvidence::Contribution,
-            "team_share",
-            0.78,
-            (share * players.len() as f64 - 1.0).abs().min(1.0),
+            fact_subject,
+            "team_rank_deaths",
+            format!("阵亡{}次，按阵亡数排全队第{death_rank}", subject.deaths),
+            RoastFactEvidence::Rank,
+            "deaths",
+            0.82,
+            death_contrast,
             evaluation,
         );
     }
 
-    let death_rank = players
-        .iter()
-        .filter(|player| player.deaths > subject.deaths)
-        .count()
-        + 1;
-    push_fact(
-        &mut facts,
-        "team_rank_deaths",
-        format!("阵亡{}次，按阵亡数排全队第{death_rank}", subject.deaths),
-        RoastFactEvidence::Rank,
-        "deaths",
-        0.82,
-        rank_contrast(death_rank, players.len()),
-        evaluation,
-    );
-
     if subject.current {
         if let Some(average) = same_role_season_average(conn, context.season, subject.role)? {
-            add_season_average_facts(&mut facts, subject, average, evaluation);
+            add_season_average_facts(&mut facts, subject, fact_subject, average, evaluation);
         }
     }
-    if subject.role == Role::Support && subject.healing < subject.damage {
+    if subject.role == Role::Support
+        && subject.healing < subject.damage
+        && meaningful_relative_contrast(subject.healing as f64, subject.damage as f64)
+    {
         let ratio = if subject.damage == 0 {
             0.0
         } else {
@@ -587,6 +671,7 @@ fn fact_candidates(
         };
         push_fact(
             &mut facts,
+            fact_subject,
             "support_healing_damage_balance",
             format!(
                 "治疗量{}，相当于伤害量{}的{:.0}%",
@@ -616,6 +701,7 @@ fn fact_candidates(
 
 fn push_fact(
     facts: &mut Vec<FactCandidate>,
+    subject: FactSubject,
     id: &str,
     text: String,
     evidence: RoastFactEvidence,
@@ -624,6 +710,16 @@ fn push_fact(
     contrast: f64,
     evaluation: &RoastEvaluation,
 ) {
+    if matches!(
+        evidence,
+        RoastFactEvidence::Rank
+            | RoastFactEvidence::SameRole
+            | RoastFactEvidence::Contribution
+            | RoastFactEvidence::StatComparison
+    ) && contrast < MIN_MEANINGFUL_RELATIVE_CONTRAST
+    {
+        return;
+    }
     let label_relevance = if evaluation
         .evidence_tags
         .iter()
@@ -641,12 +737,13 @@ fn push_fact(
         .clamp(0.0, 1.0);
     facts.push(FactCandidate {
         fact: RoastFact {
-            id: id.to_string(),
+            id: format!("{}{id}", subject.id_prefix()),
+            subject,
             text,
             strength,
             evidence,
         },
-        metric,
+        metric: format!("{}{metric}", subject.id_prefix()),
         score: strength,
     });
 }
@@ -686,20 +783,16 @@ fn format_metric(value: f64) -> String {
     }
 }
 
-fn rank_contrast(rank: usize, total: usize) -> f64 {
-    if total <= 1 {
-        0.0
-    } else {
-        ((rank as f64 - 1.0) / (total as f64 - 1.0) - 0.5).abs() * 2.0
-    }
-}
-
 fn relative_contrast(value: f64, baseline: f64) -> f64 {
     if value == 0.0 && baseline == 0.0 {
         0.0
     } else {
         ((value - baseline).abs() / value.abs().max(baseline.abs()).max(1.0)).min(1.0)
     }
+}
+
+fn meaningful_relative_contrast(value: f64, baseline: f64) -> bool {
+    value != baseline && relative_contrast(value, baseline) >= MIN_MEANINGFUL_RELATIVE_CONTRAST
 }
 
 fn same_role_season_average(
@@ -750,6 +843,7 @@ fn same_role_season_average(
 fn add_season_average_facts(
     facts: &mut Vec<FactCandidate>,
     subject: &PlayerMetrics,
+    fact_subject: FactSubject,
     average: SeasonAverage,
     evaluation: &RoastEvaluation,
 ) {
@@ -780,6 +874,7 @@ fn add_season_average_facts(
     };
     push_fact(
         facts,
+        fact_subject,
         id,
         format!(
             "本场{name}{}，{direction}赛季同角色均值{}",
@@ -797,6 +892,7 @@ fn add_season_average_facts(
     }
     push_fact(
         facts,
+        fact_subject,
         "same_role_deaths",
         format!(
             "本场阵亡{}次，赛季同角色均值{:.1}次",
@@ -811,6 +907,7 @@ fn add_season_average_facts(
     if subject.role != Role::Support {
         push_fact(
             facts,
+            fact_subject,
             "same_role_kills",
             format!(
                 "本场击杀{}次，赛季同角色均值{:.1}次",
@@ -857,7 +954,11 @@ fn counter_facts(players: &[PlayerMetrics], subject: &PlayerMetrics) -> Vec<Roas
         return Vec::new();
     }
     vec![RoastFact {
-        id: "counter_team_damage_share".to_string(),
+        id: format!(
+            "{}counter_team_damage_share",
+            FactSubject::RelationshipSubject.id_prefix()
+        ),
+        subject: FactSubject::RelationshipSubject,
         text: format!(
             "仍贡献全队伤害的{:.0}%",
             subject.damage as f64 / damage_total as f64 * 100.0
@@ -876,12 +977,13 @@ fn result_fact_candidate(result: &str) -> Result<FactCandidate> {
     };
     Ok(FactCandidate {
         fact: RoastFact {
-            id: "match_result".to_string(),
+            id: format!("{}match_result", FactSubject::Match.id_prefix()),
+            subject: FactSubject::Match,
             text: text.to_string(),
             strength: 0.88,
             evidence: RoastFactEvidence::Result,
         },
-        metric: "match_result",
+        metric: format!("{}match_result", FactSubject::Match.id_prefix()),
         score: 0.88,
     })
 }
@@ -981,7 +1083,29 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
     if selected_ids.len() != material.selected_facts.len() {
         return Err(anyhow!("锐评事实未去重"));
     }
+    if material
+        .selected_facts
+        .iter()
+        .any(|fact| !fact.id.starts_with(fact.subject.id_prefix()))
+    {
+        return Err(anyhow!(
+            "\u{9510}\u{8bc4}\u{4e8b}\u{5b9e}\u{4e3b}\u{4f53}\u{6807}\u{8bc6}\u{65e0}\u{6548}"
+        ));
+    }
     if let Some(relationship) = &material.relationship {
+        if relationship
+            .facts
+            .iter()
+            .chain(relationship.counter_facts.iter())
+            .any(|fact| {
+                fact.subject != FactSubject::RelationshipSubject
+                    || !fact.id.starts_with(fact.subject.id_prefix())
+            })
+        {
+            return Err(anyhow!(
+                "\u{9510}\u{8bc4}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{4e3b}\u{4f53}\u{6807}\u{8bc6}\u{65e0}\u{6548}"
+            ));
+        }
         if relationship.facts.len() < 2
             || relationship.facts.len() > 4
             || !relationship.facts.iter().any(|fact| {
@@ -1040,12 +1164,21 @@ fn scan_value(value: &Value) -> Result<()> {
         }
         Value::String(text) => {
             let lower = text.to_ascii_lowercase();
+            let compact = lower
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>();
+            let normalized = compact.replace(['_', '-'], "");
             if lower.contains("battle.net")
                 || lower.contains("battletag")
-                || lower.contains("authorization:")
+                || normalized.contains("authorization")
                 || lower.contains("bearer ")
-                || lower.contains("cookie=")
-                || lower.contains("customertoken")
+                || normalized.contains("cookie=")
+                || normalized.contains("cookie:")
+                || normalized.contains("credential=")
+                || normalized.contains("credential:")
+                || normalized.contains("token=")
+                || normalized.contains("token:")
                 || lower.contains(":\\")
                 || lower.contains("/@fs/")
             {

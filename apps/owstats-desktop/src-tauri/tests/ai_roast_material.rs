@@ -1,8 +1,8 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
     ai_roast::material::{
-        assert_material_privacy, build_roast_material, RoastFactEvidence, RoastMaterial,
-        RoastRelationship, RoastRelationshipKind, MATERIAL_VERSION,
+        assert_material_privacy, build_roast_material, FactSubject, RoastFactEvidence,
+        RoastMaterial, RoastRelationship, RoastRelationshipKind, MATERIAL_VERSION,
     },
     OwDatabase,
 };
@@ -551,6 +551,127 @@ fn rejects_material_when_fewer_than_three_grounded_facts_exist() -> Result<()> {
 }
 
 #[test]
+fn tied_identical_players_do_not_create_rank_or_relationship_evidence() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-tied-identical";
+    seed_match(&conn, match_id, 23, "draw", 2_675)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("dps", true, stats(8, 4, 4, 8_000, 0, 0)),
+            ("dps", false, stats(8, 4, 4, 8_000, 0, 0)),
+        ],
+    )?;
+
+    assert!(build_roast_material(&conn, match_id).is_err());
+    Ok(())
+}
+
+#[test]
+fn tied_players_use_competition_rank_without_row_order_relationships() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-competition-rank";
+    seed_match(&conn, match_id, 23, "win", 2_677)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("dps", true, stats(5, 2, 5, 5_000, 0, 0)),
+            ("dps", false, stats(10, 4, 2, 10_000, 0, 0)),
+            ("dps", false, stats(5, 2, 5, 5_000, 0, 0)),
+        ],
+    )?;
+
+    let material = build_roast_material(&conn, match_id)?;
+    let rank_fact = material
+        .selected_facts
+        .iter()
+        .find(|fact| fact.id == "current_player:team_rank_composite")
+        .expect("expected current-player competition rank fact");
+
+    assert!(rank_fact.text.ends_with('2'));
+    assert!(material.relationship.is_none());
+    Ok(())
+}
+
+#[test]
+fn negligible_same_role_delta_does_not_create_comparison_evidence() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-negligible-role-delta";
+    seed_match(&conn, match_id, 23, "draw", 2_680)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("dps", true, stats(8, 4, 4, 10_000, 0, 0)),
+            ("dps", false, stats(8, 4, 4, 10_001, 0, 0)),
+        ],
+    )?;
+
+    assert!(build_roast_material(&conn, match_id).is_err());
+    Ok(())
+}
+
+#[test]
+fn single_player_draw_returns_insufficient_detail_without_fake_comparisons() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-single-player-draw";
+    seed_match(&conn, match_id, 23, "draw", 2_685)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[("dps", true, stats(8, 4, 4, 8_000, 0, 0))],
+    )?;
+
+    assert!(build_roast_material(&conn, match_id).is_err());
+    Ok(())
+}
+
+#[test]
+fn selected_facts_are_subject_scoped_and_uniquely_identified() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-subject-scoped-facts";
+    seed_match(&conn, match_id, 23, "win", 2_690)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, stats(8, 6, 3, 8_000, 0, 10_000)),
+            ("dps", false, stats(1, 1, 12, 1_000, 0, 0)),
+            ("dps", false, stats(12, 4, 4, 10_000, 0, 0)),
+        ],
+    )?;
+
+    let material = build_roast_material(&conn, match_id)?;
+    let ids = material
+        .selected_facts
+        .iter()
+        .map(|fact| fact.id.as_str())
+        .collect::<HashSet<_>>();
+
+    assert_eq!(ids.len(), material.selected_facts.len());
+    assert!(material
+        .selected_facts
+        .iter()
+        .any(|fact| fact.subject == FactSubject::CurrentPlayer));
+    assert!(material
+        .selected_facts
+        .iter()
+        .any(|fact| fact.subject == FactSubject::RelationshipSubject));
+    assert!(material
+        .selected_facts
+        .iter()
+        .all(|fact| fact.id.starts_with(fact.subject.id_prefix())));
+    Ok(())
+}
+
+#[test]
 fn rejects_non_ordinary_target_without_lazy_evaluation_side_effects() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;
@@ -587,7 +708,10 @@ fn non_ordinary_history_does_not_change_ordinary_streak() -> Result<()> {
     seed_team(
         &conn,
         match_id,
-        &[("tank", true, stats(8, 5, 4, 7_000, 0, 9_000))],
+        &[
+            ("tank", true, stats(8, 5, 4, 7_000, 0, 9_000)),
+            ("dps", false, stats(2, 1, 10, 2_000, 0, 0)),
+        ],
     )?;
 
     let material = build_roast_material(&conn, match_id)?;
@@ -634,5 +758,18 @@ fn rejects_unsafe_cached_evaluation_strings_before_serialization() -> Result<()>
         .facts[0]
         .text = "cookie=synthetic-secret-cookie".to_string();
     assert!(assert_material_privacy(&unsafe_relationship).is_err());
+    for forbidden in [
+        "token=synthetic-value",
+        "credential: synthetic-value",
+        "AUTHORIZATION synthetic-value",
+        "Cookie = synthetic-value",
+    ] {
+        let mut unsafe_material = unsafe_relationship.clone();
+        unsafe_material.selected_facts[0].text = forbidden.to_string();
+        assert!(
+            assert_material_privacy(&unsafe_material).is_err(),
+            "accepted forbidden outbound text: {forbidden}"
+        );
+    }
     Ok(())
 }
