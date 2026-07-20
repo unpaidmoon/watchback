@@ -66,7 +66,7 @@ fn upgrades_v8_with_idempotent_season_sync_state() -> Result<()> {
 
     let conn = db.connect()?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    assert_eq!(version, 9);
+    assert_eq!(version, 11);
     for table in [
         "season_sync_state",
         "season_sync_cursors",
