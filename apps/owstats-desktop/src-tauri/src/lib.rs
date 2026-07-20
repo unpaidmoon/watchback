@@ -3,6 +3,7 @@ pub mod account_login;
 pub mod account_migration;
 pub mod account_removal;
 pub mod account_store;
+pub mod ai_roast;
 mod analytics;
 pub mod app_paths;
 mod background_sync;

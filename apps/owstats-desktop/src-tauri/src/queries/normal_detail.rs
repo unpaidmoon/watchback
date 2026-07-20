@@ -133,6 +133,7 @@ pub(super) fn get_match_detail_impl(db: &OwDatabase, match_id: &str) -> Result<M
         team_awards,
         same_role_comparison: same_role_comparison(&conn, match_id)?,
         favorite: favorite_for_match(&conn, match_id)?,
+        ai_roast: roast_for_match(&conn, match_id)?,
         raw_json,
     })
 }
