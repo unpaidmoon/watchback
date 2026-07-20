@@ -11,3 +11,33 @@ assert.match(reviewCss, /\.reviewRoleHeroPanel\s*\{[^}]*border:\s*1px solid var\
 assert.match(reviewSource, /className="reviewReportFlow"/);
 assert.doesNotMatch(reviewSource, /AchievementWall/);
 assert.match(achievementSource, /AchievementWall/);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementModal\s*\{[^}]*background:\s*var\(--action-primary\);[^}]*color:\s*var\(--action-on-primary\);/s,
+  "成就详情弹窗应使用统一深炭黑陈列面",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementBadgeStage,\s*\.reviewWorkspace\s+\.phase6AchievementModalStats\s+\.metric\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s,
+  "成就等级区应在深色弹窗内压平",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementBadgeStage\.active\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--action-on-primary\) 6%, transparent\);[^}]*box-shadow:\s*none;/s,
+  "当前等级应只使用中性明度状态层",
+);
+assert.doesNotMatch(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementBadgeStage\.active\s*\{[^}]*var\(--data-primary\)/s,
+  "当前等级不应使用紫色边线或文字",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6AchievementBadgeStage,\s*\.reviewWorkspace\s+\.phase6AchievementModalStats\s+\.metric\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s,
+  "成就指标区应在深色弹窗内压平",
+);
+assert.match(
+  reviewCss,
+  /\.reviewWorkspace\s+\.phase6IconButton:focus-visible\s*\{[^}]*outline:\s*none\s*!important;[^}]*background:\s*color-mix\(in srgb, var\(--action-on-primary\) 12%, transparent\);/s,
+  "详情关闭按钮应使用中性明度焦点而非彩色外环",
+);
