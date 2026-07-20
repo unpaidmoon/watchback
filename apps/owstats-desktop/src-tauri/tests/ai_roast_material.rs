@@ -1,12 +1,13 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
     ai_roast::material::{
-        assert_material_privacy, build_roast_material, RoastMaterial, RoastRelationshipKind,
-        MATERIAL_VERSION,
+        assert_material_privacy, build_roast_material, RoastFactEvidence, RoastMaterial,
+        RoastRelationshipKind, MATERIAL_VERSION,
     },
     OwDatabase,
 };
 use rusqlite::{params, Connection};
+use std::collections::HashSet;
 use tempfile::tempdir;
 
 const OUTPUT_HEAVY_SUPPORT_GUID: &str = "207165582859043234";
@@ -39,9 +40,36 @@ fn seed_match(
     result: &str,
     begin_ts: i64,
 ) -> Result<()> {
+    seed_match_with_kind(conn, match_id, season, result, begin_ts, "normal")
+}
+
+fn seed_match_with_kind(
+    conn: &Connection,
+    match_id: &str,
+    season: i64,
+    result: &str,
+    begin_ts: i64,
+    match_kind: &str,
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,?2,'preset','SportPreset','normal',?3,'synthetic-map','synthetic-hero',?4,2,1,0,0,0,0,0,0,0,600,'{\"credential\":\"synthetic-secret-token\"}','now')",
-        params![match_id, season, result, begin_ts],
+        "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,?2,?3,?4,?5,?6,'synthetic-map','synthetic-hero',?7,2,1,0,0,0,0,0,0,0,600,'{\"credential\":\"synthetic-secret-token\"}','now')",
+        params![
+            match_id,
+            season,
+            if match_kind == "normal" {
+                "preset"
+            } else {
+                "stadium"
+            },
+            if match_kind == "normal" {
+                "SportPreset"
+            } else {
+                "SportFight"
+            },
+            match_kind,
+            result,
+            begin_ts
+        ],
     )?;
     Ok(())
 }
@@ -123,12 +151,20 @@ fn assert_grounded(material: &RoastMaterial, kind: RoastRelationshipKind) {
         .relationship
         .facts
         .iter()
-        .all(|fact| fact.strength > 0.0));
-    assert!(material
+        .all(|fact| fact.strength >= 0.35));
+    let fact_ids = material
         .relationship
         .facts
         .iter()
-        .any(|fact| fact.id.contains("rank") || fact.id.contains("same_role")));
+        .map(|fact| fact.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(fact_ids.len(), material.relationship.facts.len());
+    if kind != RoastRelationshipKind::Neutral {
+        assert!(material.relationship.facts.iter().any(|fact| matches!(
+            fact.evidence,
+            RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+        )));
+    }
 }
 
 fn assert_private(material: &RoastMaterial, forbidden: &[&str]) -> Result<()> {
@@ -417,6 +453,94 @@ fn lazily_evaluates_current_match_and_uses_neutral_win_loss_draw_fallbacks() -> 
         |row| row.get(0),
     )?;
     assert_eq!(draw_cached, 0);
+    Ok(())
+}
+
+#[test]
+fn falls_back_to_neutral_when_only_two_distinct_relationship_facts_are_grounded() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-two-facts";
+    seed_match(&conn, match_id, 23, "win", 2_500)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, stats(8, 4, 2, 0, 0, 8_000)),
+            ("dps", false, stats(0, 0, 12, 0, 0, 0)),
+            ("healer", false, stats(2, 3, 5, 0, 0, 0)),
+        ],
+    )?;
+
+    let material = build_roast_material(&conn, match_id)?;
+
+    assert_grounded(&material, RoastRelationshipKind::Neutral);
+    assert_eq!(material.relationship.facts.len(), 3);
+    assert!(material.relationship.facts.iter().all(|fact| !matches!(
+        fact.evidence,
+        RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+    )));
+    assert_private(&material, &[match_id])
+}
+
+#[test]
+fn neutral_material_needs_no_relationship_evidence_but_still_needs_three_facts() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-neutral-evidence";
+    seed_match(&conn, match_id, 23, "draw", 2_600)?;
+
+    let material = build_roast_material(&conn, match_id)?;
+
+    assert_grounded(&material, RoastRelationshipKind::Neutral);
+    assert!(material.relationship.facts.iter().all(|fact| !matches!(
+        fact.evidence,
+        RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+    )));
+    let mut too_short = material;
+    too_short.relationship.facts.truncate(2);
+    assert!(assert_material_privacy(&too_short).is_err());
+    Ok(())
+}
+
+#[test]
+fn rejects_non_ordinary_target_without_lazy_evaluation_side_effects() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-stadium-target";
+    seed_match_with_kind(&conn, match_id, 23, "win", 2_700, "fight")?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, stats(8, 4, 2, 7_000, 0, 8_000)),
+            ("dps", false, stats(5, 2, 7, 4_000, 0, 0)),
+        ],
+    )?;
+
+    assert!(build_roast_material(&conn, match_id).is_err());
+    let cached: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM match_evaluations WHERE match_id=?",
+        params![match_id],
+        |row| row.get(0),
+    )?;
+    assert_eq!(cached, 0);
+    Ok(())
+}
+
+#[test]
+fn non_ordinary_history_does_not_change_ordinary_streak() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    seed_match(&conn, "synthetic-ordinary-win-a", 23, "win", 100)?;
+    seed_match(&conn, "synthetic-ordinary-win-b", 23, "win", 200)?;
+    seed_match_with_kind(&conn, "synthetic-stadium-loss", 23, "loss", 250, "fight")?;
+    let match_id = "synthetic-ordinary-target";
+    seed_match(&conn, match_id, 23, "win", 300)?;
+
+    let material = build_roast_material(&conn, match_id)?;
+
+    assert_eq!(material.streak.before_current, 2);
     Ok(())
 }
 

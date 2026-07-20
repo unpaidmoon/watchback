@@ -84,12 +84,9 @@ pub(crate) fn evaluation_for_match_conn(
     conn: &Connection,
     match_id: &str,
 ) -> Result<Option<MatchEvaluation>> {
-    if let Some(evaluation) = stored_evaluation(conn, match_id)? {
-        return Ok(Some(evaluation));
-    }
     let row = conn
         .query_row(
-            "SELECT match_id, game_mode, result FROM matches WHERE match_id=?",
+            "SELECT match_id, game_mode, result FROM matches WHERE match_id=? AND match_kind='normal'",
             params![match_id],
             |row| {
                 Ok(MatchRow {
@@ -103,6 +100,9 @@ pub(crate) fn evaluation_for_match_conn(
     let Some(row) = row else {
         return Ok(None);
     };
+    if let Some(evaluation) = stored_evaluation(conn, match_id)? {
+        return Ok(Some(evaluation));
+    }
     let evaluation = evaluate_match(conn, &row)?;
     if let Some(evaluation) = &evaluation {
         upsert_evaluation(conn, evaluation)?;
@@ -143,7 +143,7 @@ fn evaluation_match_rows(conn: &Connection) -> Result<Vec<MatchRow>> {
         r#"
         SELECT match_id, game_mode, result
         FROM matches
-        WHERE bucket='preset'
+        WHERE match_kind='normal'
         ORDER BY begin_ts ASC, match_id ASC
         "#,
     )?;

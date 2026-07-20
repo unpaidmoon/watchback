@@ -416,6 +416,41 @@ fn stale_cache_versions_are_refreshed() {
 }
 
 #[test]
+fn refresh_skips_non_ordinary_matches_even_when_bucket_is_preset() {
+    let db = temp_db();
+    seed_match(
+        &db,
+        "synthetic-non-ordinary-scoring",
+        "win",
+        1,
+        player("me", "Me", "hero-me", true, false, 8, 4, 2, 7000, 0, 8000),
+        vec![player(
+            "t1", "Team 1", "ally-a", false, false, 5, 2, 7, 4000, 0, 0,
+        )],
+        vec![],
+    );
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "UPDATE matches SET match_kind='fight' WHERE match_id='synthetic-non-ordinary-scoring'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    refresh_match_evaluations(&db).unwrap();
+
+    let conn = db.connect().unwrap();
+    let cached: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM match_evaluations WHERE match_id='synthetic-non-ordinary-scoring'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(cached, 0);
+}
+
+#[test]
 fn import_generates_evaluation_cache_without_blocking_match_import() {
     let db = temp_db();
     let root = tempfile::tempdir().unwrap();

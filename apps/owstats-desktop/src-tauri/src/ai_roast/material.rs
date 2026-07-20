@@ -70,6 +70,19 @@ pub struct RoastFact {
     pub id: String,
     pub text: String,
     pub strength: f64,
+    pub evidence: RoastFactEvidence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RoastFactEvidence {
+    Rank,
+    SameRole,
+    Contribution,
+    StatComparison,
+    Result,
+    Availability,
+    Counterpoint,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -187,7 +200,7 @@ fn safe_evaluation(
 
 fn match_context(conn: &Connection, match_id: &str) -> Result<MatchContext> {
     conn.query_row(
-        "SELECT season, result, begin_ts FROM matches WHERE match_id=?",
+        "SELECT season, result, begin_ts FROM matches WHERE match_id=? AND match_kind='normal'",
         params![match_id],
         |row| {
             Ok(MatchContext {
@@ -394,10 +407,13 @@ fn select_relationship(
     let facts = select_facts(fact_candidates(
         conn, context, evaluation, players, subject, &kind,
     )?);
-    if facts.len() < 2
-        || !facts
-            .iter()
-            .any(|fact| fact.id.contains("rank") || fact.id.contains("same_role"))
+    if facts.len() < 3
+        || !facts.iter().any(|fact| {
+            matches!(
+                fact.evidence,
+                RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+            )
+        })
     {
         return Ok(neutral_relationship(&context.result));
     }
@@ -457,6 +473,7 @@ fn fact_candidates(
         &mut facts,
         "team_rank_composite",
         rank_text,
+        RoastFactEvidence::Rank,
         "composite_rank",
         0.98,
         rank_contrast(team_rank, players.len()),
@@ -485,6 +502,7 @@ fn fact_candidates(
                 "{metric_name}比同位置队友平均{direction}{}",
                 format_metric(delta.abs())
             ),
+            RoastFactEvidence::SameRole,
             "role_primary",
             0.90,
             relative_contrast(role_metric, peer_average),
@@ -506,6 +524,7 @@ fn fact_candidates(
             &mut facts,
             contribution.0,
             format!("贡献全队{}的{:.0}%", contribution.1, share * 100.0),
+            RoastFactEvidence::Contribution,
             "team_share",
             0.78,
             (share * players.len() as f64 - 1.0).abs().min(1.0),
@@ -522,6 +541,7 @@ fn fact_candidates(
         &mut facts,
         "team_rank_deaths",
         format!("阵亡{}次，按阵亡数排全队第{death_rank}", subject.deaths),
+        RoastFactEvidence::Rank,
         "deaths",
         0.82,
         rank_contrast(death_rank, players.len()),
@@ -548,6 +568,7 @@ fn fact_candidates(
                 subject.damage,
                 ratio * 100.0
             ),
+            RoastFactEvidence::StatComparison,
             "support_balance",
             0.94,
             (1.0 - ratio).clamp(0.0, 1.0),
@@ -571,6 +592,7 @@ fn push_fact(
     facts: &mut Vec<FactCandidate>,
     id: &str,
     text: String,
+    evidence: RoastFactEvidence,
     metric: &'static str,
     evidence_strength: f64,
     contrast: f64,
@@ -596,6 +618,7 @@ fn push_fact(
             id: id.to_string(),
             text,
             strength,
+            evidence,
         },
         metric,
         score: strength,
@@ -667,7 +690,7 @@ fn same_role_season_average(
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT AVG(kill), AVG(death), AVG(hero_damage), AVG(cure) FROM match_players WHERE season=? AND is_current_player=1 AND role_type IN ({placeholders})"
+        "SELECT AVG(mp.kill), AVG(mp.death), AVG(mp.hero_damage), AVG(mp.cure) FROM match_players mp JOIN matches m ON m.match_id=mp.match_id WHERE mp.season=? AND mp.is_current_player=1 AND mp.role_type IN ({placeholders}) AND m.match_kind='normal'"
     );
     let mut values = Vec::<Box<dyn rusqlite::ToSql>>::new();
     values.push(Box::new(season));
@@ -737,6 +760,7 @@ fn add_season_average_facts(
             format_metric(value),
             format_metric(baseline)
         ),
+        RoastFactEvidence::SameRole,
         "season_role",
         0.96,
         relative_contrast(value, baseline),
@@ -752,6 +776,7 @@ fn add_season_average_facts(
             "本场阵亡{}次，赛季同角色均值{:.1}次",
             subject.deaths, average.deaths
         ),
+        RoastFactEvidence::SameRole,
         "deaths",
         0.84,
         relative_contrast(subject.deaths as f64, average.deaths),
@@ -765,6 +790,7 @@ fn add_season_average_facts(
                 "本场击杀{}次，赛季同角色均值{:.1}次",
                 subject.kills, average.kills
             ),
+            RoastFactEvidence::SameRole,
             "kills",
             0.82,
             relative_contrast(subject.kills as f64, average.kills),
@@ -811,6 +837,7 @@ fn counter_facts(players: &[PlayerMetrics], subject: &PlayerMetrics) -> Vec<Roas
             subject.damage as f64 / damage_total as f64 * 100.0
         ),
         strength: 0.62,
+        evidence: RoastFactEvidence::Counterpoint,
     }]
 }
 
@@ -826,19 +853,22 @@ fn neutral_relationship(result: &str) -> RoastRelationship {
         subject: "本场整体".to_string(),
         facts: vec![
             RoastFact {
-                id: "result_rank_neutral".to_string(),
+                id: "result_neutral".to_string(),
                 text: result_text.to_string(),
                 strength: 0.60,
+                evidence: RoastFactEvidence::Result,
             },
             RoastFact {
                 id: "evidence_neutral".to_string(),
                 text: "现有数据不足以稳定归因到单个位置".to_string(),
                 strength: 0.58,
+                evidence: RoastFactEvidence::Availability,
             },
             RoastFact {
                 id: "relationship_neutral".to_string(),
                 text: "本次仅保留结果层面的中性材料".to_string(),
                 strength: 0.56,
+                evidence: RoastFactEvidence::Availability,
             },
         ],
         counter_facts: Vec::new(),
@@ -855,7 +885,7 @@ fn streak_context(
         r#"
         SELECT match_id, result, begin_ts
         FROM matches
-        WHERE season=?
+        WHERE season=? AND match_kind='normal'
         ORDER BY begin_ts ASC, match_id ASC
         "#,
     )?;
@@ -923,14 +953,16 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
     if material.material_version != MATERIAL_VERSION {
         return Err(anyhow!("锐评材料版本无效"));
     }
-    if material.relationship.facts.len() < 2 || material.relationship.facts.len() > 4 {
+    if material.relationship.facts.len() < 3 || material.relationship.facts.len() > 4 {
         return Err(anyhow!("锐评关系事实数量无效"));
     }
-    if !material
-        .relationship
-        .facts
-        .iter()
-        .any(|fact| fact.id.contains("rank") || fact.id.contains("same_role"))
+    if material.relationship.kind != RoastRelationshipKind::Neutral
+        && !material.relationship.facts.iter().any(|fact| {
+            matches!(
+                fact.evidence,
+                RoastFactEvidence::Rank | RoastFactEvidence::SameRole
+            )
+        })
     {
         return Err(anyhow!("锐评关系缺少排名或同位置比较"));
     }
