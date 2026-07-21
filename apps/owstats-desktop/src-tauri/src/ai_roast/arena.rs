@@ -14,6 +14,7 @@ pub struct ArenaRoastMaterial {
 enum RoundOutcome {
     Win,
     Loss,
+    Draw,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -31,8 +32,10 @@ pub fn build_arena_roast_material(
 ) -> ArenaRoastMaterial {
     let rounds = reliable_rounds(&detail.rounds);
     let mut candidate_facts = Vec::new();
-    let has_comeback = is_three_down_comeback(detail, &rounds);
-    let has_decider = !has_comeback && won_decider_after_tie(detail, &rounds);
+    let sequence_evidence_is_complete = sequence_summary_matches(detail, &rounds);
+    let has_comeback = sequence_evidence_is_complete && is_three_down_comeback(detail, &rounds);
+    let has_decider =
+        sequence_evidence_is_complete && !has_comeback && won_decider_after_tie(detail, &rounds);
 
     if has_comeback {
         candidate_facts.push(match_fact(
@@ -46,7 +49,11 @@ pub fn build_arena_roast_material(
             "\u{672c}\u{573a}\u{4e00}\u{5ea6}\u{9886}\u{5148}\u{ff0c}\u{968f}\u{540e}\u{88ab}\u{8ffd}\u{5e73}\u{ff0c}\u{5e76}\u{8d62}\u{4e0b}\u{51b3}\u{80dc}\u{56de}\u{5408}",
             0.92,
         ));
-    } else if let Some(streak) = longest_win_streak(&rounds).filter(|streak| *streak >= 2) {
+    } else if let Some(streak) = sequence_evidence_is_complete
+        .then(|| longest_win_streak(&rounds))
+        .flatten()
+        .filter(|streak| *streak >= 2)
+    {
         candidate_facts.push(match_fact(
             "arena_longest_win_streak",
             &format!(
@@ -114,6 +121,7 @@ fn reliable_rounds(rounds: &[ArenaDetailSlice]) -> Vec<Option<ReliableRound>> {
             let score_outcome = match (team_delta, opponent_delta) {
                 (1, 0) => Some(RoundOutcome::Win),
                 (0, 1) => Some(RoundOutcome::Loss),
+                (0, 0) => Some(RoundOutcome::Draw),
                 _ => None,
             }?;
             let declared_outcome = match round
@@ -125,6 +133,7 @@ fn reliable_rounds(rounds: &[ArenaDetailSlice]) -> Vec<Option<ReliableRound>> {
             {
                 Some("win") => RoundOutcome::Win,
                 Some("loss") => RoundOutcome::Loss,
+                Some("draw") => RoundOutcome::Draw,
                 _ => return None,
             };
             (score_outcome == declared_outcome).then_some(ReliableRound {
@@ -136,6 +145,37 @@ fn reliable_rounds(rounds: &[ArenaDetailSlice]) -> Vec<Option<ReliableRound>> {
             })
         })
         .collect()
+}
+
+fn sequence_summary_matches(detail: &ArenaMatchDetail, rounds: &[Option<ReliableRound>]) -> bool {
+    if rounds.is_empty() || rounds.iter().any(Option::is_none) {
+        return false;
+    }
+    let Some(last) = rounds.last().and_then(Option::as_ref) else {
+        return false;
+    };
+    let summary_outcome = match detail
+        .summary
+        .result
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("win") => RoundOutcome::Win,
+        Some("loss") => RoundOutcome::Loss,
+        Some("draw") => RoundOutcome::Draw,
+        _ => return false,
+    };
+    let score_outcome = match last.team_score.cmp(&last.opponent_score) {
+        std::cmp::Ordering::Greater => RoundOutcome::Win,
+        std::cmp::Ordering::Less => RoundOutcome::Loss,
+        std::cmp::Ordering::Equal => RoundOutcome::Draw,
+    };
+
+    detail.summary.team_score == Some(last.team_score)
+        && detail.summary.opponent_score == Some(last.opponent_score)
+        && summary_outcome == score_outcome
 }
 
 fn summary_is_win(detail: &ArenaMatchDetail) -> bool {
@@ -211,7 +251,7 @@ fn longest_win_streak(rounds: &[Option<ReliableRound>]) -> Option<usize> {
 fn final_team_funds_rank(summary: &ArenaDetailSlice, current_bnet_id: &str) -> Option<RoastFact> {
     let current_bnet_id = current_bnet_id.trim();
     let teammates = &summary.teammates;
-    if current_bnet_id.is_empty() || teammates.len() < 2 || !complete_team_identity(teammates) {
+    if current_bnet_id.is_empty() || teammates.len() != 5 || !complete_team_identity(teammates) {
         return None;
     }
     let current = teammates

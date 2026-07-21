@@ -70,6 +70,11 @@ fn detail(rounds: &[(Option<&str>, Option<i64>, Option<i64>)]) -> ArenaMatchDeta
         .rev()
         .find_map(|(_, team_score, opponent_score)| Some(((*team_score)?, (*opponent_score)?)))
         .unwrap_or((0, 0));
+    let summary_result = match final_scores.0.cmp(&final_scores.1) {
+        std::cmp::Ordering::Greater => "win",
+        std::cmp::Ordering::Less => "loss",
+        std::cmp::Ordering::Equal => "draw",
+    };
     ArenaMatchDetail {
         summary: ArenaDetailSlice {
             teammates: vec![
@@ -81,7 +86,7 @@ fn detail(rounds: &[(Option<&str>, Option<i64>, Option<i64>)]) -> ArenaMatchDeta
             ],
             ..slice(
                 "summary",
-                (final_scores.0 > final_scores.1).then_some("win"),
+                Some(summary_result),
                 Some(final_scores.0),
                 Some(final_scores.1),
             )
@@ -214,6 +219,80 @@ fn draw_missing_and_inconsistent_rounds_break_sequences_and_are_ignored() {
 }
 
 #[test]
+fn reliable_draw_breaks_runs_without_invalidating_complete_round_evidence() {
+    let material = build_arena_roast_material(
+        &detail(&[
+            (Some("win"), Some(1), Some(0)),
+            (Some("win"), Some(2), Some(0)),
+            (Some("draw"), Some(2), Some(0)),
+            (Some("loss"), Some(2), Some(1)),
+        ]),
+        "current-synthetic",
+    );
+
+    assert_eq!(
+        fact(&material, "arena_longest_win_streak"),
+        "\u{672c}\u{573a}\u{6700}\u{957f}\u{8fde}\u{7eed}\u{8d62}\u{4e0b}2\u{56de}\u{5408}"
+    );
+}
+
+#[test]
+fn unreliable_gap_after_two_wins_suppresses_whole_match_longest_claim() {
+    for unreliable_round in [(None, Some(2), Some(0)), (Some("loss"), Some(3), Some(0))] {
+        let material = build_arena_roast_material(
+            &detail(&[
+                (Some("win"), Some(1), Some(0)),
+                (Some("win"), Some(2), Some(0)),
+                unreliable_round,
+            ]),
+            "current-synthetic",
+        );
+
+        assert!(material
+            .candidate_facts
+            .iter()
+            .all(|fact| !fact.id.ends_with("arena_longest_win_streak")));
+    }
+}
+
+#[test]
+fn summary_contradictions_suppress_sequence_and_turning_point_claims() {
+    let mut comeback = detail(&[
+        (Some("loss"), Some(0), Some(1)),
+        (Some("loss"), Some(0), Some(2)),
+        (Some("loss"), Some(0), Some(3)),
+        (Some("win"), Some(1), Some(3)),
+        (Some("win"), Some(2), Some(3)),
+        (Some("win"), Some(3), Some(3)),
+        (Some("win"), Some(4), Some(3)),
+    ]);
+    comeback.summary.team_score = Some(3);
+    comeback.summary.opponent_score = Some(4);
+    comeback.summary.result = Some("loss".to_string());
+
+    let mut decider = detail(&[
+        (Some("win"), Some(1), Some(0)),
+        (Some("win"), Some(2), Some(0)),
+        (Some("loss"), Some(2), Some(1)),
+        (Some("loss"), Some(2), Some(2)),
+        (Some("win"), Some(3), Some(2)),
+    ]);
+    decider.summary.team_score = Some(4);
+    decider.summary.opponent_score = Some(2);
+
+    for material in [
+        build_arena_roast_material(&comeback, "current-synthetic"),
+        build_arena_roast_material(&decider, "current-synthetic"),
+    ] {
+        assert!(material.candidate_facts.iter().all(|fact| {
+            !fact.id.ends_with("arena_longest_win_streak")
+                && !fact.id.ends_with("arena_three_down_comeback")
+                && !fact.id.ends_with("arena_won_decider_after_tie")
+        }));
+    }
+}
+
+#[test]
 fn funds_rank_requires_complete_final_end_worth_and_identity() {
     let complete = build_arena_roast_material(
         &detail(&[(Some("win"), Some(1), Some(0))]),
@@ -262,6 +341,33 @@ fn funds_rank_requires_complete_final_end_worth_and_identity() {
         "absent-synthetic",
     );
     assert!(absent_current
+        .candidate_facts
+        .iter()
+        .all(|fact| !fact.id.ends_with("arena_final_team_funds_rank")));
+
+    for teammate_count in [2, 4, 6] {
+        let mut wrong_size = detail(&[(Some("win"), Some(1), Some(0))]);
+        wrong_size.summary.teammates = (0..teammate_count)
+            .map(|index| {
+                let bnet_id = if index == 0 {
+                    "current-synthetic".to_string()
+                } else {
+                    format!("teammate-{index}")
+                };
+                player(&bnet_id, Some(5_000 - index as i64), Some(999_999))
+            })
+            .collect();
+        let material = build_arena_roast_material(&wrong_size, "current-synthetic");
+        assert!(material
+            .candidate_facts
+            .iter()
+            .all(|fact| !fact.id.ends_with("arena_final_team_funds_rank")));
+    }
+
+    let mut duplicate_current = detail(&[(Some("win"), Some(1), Some(0))]);
+    duplicate_current.summary.teammates[4].bnet_id = "current-synthetic".to_string();
+    let duplicate = build_arena_roast_material(&duplicate_current, "current-synthetic");
+    assert!(duplicate
         .candidate_facts
         .iter()
         .all(|fact| !fact.id.ends_with("arena_final_team_funds_rank")));
