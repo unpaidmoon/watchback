@@ -244,6 +244,11 @@ assert.match(matchesCssSource, /\.aiMatchRoastResult\s*\{/);
 assert.match(matchesCssSource, /\.aiMatchRoastResult h3\s*\{[\s\S]*?font-size:/);
 assert.match(matchesCssSource, /\.aiMatchRoastError\s*\{[\s\S]*?var\(--status-danger-strong\)/);
 assert.match(matchesCssSource, /\.aiMatchRoast button\s*\{[\s\S]*?min-height:\s*44px/);
+assert.match(
+  matchesCssSource,
+  /\.aiMatchRoast \.visuallyHidden\s*\{[\s\S]*?position:\s*absolute[\s\S]*?clip-path:\s*inset\(50%\)/,
+  'the live-region message must remain available to assistive technology without becoming visible',
+);
 assert.match(matchesCssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.aiMatchRoast/);
 assert.doesNotMatch(componentSource, /复制|分享|token|价格|模型|生成时间/);
 
