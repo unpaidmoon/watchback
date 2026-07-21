@@ -16,6 +16,7 @@ import {
   DeepSeekSettings,
   deepSeekStatusLabel,
   nextDeepSeekKeyValue,
+  safeDeepSeekSettingsError,
 } from '../src/features/command-center/DeepSeekSettings';
 
 const apiSource = readFileSync(new URL('../src/shared/api.ts', import.meta.url), 'utf8');
@@ -57,6 +58,11 @@ assert.equal(deepSeekStatusLabel({ state: 'ready', message: 'sk-test-fragment' }
 assert.equal(deepSeekStatusLabel({ state: 'missing', message: 'anything' }), '\u672a\u914d\u7f6e');
 assert.equal(nextDeepSeekKeyValue('synthetic-secret', true), '');
 assert.equal(nextDeepSeekKeyValue('synthetic-secret', false), 'synthetic-secret');
+assert.equal(
+  safeDeepSeekSettingsError('C:\\private\\credential-store failed for synthetic-secret'),
+  '保存失败，请检查 Key 后重试',
+);
+assert.equal(safeDeepSeekSettingsError('DeepSeek API Key 无效'), 'DeepSeek API Key 无效，请检查后重试');
 assert.match(settingsSource, /useEffect\([\s\S]*?getDeepSeekKeyStatus\(\)/);
 assert.match(settingsSource, /hasDesktopBackend\(\)/);
 assert.match(settingsSource, /saveDeepSeekKey\(trimmedApiKey\)/);

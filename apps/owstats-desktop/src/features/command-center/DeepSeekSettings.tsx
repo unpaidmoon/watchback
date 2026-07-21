@@ -11,12 +11,19 @@ export function nextDeepSeekKeyValue(currentValue: string, saved: boolean) {
   return saved ? "" : currentValue;
 }
 
-function safeSettingsError(error: unknown) {
-  if (typeof error === "string" && error.trim()) {
-    return error;
+export function safeDeepSeekSettingsError(error: unknown) {
+  const message = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  if (message.includes("API Key 无效")) {
+    return "DeepSeek API Key 无效，请检查后重试";
   }
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
+  if (message.includes("余额不足")) {
+    return "DeepSeek 余额不足，请检查账户余额";
+  }
+  if (message.includes("请求过于频繁")) {
+    return "请求过于频繁，请稍后重试";
+  }
+  if (message.includes("无法连接") || message.includes("服务暂时不可用")) {
+    return "暂时无法连接 DeepSeek，请稍后重试";
   }
   return "保存失败，请检查 Key 后重试";
 }
@@ -70,7 +77,7 @@ export function DeepSeekSettings() {
       setApiKey(nextDeepSeekKeyValue(apiKey, true));
       setFeedback("已配置并验证");
     } catch (error) {
-      setFeedback(safeSettingsError(error));
+      setFeedback(safeDeepSeekSettingsError(error));
     } finally {
       setSubmitting(false);
     }
