@@ -34,6 +34,24 @@ const commandCenterCssSource = readFileSync(
   new URL('../src/styles/features/command-center.css', import.meta.url),
   'utf8',
 );
+const matchDetailPageSource = readFileSync(
+  new URL('../src/pages/MatchDetailPage.tsx', import.meta.url),
+  'utf8',
+);
+const compactMatchDetailSource = readFileSync(
+  new URL('../src/features/matches/CompactMatchDetail.tsx', import.meta.url),
+  'utf8',
+);
+const matchesCssSource = readFileSync(
+  new URL('../src/styles/features/matches.css', import.meta.url),
+  'utf8',
+);
+const matchListSources = [
+  readFileSync(new URL('../src/pages/MatchesPage.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/features/matches/MatchListPane.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/features/matches/MatchListCard.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/features/matches/MatchFilterToolbar.tsx', import.meta.url), 'utf8'),
+].join('\n');
 
 assert.match(typesSource, /export type AiMatchRoastView\s*=\s*\{\s*award:\s*string;\s*commentary:\s*string;\s*\}/s);
 assert.match(typesSource, /export type DeepSeekKeyStatus\s*=\s*\{\s*state:\s*\x27ready\x27\s*\|\s*\x27missing\x27;\s*message:\s*string;\s*\}/s);
@@ -195,5 +213,38 @@ assert.match(componentSource, /aria-live=\x22polite\x22/);
 assert.match(componentSource, /visuallyHidden/);
 assert.match(componentSource, /recoverable\s*&&[\s\S]*?>重试<\/button>/);
 assert.doesNotMatch(componentSource, /本场封号|AI 生成|换一个|重新生成/);
+
+assert.match(matchDetailPageSource, /import \{ AiMatchRoast \} from "\.\.\/features\/matches\/AiMatchRoast"/);
+assert.match(compactMatchDetailSource, /import \{ AiMatchRoast \} from "\.\/AiMatchRoast"/);
+assert.match(
+  matchDetailPageSource,
+  /selectedArena\.key === "summary"[\s\S]*?<AiMatchRoast[\s\S]*?matchId=\{detail\.matchId\}[\s\S]*?initialRoast=\{detail\.aiRoast\}[\s\S]*?detailReady=\{true\}[\s\S]*?<MatchFavoriteEditor/,
+  'full arena summary must place the roast immediately before the favorite editor',
+);
+assert.match(
+  matchDetailPageSource,
+  /\{detail && \([\s\S]*?<AiMatchRoast[\s\S]*?matchId=\{detail\.matchId\}[\s\S]*?initialRoast=\{detail\.aiRoast\}[\s\S]*?detailReady=\{true\}[\s\S]*?<MatchFavoriteEditor/,
+  'full ordinary detail must place the roast before the favorite editor',
+);
+assert.match(
+  compactMatchDetailSource,
+  /<AiMatchRoast[\s\S]*?matchId=\{detail\.matchId\}[\s\S]*?initialRoast=\{detail\.aiRoast\}[\s\S]*?detailReady=\{true\}[\s\S]*?<MatchFavoriteEditor/,
+  'compact ordinary detail must place the roast before the favorite editor',
+);
+assert.match(
+  compactMatchDetailSource,
+  /selected\.key === "summary"[\s\S]*?<AiMatchRoast[\s\S]*?<MatchFavoriteEditor/,
+  'compact arena summary must gate the roast and favorite editor together',
+);
+assert.doesNotMatch(matchListSources, /AiMatchRoast|aiRoast|AI 锐评/);
+
+assert.match(matchesCssSource, /\.aiMatchRoast\s*\{[\s\S]*?min-height:/);
+assert.match(matchesCssSource, /\.aiMatchRoastAction\s*\{/);
+assert.match(matchesCssSource, /\.aiMatchRoastResult\s*\{/);
+assert.match(matchesCssSource, /\.aiMatchRoastResult h3\s*\{[\s\S]*?font-size:/);
+assert.match(matchesCssSource, /\.aiMatchRoastError\s*\{[\s\S]*?var\(--status-danger-strong\)/);
+assert.match(matchesCssSource, /\.aiMatchRoast button\s*\{[\s\S]*?min-height:\s*44px/);
+assert.match(matchesCssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.aiMatchRoast/);
+assert.doesNotMatch(componentSource, /复制|分享|token|价格|模型|生成时间/);
 
 console.log('AI match roast UI contracts passed');

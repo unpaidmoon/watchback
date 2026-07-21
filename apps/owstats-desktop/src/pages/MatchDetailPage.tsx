@@ -9,6 +9,7 @@ import { GlassPanel, HeroAvatar, MapPreview } from "../shared/phase6Components";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../shared/playerHighlights";
 import { productErrorMessage } from "../shared/phase6Shell";
 import type { ArenaDetailSlice, MatchDetailView, PlayerRow } from "../shared/types";
+import { AiMatchRoast } from "../features/matches/AiMatchRoast";
 import { MatchDetailHeader } from "../features/matches/MatchDetailHeader";
 import { MatchFavoriteEditor } from "../features/matches/MatchFavoriteEditor";
 import {
@@ -194,7 +195,14 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
           </div>
         </div>
         {selectedArena.key === "summary" && (
-          <MatchFavoriteEditor controller={favoriteController} />
+          <>
+            <AiMatchRoast
+              matchId={detail.matchId}
+              initialRoast={detail.aiRoast}
+              detailReady={true}
+            />
+            <MatchFavoriteEditor controller={favoriteController} />
+          </>
         )}
       </section>
     );
@@ -259,7 +267,16 @@ export function MatchDetailReport({ detail, loading, error, matchId, onBack, emb
           </div>
         </div>
       )}
-      {detail && <MatchFavoriteEditor controller={favoriteController} />}
+      {detail && (
+        <>
+          <AiMatchRoast
+            matchId={detail.matchId}
+            initialRoast={detail.aiRoast}
+            detailReady={true}
+          />
+          <MatchFavoriteEditor controller={favoriteController} />
+        </>
+      )}
     </section>
   );
 }
