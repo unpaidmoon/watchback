@@ -101,7 +101,10 @@ export function classifyAiRoastError(error: unknown): AiRoastError {
     "无法连接 DeepSeek 服务",
   ].some((fragment) => message.includes(fragment));
 
-  return { message, recoverable };
+  if (recoverable) {
+    return { message: "DeepSeek 暂时不可用，请稍后重试", recoverable: true };
+  }
+  return { message: "锐评生成失败，请稍后重试", recoverable: false };
 }
 
 export function AiMatchRoast({

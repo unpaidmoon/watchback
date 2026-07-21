@@ -139,6 +139,10 @@ assert.deepEqual(classifyAiRoastError('这场对局暂时没有足够的安全�
   recoverable: true,
 });
 assert.equal(classifyAiRoastError('对局标识无效。').recoverable, false);
+assert.deepEqual(classifyAiRoastError('C:\\private\\db.sqlite synthetic-secret'), {
+  message: '锐评生成失败，请稍后重试',
+  recoverable: false,
+});
 
 assert.equal(
   classifyAiRoastError('\u5df2\u6709\u4e00\u573a AI \u9510\u8bc4\u6b63\u5728\u751f\u6210\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5').recoverable,
