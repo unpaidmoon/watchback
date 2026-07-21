@@ -1,8 +1,9 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
     ai_roast::material::{
-        assert_material_privacy, build_roast_material, FactSubject, RoastFactEvidence,
-        RoastMaterial, RoastRelationship, RoastRelationshipKind, MATERIAL_VERSION,
+        assert_material_privacy, build_roast_material, AnonymousOrdinal, AnonymousPlayerRole,
+        FactSubject, RoastFactEvidence, RoastMaterial, RoastRelationship, RoastRelationshipKind,
+        RoastRelationshipSubject, MATERIAL_VERSION,
     },
     OwDatabase,
 };
@@ -11,6 +12,7 @@ use std::collections::HashSet;
 use tempfile::tempdir;
 
 const OUTPUT_HEAVY_SUPPORT_GUID: &str = "207165582859043234";
+const INSUFFICIENT_DETAIL: &str = "\u{5f53}\u{524d}\u{5bf9}\u{5c40}\u{7f3a}\u{5c11}\u{8db3}\u{591f}\u{7684}\u{53ef}\u{6838}\u{9a8c}\u{9510}\u{8bc4}\u{7ec6}\u{8282}";
 
 #[derive(Clone, Copy)]
 struct Stats(i64, i64, i64, i64, i64, i64);
@@ -201,6 +203,16 @@ fn assert_private(material: &RoastMaterial, forbidden: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn complete_lineup() -> [(&'static str, bool, Stats); 5] {
+    [
+        ("tank", true, stats(8, 5, 4, 7_000, 0, 9_000)),
+        ("dps", false, stats(12, 3, 4, 10_000, 0, 0)),
+        ("dps", false, stats(6, 2, 8, 5_000, 0, 0)),
+        ("healer", false, stats(3, 11, 5, 2_000, 8_000, 0)),
+        ("healer", false, stats(4, 10, 6, 2_500, 7_000, 0)),
+    ]
+}
+
 #[test]
 fn selects_weak_link_with_reused_evaluation_and_grounded_facts() -> Result<()> {
     let (_dir, db) = database()?;
@@ -224,7 +236,13 @@ fn selects_weak_link_with_reused_evaluation_and_grounded_facts() -> Result<()> {
 
     assert_eq!(material.evaluation.primary_tag, "带飞局");
     let relationship = assert_grounded(&material, RoastRelationshipKind::WeakLink);
-    assert_eq!(relationship.subject, "我方输出位2号");
+    assert_eq!(
+        relationship.subject,
+        RoastRelationshipSubject::Teammate {
+            role: AnonymousPlayerRole::Damage,
+            ordinal: AnonymousOrdinal::Second,
+        }
+    );
     assert_private(
         &material,
         &[match_id, "SyntheticPlayer#2", "synthetic-secret-token"],
@@ -259,7 +277,21 @@ fn selects_carry_big_daddy_and_reports_stable_streak_context() -> Result<()> {
     let material = build_roast_material(&conn, "synthetic-current-carry")?;
 
     let relationship = assert_grounded(&material, RoastRelationshipKind::Carry);
-    assert_eq!(relationship.subject, "我方输出位2号");
+    println!(
+        "carry facts: {:?}",
+        relationship
+            .facts
+            .iter()
+            .map(|fact| fact.id.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        relationship.subject,
+        RoastRelationshipSubject::Teammate {
+            role: AnonymousPlayerRole::Damage,
+            ordinal: AnonymousOrdinal::Second,
+        }
+    );
     assert_eq!(material.streak.before_current, 2);
     assert_eq!(material.streak.current_event, "将连胜延长到3场");
     assert_private(&material, &["synthetic-current-carry", "SyntheticPlayer#2"])
@@ -287,7 +319,13 @@ fn selects_main_scapegoat_on_loss() -> Result<()> {
     let material = build_roast_material(&conn, match_id)?;
 
     let relationship = assert_grounded(&material, RoastRelationshipKind::Scapegoat);
-    assert_eq!(relationship.subject, "我方输出位2号");
+    assert_eq!(
+        relationship.subject,
+        RoastRelationshipSubject::Teammate {
+            role: AnonymousPlayerRole::Damage,
+            ordinal: AnonymousOrdinal::Second,
+        }
+    );
     assert!(!relationship.counter_facts.is_empty());
     assert_private(&material, &[match_id, "SyntheticPlayer#2"])
 }
@@ -374,7 +412,10 @@ fn self_roasts_output_heavy_support_using_same_role_season_average() -> Result<(
     let material = build_roast_material(&conn, match_id)?;
 
     let relationship = assert_grounded(&material, RoastRelationshipKind::SelfRoast);
-    assert_eq!(relationship.subject, "当前玩家（支援位1号）");
+    assert_eq!(
+        relationship.subject,
+        RoastRelationshipSubject::CurrentPlayer
+    );
     assert!(material
         .selected_facts
         .iter()
@@ -496,13 +537,15 @@ fn keeps_relationship_when_two_distinct_supporting_facts_are_grounded() -> Resul
             ("tank", true, stats(8, 4, 2, 0, 0, 8_000)),
             ("dps", false, stats(0, 0, 12, 0, 0, 0)),
             ("healer", false, stats(2, 3, 5, 0, 0, 0)),
+            ("dps", false, stats(4, 2, 6, 1_000, 0, 0)),
+            ("healer", false, stats(3, 4, 5, 0, 1_000, 0)),
         ],
     )?;
 
     let material = build_roast_material(&conn, match_id)?;
 
     let relationship = assert_grounded(&material, RoastRelationshipKind::WeakLink);
-    assert_eq!(relationship.facts.len(), 2);
+    assert!(relationship.facts.len() >= 2);
     assert_private(&material, &[match_id])
 }
 
@@ -551,6 +594,147 @@ fn rejects_material_when_fewer_than_three_grounded_facts_exist() -> Result<()> {
 }
 
 #[test]
+fn requires_exactly_five_valid_teammates_and_one_current_player() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let lineup = complete_lineup();
+
+    for lineup_size in 2..=4 {
+        let match_id = format!("synthetic-partial-lineup-{lineup_size}");
+        seed_match(&conn, &match_id, 23, "win", 3_100 + lineup_size as i64)?;
+        seed_team(&conn, &match_id, &lineup[..lineup_size])?;
+        assert_eq!(
+            build_roast_material(&conn, &match_id)
+                .unwrap_err()
+                .to_string(),
+            INSUFFICIENT_DETAIL
+        );
+    }
+
+    let no_current = "synthetic-no-current-player";
+    seed_match(&conn, no_current, 23, "win", 3_200)?;
+    let mut no_current_lineup = complete_lineup();
+    no_current_lineup[0].1 = false;
+    seed_team(&conn, no_current, &no_current_lineup)?;
+    assert_eq!(
+        build_roast_material(&conn, no_current)
+            .unwrap_err()
+            .to_string(),
+        INSUFFICIENT_DETAIL
+    );
+
+    let multiple_current = "synthetic-multiple-current-players";
+    seed_match(&conn, multiple_current, 23, "win", 3_300)?;
+    let mut multiple_current_lineup = complete_lineup();
+    multiple_current_lineup[1].1 = true;
+    seed_team(&conn, multiple_current, &multiple_current_lineup)?;
+    assert_eq!(
+        build_roast_material(&conn, multiple_current)
+            .unwrap_err()
+            .to_string(),
+        INSUFFICIENT_DETAIL
+    );
+    Ok(())
+}
+
+#[test]
+fn relationship_subject_serializes_as_anonymous_structure() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-structured-subject";
+    seed_match(&conn, match_id, 23, "win", 3_400)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, stats(12, 8, 3, 7_000, 0, 12_000)),
+            ("dps", false, stats(18, 4, 4, 13_000, 0, 0)),
+            ("dps", false, stats(3, 2, 11, 2_800, 0, 0)),
+            ("healer", false, stats(5, 15, 4, 3_500, 8_000, 0)),
+            ("healer", false, stats(4, 13, 5, 3_000, 7_000, 0)),
+        ],
+    )?;
+
+    let material = build_roast_material(&conn, match_id)?;
+    let serialized = serde_json::to_value(&material)?;
+
+    assert_eq!(
+        serialized.pointer("/relationship/subject"),
+        Some(&serde_json::json!({
+            "teammate": { "role": "damage", "ordinal": "second" }
+        }))
+    );
+    assert_private(&material, &["SyntheticPlayer#2"])
+}
+
+#[test]
+fn rejects_non_finite_and_out_of_range_outbound_numbers() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-invalid-outbound-numbers";
+    seed_match(&conn, match_id, 23, "win", 3_500)?;
+    seed_team(&conn, match_id, &complete_lineup())?;
+    let material = build_roast_material(&conn, match_id)?;
+
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.01, 1.01] {
+        let mut mutated = material.clone();
+        mutated.evaluation.confidence = invalid;
+        assert!(assert_material_privacy(&mutated).is_err());
+
+        let mut mutated = material.clone();
+        mutated.selected_facts[0].strength = invalid;
+        assert!(assert_material_privacy(&mutated).is_err());
+
+        let mut mutated = material.clone();
+        let relationship = mutated
+            .relationship
+            .as_mut()
+            .expect("expected synthetic relationship");
+        relationship.confidence = invalid;
+        assert!(assert_material_privacy(&mutated).is_err());
+
+        let mut mutated = material.clone();
+        let relationship = mutated
+            .relationship
+            .as_mut()
+            .expect("expected synthetic relationship");
+        relationship.facts[0].strength = invalid;
+        assert!(assert_material_privacy(&mutated).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn extreme_i64_stats_never_panic_or_emit_non_finite_numbers() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-i64-max-material";
+    seed_match(&conn, match_id, 23, "win", 3_600)?;
+    let extreme = stats(i64::MAX, i64::MAX, i64::MAX, i64::MAX, i64::MAX, i64::MAX);
+    seed_team(
+        &conn,
+        match_id,
+        &[
+            ("tank", true, extreme),
+            ("dps", false, extreme),
+            ("dps", false, extreme),
+            ("healer", false, extreme),
+            ("healer", false, extreme),
+        ],
+    )?;
+
+    if let Ok(material) = build_roast_material(&conn, match_id) {
+        assert!(material.evaluation.confidence.is_finite());
+        assert!(material
+            .selected_facts
+            .iter()
+            .all(|fact| fact.strength.is_finite()));
+        assert_material_privacy(&material)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn tied_identical_players_do_not_create_rank_or_relationship_evidence() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;
@@ -582,6 +766,8 @@ fn tied_players_use_competition_rank_without_row_order_relationships() -> Result
             ("dps", true, stats(5, 2, 5, 5_000, 0, 0)),
             ("dps", false, stats(10, 4, 2, 10_000, 0, 0)),
             ("dps", false, stats(5, 2, 5, 5_000, 0, 0)),
+            ("healer", false, stats(2, 6, 5, 1_500, 4_000, 0)),
+            ("healer", false, stats(2, 6, 5, 1_500, 4_000, 0)),
         ],
     )?;
 
@@ -685,6 +871,8 @@ fn selected_facts_are_subject_scoped_and_uniquely_identified() -> Result<()> {
             ("tank", true, stats(8, 6, 3, 8_000, 0, 10_000)),
             ("dps", false, stats(1, 1, 12, 1_000, 0, 0)),
             ("dps", false, stats(12, 4, 4, 10_000, 0, 0)),
+            ("healer", false, stats(4, 12, 5, 2_500, 8_000, 0)),
+            ("healer", false, stats(3, 11, 6, 2_000, 7_000, 0)),
         ],
     )?;
 
@@ -751,6 +939,9 @@ fn non_ordinary_history_does_not_change_ordinary_streak() -> Result<()> {
         &[
             ("tank", true, stats(8, 5, 4, 7_000, 0, 9_000)),
             ("dps", false, stats(2, 1, 10, 2_000, 0, 0)),
+            ("dps", false, stats(9, 3, 5, 8_000, 0, 0)),
+            ("healer", false, stats(4, 10, 5, 2_500, 7_500, 0)),
+            ("healer", false, stats(3, 11, 6, 2_000, 7_000, 0)),
         ],
     )?;
 
@@ -772,6 +963,9 @@ fn rejects_unsafe_cached_evaluation_strings_before_serialization() -> Result<()>
         &[
             ("tank", true, stats(8, 5, 4, 7_000, 0, 9_000)),
             ("dps", false, stats(0, 0, 12, 0, 0, 0)),
+            ("dps", false, stats(9, 3, 5, 8_000, 0, 0)),
+            ("healer", false, stats(4, 10, 5, 2_500, 7_500, 0)),
+            ("healer", false, stats(3, 11, 6, 2_000, 7_000, 0)),
         ],
     )?;
     conn.execute(

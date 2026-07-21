@@ -46,6 +46,8 @@ const HYBRID_SUPPORTS: &[&str] = &[
     "207165582859043685",
 ];
 const MIN_MEANINGFUL_RELATIVE_CONTRAST: f64 = 0.01;
+const INSUFFICIENT_DETAIL_ERROR: &str = "\u{5f53}\u{524d}\u{5bf9}\u{5c40}\u{7f3a}\u{5c11}\u{8db3}\u{591f}\u{7684}\u{53ef}\u{6838}\u{9a8c}\u{9510}\u{8bc4}\u{7ec6}\u{8282}";
+const MIN_FACT_STRENGTH: f64 = 0.35;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -116,11 +118,52 @@ pub enum RoastRelationshipKind {
     SelfRoast,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnonymousPlayerRole {
+    Tank,
+    Damage,
+    Support,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnonymousOrdinal {
+    First,
+    Second,
+    Third,
+    Fourth,
+    Fifth,
+}
+
+impl AnonymousOrdinal {
+    fn from_slot(slot: usize) -> Option<Self> {
+        match slot {
+            1 => Some(Self::First),
+            2 => Some(Self::Second),
+            3 => Some(Self::Third),
+            4 => Some(Self::Fourth),
+            5 => Some(Self::Fifth),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RoastRelationshipSubject {
+    CurrentPlayer,
+    Teammate {
+        role: AnonymousPlayerRole,
+        ordinal: AnonymousOrdinal,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RoastRelationship {
     pub kind: RoastRelationshipKind,
-    pub subject: String,
+    pub subject: RoastRelationshipSubject,
     pub facts: Vec<RoastFact>,
     pub counter_facts: Vec<RoastFact>,
     pub confidence: f64,
@@ -153,7 +196,7 @@ struct PlayerMetrics {
     damage: i64,
     healing: i64,
     mitigation: i64,
-    subject: String,
+    subject: RoastRelationshipSubject,
     composite: f64,
 }
 
@@ -168,7 +211,17 @@ enum Role {
 struct FactCandidate {
     fact: RoastFact,
     metric: String,
+    category: MetricCategory,
     score: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetricCategory {
+    CompositeRank,
+    RolePrimary,
+    TeamShare,
+    Deaths,
+    Other,
 }
 
 #[derive(Debug, Clone)]
@@ -214,7 +267,7 @@ pub fn build_roast_material(conn: &Connection, match_id: &str) -> Result<RoastMa
     }
     let selected_facts = select_facts(selected_candidates);
     if selected_facts.len() < 3 {
-        return Err(anyhow!("当前对局缺少足够的可核验锐评细节"));
+        return Err(anyhow!(INSUFFICIENT_DETAIL_ERROR));
     }
     let material = RoastMaterial {
         material_version: MATERIAL_VERSION,
@@ -242,8 +295,8 @@ fn safe_evaluation(
             .into_iter()
             .filter(|tag| SAFE_EVIDENCE_TAGS.contains(&tag.as_str()))
             .collect(),
-        confidence: if value.confidence.is_finite() {
-            value.confidence.clamp(0.0, 1.0)
+        confidence: if valid_probability(value.confidence) {
+            value.confidence
         } else {
             0.5
         },
@@ -307,6 +360,8 @@ fn teammate_metrics(conn: &Connection, match_id: &str) -> Result<Vec<PlayerMetri
     })?;
     let mut role_slots = HashMap::new();
     let mut players = Vec::new();
+    let mut invalid = false;
+    let mut current_count = 0;
     for row in rows {
         let (
             rowid,
@@ -321,20 +376,29 @@ fn teammate_metrics(conn: &Connection, match_id: &str) -> Result<Vec<PlayerMetri
             mitigation,
         ) = row?;
         let Some(role) = Role::from_raw(raw_role.as_deref()) else {
+            invalid = true;
             continue;
         };
         if [kills, assists, deaths, damage, healing, mitigation]
             .iter()
             .any(|value| *value < 0)
         {
+            invalid = true;
             continue;
         }
         let slot = role_slots.entry(role).or_insert(0usize);
         *slot += 1;
+        if current {
+            current_count += 1;
+        }
         let subject = if current {
-            format!("当前玩家（{}位{}号）", role.label(), slot)
+            RoastRelationshipSubject::CurrentPlayer
         } else {
-            format!("我方{}位{}号", role.label(), slot)
+            RoastRelationshipSubject::Teammate {
+                role: role.anonymous_role(),
+                ordinal: AnonymousOrdinal::from_slot(*slot)
+                    .ok_or_else(|| anyhow!(INSUFFICIENT_DETAIL_ERROR))?,
+            }
         };
         let mut player = PlayerMetrics {
             rowid,
@@ -353,6 +417,9 @@ fn teammate_metrics(conn: &Connection, match_id: &str) -> Result<Vec<PlayerMetri
         player.composite = player.composite_score();
         players.push(player);
     }
+    if invalid || players.len() != 5 || current_count != 1 {
+        return Err(anyhow!(INSUFFICIENT_DETAIL_ERROR));
+    }
     Ok(players)
 }
 
@@ -366,11 +433,11 @@ impl Role {
         }
     }
 
-    fn label(self) -> &'static str {
+    fn anonymous_role(self) -> AnonymousPlayerRole {
         match self {
-            Self::Tank => "坦克",
-            Self::Damage => "输出",
-            Self::Support => "支援",
+            Self::Tank => AnonymousPlayerRole::Tank,
+            Self::Damage => AnonymousPlayerRole::Damage,
+            Self::Support => AnonymousPlayerRole::Support,
         }
     }
 }
@@ -486,7 +553,7 @@ fn select_relationship(
     Ok(Some(RelationshipSelection {
         relationship: RoastRelationship {
             kind,
-            subject: subject.subject.clone(),
+            subject: subject.subject,
             facts,
             counter_facts,
             confidence,
@@ -608,15 +675,21 @@ fn fact_candidates(
         }
     }
 
-    let damage_total = players.iter().map(|player| player.damage).sum::<i64>();
-    let healing_total = players.iter().map(|player| player.healing).sum::<i64>();
+    let damage_total = players
+        .iter()
+        .map(|player| player.damage as f64)
+        .sum::<f64>();
+    let healing_total = players
+        .iter()
+        .map(|player| player.healing as f64)
+        .sum::<f64>();
     let contribution = match subject.role {
-        Role::Support if healing_total > 0 => {
+        Role::Support if healing_total > 0.0 => {
             ("team_share_healing", "治疗", subject.healing, healing_total)
         }
         _ => ("team_share_damage", "伤害", subject.damage, damage_total),
     };
-    if players.len() >= 2 && contribution.3 > 0 {
+    if players.len() >= 2 && contribution.3 > 0.0 {
         let share = contribution.2 as f64 / contribution.3 as f64;
         let contribution_contrast = relative_contrast(share, 1.0 / players.len() as f64);
         if contribution_contrast >= MIN_MEANINGFUL_RELATIVE_CONTRAST {
@@ -696,7 +769,10 @@ fn fact_candidates(
     }
     if kind == Some(&RoastRelationshipKind::Carry) {
         for fact in &mut facts {
-            if fact.metric == "composite_rank" || fact.metric == "role_primary" {
+            if matches!(
+                fact.category,
+                MetricCategory::CompositeRank | MetricCategory::RolePrimary
+            ) {
                 fact.score += 0.08;
             }
         }
@@ -728,7 +804,7 @@ fn push_fact(
     let label_relevance = if evaluation
         .evidence_tags
         .iter()
-        .any(|tag| fact_matches_evidence(metric, tag))
+        .any(|tag| fact_matches_evidence(metric_category(metric), tag))
     {
         1.0
     } else {
@@ -749,24 +825,35 @@ fn push_fact(
             evidence,
         },
         metric: format!("{}{metric}", subject.id_prefix()),
+        category: metric_category(metric),
         score: strength,
     });
 }
 
-fn fact_matches_evidence(metric: &str, tag: &str) -> bool {
+fn metric_category(metric: &str) -> MetricCategory {
+    match metric {
+        "composite_rank" => MetricCategory::CompositeRank,
+        "role_primary" | "season_role" => MetricCategory::RolePrimary,
+        "team_share" => MetricCategory::TeamShare,
+        "deaths" => MetricCategory::Deaths,
+        _ => MetricCategory::Other,
+    }
+}
+
+fn fact_matches_evidence(metric: MetricCategory, tag: &str) -> bool {
     matches!(
         (metric, tag),
-        ("role_primary", "伤害最高")
-            | ("role_primary", "治疗最高")
-            | ("team_share", "伤害最高")
-            | ("team_share", "治疗最高")
-            | ("deaths", "KDA最高")
+        (MetricCategory::RolePrimary, "伤害最高")
+            | (MetricCategory::RolePrimary, "治疗最高")
+            | (MetricCategory::TeamShare, "伤害最高")
+            | (MetricCategory::TeamShare, "治疗最高")
+            | (MetricCategory::Deaths, "KDA最高")
     )
 }
 
 fn primary_role_metric(role: Role, player: &PlayerMetrics) -> f64 {
     match role {
-        Role::Tank => (player.damage + player.mitigation) as f64,
+        Role::Tank => player.damage as f64 + player.mitigation as f64,
         Role::Damage => player.damage as f64,
         Role::Support => player.healing as f64,
     }
@@ -954,8 +1041,11 @@ fn select_facts(mut candidates: Vec<FactCandidate>) -> Vec<RoastFact> {
 }
 
 fn counter_facts(players: &[PlayerMetrics], subject: &PlayerMetrics) -> Vec<RoastFact> {
-    let damage_total = players.iter().map(|player| player.damage).sum::<i64>();
-    if damage_total <= 0 || subject.damage <= 0 {
+    let damage_total = players
+        .iter()
+        .map(|player| player.damage as f64)
+        .sum::<f64>();
+    if damage_total <= 0.0 || subject.damage <= 0 {
         return Vec::new();
     }
     vec![RoastFact {
@@ -966,7 +1056,7 @@ fn counter_facts(players: &[PlayerMetrics], subject: &PlayerMetrics) -> Vec<Roas
         subject: FactSubject::RelationshipSubject,
         text: format!(
             "仍贡献全队伤害的{:.0}%",
-            subject.damage as f64 / damage_total as f64 * 100.0
+            subject.damage as f64 / damage_total * 100.0
         ),
         strength: 0.62,
         evidence: RoastFactEvidence::Counterpoint,
@@ -989,6 +1079,7 @@ fn result_fact_candidate(result: &str) -> Result<FactCandidate> {
             evidence: RoastFactEvidence::Result,
         },
         metric: format!("{}match_result", FactSubject::Match.id_prefix()),
+        category: MetricCategory::Other,
         score: 0.88,
     })
 }
@@ -1066,19 +1157,38 @@ fn streak_context(
     })
 }
 
+fn valid_probability(value: f64) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
+}
+
+fn valid_fact_strength(value: f64) -> bool {
+    valid_probability(value) && value >= MIN_FACT_STRENGTH
+}
+
 pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
     if material.material_version != MATERIAL_VERSION {
-        return Err(anyhow!("锐评材料版本无效"));
+        return Err(anyhow!(
+            "\u{9510}\u{8bc4}\u{6750}\u{6599}\u{7248}\u{672c}\u{65e0}\u{6548}"
+        ));
+    }
+    if !valid_probability(material.evaluation.confidence) {
+        return Err(anyhow!(
+            "\u{9510}\u{8bc4}\u{8bc4}\u{4ef7}\u{7f6e}\u{4fe1}\u{5ea6}\u{65e0}\u{6548}"
+        ));
     }
     if material.selected_facts.len() < 3 || material.selected_facts.len() > 4 {
-        return Err(anyhow!("锐评事实数量无效"));
+        return Err(anyhow!(
+            "\u{9510}\u{8bc4}\u{4e8b}\u{5b9e}\u{6570}\u{91cf}\u{65e0}\u{6548}"
+        ));
     }
     if material
         .selected_facts
         .iter()
-        .any(|fact| fact.strength < 0.35)
+        .any(|fact| !valid_fact_strength(fact.strength))
     {
-        return Err(anyhow!("锐评事实强度无效"));
+        return Err(anyhow!(
+            "\u{9510}\u{8bc4}\u{4e8b}\u{5b9e}\u{5f3a}\u{5ea6}\u{65e0}\u{6548}"
+        ));
     }
     let selected_ids = material
         .selected_facts
@@ -1086,7 +1196,9 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
         .map(|fact| fact.id.as_str())
         .collect::<HashSet<_>>();
     if selected_ids.len() != material.selected_facts.len() {
-        return Err(anyhow!("锐评事实未去重"));
+        return Err(anyhow!(
+            "\u{9510}\u{8bc4}\u{4e8b}\u{5b9e}\u{672a}\u{53bb}\u{91cd}"
+        ));
     }
     if material
         .selected_facts
@@ -1098,6 +1210,11 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
         ));
     }
     if let Some(relationship) = &material.relationship {
+        if !valid_probability(relationship.confidence) {
+            return Err(anyhow!(
+                "\u{9510}\u{8bc4}\u{5173}\u{7cfb}\u{7f6e}\u{4fe1}\u{5ea6}\u{65e0}\u{6548}"
+            ));
+        }
         if relationship
             .facts
             .iter()
@@ -1105,11 +1222,10 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
             .any(|fact| {
                 fact.subject != FactSubject::RelationshipSubject
                     || !fact.id.starts_with(fact.subject.id_prefix())
+                    || !valid_fact_strength(fact.strength)
             })
         {
-            return Err(anyhow!(
-                "\u{9510}\u{8bc4}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{4e3b}\u{4f53}\u{6807}\u{8bc6}\u{65e0}\u{6548}"
-            ));
+            return Err(anyhow!("\u{9510}\u{8bc4}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{4e3b}\u{4f53}\u{6216}\u{5f3a}\u{5ea6}\u{65e0}\u{6548}"));
         }
         if relationship.facts.len() < 2
             || relationship.facts.len() > 4
@@ -1120,12 +1236,7 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
                 )
             })
         {
-            return Err(anyhow!("锐评关系缺少足够的排名或同位置证据"));
-        }
-        if !(relationship.subject.starts_with("我方")
-            || relationship.subject.starts_with("当前玩家（"))
-        {
-            return Err(anyhow!("锐评主体不是匿名位置描述"));
+            return Err(anyhow!("\u{9510}\u{8bc4}\u{5173}\u{7cfb}\u{7f3a}\u{5c11}\u{8db3}\u{591f}\u{7684}\u{6392}\u{540d}\u{6216}\u{540c}\u{4f4d}\u{7f6e}\u{8bc1}\u{636e}"));
         }
     }
     let value = serde_json::to_value(material)?;

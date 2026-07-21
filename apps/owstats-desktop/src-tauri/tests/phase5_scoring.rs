@@ -560,3 +560,164 @@ fn friend_common_heroes_and_lineup_combinations_follow_phase5_rules() {
         .iter()
         .any(|member| member.bnet_id.as_deref() == Some("friend-b")));
 }
+
+#[test]
+fn i64_max_scoring_inputs_do_not_panic_or_wrap() {
+    let db = temp_db();
+    let extreme = player(
+        "me",
+        "Me",
+        "hero-me",
+        true,
+        false,
+        i64::MAX,
+        i64::MAX,
+        i64::MAX,
+        i64::MAX,
+        i64::MAX,
+        i64::MAX,
+    );
+    let teammates = vec![
+        player(
+            "ally-1",
+            "Ally 1",
+            "ally-hero-1",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "ally-2",
+            "Ally 2",
+            "ally-hero-2",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "ally-3",
+            "Ally 3",
+            "ally-hero-3",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "ally-4",
+            "Ally 4",
+            "ally-hero-4",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+    ];
+    let enemies = vec![
+        player(
+            "enemy-1",
+            "Enemy 1",
+            "enemy-hero-1",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "enemy-2",
+            "Enemy 2",
+            "enemy-hero-2",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "enemy-3",
+            "Enemy 3",
+            "enemy-hero-3",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "enemy-4",
+            "Enemy 4",
+            "enemy-hero-4",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+        player(
+            "enemy-5",
+            "Enemy 5",
+            "enemy-hero-5",
+            false,
+            false,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+        ),
+    ];
+    seed_match(
+        &db,
+        "extreme-scoring",
+        "win",
+        30,
+        extreme,
+        teammates,
+        enemies,
+    );
+
+    refresh_match_evaluations(&db).unwrap();
+
+    let conn = db.connect().unwrap();
+    let confidence: f64 = conn
+        .query_row(
+            "SELECT confidence FROM match_evaluations WHERE match_id='extreme-scoring'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(confidence.is_finite());
+    assert!((0.0..=1.0).contains(&confidence));
+}

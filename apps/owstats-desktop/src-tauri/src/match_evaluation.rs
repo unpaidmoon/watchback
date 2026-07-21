@@ -48,7 +48,7 @@ struct PlayerRow {
 
 impl PlayerRow {
     fn kda(&self) -> f64 {
-        (self.kill + self.assist) as f64 / self.death.max(1) as f64
+        (self.kill as f64 + self.assist as f64) / self.death.max(1) as f64
     }
 }
 
@@ -316,15 +316,15 @@ fn unique_highest_deaths(current: &PlayerRow, teammates: &[&PlayerRow]) -> bool 
             == 1
 }
 
-fn total(players: &[PlayerRow], side: &str, value: fn(&PlayerRow) -> i64) -> i64 {
+fn total(players: &[PlayerRow], side: &str, value: fn(&PlayerRow) -> i64) -> i128 {
     players
         .iter()
         .filter(|player| player.side == side)
-        .map(value)
+        .map(|player| value(player) as i128)
         .sum()
 }
 
-fn close_damage(a: i64, b: i64) -> bool {
+fn close_damage(a: i128, b: i128) -> bool {
     let max = a.max(b);
     if max <= 0 {
         true
