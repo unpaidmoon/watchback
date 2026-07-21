@@ -20,7 +20,7 @@ use std::{
     collections::HashSet,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
 };
@@ -146,13 +146,13 @@ struct Reply {
     delay: Duration,
 }
 
-fn loopback_server(
-    replies: Vec<Reply>,
-) -> (String, Arc<Mutex<Vec<String>>>, thread::JoinHandle<()>) {
+fn loopback_server(replies: Vec<Reply>) -> (String, Arc<Mutex<Vec<String>>>, LoopbackServer) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    let expected_request_count = replies.len();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&requests);
+    let (finished_tx, finished_rx) = mpsc::channel();
     let handle = thread::spawn(move || {
         for reply in replies {
             let (mut stream, _) = listener.accept().unwrap();
@@ -176,8 +176,42 @@ fn loopback_server(
             );
             let _ = stream.write_all(response.as_bytes());
         }
+        let _ = finished_tx.send(());
     });
-    (format!("http://{address}"), requests, handle)
+    (
+        format!("http://{address}"),
+        requests,
+        LoopbackServer {
+            address,
+            expected_request_count,
+            finished: finished_rx,
+            handle,
+        },
+    )
+}
+
+struct LoopbackServer {
+    address: std::net::SocketAddr,
+    expected_request_count: usize,
+    finished: mpsc::Receiver<()>,
+    handle: thread::JoinHandle<()>,
+}
+
+impl LoopbackServer {
+    fn join(self) {
+        match self.finished.recv_timeout(Duration::from_secs(2)) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                self.handle.join().unwrap();
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                for _ in 0..self.expected_request_count {
+                    let _ = TcpStream::connect(self.address);
+                }
+                let _ = self.handle.join();
+                panic!("timed out waiting for synthetic server completion");
+            }
+        }
+    }
 }
 
 fn read_request(stream: &mut TcpStream) -> String {
@@ -249,7 +283,7 @@ async fn sends_fixed_contract_with_minimal_prompt() {
         )
         .await
         .unwrap();
-    handle.join().unwrap();
+    handle.join();
 
     assert_eq!(output.award, AWARD);
     assert_eq!(MODEL, "deepseek-v4-flash");
@@ -327,7 +361,7 @@ async fn arena_prompt_contains_only_candidate_facts() {
         )
         .await
         .unwrap();
-    handle.join().unwrap();
+    handle.join();
 
     let prompt = request_body(&requests.lock().unwrap()[0]).to_string();
     assert!(prompt.contains("candidateFacts"));
@@ -354,7 +388,7 @@ async fn arena_with_one_candidate_fails_before_http() {
         )
         .await
         .unwrap_err();
-    handle.join().unwrap();
+    handle.join();
 
     assert_eq!(error, DeepSeekRoastError::InvalidOutput);
     assert_eq!(requests.lock().unwrap().len(), 0);
@@ -383,7 +417,7 @@ async fn status_errors_are_safe_and_not_retried() {
             )
             .await
             .unwrap_err();
-        handle.join().unwrap();
+        handle.join();
         assert_eq!(error, expected);
         assert!(!error.to_string().contains(secret));
         assert_eq!(requests.lock().unwrap().len(), 1);
@@ -411,7 +445,7 @@ async fn finish_errors_are_safe_and_not_retried() {
             )
             .await
             .unwrap_err();
-        handle.join().unwrap();
+        handle.join();
         assert_eq!(error, expected);
         assert!(!error.to_string().contains(finish_reason));
         assert_eq!(requests.lock().unwrap().len(), 1);
@@ -433,7 +467,7 @@ async fn timeout_is_safe_and_not_retried() {
         )
         .await
         .unwrap_err();
-    handle.join().unwrap();
+    handle.join();
     assert_eq!(error, DeepSeekRoastError::Timeout);
     assert_eq!(requests.lock().unwrap().len(), 1);
 }
@@ -467,7 +501,7 @@ async fn invalid_json_and_validation_retry_once() {
             )
             .await
             .unwrap();
-        handle.join().unwrap();
+        handle.join();
         assert_eq!(output.award, AWARD);
         assert_eq!(requests.lock().unwrap().len(), 2);
     }
@@ -495,7 +529,7 @@ async fn a_second_invalid_response_stops_retrying() {
         )
         .await
         .unwrap_err();
-    handle.join().unwrap();
+    handle.join();
     assert_eq!(error, DeepSeekRoastError::InvalidOutput);
     assert_eq!(requests.lock().unwrap().len(), 2);
 }

@@ -32,6 +32,7 @@ mod settings;
 mod sync;
 mod sync_coordinator;
 
+pub use ai_roast::coordinator::AiRoastGenerationResult;
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use background_sync::{BackgroundEventSink, BackgroundSeasonSyncManager};
 pub use commands::runtime_error_message;
@@ -114,6 +115,7 @@ pub fn run() {
             Ok(())
         })
         .manage(sync_coordinator)
+        .manage(ai_roast::coordinator::AiRoastCoordinator::default())
         .manage(login_target::LoginTargetCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
@@ -131,6 +133,7 @@ pub fn run() {
             commands::get_credential_status,
             commands::get_deepseek_key_status,
             commands::save_deepseek_key,
+            commands::generate_match_ai_roast,
             commands::get_player_profile,
             commands::get_user_settings,
             commands::save_user_settings,

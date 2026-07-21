@@ -1,4 +1,8 @@
 use crate::account_context::{AccountContextManager, AccountContextSnapshot};
+use crate::ai_roast::client::DeepSeekRoastClient;
+use crate::ai_roast::coordinator::{
+    AiRoastCoordinator, AiRoastGenerationResult, CapturedRoastRequest,
+};
 use crate::deepseek_key::DeepSeekKeyManager;
 use crate::importer::existing_import_summary;
 use crate::{
@@ -166,6 +170,21 @@ pub async fn save_deepseek_key(
     manager: State<'_, DeepSeekKeyManager>,
 ) -> Result<DeepSeekKeyStatus, String> {
     manager.save(&api_key).await.map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn generate_match_ai_roast(
+    accounts: State<'_, AccountContextManager>,
+    keys: State<'_, DeepSeekKeyManager>,
+    coordinator: State<'_, AiRoastCoordinator>,
+    match_id: String,
+) -> Result<AiRoastGenerationResult, String> {
+    let account = active_account(&accounts)?;
+    let request = CapturedRoastRequest::new(account.database(), match_id)?;
+    let client = DeepSeekRoastClient::new().map_err(|_| {
+        "\u{65e0}\u{6cd5}\u{521d}\u{59cb}\u{5316} DeepSeek \u{670d}\u{52a1}\u{3002}".to_string()
+    })?;
+    coordinator.generate(request, &keys, &client).await
 }
 
 #[tauri::command]
