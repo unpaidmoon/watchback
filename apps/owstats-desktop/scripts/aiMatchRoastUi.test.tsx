@@ -9,6 +9,8 @@ import {
   AiMatchRoast,
   classifyAiRoastError,
   clearBusyMatch,
+  registerLoadingInterval,
+  unregisterLoadingInterval,
 } from '../src/features/matches/AiMatchRoast';
 
 const apiSource = readFileSync(new URL('../src/shared/api.ts', import.meta.url), 'utf8');
@@ -103,10 +105,35 @@ assert.match(componentSource, /requestTokenRef\.current\s*!==\s*requestToken/);
 assert.match(componentSource, /requestMatchId\s*!==\s*matchIdRef\.current/);
 assert.equal(clearBusyMatch('match-a', 'match-a'), null);
 assert.equal(clearBusyMatch('match-b', 'match-a'), 'match-b');
+
+const originalLoadingIntervals = new Set([1]);
+const registeredLoadingIntervals = registerLoadingInterval(originalLoadingIntervals, 2);
+assert.deepEqual([...originalLoadingIntervals], [1]);
+assert.deepEqual([...registeredLoadingIntervals], [1, 2]);
+const remainingLoadingIntervals = unregisterLoadingInterval(registeredLoadingIntervals, 1);
+assert.deepEqual([...registeredLoadingIntervals], [1, 2]);
+assert.deepEqual([...remainingLoadingIntervals], [2]);
+
+assert.match(componentSource, /loadingIntervalsRef\s*=\s*useRef\(\s*new Set</);
 assert.match(
   componentSource,
-  /finally\s*\{[\s\S]*?clearInterval\(loadingInterval\)[\s\S]*?setBusyMatchId\(\(current\)\s*=>\s*clearBusyMatch\(current,\s*requestMatchId\)\)/,
-  'each request must clear its interval and only its own busy match in finally',
+  /loadingIntervalsRef\.current\s*=\s*registerLoadingInterval\(\s*loadingIntervalsRef\.current,\s*loadingInterval,?\s*\)/,
+  'each request must register its loading interval',
+);
+assert.match(
+  componentSource,
+  /finally\s*\{[\s\S]*?clearInterval\(loadingInterval\)[\s\S]*?loadingIntervalsRef\.current\s*=\s*unregisterLoadingInterval\([\s\S]*?loadingInterval,[\s\S]*?if\s*\(mountedRef\.current\)[\s\S]*?setBusyMatchId\(\(current\)\s*=>\s*clearBusyMatch\(current,\s*requestMatchId\)\)/,
+  'each request must clear and unregister its interval before guarded busy cleanup',
+);
+assert.match(
+  componentSource,
+  /return\s*\(\)\s*=>\s*\{[\s\S]*?mountedRef\.current\s*=\s*false[\s\S]*?for\s*\(const loadingInterval of loadingIntervalsRef\.current\)[\s\S]*?clearInterval\(loadingInterval\)[\s\S]*?loadingIntervalsRef\.current\.clear\(\)/,
+  'unmount must prevent updates and clear every registered interval',
+);
+assert.match(
+  componentSource,
+  /setInterval\(\(\)\s*=>\s*\{\s*if\s*\(!mountedRef\.current\)\s*\{\s*return;\s*\}/,
+  'loading callbacks must not update state after unmount',
 );
 assert.match(componentSource, /aria-live=\x22polite\x22/);
 assert.match(componentSource, /visuallyHidden/);

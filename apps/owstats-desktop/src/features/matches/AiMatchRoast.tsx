@@ -40,6 +40,22 @@ export function clearBusyMatch(
   return currentBusyMatchId === requestMatchId ? null : currentBusyMatchId;
 }
 
+export function registerLoadingInterval<T>(
+  loadingIntervals: ReadonlySet<T>,
+  loadingInterval: T,
+) {
+  return new Set(loadingIntervals).add(loadingInterval);
+}
+
+export function unregisterLoadingInterval<T>(
+  loadingIntervals: ReadonlySet<T>,
+  loadingInterval: T,
+) {
+  const remainingIntervals = new Set(loadingIntervals);
+  remainingIntervals.delete(loadingInterval);
+  return remainingIntervals;
+}
+
 function errorMessage(error: unknown) {
   if (typeof error === "string") {
     return error;
@@ -100,15 +116,21 @@ export function AiMatchRoast({
   const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0);
   const requestTokenRef = useRef(0);
   const matchIdRef = useRef(matchId);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
+  const loadingIntervalsRef = useRef(
+    new Set<ReturnType<typeof setInterval>>(),
+  );
   matchIdRef.current = matchId;
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       requestTokenRef.current += 1;
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
+      for (const loadingInterval of loadingIntervalsRef.current) {
+        clearInterval(loadingInterval);
       }
+      loadingIntervalsRef.current.clear();
     };
   }, []);
 
@@ -130,11 +152,17 @@ export function AiMatchRoast({
     setLoadingPhraseIndex(0);
 
     const loadingInterval = setInterval(() => {
+      if (!mountedRef.current) {
+        return;
+      }
       setLoadingPhraseIndex(
         (current) => (current + 1) % AI_ROAST_LOADING_PHRASES.length,
       );
     }, AI_ROAST_LOADING_INTERVAL_MS);
-    intervalRef.current = loadingInterval;
+    loadingIntervalsRef.current = registerLoadingInterval(
+      loadingIntervalsRef.current,
+      loadingInterval,
+    );
 
     try {
       const keyStatus = await getDeepSeekKeyStatus();
@@ -174,10 +202,13 @@ export function AiMatchRoast({
       });
     } finally {
       clearInterval(loadingInterval);
-      if (intervalRef.current === loadingInterval) {
-        intervalRef.current = null;
+      loadingIntervalsRef.current = unregisterLoadingInterval(
+        loadingIntervalsRef.current,
+        loadingInterval,
+      );
+      if (mountedRef.current) {
+        setBusyMatchId((current) => clearBusyMatch(current, requestMatchId));
       }
-      setBusyMatchId((current) => clearBusyMatch(current, requestMatchId));
     }
   }
 
