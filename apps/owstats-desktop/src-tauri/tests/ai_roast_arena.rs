@@ -116,6 +116,56 @@ fn fact<'a>(material: &'a ArenaRoastMaterial, suffix: &str) -> &'a str {
 }
 
 #[test]
+fn complete_ordinary_zero_four_loss_has_enough_grounded_material() {
+    let mut detail = detail(&[
+        (Some("loss"), Some(0), Some(1)),
+        (Some("loss"), Some(0), Some(2)),
+        (Some("loss"), Some(0), Some(3)),
+        (Some("loss"), Some(0), Some(4)),
+    ]);
+    detail.summary.teammates[4].end_worth = None;
+
+    let material = build_arena_roast_material(&detail, "current-synthetic");
+
+    assert!(material.candidate_facts.len() >= 2);
+    assert_eq!(
+        fact(&material, "arena_final_round_score"),
+        "本场最终以0:4告负"
+    );
+    assert_eq!(
+        fact(&material, "arena_round_record"),
+        "完整回合记录为0胜4负"
+    );
+}
+
+#[test]
+fn complete_alternating_sequence_has_enough_material_without_end_worth() {
+    let mut detail = detail(&[
+        (Some("win"), Some(1), Some(0)),
+        (Some("loss"), Some(1), Some(1)),
+        (Some("win"), Some(2), Some(1)),
+        (Some("loss"), Some(2), Some(2)),
+    ]);
+    detail.summary.teammates[4].end_worth = None;
+
+    let material = build_arena_roast_material(&detail, "current-synthetic");
+
+    assert!(material.candidate_facts.len() >= 2);
+    assert_eq!(
+        fact(&material, "arena_final_round_score"),
+        "本场最终战成2:2平"
+    );
+    assert_eq!(
+        fact(&material, "arena_round_record"),
+        "完整回合记录为2胜2负"
+    );
+    assert!(material
+        .candidate_facts
+        .iter()
+        .all(|fact| !fact.id.ends_with("arena_final_team_funds_rank")));
+}
+
+#[test]
 fn first_loses_three_then_wins_four_is_a_grounded_comeback() {
     let material = build_arena_roast_material(
         &detail(&[
@@ -187,6 +237,8 @@ fn ordinary_consecutive_round_wins_emit_a_stable_streak_fact() {
             .map(|fact| fact.id.as_str())
             .collect::<Vec<_>>(),
         vec![
+            "match:arena_final_round_score",
+            "match:arena_round_record",
             "match:arena_longest_win_streak",
             "current_player:arena_final_team_funds_rank",
         ]

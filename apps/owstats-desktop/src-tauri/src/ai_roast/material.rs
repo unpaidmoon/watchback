@@ -305,7 +305,10 @@ fn safe_evaluation(
 
 fn match_context(conn: &Connection, match_id: &str) -> Result<MatchContext> {
     conn.query_row(
-        "SELECT season, result, begin_ts FROM matches WHERE match_id=? AND match_kind='normal'",
+        "SELECT season, result, begin_ts FROM matches
+         WHERE match_id=?
+           AND match_kind='normal'
+           AND game_mode IN ('Leisure6v6', 'LeisurePreset', 'SportPreset', 'SportOpen')",
         params![match_id],
         |row| {
             Ok(MatchContext {

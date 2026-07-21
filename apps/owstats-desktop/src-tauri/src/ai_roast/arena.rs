@@ -37,6 +37,10 @@ pub fn build_arena_roast_material(
     let has_decider =
         sequence_evidence_is_complete && !has_comeback && won_decider_after_tie(detail, &rounds);
 
+    if sequence_evidence_is_complete {
+        candidate_facts.extend(ordinary_round_facts(&rounds));
+    }
+
     if has_comeback {
         candidate_facts.push(match_fact(
             "arena_three_down_comeback",
@@ -68,6 +72,40 @@ pub fn build_arena_roast_material(
     }
 
     ArenaRoastMaterial { candidate_facts }
+}
+
+fn ordinary_round_facts(rounds: &[Option<ReliableRound>]) -> [RoastFact; 2] {
+    let rounds = rounds.iter().filter_map(Option::as_ref).collect::<Vec<_>>();
+    let last = rounds
+        .last()
+        .expect("complete arena round sequence is non-empty");
+    let final_score_text = match last.team_score.cmp(&last.opponent_score) {
+        std::cmp::Ordering::Greater => {
+            format!("本场最终以{}:{}获胜", last.team_score, last.opponent_score)
+        }
+        std::cmp::Ordering::Less => {
+            format!("本场最终以{}:{}告负", last.team_score, last.opponent_score)
+        }
+        std::cmp::Ordering::Equal => {
+            format!("本场最终战成{}:{}平", last.team_score, last.opponent_score)
+        }
+    };
+    let wins = rounds
+        .iter()
+        .filter(|round| round.outcome == RoundOutcome::Win)
+        .count();
+    let losses = rounds
+        .iter()
+        .filter(|round| round.outcome == RoundOutcome::Loss)
+        .count();
+    [
+        match_fact("arena_final_round_score", &final_score_text, 0.9),
+        match_fact(
+            "arena_round_record",
+            &format!("完整回合记录为{wins}胜{losses}负"),
+            0.82,
+        ),
+    ]
 }
 
 pub fn assert_arena_material_privacy(material: &ArenaRoastMaterial) -> Result<()> {

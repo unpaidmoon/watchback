@@ -925,6 +925,22 @@ fn rejects_non_ordinary_target_without_lazy_evaluation_side_effects() -> Result<
 }
 
 #[test]
+fn rejects_unsupported_normal_game_mode_before_material_generation() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    let match_id = "synthetic-unsupported-normal-mode";
+    seed_match(&conn, match_id, 23, "win", 2_800)?;
+    conn.execute(
+        "UPDATE matches SET game_mode='SyntheticUnsupportedMode' WHERE match_id=?",
+        params![match_id],
+    )?;
+    seed_team(&conn, match_id, &complete_lineup())?;
+
+    assert!(build_roast_material(&conn, match_id).is_err());
+    Ok(())
+}
+
+#[test]
 fn non_ordinary_history_does_not_change_ordinary_streak() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;
