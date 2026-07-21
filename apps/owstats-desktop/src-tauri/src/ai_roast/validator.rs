@@ -38,6 +38,7 @@ pub struct RoastValidationContext {
     allowed_terms: HashSet<String>,
     allowed_numeric_literals: HashSet<String>,
     requires_relationship_fact: bool,
+    forbids_economic_causality: bool,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -80,17 +81,17 @@ pub enum RoastValidationError {
 
 impl RoastValidationContext {
     pub fn for_match(material: &RoastMaterial, vocabulary: RoastValidationVocabulary) -> Self {
-        let mut facts = material.selected_facts.clone();
-        let requires_relationship_fact = material.relationship.is_some();
-        if let Some(relationship) = &material.relationship {
-            facts.extend(relationship.facts.clone());
-            facts.extend(relationship.counter_facts.clone());
-        }
+        let facts = material.selected_facts.clone();
+        let requires_relationship_fact = material.relationship.is_some()
+            && facts
+                .iter()
+                .any(|fact| fact.subject == super::material::FactSubject::RelationshipSubject);
         Self::from_facts(
             facts,
             vocabulary,
             material.streak.before_current.to_string(),
             requires_relationship_fact,
+            false,
         )
     }
 
@@ -100,6 +101,7 @@ impl RoastValidationContext {
             vocabulary,
             String::new(),
             false,
+            true,
         )
     }
 
@@ -108,6 +110,7 @@ impl RoastValidationContext {
         vocabulary: RoastValidationVocabulary,
         streak: String,
         requires_relationship_fact: bool,
+        forbids_economic_causality: bool,
     ) -> Self {
         let fact_texts = facts
             .into_iter()
@@ -124,6 +127,7 @@ impl RoastValidationContext {
             allowed_terms: vocabulary.allowed_terms,
             allowed_numeric_literals: numeric_literals(&numeric_context.join(" ")),
             requires_relationship_fact,
+            forbids_economic_causality,
         }
     }
 }
@@ -191,7 +195,9 @@ pub fn validate_roast_output(
     {
         return Err(RoastValidationError::UnsupportedNumber);
     }
-    if contains_unsupported_claim(commentary) {
+    if contains_unsupported_claim(commentary)
+        || (context.forbids_economic_causality && contains_economic_causality(commentary))
+    {
         return Err(RoastValidationError::UnsupportedClaim);
     }
     if contains_unfriendly_text(commentary) {
@@ -231,6 +237,27 @@ fn contains_unsupported_claim(text: &str) -> bool {
     ]
     .iter()
     .any(|value| text.contains(value))
+}
+
+fn contains_economic_causality(text: &str) -> bool {
+    let mentions_economy = ["\u{8d44}\u{91d1}", "\u{7ecf}\u{6d4e}", "\u{8d22}\u{529b}"]
+        .iter()
+        .any(|value| text.contains(value));
+    let claims_causality = [
+        "\u{56e0}\u{6b64}",
+        "\u{6240}\u{4ee5}",
+        "\u{5bfc}\u{81f4}",
+        "\u{9020}\u{6210}",
+        "\u{5168}\u{9760}",
+        "\u{9760}\u{8fd9}",
+        "\u{9760}\u{7740}",
+        "\u{624d}\u{80fd}",
+        "\u{624d}\u{8d62}",
+        "\u{5e26}\u{961f}",
+    ]
+    .iter()
+    .any(|value| text.contains(value));
+    mentions_economy && claims_causality
 }
 
 fn contains_unfriendly_text(text: &str) -> bool {

@@ -107,6 +107,20 @@ impl DeepSeekRoastClient {
         };
         let request = build_request(material);
 
+        tokio::time::timeout(
+            self.timeout,
+            self.generate_with_retries(api_key, &request, &context),
+        )
+        .await
+        .map_err(|_| DeepSeekRoastError::Timeout)?
+    }
+
+    async fn generate_with_retries(
+        &self,
+        api_key: &str,
+        request: &ChatRequest,
+        context: &RoastValidationContext,
+    ) -> Result<RoastOutput, DeepSeekRoastError> {
         for attempt in 0..=1 {
             let response = self
                 .client
@@ -234,8 +248,7 @@ struct PromptFact<'a> {
 struct PromptRelationship<'a> {
     kind: &'static str,
     anonymous_subject: String,
-    facts: Vec<PromptFact<'a>>,
-    counter_facts: Vec<PromptFact<'a>>,
+    fact_ids: Vec<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -288,12 +301,7 @@ fn system_prompt() -> &'static str {
 
 fn prompt_fact_count(material: RoastPromptMaterial<'_>) -> usize {
     match material {
-        RoastPromptMaterial::Match(value) => {
-            value.selected_facts.len()
-                + value.relationship.as_ref().map_or(0, |relationship| {
-                    relationship.facts.len() + relationship.counter_facts.len()
-                })
-        }
+        RoastPromptMaterial::Match(value) => value.selected_facts.len(),
         RoastPromptMaterial::Arena(value) => value.candidate_facts.len(),
     }
 }
@@ -304,8 +312,12 @@ fn user_prompt(material: RoastPromptMaterial<'_>) -> String {
         RoastPromptMaterial::Arena(value) => serde_json::to_string(&arena_prompt(value)),
     }
     .expect("roast prompt payload serializes");
+    let arena_rule = matches!(material, RoastPromptMaterial::Arena(_)).then_some(
+        "\u{89d2}\u{6597}\u{8d44}\u{91d1}\u{53ea}\u{80fd}\u{9648}\u{8ff0}\u{6700}\u{7ec8}\u{6392}\u{540d}\u{ff0c}\u{4e0d}\u{5f97}\u{89e3}\u{91ca}\u{4e3a}\u{80dc}\u{8d1f}\u{3001}\u{7ffb}\u{76d8}\u{6216}\u{56de}\u{5408}\u{7ed3}\u{679c}\u{7684}\u{539f}\u{56e0}\u{3002}",
+    );
     format!(
-        "\u{4f7f}\u{7528}\u{4e0b}\u{5217}\u{533f}\u{540d}\u{6750}\u{6599}\u{751f}\u{6210}\u{4e00}\u{6b21}\u{5bf9}\u{5c40}\u{9510}\u{8bc4}\u{ff0c}\u{4e0d}\u{8981}\u{8f93}\u{51fa} Markdown\u{6216}\u{89e3}\u{91ca}\u{ff1a}{payload}"
+        "{}\u{4f7f}\u{7528}\u{4e0b}\u{5217}\u{533f}\u{540d}\u{6750}\u{6599}\u{751f}\u{6210}\u{4e00}\u{6b21}\u{5bf9}\u{5c40}\u{9510}\u{8bc4}\u{ff0c}\u{4e0d}\u{8981}\u{8f93}\u{51fa} Markdown\u{6216}\u{89e3}\u{91ca}\u{ff1a}{payload}",
+        arena_rule.unwrap_or_default(),
     )
 }
 
@@ -318,15 +330,19 @@ fn match_prompt(material: &RoastMaterial) -> MatchPrompt<'_> {
             evidence_tags: &material.evaluation.evidence_tags,
         },
         selected_facts: prompt_facts(&material.selected_facts),
-        anonymous_relation: material
-            .relationship
-            .as_ref()
-            .map(|relationship| PromptRelationship {
+        anonymous_relation: material.relationship.as_ref().and_then(|relationship| {
+            let fact_ids = material
+                .selected_facts
+                .iter()
+                .filter(|fact| fact.subject == FactSubject::RelationshipSubject)
+                .map(|fact| fact.id.as_str())
+                .collect::<Vec<_>>();
+            (!fact_ids.is_empty()).then(|| PromptRelationship {
                 kind: relationship_kind(&relationship.kind),
                 anonymous_subject: relationship_subject(&relationship.subject),
-                facts: prompt_facts(&relationship.facts),
-                counter_facts: prompt_facts(&relationship.counter_facts),
-            }),
+                fact_ids,
+            })
+        }),
         streak: PromptStreak {
             before_current: material.streak.before_current,
             previous_event: material.streak.previous_event.as_deref(),

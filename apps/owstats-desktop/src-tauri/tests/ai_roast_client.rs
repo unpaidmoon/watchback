@@ -42,6 +42,11 @@ fn fact(id: &str, text: &str, subject: FactSubject) -> RoastFact {
 }
 
 fn material() -> RoastMaterial {
+    let relationship_fact = fact(
+        "relationship_subject:healing_rank",
+        "\u{533f}\u{540d}\u{5173}\u{7cfb}\u{5bf9}\u{8c61}\u{6cbb}\u{7597}\u{6392}\u{540d}\u{7b2c}1",
+        FactSubject::RelationshipSubject,
+    );
     RoastMaterial {
         material_version: MATERIAL_VERSION,
         evaluation: RoastEvaluation {
@@ -61,6 +66,7 @@ fn material() -> RoastMaterial {
                 "\u{5f53}\u{524d}\u{73a9}\u{5bb6}\u{4f24}\u{5bb3}\u{6392}\u{540d}\u{7b2c}2",
                 FactSubject::CurrentPlayer,
             ),
+            relationship_fact.clone(),
         ],
         relationship: Some(RoastRelationship {
             kind: RoastRelationshipKind::Carry,
@@ -68,11 +74,7 @@ fn material() -> RoastMaterial {
                 role: AnonymousPlayerRole::Support,
                 ordinal: AnonymousOrdinal::Second,
             },
-            facts: vec![fact(
-                "relationship_subject:healing_rank",
-                "\u{533f}\u{540d}\u{5173}\u{7cfb}\u{5bf9}\u{8c61}\u{6cbb}\u{7597}\u{6392}\u{540d}\u{7b2c}1",
-                FactSubject::RelationshipSubject,
-            )],
+            facts: vec![relationship_fact],
             counter_facts: Vec::new(),
             confidence: 0.81,
         }),
@@ -312,6 +314,13 @@ async fn sends_fixed_contract_with_minimal_prompt() {
     assert!(prompt.contains("usedFactIds"));
     assert!(prompt.contains("promptVersion"));
     assert!(prompt.contains("anonymousRelation"));
+    assert!(prompt.contains("factIds"));
+    assert!(!prompt.contains("counterFacts"));
+    assert_eq!(
+        prompt.matches("\u{533f}\u{540d}\u{5173}\u{7cfb}\u{5bf9}\u{8c61}\u{6cbb}\u{7597}\u{6392}\u{540d}\u{7b2c}1").count(),
+        1,
+        "relationship evidence text must only be sent through selectedFacts",
+    );
     assert!(prompt.contains(
         "\u{76ee}\u{6807}\u{662f}\u{8ba9}\u{7528}\u{6237}\u{770b}\u{5f97}\u{5f00}\u{5fc3}"
     ));
@@ -368,6 +377,12 @@ async fn arena_prompt_contains_only_candidate_facts() {
     assert!(!prompt.contains("anonymousRelation"));
     assert!(!prompt.contains("evaluation"));
     assert!(!prompt.contains("streak"));
+    assert!(prompt.contains(
+        "\u{89d2}\u{6597}\u{8d44}\u{91d1}\u{53ea}\u{80fd}\u{9648}\u{8ff0}\u{6700}\u{7ec8}\u{6392}\u{540d}"
+    ));
+    assert!(prompt.contains(
+        "\u{4e0d}\u{5f97}\u{89e3}\u{91ca}\u{4e3a}\u{80dc}\u{8d1f}\u{3001}\u{7ffb}\u{76d8}\u{6216}\u{56de}\u{5408}\u{7ed3}\u{679c}\u{7684}\u{539f}\u{56e0}"
+    ));
 }
 
 #[tokio::test]
@@ -470,6 +485,37 @@ async fn timeout_is_safe_and_not_retried() {
     handle.join();
     assert_eq!(error, DeepSeekRoastError::Timeout);
     assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn retries_share_one_total_timeout_budget() {
+    let (url, requests, handle) = loopback_server(vec![
+        Reply {
+            status: 200,
+            body: "not-json".into(),
+            delay: Duration::from_millis(10),
+        },
+        Reply {
+            status: 200,
+            body: completion(&valid_output(), "stop"),
+            delay: Duration::from_millis(100),
+        },
+    ]);
+    let started = std::time::Instant::now();
+    let error = client(&url, Duration::from_millis(55))
+        .generate(
+            "sk-synthetic-only",
+            RoastPromptMaterial::Match(&material()),
+            &vocabulary(),
+        )
+        .await
+        .unwrap_err();
+    let client_elapsed = started.elapsed();
+    handle.join();
+
+    assert_eq!(error, DeepSeekRoastError::Timeout);
+    assert!(client_elapsed < Duration::from_millis(90));
+    assert_eq!(requests.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -733,4 +779,25 @@ fn arena_requires_two_fact_ids() {
         validate_roast_output(&value.to_string(), &context).unwrap_err(),
         RoastValidationError::InsufficientFacts
     );
+}
+
+#[test]
+fn arena_rejects_economic_causality_but_allows_plain_final_rank() {
+    let context = RoastValidationContext::for_arena(&arena_material(), vocabulary());
+    let causal = json!({
+        "award": "\u{89d2}\u{6597}\u{7ffb}\u{76d8}\u{624b}",
+        "commentary": "\u{6700}\u{7ec8}\u{8d44}\u{91d1}\u{6392}\u{7b2c}2\u{ff0c}\u{56e0}\u{6b64}\u{5e26}\u{961f}\u{4ee5}4\u{6bd4}3\u{7ffb}\u{76d8}\u{3002}\u{8fd9}\u{5c40}\u{80dc}\u{5229}\u{5168}\u{9760}\u{8fd9}\u{7b14}\u{7ecf}\u{6d4e}\u{6491}\u{4f4f}\u{3002}",
+        "usedFactIds": ["match:arena_result", "current_player:arena_funds_rank"]
+    });
+    assert_eq!(
+        validate_roast_output(&causal.to_string(), &context).unwrap_err(),
+        RoastValidationError::UnsupportedClaim,
+    );
+
+    let descriptive = json!({
+        "award": "\u{89d2}\u{6597}\u{6536}\u{5b98}\u{4eba}",
+        "commentary": "\u{8fd9}\u{573a}\u{89d2}\u{6597}\u{4ee5}4\u{6bd4}3\u{6536}\u{5c3e}\u{ff0c}\u{56de}\u{5408}\u{8282}\u{594f}\u{62c9}\u{6ee1}\u{3002}\u{4f60}\u{7684}\u{6700}\u{7ec8}\u{8d44}\u{91d1}\u{6392}\u{7b2c}2\u{ff0c}\u{8fd9}\u{7b14}\u{6570}\u{5b57}\u{4e5f}\u{5f88}\u{9192}\u{76ee}\u{3002}",
+        "usedFactIds": ["match:arena_result", "current_player:arena_funds_rank"]
+    });
+    assert!(validate_roast_output(&descriptive.to_string(), &context).is_ok());
 }
