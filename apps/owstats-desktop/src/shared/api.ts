@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountLoginResult,
   AccountManagerStatus,
+  AiRoastGenerationResult,
   CareerMmrBuildStatus,
   CareerMmrHistory,
   CareerMmrHistoryRequest,
@@ -12,6 +13,7 @@ import type {
   CareerRole,
   FilterOptions,
   CredentialStatus,
+  DeepSeekKeyStatus,
   FriendAnalytics,
   FriendAnalyticsFilters,
   FriendDetail,
@@ -70,6 +72,18 @@ export function searchMatchPlayerOptions(query: string) {
 
 export function getMatchDetails(matchId: string) {
   return invoke<MatchDetailView>("get_match_details", { matchId });
+}
+
+export function getDeepSeekKeyStatus() {
+  return invoke<DeepSeekKeyStatus>("get_deepseek_key_status");
+}
+
+export function saveDeepSeekKey(apiKey: string) {
+  return invoke<DeepSeekKeyStatus>("save_deepseek_key", { apiKey });
+}
+
+export function generateMatchAiRoast(matchId: string) {
+  return invoke<AiRoastGenerationResult>("generate_match_ai_roast", { matchId });
 }
 
 export function saveMatchFavorite(request: MatchFavoriteRequest) {

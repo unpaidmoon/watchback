@@ -34,6 +34,20 @@ export type MatchFavoriteRequest = {
   note: string;
 };
 
+export type AiMatchRoastView = {
+  award: string;
+  commentary: string;
+};
+
+export type DeepSeekKeyStatus = {
+  state: 'ready' | 'missing';
+  message: string;
+};
+
+export type AiRoastGenerationResult = {
+  aiRoast: AiMatchRoastView;
+};
+
 export type MatchEvaluationSummary = {
   grade: string;
   primaryTag: string;
@@ -249,6 +263,7 @@ export type MatchDetailView = {
   teamAwards: MatchPerformanceAward[];
   sameRoleComparison: SameRoleComparison | null;
   favorite: MatchFavoriteView | null;
+  aiRoast: AiMatchRoastView | null;
   rawJson: unknown;
 };
 
