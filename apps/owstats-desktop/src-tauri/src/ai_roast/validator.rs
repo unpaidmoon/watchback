@@ -16,9 +16,25 @@ pub struct RoastOutput {
 }
 
 #[derive(Debug, Clone)]
+pub struct RoastValidationVocabulary {
+    known_terms: HashSet<String>,
+    allowed_terms: HashSet<String>,
+}
+
+impl RoastValidationVocabulary {
+    pub fn new(known_terms: HashSet<String>, allowed_terms: HashSet<String>) -> Self {
+        Self {
+            known_terms,
+            allowed_terms,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct RoastValidationContext {
     fact_texts: HashMap<String, String>,
     minimum_fact_count: usize,
+    known_terms: HashSet<String>,
     allowed_terms: HashSet<String>,
     allowed_numeric_literals: HashSet<String>,
     requires_relationship_fact: bool,
@@ -63,7 +79,7 @@ pub enum RoastValidationError {
 }
 
 impl RoastValidationContext {
-    pub fn for_match(material: &RoastMaterial, allowed_terms: HashSet<String>) -> Self {
+    pub fn for_match(material: &RoastMaterial, vocabulary: RoastValidationVocabulary) -> Self {
         let mut facts = material.selected_facts.clone();
         let requires_relationship_fact = material.relationship.is_some();
         if let Some(relationship) = &material.relationship {
@@ -72,29 +88,26 @@ impl RoastValidationContext {
         }
         Self::from_facts(
             facts,
-            allowed_terms,
+            vocabulary,
             material.streak.before_current.to_string(),
             requires_relationship_fact,
-            material.selected_facts.len().min(2),
         )
     }
 
-    pub fn for_arena(material: &ArenaRoastMaterial, allowed_terms: HashSet<String>) -> Self {
+    pub fn for_arena(material: &ArenaRoastMaterial, vocabulary: RoastValidationVocabulary) -> Self {
         Self::from_facts(
             material.candidate_facts.clone(),
-            allowed_terms,
+            vocabulary,
             String::new(),
             false,
-            material.candidate_facts.len().min(2),
         )
     }
 
     fn from_facts(
         facts: Vec<RoastFact>,
-        allowed_terms: HashSet<String>,
+        vocabulary: RoastValidationVocabulary,
         streak: String,
         requires_relationship_fact: bool,
-        required_count: usize,
     ) -> Self {
         let fact_texts = facts
             .into_iter()
@@ -106,8 +119,9 @@ impl RoastValidationContext {
         }
         Self {
             fact_texts,
-            minimum_fact_count: required_count,
-            allowed_terms,
+            minimum_fact_count: 2,
+            known_terms: vocabulary.known_terms,
+            allowed_terms: vocabulary.allowed_terms,
             allowed_numeric_literals: numeric_literals(&numeric_context.join(" ")),
             requires_relationship_fact,
         }
@@ -165,7 +179,10 @@ pub fn validate_roast_output(
     {
         return Err(RoastValidationError::MissingRelationshipFact);
     }
-    if quoted_unknown_term(commentary, context) {
+    if contains_disallowed_known_term(&output.award, context)
+        || contains_disallowed_known_term(commentary, context)
+        || quoted_unknown_term(commentary, context)
+    {
         return Err(RoastValidationError::UnknownTerm);
     }
     if numeric_literals(commentary)
@@ -291,6 +308,12 @@ fn quoted_unknown_term(text: &str, context: &RoastValidationContext) -> bool {
         }
     }
     false
+}
+
+fn contains_disallowed_known_term(text: &str, context: &RoastValidationContext) -> bool {
+    context.known_terms.iter().any(|term| {
+        !term.is_empty() && !context.allowed_terms.contains(term) && text.contains(term)
+    })
 }
 
 fn numeric_literals(text: &str) -> HashSet<String> {

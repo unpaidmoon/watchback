@@ -4,11 +4,13 @@ use super::{
         AnonymousOrdinal, AnonymousPlayerRole, FactSubject, RoastFact, RoastMaterial,
         RoastRelationshipKind, RoastRelationshipSubject,
     },
-    validator::{validate_roast_output, RoastOutput, RoastValidationContext},
+    validator::{
+        validate_roast_output, RoastOutput, RoastValidationContext, RoastValidationVocabulary,
+    },
 };
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 use thiserror::Error;
 
 pub const MODEL: &str = "deepseek-v4-flash";
@@ -87,17 +89,20 @@ impl DeepSeekRoastClient {
         &self,
         api_key: &str,
         material: RoastPromptMaterial<'_>,
-        allowed_terms: &HashSet<String>,
+        vocabulary: &RoastValidationVocabulary,
     ) -> Result<RoastOutput, DeepSeekRoastError> {
         if api_key.trim().is_empty() {
             return Err(DeepSeekRoastError::InvalidKey);
         }
+        if prompt_fact_count(material) < 2 {
+            return Err(DeepSeekRoastError::InvalidOutput);
+        }
         let context = match material {
             RoastPromptMaterial::Match(value) => {
-                RoastValidationContext::for_match(value, allowed_terms.clone())
+                RoastValidationContext::for_match(value, vocabulary.clone())
             }
             RoastPromptMaterial::Arena(value) => {
-                RoastValidationContext::for_arena(value, allowed_terms.clone())
+                RoastValidationContext::for_arena(value, vocabulary.clone())
             }
         };
         let request = build_request(material);
@@ -266,6 +271,11 @@ fn build_request(material: RoastPromptMaterial<'_>) -> ChatRequest {
 fn system_prompt() -> &'static str {
     concat!(
         "\u{4f60}\u{662f}\u{5b88}\u{671b}\u{5148}\u{950b}\u{5bf9}\u{5c40}\u{9510}\u{8bc4}\u{52a9}\u{624b}\u{3002}",
+        "\u{76ee}\u{6807}\u{662f}\u{8ba9}\u{7528}\u{6237}\u{770b}\u{5f97}\u{5f00}\u{5fc3}\u{3002}",
+        "\u{80dc}\u{5229}\u{6216}\u{6709}\u{5e26}\u{98de}\u{8bc1}\u{636e}\u{65f6}\u{ff0c}\u{5148}\u{5938}\u{5f53}\u{524d}\u{73a9}\u{5bb6}\u{6709}\u{4e8b}\u{5b9e}\u{652f}\u{6301}\u{7684}\u{4f18}\u{70b9}\u{ff0c}\u{4e5f}\u{53ef}\u{6839}\u{636e}\u{672c}\u{5730}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{4fcf}\u{76ae}\u{5730}\u{70b9}\u{51fa}\u{533f}\u{540d}\u{5f31}\u{70b9}\u{6216}\u{5927}\u{7239}\u{3002}",
+        "\u{5931}\u{5229}\u{65f6}\u{ff0c}\u{53ea}\u{80fd}\u{4f9d}\u{636e}\u{672c}\u{5730}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{8fdb}\u{884c}\u{5e7d}\u{9ed8}\u{7529}\u{9505}\u{3002}",
+        "\u{59cb}\u{7ec8}\u{907f}\u{514d}\u{4ee4}\u{4eba}\u{6cc4}\u{6c14}\u{3001}\u{8fb1}\u{9a82}\u{3001}\u{4ec7}\u{6068}\u{6216}\u{9488}\u{5bf9}\u{8eab}\u{4efd}\u{7684}\u{8868}\u{8fbe}\u{3002}",
+        "\u{8bc4}\u{8bed}\u{5fc5}\u{987b}\u{5199}\u{6210}\u{8fde}\u{8d2f}\u{81ea}\u{7136}\u{6bb5}\u{ff0c}\u{4e0d}\u{8981}\u{6807}\u{7b7e}\u{6216}\u{5217}\u{8868}\u{3002}",
         "\u{53ea}\u{80fd}\u{4f7f}\u{7528}\u{7528}\u{6237}\u{6d88}\u{606f}\u{4e2d}\u{7684}\u{533f}\u{540d}\u{4e8b}\u{5b9e}\u{ff0c}",
         "\u{4e0d}\u{5f97}\u{731c}\u{6d4b}\u{82f1}\u{96c4}\u{3001}\u{6570}\u{503c}\u{3001}\u{771f}\u{5b9e}\u{8eab}\u{4efd}\u{6216}\u{9690}\u{79c1}\u{4fe1}\u{606f}\u{3002}",
         "\u{53ea}\u{8fd4}\u{56de} JSON \u{5bf9}\u{8c61}\u{ff0c}\u{4e14}\u{53ea}\u{5305}\u{542b} award\u{3001}commentary\u{3001}usedFactIds\u{3002}",
@@ -274,6 +284,18 @@ fn system_prompt() -> &'static str {
         "usedFactIds \u{81f3}\u{5c11}\u{5f15}\u{7528}2\u{4e2a}\u{63d0}\u{4f9b}\u{7684}\u{4e8b}\u{5b9e} ID\u{ff1b}",
         "\u{5982}\u{679c}\u{5b58}\u{5728}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{5bf9}\u{8c61}\u{ff0c}\u{5fc5}\u{987b}\u{5f15}\u{7528}\u{81f3}\u{5c11}1\u{4e2a}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{3002}"
     )
+}
+
+fn prompt_fact_count(material: RoastPromptMaterial<'_>) -> usize {
+    match material {
+        RoastPromptMaterial::Match(value) => {
+            value.selected_facts.len()
+                + value.relationship.as_ref().map_or(0, |relationship| {
+                    relationship.facts.len() + relationship.counter_facts.len()
+                })
+        }
+        RoastPromptMaterial::Arena(value) => value.candidate_facts.len(),
+    }
 }
 
 fn user_prompt(material: RoastPromptMaterial<'_>) -> String {

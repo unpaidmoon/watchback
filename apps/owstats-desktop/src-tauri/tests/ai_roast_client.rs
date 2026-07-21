@@ -9,7 +9,10 @@ use owstats_desktop_lib::ai_roast::{
         RoastFactEvidence, RoastMaterial, RoastRelationship, RoastRelationshipKind,
         RoastRelationshipSubject, RoastStreakContext, MATERIAL_VERSION,
     },
-    validator::{validate_roast_output, RoastValidationContext, RoastValidationError},
+    validator::{
+        validate_roast_output, RoastValidationContext, RoastValidationError,
+        RoastValidationVocabulary,
+    },
 };
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -25,6 +28,8 @@ use std::{
 const AWARD: &str = "\u{5e26}\u{98de}\u{5956}";
 const COMMENTARY: &str = "\u{4f60}\u{8fd9}\u{5c40}\u{51fb}\u{6740}\u{6392}\u{7b2c}1\u{ff0c}\u{8f93}\u{51fa}\u{50cf}\u{5f00}\u{4e86}\u{5bfc}\u{822a}\u{3002}\u{533f}\u{540d}\u{961f}\u{53cb}\u{6cbb}\u{7597}\u{4e5f}\u{7a33}\u{ff0c}\u{8d62}\u{6cd5}\u{5199}\u{5f97}\u{660e}\u{660e}\u{767d}\u{767d}\u{3002}";
 const UNKNOWN_HERO: &str = "\u{795e}\u{79d8}\u{82f1}\u{96c4}";
+const SYNTHETIC_NAME: &str = "\u{5408}\u{6210}\u{89d2}\u{8272}\u{7532}";
+const ARBITRARY_LABEL: &str = "\u{4e34}\u{65f6}\u{79f0}\u{53f7}";
 
 fn fact(id: &str, text: &str, subject: FactSubject) -> RoastFact {
     RoastFact {
@@ -105,6 +110,17 @@ fn allowed_terms() -> HashSet<String> {
     .into_iter()
     .map(str::to_string)
     .collect()
+}
+
+fn known_terms() -> HashSet<String> {
+    [UNKNOWN_HERO, SYNTHETIC_NAME]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn vocabulary() -> RoastValidationVocabulary {
+    RoastValidationVocabulary::new(known_terms(), allowed_terms())
 }
 
 fn valid_output() -> String {
@@ -229,7 +245,7 @@ async fn sends_fixed_contract_with_minimal_prompt() {
         .generate(
             "sk-synthetic-only",
             RoastPromptMaterial::Match(&material()),
-            &allowed_terms(),
+            &vocabulary(),
         )
         .await
         .unwrap();
@@ -262,6 +278,14 @@ async fn sends_fixed_contract_with_minimal_prompt() {
     assert!(prompt.contains("usedFactIds"));
     assert!(prompt.contains("promptVersion"));
     assert!(prompt.contains("anonymousRelation"));
+    assert!(prompt.contains(
+        "\u{76ee}\u{6807}\u{662f}\u{8ba9}\u{7528}\u{6237}\u{770b}\u{5f97}\u{5f00}\u{5fc3}"
+    ));
+    assert!(prompt.contains("\u{80dc}\u{5229}\u{6216}\u{6709}\u{5e26}\u{98de}\u{8bc1}\u{636e}"));
+    assert!(prompt.contains("\u{533f}\u{540d}\u{5f31}\u{70b9}\u{6216}\u{5927}\u{7239}"));
+    assert!(prompt.contains("\u{5931}\u{5229}\u{65f6}\u{ff0c}\u{53ea}\u{80fd}\u{4f9d}\u{636e}\u{672c}\u{5730}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{8fdb}\u{884c}\u{5e7d}\u{9ed8}\u{7529}\u{9505}"));
+    assert!(prompt.contains("\u{907f}\u{514d}\u{4ee4}\u{4eba}\u{6cc4}\u{6c14}\u{3001}\u{8fb1}\u{9a82}\u{3001}\u{4ec7}\u{6068}\u{6216}\u{9488}\u{5bf9}\u{8eab}\u{4efd}\u{7684}\u{8868}\u{8fbe}"));
+    assert!(prompt.contains("\u{8fde}\u{8d2f}\u{81ea}\u{7136}\u{6bb5}\u{ff0c}\u{4e0d}\u{8981}\u{6807}\u{7b7e}\u{6216}\u{5217}\u{8868}"));
     for forbidden in [
         "bnet_id",
         "bnetId",
@@ -299,7 +323,7 @@ async fn arena_prompt_contains_only_candidate_facts() {
         .generate(
             "sk-synthetic-only",
             RoastPromptMaterial::Arena(&arena_material()),
-            &allowed_terms(),
+            &vocabulary(),
         )
         .await
         .unwrap();
@@ -310,6 +334,30 @@ async fn arena_prompt_contains_only_candidate_facts() {
     assert!(!prompt.contains("anonymousRelation"));
     assert!(!prompt.contains("evaluation"));
     assert!(!prompt.contains("streak"));
+}
+
+#[tokio::test]
+async fn arena_with_one_candidate_fails_before_http() {
+    let material = ArenaRoastMaterial {
+        candidate_facts: vec![fact(
+            "match:arena_result",
+            "\u{89d2}\u{6597}\u{5bf9}\u{5c40}\u{4ee5}4\u{6bd4}3\u{80dc}\u{5229}",
+            FactSubject::Match,
+        )],
+    };
+    let (url, requests, handle) = loopback_server(Vec::new());
+    let error = client(&url, Duration::from_secs(2))
+        .generate(
+            "sk-synthetic-only",
+            RoastPromptMaterial::Arena(&material),
+            &vocabulary(),
+        )
+        .await
+        .unwrap_err();
+    handle.join().unwrap();
+
+    assert_eq!(error, DeepSeekRoastError::InvalidOutput);
+    assert_eq!(requests.lock().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -331,7 +379,7 @@ async fn status_errors_are_safe_and_not_retried() {
             .generate(
                 "sk-synthetic-only",
                 RoastPromptMaterial::Match(&material()),
-                &allowed_terms(),
+                &vocabulary(),
             )
             .await
             .unwrap_err();
@@ -359,7 +407,7 @@ async fn finish_errors_are_safe_and_not_retried() {
             .generate(
                 "sk-synthetic-only",
                 RoastPromptMaterial::Match(&material()),
-                &allowed_terms(),
+                &vocabulary(),
             )
             .await
             .unwrap_err();
@@ -381,7 +429,7 @@ async fn timeout_is_safe_and_not_retried() {
         .generate(
             "sk-synthetic-only",
             RoastPromptMaterial::Match(&material()),
-            &allowed_terms(),
+            &vocabulary(),
         )
         .await
         .unwrap_err();
@@ -415,7 +463,7 @@ async fn invalid_json_and_validation_retry_once() {
             .generate(
                 "sk-synthetic-only",
                 RoastPromptMaterial::Match(&material()),
-                &allowed_terms(),
+                &vocabulary(),
             )
             .await
             .unwrap();
@@ -443,7 +491,7 @@ async fn a_second_invalid_response_stops_retrying() {
         .generate(
             "sk-synthetic-only",
             RoastPromptMaterial::Match(&material()),
-            &allowed_terms(),
+            &vocabulary(),
         )
         .await
         .unwrap_err();
@@ -453,7 +501,7 @@ async fn a_second_invalid_response_stops_retrying() {
 }
 
 fn match_context() -> RoastValidationContext {
-    RoastValidationContext::for_match(&material(), allowed_terms())
+    RoastValidationContext::for_match(&material(), vocabulary())
 }
 
 fn assert_invalid(value: Value, expected: RoastValidationError) {
@@ -591,10 +639,10 @@ fn facts_numbers_and_terms_must_be_grounded() {
 }
 
 #[test]
-fn quoted_hero_terms_require_the_allowlist() {
+fn quoted_arbitrary_labels_require_the_allowlist() {
     let value = json!({
         "award": AWARD,
-        "commentary": format!("\u{4f60}\u{7528}\u{300c}{UNKNOWN_HERO}\u{300d}\u{6253}\u{51fa}\u{4e86}\u{8282}\u{594f}\u{3002}\u{533f}\u{540d}\u{961f}\u{53cb}\u{6cbb}\u{7597}\u{4e5f}\u{7a33}\u{ff0c}\u{8d62}\u{5f97}\u{5f88}\u{6e05}\u{695a}\u{3002}"),
+        "commentary": format!("\u{4f60}\u{7528}\u{300c}{ARBITRARY_LABEL}\u{300d}\u{6253}\u{51fa}\u{4e86}\u{8282}\u{594f}\u{3002}\u{533f}\u{540d}\u{961f}\u{53cb}\u{6cbb}\u{7597}\u{4e5f}\u{7a33}\u{ff0c}\u{8d62}\u{5f97}\u{5f88}\u{6e05}\u{695a}\u{3002}"),
         "usedFactIds": ["current_player:kills_rank", "relationship_subject:healing_rank"]
     });
     assert_eq!(
@@ -602,17 +650,46 @@ fn quoted_hero_terms_require_the_allowlist() {
         RoastValidationError::UnknownTerm
     );
     let mut terms = allowed_terms();
-    terms.insert(UNKNOWN_HERO.into());
+    terms.insert(ARBITRARY_LABEL.into());
     assert!(validate_roast_output(
         &value.to_string(),
-        &RoastValidationContext::for_match(&material(), terms)
+        &RoastValidationContext::for_match(
+            &material(),
+            RoastValidationVocabulary::new(known_terms(), terms),
+        )
     )
     .is_ok());
 }
 
 #[test]
+fn unquoted_known_entities_require_the_allowlist() {
+    for term in [UNKNOWN_HERO, SYNTHETIC_NAME] {
+        let value = json!({
+            "award": AWARD,
+            "commentary": format!("\u{4f60}\u{7528}{term}\u{6253}\u{51fa}\u{4e86}\u{8282}\u{594f}\u{3002}\u{533f}\u{540d}\u{961f}\u{53cb}\u{6cbb}\u{7597}\u{4e5f}\u{7a33}\u{ff0c}\u{8d62}\u{5f97}\u{5f88}\u{6e05}\u{695a}\u{3002}"),
+            "usedFactIds": ["current_player:kills_rank", "relationship_subject:healing_rank"]
+        });
+        assert_eq!(
+            validate_roast_output(&value.to_string(), &match_context()).unwrap_err(),
+            RoastValidationError::UnknownTerm
+        );
+
+        let mut terms = allowed_terms();
+        terms.insert(term.into());
+        assert!(validate_roast_output(
+            &value.to_string(),
+            &RoastValidationContext::for_match(
+                &material(),
+                RoastValidationVocabulary::new(known_terms(), terms),
+            )
+        )
+        .is_ok());
+    }
+}
+
+#[test]
 fn arena_requires_two_fact_ids() {
-    let context = RoastValidationContext::for_arena(&arena_material(), allowed_terms());
+    let context = RoastValidationContext::for_arena(&arena_material(), vocabulary());
     let value = json!({
         "award": "\u{89d2}\u{6597}\u{5956}",
         "commentary": "\u{8fd9}\u{573a}\u{89d2}\u{6597}\u{4ee5}4\u{6bd4}3\u{6536}\u{5c3e}\u{ff0c}\u{8282}\u{594f}\u{62c9}\u{6ee1}\u{3002}\u{51b3}\u{80dc}\u{8f6e}\u{6ca1}\u{624b}\u{8f6f}\u{ff0c}\u{7ed3}\u{679c}\u{5f88}\u{5e72}\u{51c0}\u{3002}",
