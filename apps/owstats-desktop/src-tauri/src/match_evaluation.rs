@@ -147,7 +147,7 @@ fn evaluation_match_rows(conn: &Connection) -> Result<Vec<MatchRow>> {
         SELECT m.match_id, m.game_mode, m.result, d.raw_detail_json
         FROM matches m
         LEFT JOIN match_details d ON d.match_id=m.match_id
-        WHERE m.bucket='preset'
+        WHERE (m.bucket='preset' AND m.match_kind='normal')
            OR (m.match_kind='fight' AND m.game_mode IN ('SportFight', 'LeisureFight', 'QuickFight'))
         ORDER BY m.begin_ts ASC, m.match_id ASC
         "#,
