@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 10;
+pub const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 struct Migration {
     version: i64,
@@ -61,6 +61,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 10,
         name: "career mmr v3 performance artifact storage",
         apply: migrate_v10,
+    },
+    Migration {
+        version: 11,
+        name: "permanent match AI roasts",
+        apply: migrate_v11,
     },
 ];
 
@@ -425,6 +430,25 @@ fn migrate_v10(transaction: &Transaction<'_>) -> Result<()> {
             algorithm TEXT NOT NULL,
             config_hash TEXT NOT NULL,
             artifact_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        "#,
+    )?;
+    Ok(())
+}
+
+fn migrate_v11(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS match_ai_roasts (
+            match_id TEXT PRIMARY KEY REFERENCES matches(match_id) ON DELETE CASCADE,
+            award TEXT NOT NULL CHECK(length(award) BETWEEN 1 AND 32),
+            commentary TEXT NOT NULL CHECK(length(commentary) BETWEEN 1 AND 720),
+            used_fact_ids_json TEXT NOT NULL CHECK(length(used_fact_ids_json) > 0),
+            model TEXT NOT NULL CHECK(length(model) > 0),
+            evaluation_rule_version INTEGER NOT NULL,
+            material_version INTEGER NOT NULL,
+            prompt_version INTEGER NOT NULL,
             created_at TEXT NOT NULL
         );
         "#,

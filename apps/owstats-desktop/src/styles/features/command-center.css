@@ -87,6 +87,76 @@
   font-weight: 400;
 }
 
+.deepSeekSettings {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: rgba(250, 251, 247, 0.38);
+  box-shadow: none;
+}
+
+.deepSeekSettingsHeading,
+.deepSeekSettingsControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.deepSeekSettingsHeading h3 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.deepSeekSettingsStatus,
+.deepSeekSettingsDisclosure,
+.deepSeekSettingsFeedback {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.deepSeekSettingsDisclosure,
+.deepSeekSettingsFeedback {
+  margin: 0;
+}
+
+.deepSeekSettingsForm {
+  display: grid;
+  gap: 8px;
+}
+
+.deepSeekSettingsForm label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.deepSeekSettingsInput,
+.deepSeekSettingsSubmit {
+  min-height: 44px;
+}
+
+.deepSeekSettingsInput {
+  min-width: 0;
+  flex: 1;
+  padding: 0 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+@media (max-width: 720px) {
+  .deepSeekSettingsHeading,
+  .deepSeekSettingsControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .commandCenterSyncPanel .seasonSyncWorkbench {
   margin-top: 20px;
   border: 0;

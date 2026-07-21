@@ -5,6 +5,7 @@ import { resolveArenaModTraitInfo } from "../../shared/assets";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../../shared/matchDetailHeaderFormat";
 import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
+import { AiMatchRoast } from "./AiMatchRoast";
 import { MatchDetailHeader } from "./MatchDetailHeader";
 import { MatchFavoriteEditor } from "./MatchFavoriteEditor";
 import { MatchTeamTable } from "./MatchTeamTable";
@@ -49,6 +50,11 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, f
             <MatchTeamTable title="对手数据" tone="enemy" players={detail.enemies.slice(0, 6)} showPerks />
           </div>
         </section>
+        <AiMatchRoast
+          matchId={detail.matchId}
+          initialRoast={detail.aiRoast}
+          detailReady={true}
+        />
         <MatchFavoriteEditor controller={favoriteController} />
       </div>
     </section>
@@ -173,7 +179,14 @@ function CompactArenaDetail({
           </div>
         </section>
         {selected.key === "summary" && (
-          <MatchFavoriteEditor controller={favoriteController} />
+          <>
+            <AiMatchRoast
+              matchId={detail.matchId}
+              initialRoast={detail.aiRoast}
+              detailReady={true}
+            />
+            <MatchFavoriteEditor controller={favoriteController} />
+          </>
         )}
       </div>
     </section>

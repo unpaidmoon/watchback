@@ -275,6 +275,13 @@ pub struct HeroStat {
     pub value: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMatchRoastView {
+    pub award: String,
+    pub commentary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchDetailView {
@@ -299,6 +306,7 @@ pub struct MatchDetailView {
     pub team_awards: Vec<MatchPerformanceAward>,
     pub same_role_comparison: Option<SameRoleComparison>,
     pub favorite: Option<MatchFavoriteView>,
+    pub ai_roast: Option<AiMatchRoastView>,
     pub raw_json: Value,
 }
 
@@ -839,6 +847,13 @@ pub struct CredentialStatus {
     #[serde(skip_serializing)]
     pub role_id: Option<i64>,
     pub saved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeepSeekKeyStatus {
+    pub state: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

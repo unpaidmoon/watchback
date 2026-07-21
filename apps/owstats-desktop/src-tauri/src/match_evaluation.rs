@@ -1,7 +1,7 @@
 use crate::db::OwDatabase;
 use anyhow::Result;
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -50,7 +50,7 @@ struct PlayerRow {
 
 impl PlayerRow {
     fn kda(&self) -> f64 {
-        (self.kill + self.assist) as f64 / self.death.max(1) as f64
+        (self.kill as f64 + self.assist as f64) / self.death.max(1) as f64
     }
 }
 
@@ -80,6 +80,65 @@ pub fn refresh_match_evaluations_conn(conn: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub(crate) fn evaluation_for_match_conn(
+    conn: &Connection,
+    match_id: &str,
+) -> Result<Option<MatchEvaluation>> {
+    let row = conn
+        .query_row(
+            "SELECT match_id, game_mode, result FROM matches WHERE match_id=? AND match_kind='normal'",
+            params![match_id],
+            |row| {
+                Ok(MatchRow {
+                    match_id: row.get(0)?,
+                    mode: row.get(1)?,
+                    result: row.get(2)?,
+                    raw_detail_json: None,
+                })
+            },
+        )
+        .optional()?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    if let Some(evaluation) = stored_evaluation(conn, match_id)? {
+        return Ok(Some(evaluation));
+    }
+    let evaluation = evaluate_match(conn, &row)?;
+    if let Some(evaluation) = &evaluation {
+        upsert_evaluation(conn, evaluation)?;
+    }
+    Ok(evaluation)
+}
+
+fn stored_evaluation(conn: &Connection, match_id: &str) -> Result<Option<MatchEvaluation>> {
+    conn.query_row(
+        r#"
+        SELECT match_id, mode, rule_version, grade, primary_tag,
+               evidence_tags_json, reasons_json, confidence
+        FROM match_evaluations
+        WHERE match_id=?
+        "#,
+        params![match_id],
+        |row| {
+            let evidence_tags_json: String = row.get(5)?;
+            let reasons_json: String = row.get(6)?;
+            Ok(MatchEvaluation {
+                match_id: row.get(0)?,
+                mode: row.get(1)?,
+                rule_version: row.get(2)?,
+                grade: row.get(3)?,
+                primary_tag: row.get(4)?,
+                evidence_tags: serde_json::from_str(&evidence_tags_json).unwrap_or_default(),
+                reasons: serde_json::from_str(&reasons_json).unwrap_or_default(),
+                confidence: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 fn evaluation_match_rows(conn: &Connection) -> Result<Vec<MatchRow>> {
@@ -326,15 +385,15 @@ fn unique_highest_deaths(current: &PlayerRow, teammates: &[&PlayerRow]) -> bool 
             == 1
 }
 
-fn total(players: &[PlayerRow], side: &str, value: fn(&PlayerRow) -> i64) -> i64 {
+fn total(players: &[PlayerRow], side: &str, value: fn(&PlayerRow) -> i64) -> i128 {
     players
         .iter()
         .filter(|player| player.side == side)
-        .map(value)
+        .map(|player| value(player) as i128)
         .sum()
 }
 
-fn close_damage(a: i64, b: i64) -> bool {
+fn close_damage(a: i128, b: i128) -> bool {
     let max = a.max(b);
     if max <= 0 {
         true

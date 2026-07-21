@@ -1,4 +1,9 @@
 use crate::account_context::{AccountContextManager, AccountContextSnapshot};
+use crate::ai_roast::client::DeepSeekRoastClient;
+use crate::ai_roast::coordinator::{
+    AiRoastCoordinator, AiRoastGenerationResult, CapturedRoastRequest,
+};
+use crate::deepseek_key::DeepSeekKeyManager;
 use crate::importer::existing_import_summary;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
@@ -7,9 +12,9 @@ use crate::{
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
     AccountLoginResult, ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus,
-    FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail, ImportSummary,
-    LoginTargetStatus, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView, MatchFilters,
-    MatchSummary, OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest,
+    DeepSeekKeyStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail,
+    ImportSummary, LoginTargetStatus, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView,
+    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest,
     PersonalSeasonReview, PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse,
     SeasonAnalysis, SeasonSyncResult, SyncRequest, UpdateCheckResult, UserSettings,
 };
@@ -150,6 +155,36 @@ pub fn get_credential_status(
 ) -> Result<CredentialStatus, String> {
     let account = active_account(&accounts)?;
     crate::credentials::get_credential_status_for_account(account.paths()).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_deepseek_key_status(
+    manager: State<'_, DeepSeekKeyManager>,
+) -> Result<DeepSeekKeyStatus, String> {
+    manager.status().map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn save_deepseek_key(
+    api_key: String,
+    manager: State<'_, DeepSeekKeyManager>,
+) -> Result<DeepSeekKeyStatus, String> {
+    manager.save(&api_key).await.map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn generate_match_ai_roast(
+    accounts: State<'_, AccountContextManager>,
+    keys: State<'_, DeepSeekKeyManager>,
+    coordinator: State<'_, AiRoastCoordinator>,
+    match_id: String,
+) -> Result<AiRoastGenerationResult, String> {
+    let account = active_account(&accounts)?;
+    let request = CapturedRoastRequest::new(account.database(), match_id)?;
+    let client = DeepSeekRoastClient::new().map_err(|_| {
+        "\u{65e0}\u{6cd5}\u{521d}\u{59cb}\u{5316} DeepSeek \u{670d}\u{52a1}\u{3002}".to_string()
+    })?;
+    coordinator.generate(request, &keys, &client).await
 }
 
 #[tauri::command]

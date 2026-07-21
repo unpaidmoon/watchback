@@ -3,6 +3,7 @@ pub mod account_login;
 pub mod account_migration;
 pub mod account_removal;
 pub mod account_store;
+pub mod ai_roast;
 mod analytics;
 pub mod app_paths;
 mod background_sync;
@@ -15,6 +16,7 @@ pub mod dashen_auth;
 pub mod dashen_client;
 mod database;
 mod db;
+pub mod deepseek_key;
 mod importer;
 pub mod login_flow;
 pub mod login_target;
@@ -30,6 +32,7 @@ mod settings;
 mod sync;
 mod sync_coordinator;
 
+pub use ai_roast::coordinator::AiRoastGenerationResult;
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
 pub use background_sync::{BackgroundEventSink, BackgroundSeasonSyncManager};
 pub use commands::runtime_error_message;
@@ -87,6 +90,10 @@ pub fn run() {
             let account_context = account_context::AccountContextManager::load(shared)
                 .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
             app.manage(account_context.clone());
+            app.manage(
+                deepseek_key::DeepSeekKeyManager::new()
+                    .map_err(|error| anyhow::anyhow!("无法初始化 DeepSeek 配置: {error}"))?,
+            );
             let manager = app.state::<background_sync::BackgroundSeasonSyncManager>();
             let registry = account_context.registry_snapshot()?;
             for entry in registry.accounts {
@@ -108,6 +115,7 @@ pub fn run() {
             Ok(())
         })
         .manage(sync_coordinator)
+        .manage(ai_roast::coordinator::AiRoastCoordinator::default())
         .manage(login_target::LoginTargetCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
@@ -123,6 +131,9 @@ pub fn run() {
             commands::get_onboarding_status,
             commands::get_personal_season_review,
             commands::get_credential_status,
+            commands::get_deepseek_key_status,
+            commands::save_deepseek_key,
+            commands::generate_match_ai_roast,
             commands::get_player_profile,
             commands::get_user_settings,
             commands::save_user_settings,
