@@ -1161,7 +1161,7 @@ fn valid_probability(value: f64) -> bool {
     value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
-fn valid_fact_strength(value: f64) -> bool {
+pub(super) fn valid_fact_strength(value: f64) -> bool {
     valid_probability(value) && value >= MIN_FACT_STRENGTH
 }
 
@@ -1243,7 +1243,7 @@ pub fn assert_material_privacy(material: &RoastMaterial) -> Result<()> {
     scan_value(&value)
 }
 
-fn scan_value(value: &Value) -> Result<()> {
+pub(super) fn scan_value(value: &Value) -> Result<()> {
     match value {
         Value::Object(values) => {
             for (key, value) in values {
