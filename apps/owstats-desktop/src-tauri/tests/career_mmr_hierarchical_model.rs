@@ -59,7 +59,8 @@ fn constrained_hierarchy_shares_all_queue_offsets_and_never_trains_outcome_only(
     assert!(model.core_weight("final").unwrap() > model.core_weight("nonfinal").unwrap());
     assert!(model.core_weight("nonfinal").unwrap() > 0.0);
     assert!(model.core_weight("death").unwrap() < 0.0);
-    assert!(model.cohort_offset(TrainingCohort::OpenQueue).is_some());
+    // 普通四模式已合并为单一 RoleQueue 训练组，OpenQueue 不再产生样本与 offset。
+    assert!(model.cohort_offset(TrainingCohort::OpenQueue).is_none());
     assert!(model.cohort_offset(TrainingCohort::RoleQueue).is_some());
     assert!(model
         .cohort_offset(TrainingCohort::StadiumCompetitive)
@@ -74,7 +75,6 @@ fn constrained_hierarchy_shares_all_queue_offsets_and_never_trains_outcome_only(
 
     for cohort in [
         TrainingCohort::RoleQueue,
-        TrainingCohort::OpenQueue,
         TrainingCohort::StadiumCompetitive,
     ] {
         let weights = model.effective_weights(cohort);
@@ -106,8 +106,10 @@ fn constrained_hierarchy_shares_all_queue_offsets_and_never_trains_outcome_only(
 
 #[test]
 fn sparse_cohort_offset_remains_forced_to_zero() {
+    // 稀疏 StadiumCompetitive cohort（149 行）应被强制归零；
+    // OpenCompetitive 已并入 RoleQueue，不再单独产生 offset。
     let rows = (0..149)
-        .map(|i| row(i, ModeFamily::OpenCompetitive, true))
+        .map(|i| row(i, ModeFamily::StadiumCompetitive, false))
         .chain((149..349).map(|i| row(i, ModeFamily::RoleCompetitive, true)))
         .collect::<Vec<_>>();
     let model = fit_model(
@@ -119,6 +121,9 @@ fn sparse_cohort_offset_remains_forced_to_zero() {
     )
     .unwrap();
     assert!(model.cohort_offset(TrainingCohort::OpenQueue).is_none());
+    assert!(model
+        .cohort_offset(TrainingCohort::StadiumCompetitive)
+        .is_none());
 }
 
 #[test]

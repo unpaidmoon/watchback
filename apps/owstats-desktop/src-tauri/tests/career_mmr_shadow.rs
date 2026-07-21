@@ -210,6 +210,7 @@ fn artifact() -> PerformanceModelArtifact {
         },
         sample_buckets: Vec::<AggregateSampleBucket>::new(),
         config_hash: "test".into(),
+        v3_runtime: None,
     }
 }
 
@@ -786,7 +787,7 @@ fn shadow_source_fixture() -> Result<(TempDir, SharedAppPaths)> {
         conn.execute("INSERT INTO hero_dict(guid,name,role,updated_at) VALUES('shadow-hero','合成英雄','damage','now') ON CONFLICT(guid) DO NOTHING",[])?;
         let match_id = format!("shadow-source-{index}");
         conn.execute("INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,24,'preset','SportPreset','normal','win','shadow-map','shadow-hero',?2,1,0,6,4,2,1000,0,0,0,600,'{\"roleType\":\"damage\",\"heroPlayTimeList\":[{\"heroGuid\":\"shadow-hero\",\"durationSec\":600}]}','now')",params![match_id,1000+index as i64])?;
-        conn.execute("INSERT INTO match_players(match_id,season,side,bnet_id,player_name,hero_guid,is_current_player,kill,assist,death,hero_damage,raw_json,updated_at) VALUES(?1,24,'teammate',?2,'合成当前玩家','shadow-hero',1,6,4,2,1000,'{\"finalHit\":4}','now')",params![match_id,format!("shadow-current-{index}")])?;
+        conn.execute("INSERT INTO match_players(match_id,season,side,bnet_id,player_name,hero_guid,is_current_player,kill,assist,death,hero_damage,raw_json,updated_at) VALUES(?1,24,'teammate',?2,'合成当前玩家','shadow-hero',1,6,4,2,1000,'{\"finalHit\":4}','now')",params![match_id,format!("shadow-current-{index}")])?;
         entries.push(AccountRegistryEntry {
             account_id,
             battle_tag: format!("合成影子#{index:04}"),

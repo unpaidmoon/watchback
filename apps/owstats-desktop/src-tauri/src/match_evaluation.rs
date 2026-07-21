@@ -3,6 +3,7 @@ use anyhow::Result;
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub const PHASE5_SCORING_RULE_VERSION: i64 = 1;
 
@@ -32,6 +33,7 @@ struct MatchRow {
     match_id: String,
     mode: String,
     result: String,
+    raw_detail_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,10 +85,12 @@ pub fn refresh_match_evaluations_conn(conn: &Connection) -> Result<()> {
 fn evaluation_match_rows(conn: &Connection) -> Result<Vec<MatchRow>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT match_id, game_mode, result
-        FROM matches
-        WHERE bucket='preset'
-        ORDER BY begin_ts ASC, match_id ASC
+        SELECT m.match_id, m.game_mode, m.result, d.raw_detail_json
+        FROM matches m
+        LEFT JOIN match_details d ON d.match_id=m.match_id
+        WHERE m.bucket='preset'
+           OR (m.match_kind='fight' AND m.game_mode IN ('SportFight', 'LeisureFight', 'QuickFight'))
+        ORDER BY m.begin_ts ASC, m.match_id ASC
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
@@ -94,6 +98,7 @@ fn evaluation_match_rows(conn: &Connection) -> Result<Vec<MatchRow>> {
             match_id: row.get(0)?,
             mode: row.get(1)?,
             result: row.get(2)?,
+            raw_detail_json: row.get(3)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -104,7 +109,11 @@ fn evaluate_match(conn: &Connection, row: &MatchRow) -> Result<Option<MatchEvalu
     if row.result != "win" && row.result != "loss" {
         return Ok(None);
     }
-    let players = player_rows(conn, &row.match_id)?;
+    let players = if is_stadium_mode(&row.mode) {
+        stadium_player_rows(row.raw_detail_json.as_deref())
+    } else {
+        player_rows(conn, &row.match_id)?
+    };
     let teammates = players
         .iter()
         .filter(|player| player.side == "teammate")
@@ -191,6 +200,65 @@ fn player_rows(conn: &Connection, match_id: &str) -> Result<Vec<PlayerRow>> {
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
+}
+
+fn is_stadium_mode(mode: &str) -> bool {
+    matches!(mode, "SportFight" | "LeisureFight" | "QuickFight")
+}
+
+fn stadium_player_rows(raw_detail_json: Option<&str>) -> Vec<PlayerRow> {
+    let Some(detail) = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return Vec::new();
+    };
+    let Some(round) = detail
+        .pointer("/payload/data/roundCountList")
+        .and_then(Value::as_array)
+        .and_then(|rounds| {
+            rounds.iter().rev().find(|round| {
+                round
+                    .get("teammateList")
+                    .and_then(Value::as_array)
+                    .is_some_and(|players| !players.is_empty())
+            })
+        })
+    else {
+        return Vec::new();
+    };
+
+    let mut players = Vec::new();
+    append_stadium_players(&mut players, round.get("teammateList"), "teammate");
+    append_stadium_players(&mut players, round.get("enemyList"), "enemy");
+    players
+}
+
+fn append_stadium_players(players: &mut Vec<PlayerRow>, value: Option<&Value>, side: &str) {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return;
+    };
+    for (index, item) in items.iter().filter(|item| item.is_object()).enumerate() {
+        players.push(PlayerRow {
+            side: side.to_string(),
+            is_current_player: side == "teammate" && index == 0,
+            kill: json_i64(item, "kill"),
+            assist: json_i64(item, "assist"),
+            death: json_i64(item, "death"),
+            damage: json_i64(item, "heroDamage"),
+            healing: json_i64(item, "cure"),
+            mitigation: json_i64(item, "resistDamage"),
+        });
+    }
+}
+
+fn json_i64(value: &Value, key: &str) -> i64 {
+    value
+        .get(key)
+        .and_then(|item| {
+            item.as_i64()
+                .or_else(|| item.as_f64().map(|number| number.round() as i64))
+                .or_else(|| item.as_str().and_then(|text| text.parse().ok()))
+        })
+        .unwrap_or(0)
 }
 
 fn evidence_tags(

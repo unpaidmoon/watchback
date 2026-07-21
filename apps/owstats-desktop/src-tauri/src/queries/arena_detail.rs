@@ -2,15 +2,7 @@ use super::*;
 
 pub(super) fn last_round_map_guid(raw_detail_json: Option<&str>) -> Option<String> {
     let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
-    detail
-        .pointer("/payload/data/roundCountList")
-        .and_then(Value::as_array)
-        .and_then(|rounds| {
-            rounds
-                .iter()
-                .rev()
-                .find_map(|round| string_field(round, "mapGuid"))
-        })
+    final_valid_arena_round(&detail).and_then(|round| string_field(round, "mapGuid"))
 }
 
 #[derive(Default)]
@@ -28,12 +20,7 @@ pub(super) struct FightListProjection {
 
 pub(super) fn fight_list_projection(raw_detail_json: Option<&str>) -> Option<FightListProjection> {
     let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
-    let last_round = detail
-        .pointer("/payload/data/roundCountList")
-        .and_then(Value::as_array)?
-        .iter()
-        .rev()
-        .find(|round| round.is_object())?;
+    let last_round = final_valid_arena_round(&detail)?;
     let player = last_round
         .get("teammateList")
         .and_then(Value::as_array)
@@ -49,6 +36,33 @@ pub(super) fn fight_list_projection(raw_detail_json: Option<&str>) -> Option<Fig
         mitigation: player.and_then(|item| optional_i64(item, "resistDamage")),
         duration_sec: optional_i64(last_round, "gameTimeSec"),
     })
+}
+
+pub(super) fn stadium_team_awards(raw_detail_json: Option<&str>) -> Vec<MatchPerformanceAward> {
+    let Some(detail) = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return Vec::new();
+    };
+    let Some(round) = final_valid_arena_round(&detail) else {
+        return Vec::new();
+    };
+    let players = player_rows(round.get("teammateList"), "teammate", &HashMap::new());
+    team_awards_from_players(&players)
+}
+
+fn final_valid_arena_round(detail: &Value) -> Option<&Value> {
+    detail
+        .pointer("/payload/data/roundCountList")
+        .and_then(Value::as_array)?
+        .iter()
+        .rev()
+        .find(|round| {
+            round.is_object()
+                && round
+                    .get("teammateList")
+                    .and_then(Value::as_array)
+                    .is_some_and(|players| !players.is_empty())
+        })
 }
 
 pub(super) fn match_evaluation_summary(

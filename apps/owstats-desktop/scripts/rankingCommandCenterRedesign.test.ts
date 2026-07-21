@@ -18,14 +18,17 @@ for (const contract of [
   /getRankings\(selectedSeason\)/,
   /const heroSortKeys: RankingSortKey\[\] = \["matches", "winRate", "playTimeHours", "kda"\]/,
   /const mapSortKeys: RankingSortKey\[\] = \["matches", "winRate", "playTimeHours", "kda"\]/,
-  /sortRankingRows\(filtered, sort\)/,
+  /sortRankingRows\(source, sort\)/,
   /ranking\?\.availableSeasons/,
   /nextParams\.set\("season", String\(nextSeason\)\)/,
 ]) assert.match(rankingSource, contract);
 
 assert.match(rankingSource, /title="英雄与地图排行"/);
 assert.match(rankingSource, /<PageHeader[\s\S]*actions=\{\([\s\S]*<PageSeasonSelect/);
-assert.match(rankingSource, /className="rankingToolbar phase6RankingToolbar"[\s\S]*phase6SegmentedControl[\s\S]*phase6RankingSearch[\s\S]*phase6RankingCount/);
+assert.match(rankingSource, /className="rankingToolbar phase6RankingToolbar"[\s\S]*phase6SegmentedControl[\s\S]*phase6RankingCount/);
+assert.doesNotMatch(rankingSource, /phase6RankingSearch/, "排行页不应保留搜索控件");
+assert.doesNotMatch(rankingSource, /const \[search, setSearch\]/, "排行页不应保留搜索状态");
+assert.doesNotMatch(rankingSource, /const keyword = search/, "排行数据不应再按搜索词过滤");
 assert.doesNotMatch(rankingSource, /className="rankingToolbar phase6RankingToolbar"[\s\S]*phase8SeasonSelect[\s\S]*<\/div>/);
 assert.match(
   rankingCss,

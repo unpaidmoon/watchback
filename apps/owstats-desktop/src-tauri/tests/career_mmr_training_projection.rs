@@ -1,7 +1,9 @@
 use anyhow::Result;
 use owstats_desktop_lib::{
     career_mmr::input::ModeFamily,
-    career_mmr::training::{build_training_projection, RoleTrainingAudit},
+    career_mmr::training::{
+        build_training_projection, build_training_projection_for_account, RoleTrainingAudit,
+    },
     OwDatabase,
 };
 use rusqlite::{params, Connection};
@@ -45,6 +47,33 @@ fn insert_stadium_match(
     conn.execute(
         "INSERT INTO match_players(match_id,season,side,bnet_id,player_name,hero_guid,is_current_player,raw_json,updated_at) VALUES(?1,23,'teammate','current-local','safe','entry-hero',1,'{}','now')",
         [match_id],
+    )?;
+    conn.execute(
+        "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES(?1,'arena',?2,'now')",
+        params![match_id, serde_json::json!({"payload":{"data":{"roundCountList":rounds}}}).to_string()],
+    )?;
+    Ok(())
+}
+
+fn insert_stadium_match_without_match_players(
+    conn: &Connection,
+    match_id: &str,
+    game_mode: &str,
+    battle_tag: &str,
+    arena_bnet_id: &str,
+    rounds: serde_json::Value,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO hero_dict(guid,name,role,updated_at) VALUES('support-hero','safe','support','now') ON CONFLICT(guid) DO NOTHING",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,23,'stadium',?2,'arena','win','map','entry-hero',200,1,0,0,0,0,0,0,0,0,600,'{}','now')",
+        params![match_id, game_mode],
+    )?;
+    conn.execute(
+        "INSERT INTO arena_match_players(match_id,season,side,bnet_id,player_name,updated_at) VALUES(?1,23,'teammate',?2,?3,'now')",
+        params![match_id, arena_bnet_id, battle_tag],
     )?;
     conn.execute(
         "INSERT INTO match_details(match_id,match_kind,raw_detail_json,updated_at) VALUES(?1,'arena',?2,'now')",
@@ -174,6 +203,62 @@ fn stadium_competitive_projects_only_the_final_snapshot() -> Result<()> {
 }
 
 #[test]
+fn stadium_identity_falls_back_to_arena_match_players_with_battle_tag() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match_without_match_players(
+        &conn,
+        "stadium-arena-identity",
+        "SportFight",
+        "匿名玩家#0000",
+        "arena-current",
+        serde_json::json!([
+            {
+                "roundIndex": 1,
+                "startTime": 100,
+                "teammateList": [
+                    {"bnetId":"arena-current","heroGuid":"support-hero","finalHit":5,"cure":800,"healingTaken":1200},
+                    {"bnetId":"arena-ally","heroGuid":"support-hero","cure":2600}
+                ],
+                "enemyList": []
+            }
+        ]),
+    )?;
+
+    // 没有 battleTag 时无法识别角斗当前玩家，该行必须被排除。
+    let without_tag = build_training_projection(&conn)?;
+    assert_eq!(
+        without_tag
+            .rows
+            .iter()
+            .filter(|row| row.mode_family == ModeFamily::StadiumCompetitive)
+            .count(),
+        0
+    );
+    assert_eq!(without_tag.audit.stadium_ambiguous_excluded, 1);
+
+    // 带上 battleTag 后从 arena_match_players 找回身份并取最终回合快照。
+    let with_tag =
+        build_training_projection_for_account(&conn, "dataset-001", Some("匿名玩家#0000"))?;
+    let rows = with_tag
+        .rows
+        .iter()
+        .filter(|row| row.mode_family == ModeFamily::StadiumCompetitive)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    let row = rows[0];
+    assert_eq!(row.role, "support");
+    assert_eq!(row.final_hit, Some(5.0));
+    assert_eq!(row.healing, Some(800.0));
+    assert_eq!(row.healing_taken, Some(1200.0));
+    assert_eq!(row.available_team_healing, Some(2600.0));
+    assert!(row.allow_performance);
+    assert!(!row.outcome_only);
+    assert_eq!(with_tag.audit.stadium_competitive_candidates, 1);
+    assert_eq!(with_tag.audit.stadium_ambiguous_excluded, 0);
+    Ok(())
+}
+
+#[test]
 fn stadium_training_quality_and_eligibility_follow_snapshot_coverage() -> Result<()> {
     let cases = [
         ("empty", serde_json::json!({}), 0.55, false),
@@ -242,7 +327,7 @@ fn stadium_training_quality_and_eligibility_follow_snapshot_coverage() -> Result
 }
 
 #[test]
-fn stadium_quick_keeps_outcome_row_but_never_trains_performance() -> Result<()> {
+fn stadium_quick_joins_shared_stadium_training_with_tight_runtime_cap() -> Result<()> {
     let (_dir, conn) = fixture()?;
     insert_stadium_match(
         &conn,
@@ -263,18 +348,97 @@ fn stadium_quick_keeps_outcome_row_but_never_trains_performance() -> Result<()> 
         .find(|row| {
             row.mode_family == owstats_desktop_lib::career_mmr::input::ModeFamily::StadiumQuick
         })
-        .expect("LeisureFight should remain as an outcome-only training row");
+        .expect("LeisureFight must still produce a training row");
     assert_eq!(row.role, "support");
-    assert!(row.outcome_only);
-    assert!(!row.allow_performance);
-    assert!(!row.allow_performance_by_hero);
-    assert_eq!(row.final_hit, None);
+    // Stadium quick trains performance inside the shared stadium cohort; it no
+    // longer stays outcome-only. Runtime eligibility is gated separately by the
+    // mode/tier cap (asserted in career_mmr_inputs), not by training eligibility.
+    assert!(row.allow_performance);
+    assert!(row.allow_performance_by_hero);
+    assert!(!row.outcome_only);
+    assert_eq!(row.final_hit, Some(7.0));
     assert!((row.data_quality - 0.585).abs() < 1e-12);
     assert_eq!(row.duration_sec, 600.0);
     assert_eq!(row.hero_duration_sec, Some(600.0));
     assert_eq!(projection.audit.stadium_competitive_candidates, 0);
-    assert_eq!(projection.audit.stadium_performance_eligible_rows, 0);
-    assert_eq!(projection.audit.stadium_quick_outcome_only_rows, 1);
+    assert_eq!(projection.audit.stadium_performance_eligible_rows, 1);
+    assert_eq!(projection.audit.stadium_quick_outcome_only_rows, 0);
+    Ok(())
+}
+
+#[test]
+fn stadium_identity_rejects_duplicate_battle_tag_rows() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match_without_match_players(
+        &conn,
+        "stadium-duplicate-tag",
+        "SportFight",
+        "匿名玩家#0000",
+        "arena-current",
+        serde_json::json!([{
+            "roundIndex": 1,
+            "teammateList": [
+                {"bnetId":"arena-current","heroGuid":"support-hero","finalHit":5,"cure":800},
+                {"bnetId":"arena-ally","heroGuid":"support-hero","cure":2600}
+            ],
+            "enemyList": []
+        }]),
+    )?;
+    // A second arena row with the same player_name (battleTag) must make the
+    // current-player identity ambiguous: count==2 fails the exact-uniqueness rule.
+    conn.execute(
+        "INSERT INTO arena_match_players(match_id,season,side,bnet_id,player_name,updated_at) VALUES(?1,23,'teammate','arena-duplicate','匿名玩家#0000','now')",
+        ["stadium-duplicate-tag"],
+    )?;
+
+    let with_tag =
+        build_training_projection_for_account(&conn, "dataset-001", Some("匿名玩家#0000"))?;
+    assert_eq!(
+        with_tag
+            .rows
+            .iter()
+            .filter(|row| row.mode_family == ModeFamily::StadiumCompetitive)
+            .count(),
+        0,
+        "duplicate battleTag rows must not resolve to any current player"
+    );
+    assert_eq!(with_tag.audit.stadium_ambiguous_excluded, 1);
+    assert_eq!(with_tag.audit.stadium_performance_eligible_rows, 0);
+    Ok(())
+}
+
+#[test]
+fn stadium_identity_does_not_fall_back_to_another_player() -> Result<()> {
+    let (_dir, conn) = fixture()?;
+    insert_stadium_match_without_match_players(
+        &conn,
+        "stadium-other-tag",
+        "SportFight",
+        "其他玩家#1234",
+        "arena-other",
+        serde_json::json!([{
+            "roundIndex": 1,
+            "teammateList": [
+                {"bnetId":"arena-other","heroGuid":"support-hero","finalHit":5,"cure":800}
+            ],
+            "enemyList": []
+        }]),
+    )?;
+
+    // The registered account battleTag does not match any arena row. The match
+    // must be excluded rather than borrowing another player's snapshot.
+    let with_tag =
+        build_training_projection_for_account(&conn, "dataset-001", Some("匿名玩家#0000"))?;
+    assert_eq!(
+        with_tag
+            .rows
+            .iter()
+            .filter(|row| row.mode_family == ModeFamily::StadiumCompetitive)
+            .count(),
+        0
+    );
+    assert_eq!(with_tag.audit.stadium_ambiguous_excluded, 1);
+    assert_eq!(with_tag.audit.stadium_performance_eligible_rows, 0);
     Ok(())
 }
 
@@ -496,7 +660,7 @@ fn expected_rate_comes_only_from_active_model() -> Result<()> {
             "INSERT INTO mmr_model_versions VALUES(?1,'test','{}',?2,'now')",
             params![version, active],
         )?;
-        conn.execute("INSERT INTO career_mmr_events VALUES(?1,'private-match','damage',22,100,'role_competitive',1,1,?2,.8,0,2500,200,1,1,2501,199,.8,'hash','now')", params![version,expected])?;
+        conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(?1,'private-match','damage',22,100,'role_competitive',1,1,?2,.8,0,2500,200,1,1,2501,199,.8,'hash','now')", params![version,expected])?;
     }
     let row = build_training_projection(&conn)?.rows.remove(0);
     assert_eq!(row.expected_win_rate, 0.4);

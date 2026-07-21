@@ -200,13 +200,14 @@ pub async fn add_account(
     app: AppHandle,
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<AccountLoginResult, String> {
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
     let shared = accounts.shared_paths().clone();
     let capture_app = app.clone();
-    crate::account_login::capture_and_publish_add(
+    let result = crate::account_login::capture_and_publish_add(
         &accounts,
         &app,
         move || async move {
@@ -219,7 +220,15 @@ pub async fn add_account(
         crate::credentials::login_cancelled,
     )
     .await
-    .map_err(to_message)
+    .map_err(to_message)?;
+    reconcile_published_login_target(
+        &accounts,
+        login_target_coordinator.inner(),
+        &result,
+        DASHEN_ROOT_BASE,
+    )
+    .await?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -227,6 +236,7 @@ pub async fn relogin_account(
     app: AppHandle,
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     account_id: String,
 ) -> Result<AccountLoginResult, String> {
     let _permit = operation_coordinator
@@ -236,7 +246,7 @@ pub async fn relogin_account(
         .map_err(|_| "账号标识无效。".to_string())?;
     let shared = accounts.shared_paths().clone();
     let capture_app = app.clone();
-    crate::account_login::capture_and_publish_relogin(
+    let result = crate::account_login::capture_and_publish_relogin(
         &accounts,
         &account_id,
         &app,
@@ -250,7 +260,48 @@ pub async fn relogin_account(
         crate::credentials::login_cancelled,
     )
     .await
-    .map_err(to_message)
+    .map_err(to_message)?;
+    reconcile_published_login_target(
+        &accounts,
+        login_target_coordinator.inner(),
+        &result,
+        DASHEN_ROOT_BASE,
+    )
+    .await?;
+    Ok(result)
+}
+
+async fn reconcile_published_login_target(
+    accounts: &AccountContextManager,
+    coordinator: &crate::login_target::LoginTargetCoordinator,
+    result: &AccountLoginResult,
+    root_base_url: &str,
+) -> Result<(), String> {
+    if !matches!(
+        result.kind.as_str(),
+        "newAccountAdded" | "existingAccountUpdated"
+    ) {
+        return Ok(());
+    }
+    let account_id = result
+        .account_id
+        .as_deref()
+        .and_then(|value| crate::account_store::AccountId::parse(value).ok())
+        .ok_or_else(|| "账号登录结果不完整，请重试。".to_string())?;
+    let account = accounts.snapshot_for(&account_id).map_err(to_message)?;
+    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
+        .map_err(to_message)?;
+    let target_path = crate::player_target::player_target_path_for_account(account.paths());
+    crate::login_target::reconcile_detected_target(
+        coordinator,
+        account.account_id(),
+        &credentials,
+        result.battle_tag.as_deref(),
+        &target_path,
+        root_base_url,
+    )
+    .await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -527,7 +578,7 @@ pub fn rebuild_career_mmr(
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
     let account = active_account(&accounts)?;
-    crate::career_mmr::replay::rebuild_career_mmr(&account.database()).map_err(to_message)
+    crate::career_mmr::replay::rebuild_career_mmr_active(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
@@ -666,6 +717,56 @@ fn to_message(error: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod account_management_tests {
     use super::*;
+    use crate::app_paths::SharedAppPaths;
+
+    #[tokio::test]
+    async fn published_login_updates_the_account_scoped_target_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager =
+            AccountContextManager::load(<SharedAppPaths>::from_app_data_dir(temp.path())).unwrap();
+        let result = crate::account_login::publish_add_account(
+            &manager,
+            crate::account_login::LoginCapture {
+                credentials: crate::credential_store::DashenCredentials {
+                    role_id: 101101,
+                    token: "synthetic-account-token".to_string(),
+                    customer_token: None,
+                    dts: None,
+                    server: 1,
+                    saved_at: "2026-07-16T00:00:00Z".to_string(),
+                },
+                battle_tag: "Synthetic#1011".to_string(),
+            },
+        )
+        .unwrap();
+        let account_id = result
+            .account_id
+            .as_deref()
+            .and_then(|value| crate::account_store::AccountId::parse(value).ok())
+            .unwrap();
+        let account = manager.snapshot_for(&account_id).unwrap();
+        crate::player_target::save_player_target_for_path(
+            &account.paths().player_target(),
+            &crate::player_target::PlayerTarget {
+                input_bnet: "Synthetic#1011".to_string(),
+                resolved_bnet: Some("Synthetic#1011".to_string()),
+                customer_token: "synthetic-player-token".to_string(),
+                bound_at: "2026-07-16T00:00:00Z".to_string(),
+                source_role_id: Some(101101),
+            },
+        )
+        .unwrap();
+        let coordinator = crate::login_target::LoginTargetCoordinator::default();
+
+        reconcile_published_login_target(&manager, &coordinator, &result, "http://127.0.0.1:1")
+            .await
+            .unwrap();
+
+        let status = coordinator.status(&account_id).unwrap();
+        assert_eq!(status.state, "ready");
+        assert!(status.sync_allowed);
+        assert_eq!(status.detected_bnet.as_deref(), Some("Synthetic#1011"));
+    }
 
     #[test]
     fn removing_one_account_clears_only_its_login_target_session() {

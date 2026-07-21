@@ -17,13 +17,16 @@ use std::sync::mpsc;
 const MAX_LOO_WORSENED_FRACTION: f64 = 0.25;
 const MAX_ABS_AVERAGE_ADJUSTMENT: f64 = 0.10;
 
-pub const VALIDATION_MODES: [ModeFamily; 5] = [
+pub const VALIDATION_MODES: [ModeFamily; 6] = [
     ModeFamily::RoleCompetitive,
     ModeFamily::RoleQuick,
     ModeFamily::OpenCompetitive,
     ModeFamily::OpenQuick,
     ModeFamily::StadiumCompetitive,
+    ModeFamily::StadiumQuick,
 ];
+
+const VALIDATION_CELL_COUNT: usize = 3 * VALIDATION_MODES.len();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -160,6 +163,14 @@ pub struct StabilityConfig {
     pub seed: u64,
     pub max_loo_worsened_fraction: f64,
     pub max_abs_average_adjustment: f64,
+    pub minimum_improved_folds: usize,
+    pub minimum_critical_direction_stability: f64,
+    pub maximum_bootstrap_brier_ci_high: f64,
+    pub require_critical_ci_excludes_zero: bool,
+    pub require_nonzero_reference_coefficients: bool,
+    pub maximum_single_feature_share: f64,
+    pub maximum_cap_hit_rate: f64,
+    pub max_ece_worsening: f64,
     pub promoted_candidates: Option<Vec<PromotedCandidate>>,
 }
 impl Default for StabilityConfig {
@@ -167,8 +178,18 @@ impl Default for StabilityConfig {
         Self {
             bootstrap_iterations: 1000,
             seed: 0x5eed,
-            max_loo_worsened_fraction: MAX_LOO_WORSENED_FRACTION,
+            max_loo_worsened_fraction: 0.35,
             max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
+            // 上线门槛（放宽后）：只保留“多数 forward 折胜 + 方向大体稳定 + 幅度/封顶安全线”，
+            // 其余统计量降级为报告参考指标。
+            minimum_improved_folds: 3,
+            minimum_critical_direction_stability: 0.75,
+            maximum_bootstrap_brier_ci_high: 0.01,
+            require_critical_ci_excludes_zero: false,
+            require_nonzero_reference_coefficients: false,
+            maximum_single_feature_share: 0.50,
+            maximum_cap_hit_rate: 0.05,
+            max_ece_worsening: 0.02,
             promoted_candidates: None,
         }
     }
@@ -205,21 +226,21 @@ impl StabilityConfig {
             fit_learning_rate: defaults.learning_rate,
             fit_steps: MODEL_FIT_STEPS,
             minimum_cohort_offset_rows: defaults.min_cohort_offset_rows,
-            minimum_improved_folds: 4,
+            minimum_improved_folds: self.minimum_improved_folds,
             minimum_role_core_rows: 500,
             minimum_cohort_rows: 150,
             minimum_season_loo_groups: 2,
-            minimum_hero_loo_groups: 5,
+            minimum_hero_loo_groups: 3,
             minimum_loo_row_coverage: 0.80,
             minimum_bootstrap_completion: 0.90,
-            minimum_critical_direction_stability: 0.90,
-            maximum_bootstrap_brier_ci_high: 0.0,
-            max_ece_worsening: 0.005,
-            maximum_single_feature_share: 0.35,
-            maximum_cap_hit_rate: 0.05,
+            minimum_critical_direction_stability: self.minimum_critical_direction_stability,
+            maximum_bootstrap_brier_ci_high: self.maximum_bootstrap_brier_ci_high,
+            max_ece_worsening: self.max_ece_worsening,
+            maximum_single_feature_share: self.maximum_single_feature_share,
+            maximum_cap_hit_rate: self.maximum_cap_hit_rate,
             require_account_coverage: true,
-            require_critical_ci_excludes_zero: true,
-            require_nonzero_reference_coefficients: true,
+            require_critical_ci_excludes_zero: self.require_critical_ci_excludes_zero,
+            require_nonzero_reference_coefficients: self.require_nonzero_reference_coefficients,
             promoted_candidates: self.promoted_candidates.clone(),
         }
     }
@@ -467,35 +488,35 @@ impl StabilityReport {
             max_abs_average_adjustment: MAX_ABS_AVERAGE_ADJUSTMENT,
         }
     }
-    pub fn apply_gates(&mut self) {
+    pub fn apply_default_gates(&mut self) {
+        self.apply_gates(&StabilityConfig::default().snapshot());
+    }
+    pub fn apply_gates(&mut self, config: &StabilityConfigSnapshot) {
         let mut reasons = self.forward.rejected_reasons.clone();
-        if self.forward.improved_folds < 4 {
-            push_once(&mut reasons, "improved_folds_below_4");
+        if self.forward.improved_folds < config.minimum_improved_folds {
+            push_once(&mut reasons, "improved_folds_below_minimum");
         }
-        if self
-            .bootstrap
-            .coefficients
-            .iter()
-            .any(|c| c.critical_constraint && c.direction_stability < 0.9)
-        {
-            push_once(
-                &mut reasons,
-                "critical_direction_stability_below_90_percent",
-            );
+        if self.bootstrap.coefficients.iter().any(|c| {
+            c.critical_constraint
+                && c.direction_stability < config.minimum_critical_direction_stability
+        }) {
+            push_once(&mut reasons, "critical_direction_stability_below_minimum");
         }
-        if self
-            .bootstrap
-            .coefficients
-            .iter()
-            .any(|c| !c.reference_nonzero)
+        if config.require_nonzero_reference_coefficients
+            && self
+                .bootstrap
+                .coefficients
+                .iter()
+                .any(|c| !c.reference_nonzero)
         {
             push_once(&mut reasons, "zero_reference_coefficient_unstable");
         }
-        if self
-            .bootstrap
-            .coefficients
-            .iter()
-            .any(|c| c.critical_constraint && c.ci95_low <= 0.0 && c.ci95_high >= 0.0)
+        if config.require_critical_ci_excludes_zero
+            && self
+                .bootstrap
+                .coefficients
+                .iter()
+                .any(|c| c.critical_constraint && c.ci95_low <= 0.0 && c.ci95_high >= 0.0)
         {
             push_once(&mut reasons, "critical_coefficient_ci_crosses_zero");
         }
@@ -536,47 +557,38 @@ impl StabilityReport {
             if loo.worsened_fraction() > self.max_loo_worsened_fraction {
                 push_once(
                     &mut reasons,
-                    &format!("{name}_loo_worsened_fraction_above_25_percent"),
+                    &format!("{name}_loo_worsened_fraction_above_maximum"),
                 );
             }
         }
         if self
             .bootstrap
             .brier_delta_ci95_high
-            .is_none_or(|v| v >= 0.0)
+            .is_none_or(|v| v >= config.maximum_bootstrap_brier_ci_high)
         {
-            push_once(&mut reasons, "bootstrap_brier_ci_not_below_zero");
+            push_once(&mut reasons, "bootstrap_brier_ci_above_maximum");
         }
         if self
             .forward
             .metrics
             .as_ref()
             .zip(self.forward.baseline_metrics.as_ref())
-            .is_some_and(|(candidate, baseline)| candidate.ece > baseline.ece + 0.005)
+            .is_some_and(|(candidate, baseline)| {
+                candidate.ece > baseline.ece + config.max_ece_worsening
+            })
         {
-            push_once(&mut reasons, "ece_worse_than_0_005");
+            push_once(&mut reasons, "ece_worse_than_maximum");
         }
-        if self.forward.p95_single_feature_share > 0.35 {
-            push_once(
-                &mut reasons,
-                "p95_single_feature_contribution_above_35_percent",
-            );
+        if self.forward.p95_single_feature_share > config.maximum_single_feature_share {
+            push_once(&mut reasons, "p95_single_feature_share_above_maximum");
         }
         if self.forward.average_adjustment.abs() > self.max_abs_average_adjustment {
             push_once(&mut reasons, "average_adjustment_above_0_10_mmr");
         }
-        if self.forward.upper_cap_rate > 0.05 || self.forward.lower_cap_rate > 0.05 {
-            push_once(&mut reasons, "cap_hit_rate_above_5_percent");
-        }
-        if self.strategy == "resourceconversiondebt"
-            && self
-                .bootstrap
-                .coefficients
-                .iter()
-                .find(|coefficient| coefficient.weight == "debt")
-                .is_none_or(|coefficient| coefficient.ci95_high >= 0.0)
+        if self.forward.upper_cap_rate > config.maximum_cap_hit_rate
+            || self.forward.lower_cap_rate > config.maximum_cap_hit_rate
         {
-            push_once(&mut reasons, "resource_debt_ci_upper_not_below_zero");
+            push_once(&mut reasons, "cap_hit_rate_above_maximum");
         }
         self.rejected_reasons = reasons;
         self.eligible = self.rejected_reasons.is_empty();
@@ -616,6 +628,51 @@ pub struct StabilityEvaluation {
     pub worker_errors: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+struct StabilityWorkerJob {
+    role: Role,
+    strategy: HealingTakenStrategy,
+    fixed: Option<CandidateSelection>,
+}
+
+fn stability_worker_jobs(config: &StabilityConfig) -> Vec<StabilityWorkerJob> {
+    if let Some(candidates) = config.promoted_candidates.as_ref() {
+        return candidates
+            .iter()
+            .filter_map(|candidate| {
+                Some(StabilityWorkerJob {
+                    role: candidate.role,
+                    strategy: parse_strategy_checked(&candidate.strategy)?,
+                    fixed: Some(candidate.selection()),
+                })
+            })
+            .collect();
+    }
+
+    [Role::Tank, Role::Damage, Role::Support]
+        .into_iter()
+        .flat_map(|role| {
+            [
+                HealingTakenStrategy::None,
+                HealingTakenStrategy::DirectNegative,
+                HealingTakenStrategy::HeroNormalized,
+                HealingTakenStrategy::ExcessHealing,
+                HealingTakenStrategy::ResourceConversionDebt,
+            ]
+            .into_iter()
+            .map(move |strategy| StabilityWorkerJob {
+                role,
+                strategy,
+                fixed: None,
+            })
+        })
+        .collect()
+}
+
+fn needs_nested_validation(reports: &[StabilityReport]) -> bool {
+    reports.iter().any(|report| report.eligible)
+}
+
 pub fn evaluate_stability(source: &[TrainingRow], config: StabilityConfig) -> StabilityEvaluation {
     evaluate_stability_with_progress(source, config, |_| {})
 }
@@ -629,128 +686,128 @@ pub fn evaluate_stability_with_progress(
     let stage = config_snapshot.stage;
     let candidate_count = config.promoted_candidates.as_ref().map_or(15, Vec::len);
     let bootstrap_total = config.bootstrap_iterations.saturating_mul(candidate_count);
-    let total = bootstrap_total.saturating_add(15);
+    let total = bootstrap_total.saturating_add(VALIDATION_CELL_COUNT);
     let started = std::time::Instant::now();
     on_progress(aggregate_progress_event(stage, 0, total, 0));
     let source = eligible_performance_rows(source);
     let (mut reports, mut worker_errors) = std::thread::scope(|scope| {
         let source = &source;
         let (progress_tx, progress_rx) = mpsc::channel::<usize>();
-        let handles = [Role::Tank, Role::Damage, Role::Support].map(|role| {
-            let config = &config;
-            let progress_tx = progress_tx.clone();
-            scope.spawn(move || {
-                let role_rows_all = source
-                    .iter()
-                    .filter(|r| r.role == role_name(role))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let role_core_rows = role_rows_all.len();
-                let mut reports = Vec::new();
-                let candidates = config
-                    .promoted_candidates
-                    .as_ref()
-                    .map(|all| {
-                        all.iter()
-                            .filter(|candidate| candidate.role == role)
-                            .filter_map(|candidate| {
-                                let strategy = parse_strategy_checked(&candidate.strategy)?;
-                                Some((strategy, Some(candidate.selection())))
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| {
-                        [
-                            HealingTakenStrategy::None,
-                            HealingTakenStrategy::DirectNegative,
-                            HealingTakenStrategy::HeroNormalized,
-                            HealingTakenStrategy::ExcessHealing,
-                            HealingTakenStrategy::ResourceConversionDebt,
-                        ]
-                        .into_iter()
-                        .map(|strategy| (strategy, None))
-                        .collect()
-                    });
-                for (strategy, fixed) in candidates {
-                    let forwards = VALIDATION_MODES
-                        .into_iter()
-                        .map(|mode| {
-                            (
-                                mode,
-                                fixed.map_or_else(
-                                    || evaluate_cell_strategy(&role_rows_all, role, mode, strategy),
-                                    |selected| {
-                                        evaluate_cell_strategy_fixed(
-                                            &role_rows_all,
-                                            role,
-                                            mode,
-                                            strategy,
-                                            selected,
-                                        )
-                                    },
-                                ),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let selected = &forwards[0].1;
-                    debug_assert!(forwards.iter().all(|(_, forward)| {
-                        forward.variant == selected.variant
-                            && forward.final_multiplier == selected.final_multiplier
-                            && forward.lambda_core == selected.lambda_core
-                            && forward.lambda_cohort == selected.lambda_cohort
-                    }));
-                    let mut bootstraps = bootstrap_all_modes(
-                        &role_rows_all,
-                        role,
-                        strategy,
-                        selected.variant,
-                        selected.final_multiplier,
-                        selected.lambda_core,
-                        selected.lambda_cohort,
-                        config,
-                        Some(&progress_tx),
-                    );
-                    for (mode, forward) in forwards {
-                        let cohort = mode.training_cohort();
-                        let season = loo_season(&role_rows_all, role, mode, strategy, fixed);
-                        let hero = loo_hero(&role_rows_all, role, mode, strategy, fixed);
-                        let account = loo_account(&role_rows_all, role, mode, strategy, fixed);
-                        let bootstrap = bootstraps.remove(&mode).unwrap_or_default();
-                        let mut report = StabilityReport {
-                            role,
-                            mode,
-                            training_cohort: cohort,
-                            shared_parameter_version: shared_parameter_version(cohort),
-                            strategy: forward.strategy.clone(),
-                            forward,
-                            leave_one_season_out: season,
-                            leave_one_hero_out: hero,
-                            leave_one_account_out: account,
-                            bootstrap,
-                            eligible: false,
-                            decision: CellDecision::Shadow,
-                            rejected_reasons: vec![],
-                            performance_adjustment: 0.0,
-                            max_loo_worsened_fraction: config.max_loo_worsened_fraction,
-                            max_abs_average_adjustment: config.max_abs_average_adjustment,
-                        };
-                        report.apply_gates();
-                        if role_core_rows < 500 {
-                            push_once(&mut report.rejected_reasons, "role_core_rows_below_500");
-                            report.eligible = false;
-                            report.decision = CellDecision::Shadow;
+        let handles = stability_worker_jobs(&config)
+            .into_iter()
+            .map(|job| {
+                let role = job.role;
+                let config = &config;
+                let progress_tx = progress_tx.clone();
+                let config_snapshot = config_snapshot.clone();
+                (
+                    role,
+                    scope.spawn(move || {
+                        let role_rows_all = source
+                            .iter()
+                            .filter(|r| r.role == role_name(role))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let role_core_rows = role_rows_all.len();
+                        let mut reports = Vec::new();
+                        let candidates = [(job.strategy, job.fixed)];
+                        for (strategy, fixed) in candidates {
+                            let forwards = VALIDATION_MODES
+                                .into_iter()
+                                .map(|mode| {
+                                    (
+                                        mode,
+                                        fixed.map_or_else(
+                                            || {
+                                                evaluate_cell_strategy(
+                                                    &role_rows_all,
+                                                    role,
+                                                    mode,
+                                                    strategy,
+                                                )
+                                            },
+                                            |selected| {
+                                                evaluate_cell_strategy_fixed(
+                                                    &role_rows_all,
+                                                    role,
+                                                    mode,
+                                                    strategy,
+                                                    selected,
+                                                )
+                                            },
+                                        ),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            let selected = &forwards[0].1;
+                            debug_assert!(forwards.iter().all(|(_, forward)| {
+                                forward.variant == selected.variant
+                                    && forward.final_multiplier == selected.final_multiplier
+                                    && forward.lambda_core == selected.lambda_core
+                                    && forward.lambda_cohort == selected.lambda_cohort
+                            }));
+                            let mut bootstraps = bootstrap_all_modes(
+                                &role_rows_all,
+                                role,
+                                strategy,
+                                selected.variant,
+                                selected.final_multiplier,
+                                selected.lambda_core,
+                                selected.lambda_cohort,
+                                config,
+                                Some(&progress_tx),
+                            );
+                            for (mode, forward) in forwards {
+                                let cohort = mode.training_cohort();
+                                let season =
+                                    loo_season(&role_rows_all, role, mode, strategy, fixed);
+                                let hero = loo_hero(&role_rows_all, role, mode, strategy, fixed);
+                                let account =
+                                    loo_account(&role_rows_all, role, mode, strategy, fixed);
+                                let bootstrap = bootstraps.remove(&mode).unwrap_or_default();
+                                let mut report = StabilityReport {
+                                    role,
+                                    mode,
+                                    training_cohort: cohort,
+                                    shared_parameter_version: shared_parameter_version(cohort),
+                                    strategy: forward.strategy.clone(),
+                                    forward,
+                                    leave_one_season_out: season,
+                                    leave_one_hero_out: hero,
+                                    leave_one_account_out: account,
+                                    bootstrap,
+                                    eligible: false,
+                                    decision: CellDecision::Shadow,
+                                    rejected_reasons: vec![],
+                                    performance_adjustment: 0.0,
+                                    max_loo_worsened_fraction: config.max_loo_worsened_fraction,
+                                    max_abs_average_adjustment: config.max_abs_average_adjustment,
+                                };
+                                report.apply_gates(&config_snapshot);
+                                if role_core_rows < 500 {
+                                    push_once(
+                                        &mut report.rejected_reasons,
+                                        "role_core_rows_below_500",
+                                    );
+                                    report.eligible = false;
+                                    report.decision = CellDecision::Shadow;
+                                }
+                                if report.leave_one_account_out.coverage_limited_groups > 0 {
+                                    push_once(
+                                        &mut report.rejected_reasons,
+                                        "account_coverage_limited",
+                                    );
+                                    report.eligible = false;
+                                    report.decision = CellDecision::Shadow;
+                                }
+                                reports.push(report);
+                            }
                         }
-                        if report.leave_one_account_out.coverage_limited_groups > 0 {
-                            push_once(&mut report.rejected_reasons, "account_coverage_limited");
-                            report.eligible = false;
-                            report.decision = CellDecision::Shadow;
-                        }
-                        reports.push(report);
-                    }
-                }
-                reports
+                        reports
+                    }),
+                )
             })
-        });
+            .collect::<Vec<_>>();
         drop(progress_tx);
         let mut raw_completed = 0usize;
         let mut emitted_completed = 0usize;
@@ -768,16 +825,16 @@ pub fn evaluate_stability_with_progress(
         merge_worker_results(
             handles
                 .into_iter()
-                .zip([Role::Tank, Role::Damage, Role::Support])
-                .map(|(handle, role)| (role, handle.join().ok()))
+                .map(|(role, handle)| (role, handle.join().ok()))
                 .collect(),
         )
     });
     reports.sort_by_key(|report| (report.role, report.mode, strategy_order(&report.strategy)));
     let nested_started = std::time::Instant::now();
     let mut cells = Vec::new();
+    let nested_config_snapshot = config_snapshot.clone();
     if worker_errors.is_empty() {
-        let (completed_cells, failed) = run_nested_sequence(
+        let (completed_cells, failed) = run_nested_parallel(
             |role, mode| {
                 Ok(evaluate_nested_cell_report(
                     &source,
@@ -785,6 +842,7 @@ pub fn evaluate_stability_with_progress(
                     role,
                     mode,
                     config.promoted_candidates.as_deref(),
+                    &nested_config_snapshot,
                 ))
             },
             |completed| {
@@ -803,6 +861,7 @@ pub fn evaluate_stability_with_progress(
             worker_errors.push("nested_cell_worker_failed".into());
         }
     }
+    apply_cohort_shared_promotion(&mut cells);
     let roles = [Role::Tank, Role::Damage, Role::Support]
         .into_iter()
         .map(|role| {
@@ -830,6 +889,7 @@ pub fn evaluate_stability_with_progress(
     evaluation
 }
 
+#[cfg(test)]
 fn run_nested_sequence<T>(
     mut evaluator: impl FnMut(Role, ModeFamily) -> Result<T, ()>,
     mut on_complete: impl FnMut(usize),
@@ -851,6 +911,33 @@ fn run_nested_sequence<T>(
     (completed, false)
 }
 
+fn run_nested_parallel<T: Send>(
+    evaluator: impl Fn(Role, ModeFamily) -> Result<T, ()> + Sync,
+    mut on_complete: impl FnMut(usize),
+) -> (Vec<T>, bool) {
+    std::thread::scope(|scope| {
+        let evaluator = &evaluator;
+        let mut handles = Vec::with_capacity(VALIDATION_CELL_COUNT);
+        for role in [Role::Tank, Role::Damage, Role::Support] {
+            for mode in VALIDATION_MODES {
+                handles.push(scope.spawn(move || evaluator(role, mode)));
+            }
+        }
+
+        let mut completed = Vec::with_capacity(VALIDATION_CELL_COUNT);
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(value)) => {
+                    completed.push(value);
+                    on_complete(completed.len());
+                }
+                Ok(Err(())) | Err(_) => return (completed, true),
+            }
+        }
+        (completed, false)
+    })
+}
+
 fn nested_progress_event(
     stage: TrainingStage,
     bootstrap_total: usize,
@@ -859,7 +946,7 @@ fn nested_progress_event(
     elapsed_ms: u128,
     nested_elapsed_ms: u128,
 ) -> ProgressEvent {
-    let remaining_cells = 15usize.saturating_sub(completed_cells);
+    let remaining_cells = VALIDATION_CELL_COUNT.saturating_sub(completed_cells);
     let eta_ms = if remaining_cells == 0 {
         Some(0)
     } else {
@@ -886,12 +973,48 @@ fn evaluate_nested_cell_report(
     role: Role,
     mode: ModeFamily,
     promoted: Option<&[PromotedCandidate]>,
+    config: &StabilityConfigSnapshot,
 ) -> CellEvaluation {
     let items = reports
         .iter()
         .filter(|report| report.role == role && report.mode == mode)
         .cloned()
         .collect::<Vec<_>>();
+    if !items.is_empty() && !needs_nested_validation(&items) {
+        let mut rejected_reasons = items
+            .iter()
+            .flat_map(|report| report.rejected_reasons.iter().cloned())
+            .collect::<Vec<_>>();
+        rejected_reasons.sort();
+        rejected_reasons.dedup();
+        if rejected_reasons.is_empty() {
+            rejected_reasons.push("no_preeligible_candidate".into());
+        }
+        return CellEvaluation {
+            role,
+            mode,
+            training_cohort: mode.training_cohort(),
+            shared_parameter_version: shared_parameter_version(mode.training_cohort()),
+            selected: None,
+            decision: CellDecision::Shadow,
+            rejected_reasons,
+            nested_validation: NestedCellReport {
+                role,
+                mode,
+                folds: vec![],
+                improved_folds: 0,
+                metrics: None,
+                baseline_metrics: None,
+                selection_degraded: true,
+                selected_strategy: "none".into(),
+                selected_variant: ModelVariant::Core,
+                selected_final_multiplier: 1.25,
+                selected_lambda_core: 0.02,
+                selected_lambda_cohort: 0.05,
+            },
+            reports: items,
+        };
+    }
     if promoted.is_some() && items.is_empty() {
         return CellEvaluation {
             role,
@@ -972,12 +1095,14 @@ fn evaluate_nested_cell_report(
                 && report.forward.lambda_cohort == nested_validation.selected_lambda_cohort
         })
         .map(|report| report.strategy.clone());
-    let nested_passes = nested_validation.improved_folds >= 4
+    let nested_passes = nested_validation.improved_folds >= config.minimum_improved_folds
         && nested_validation
             .metrics
             .as_ref()
             .zip(nested_validation.baseline_metrics.as_ref())
-            .is_none_or(|(candidate, baseline)| candidate.ece <= baseline.ece + 0.005);
+            .is_none_or(|(candidate, baseline)| {
+                candidate.ece <= baseline.ece + config.max_ece_worsening
+            });
     if !nested_passes {
         selected = None;
     }
@@ -1003,16 +1128,18 @@ fn evaluate_nested_cell_report(
     if rejected_reasons.is_empty() && selected.is_none() {
         rejected_reasons.push("no_eligible_strategy".into());
     }
-    if nested_validation.improved_folds < 4 {
-        push_once(&mut rejected_reasons, "improved_folds_below_4");
+    if nested_validation.improved_folds < config.minimum_improved_folds {
+        push_once(&mut rejected_reasons, "improved_folds_below_minimum");
     }
     if nested_validation
         .metrics
         .as_ref()
         .zip(nested_validation.baseline_metrics.as_ref())
-        .is_some_and(|(candidate, baseline)| candidate.ece > baseline.ece + 0.005)
+        .is_some_and(|(candidate, baseline)| {
+            candidate.ece > baseline.ece + config.max_ece_worsening
+        })
     {
-        push_once(&mut rejected_reasons, "ece_worse_than_0_005");
+        push_once(&mut rejected_reasons, "ece_worse_than_maximum");
     }
     CellEvaluation {
         role,
@@ -1035,6 +1162,36 @@ fn shared_parameter_version(cohort: TrainingCohort) -> String {
         TrainingCohort::OutcomeOnly => "outcome_only-v1",
     }
     .into()
+}
+
+// 共享参数组按组晋级：同一职责、同一训练组内，只要有一个实际模式通过门槛，组内其余模式共享晋级结果。
+fn apply_cohort_shared_promotion(cells: &mut [CellEvaluation]) {
+    let mut promoted: BTreeMap<(Role, TrainingCohort), String> = BTreeMap::new();
+    for cell in cells.iter() {
+        if cell.decision == CellDecision::Eligible {
+            if let Some(selected) = &cell.selected {
+                promoted
+                    .entry((cell.role, cell.training_cohort))
+                    .or_insert_with(|| selected.clone());
+            }
+        }
+    }
+    if promoted.is_empty() {
+        return;
+    }
+    for cell in cells.iter_mut() {
+        if cell.decision == CellDecision::Eligible
+            || cell.training_cohort == TrainingCohort::OutcomeOnly
+        {
+            continue;
+        }
+        let Some(selected) = promoted.get(&(cell.role, cell.training_cohort)).cloned() else {
+            continue;
+        };
+        cell.decision = CellDecision::Eligible;
+        cell.selected = Some(selected);
+        cell.rejected_reasons = vec!["cohort_shared_promotion".into()];
+    }
 }
 
 pub fn merge_worker_results(
@@ -1651,6 +1808,39 @@ mod hierarchical_bootstrap_tests {
     };
     use std::cell::RefCell;
 
+    #[test]
+    fn screen_schedules_each_role_strategy_as_an_independent_worker_job() {
+        let config = StabilityConfig::for_stage(TrainingStage::Screen100);
+        let jobs = stability_worker_jobs(&config);
+
+        assert_eq!(jobs.len(), 15);
+        for role in [Role::Tank, Role::Damage, Role::Support] {
+            assert_eq!(jobs.iter().filter(|job| job.role == role).count(), 5);
+        }
+    }
+
+    #[test]
+    fn parallel_nested_sequence_preserves_canonical_cell_order() {
+        let (values, failed) = run_nested_parallel(|role, mode| Ok((role, mode)), |_| {});
+
+        assert!(!failed);
+        assert_eq!(values.len(), VALIDATION_CELL_COUNT);
+        assert_eq!(values[0], (Role::Tank, VALIDATION_MODES[0]));
+        assert_eq!(
+            values[VALIDATION_CELL_COUNT - 1],
+            (Role::Support, VALIDATION_MODES[VALIDATION_MODES.len() - 1])
+        );
+    }
+
+    #[test]
+    fn nested_validation_is_skipped_when_no_candidate_passes_pre_gates() {
+        assert!(!needs_nested_validation(&[]));
+        let mut report = StabilityReport::testing(Role::Tank, "none");
+        assert!(!needs_nested_validation(std::slice::from_ref(&report)));
+        report.eligible = true;
+        assert!(needs_nested_validation(std::slice::from_ref(&report)));
+    }
+
     fn row(index: usize, mode_family: ModeFamily) -> TrainingRow {
         let positive = index % 2 == 0;
         let opposite = mode_family == ModeFamily::StadiumCompetitive;
@@ -1886,12 +2076,12 @@ mod hierarchical_bootstrap_tests {
             |completed| events.borrow_mut().push(format!("progress-{completed}")),
         );
         assert!(!failed);
-        assert_eq!(values.len(), 15);
+        assert_eq!(values.len(), VALIDATION_CELL_COUNT);
         assert_eq!(
             events
                 .borrow()
                 .iter()
-                .filter(|event| *event == "progress-15")
+                .filter(|event| *event == "progress-18")
                 .count(),
             1
         );

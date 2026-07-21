@@ -487,3 +487,46 @@ fn public_inactivity_rejects_non_positive_or_rewound_time() {
         );
     }
 }
+
+#[test]
+fn update_rating_for_expected_preserves_tier_capped_correction_without_sign_reversal() {
+    let state = RoleRatingState {
+        mu: INITIAL_MU,
+        sigma: 500.0,
+        effective_matches: 50.0,
+        last_played_seconds: Some(1_700_000_000),
+        last_season: Some(22),
+    };
+    let decisive = RatingInput {
+        result: 1.0,
+        mode: ModeFamily::RoleCompetitive,
+        team_strength: None,
+        opponent_strength: None,
+        role_share: 1.0,
+        data_quality: 1.0,
+        played_at_seconds: 1_700_000_000 + DAY_SECONDS,
+        season: 22,
+    };
+    let expected = 0.5;
+
+    // Correction well within the tier/mode caps is preserved verbatim.
+    let small = update_rating_for_expected(state, decisive, expected, 1.0).unwrap();
+    assert!(small.performance_adjustment > 0.0);
+    assert!((small.delta - small.base_delta - small.performance_adjustment).abs() < 1e-9);
+    assert!(small.delta.signum() == small.base_delta.signum());
+
+    // A correction larger than the competitive mode cap is clamped, and the
+    // realized adjustment never exceeds the mode cap nor reverses the outcome.
+    let huge = update_rating_for_expected(state, decisive, expected, 50.0).unwrap();
+    assert!(huge.performance_adjustment <= 30.0 + 1e-9);
+    assert!(huge.delta <= 30.0 + 1e-9);
+    assert!(huge.delta.signum() == huge.base_delta.signum());
+
+    // A correction that would flip a small decisive base is dropped, leaving
+    // the outcome direction unchanged and a zero performance adjustment.
+    let mut small_base = decisive;
+    small_base.role_share = 0.05;
+    let flipping = update_rating_for_expected(state, small_base, expected, -10.0).unwrap();
+    assert_eq!(flipping.performance_adjustment, 0.0);
+    assert_eq!(flipping.delta, flipping.base_delta);
+}

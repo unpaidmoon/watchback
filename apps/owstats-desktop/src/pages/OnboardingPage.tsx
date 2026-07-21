@@ -39,6 +39,7 @@ import {
   runSwitchAccountOperation,
 } from "../features/command-center/accountOperationIsolation";
 import type { BusyAccountAction, DashboardSnapshot } from "../features/command-center/accountOperationIsolation";
+import { summarizeCommandCenterSeasons } from "../features/command-center/commandCenterTotals";
 import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { QaRegion } from "../shared/QaFeedbackLayer";
@@ -610,9 +611,11 @@ export function OnboardingPage() {
   const displayName = activeAccount?.battleTag ?? "未登录玩家";
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
   const canUseData = Boolean(status?.canEnterReview);
-  const presetMatches = status?.localData.presetMatches ?? 0;
-  const detailMatches = status?.localData.detailMatches ?? 0;
-  const coveragePercent = presetMatches > 0 ? Math.min(100, Math.round((detailMatches / presetMatches) * 100)) : 0;
+  const {
+    matchCount: localMatches,
+    detailCount: detailMatches,
+    coveragePercent,
+  } = summarizeCommandCenterSeasons(status?.seasonStatuses ?? []);
 
   useEffect(() => {
     if (!primaryTargetState) {
@@ -659,7 +662,7 @@ export function OnboardingPage() {
 
       {!accountContextInvalidated && accountStatus?.activeAccountId ? <div className="commandCenterMetricsRow" aria-label="指挥台状态摘要">
         <DataFact label="登录状态" value={credentialReady ? "已登录" : "待登录"} tone={credentialReady ? "good" : "warn"} />
-        <DataFact label="本地对局" value={`${presetMatches} 场`} tone={presetMatches > 0 ? "good" : "warn"} />
+        <DataFact label="本地对局" value={`${localMatches} 场`} tone={localMatches > 0 ? "good" : "warn"} />
         <DataFact label="覆盖率" value={`${coveragePercent}%`} tone={coveragePercent >= 80 ? "good" : "warn"} />
         <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
       </div> : null}
@@ -762,12 +765,12 @@ export function OnboardingPage() {
                 <div><span className="phase6Eyebrow">数据覆盖度</span><strong>{coveragePercent}%</strong></div>
               </div>
               <div className="phase6CoverageTrack" aria-hidden="true"><span style={{ width: `${coveragePercent}%` }} /></div>
-              <div className="phase6CoverageFooter"><span>{canUseData ? "数据已就绪" : "等待数据"}</span><strong>{detailMatches}/{presetMatches} 场详情</strong></div>
+              <div className="phase6CoverageFooter"><span>{canUseData ? "数据已就绪" : "等待数据"}</span><strong>{detailMatches}/{localMatches} 场详情</strong></div>
             </section>
             <div className="phase6DataHealthGrid" aria-label="数据检查">
               <HealthItem label={credentialReady ? "登录凭证可用" : "登录凭证待登录"} ok={credentialReady} />
               <HealthItem label={status?.health.readable ? "本地数据库可用" : "本地数据库待检查"} ok={Boolean(status?.health.readable)} />
-              <HealthItem label={presetMatches > 0 ? "本地赛季有数据" : "本地赛季等待数据"} ok={presetMatches > 0} />
+              <HealthItem label={localMatches > 0 ? "本地赛季有数据" : "本地赛季等待数据"} ok={localMatches > 0} />
               <HealthItem label="没有待处理失败" ok={!warnings.length} />
             </div>
           </aside>

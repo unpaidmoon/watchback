@@ -9,7 +9,8 @@ use owstats_desktop_lib::credentials::{
 use owstats_desktop_lib::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
     extract_battle_tag, extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
-    is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
+    extract_role_id_for_battle_tag, is_signature_helper_missing, BattleTagExtraction,
+    RoleIdExtraction,
 };
 use owstats_desktop_lib::login_target::LoginTargetCoordinator;
 
@@ -38,6 +39,47 @@ fn browser_capture_is_separate_from_final_credential_persistence() {
 }
 
 #[test]
+fn token_exchange_uses_a_dedicated_sign_page_connection_after_login_capture() {
+    let source = include_str!("../src/credentials.rs");
+
+    assert!(source.contains("open_new_page(SIGN_PAGE_URL, port)"));
+    assert!(!source.contains("\"location.href = {}; true\""));
+}
+
+#[test]
+fn login_capture_installs_transient_identity_capture_before_each_document_load() {
+    let source = include_str!("../src/credentials.rs");
+    let install = source
+        .find("add_script_to_evaluate_on_new_document")
+        .expect("login capture should install its collector for every new document");
+    let polling_loop = source
+        .find("while Instant::now() < deadline")
+        .expect("login capture should poll until its deadline");
+
+    assert!(
+        install < polling_loop,
+        "the new-document collector must be installed before login polling starts"
+    );
+}
+
+#[test]
+fn signature_phase_never_locks_before_battletag_pair_is_stable() {
+    let source = include_str!("../src/credentials.rs");
+    let signature_branch = source
+        .split("if is_signature_helper_missing(&result)")
+        .nth(1)
+        .expect("signature fallback branch should exist");
+    let stable_pair_check = signature_branch
+        .find("paired_identity.filter(|(paired_role_id, _)| paired_role_id == &role_id)")
+        .expect("signature fallback must require a stable identity pair");
+    let role_lock = signature_branch
+        .find("locked_credential_role_id = Some(role_id)")
+        .expect("signature fallback should lock the credential role");
+
+    assert!(stable_pair_check < role_lock);
+}
+
+#[test]
 fn product_login_handlers_only_expose_staged_account_flows() {
     let source = include_str!("../src/commands.rs");
     assert!(!source.contains("pub async fn start_dashen_login("));
@@ -58,6 +100,31 @@ fn login_target_failure_preserves_synthetic_error_fragments() {
 
     assert_eq!(status.state, "bindFailed");
     assert_eq!(status.message, format!("自动绑定失败：{source}"),);
+}
+
+#[test]
+fn published_login_commands_reconcile_the_detected_sync_target() {
+    let source = include_str!("../src/commands.rs");
+    let add_command = source
+        .split("pub async fn add_account(")
+        .nth(1)
+        .and_then(|body| body.split("#[tauri::command]").next())
+        .expect("add account command should exist");
+    let relogin_command = source
+        .split("pub async fn relogin_account(")
+        .nth(1)
+        .and_then(|body| body.split("#[tauri::command]").next())
+        .expect("relogin account command should exist");
+
+    for (name, command) in [
+        ("add_account", add_command),
+        ("relogin_account", relogin_command),
+    ] {
+        assert!(
+            command.contains("reconcile_published_login_target"),
+            "{name} must reconcile the captured BattleTag into the account-scoped sync target"
+        );
+    }
 }
 
 #[test]
@@ -239,6 +306,12 @@ fn collect_script_reads_page_storage_and_resource_urls() {
     assert!(script.contains("performance.getEntriesByType"));
     assert!(script.contains("localStorage"));
     assert!(script.contains("sessionStorage"));
+    assert!(script.contains("MutationObserver"));
+    assert!(script.contains("__owstatsBattleTagCapture"));
+    assert!(script.contains("capture.values = next.values"));
+    assert!(script.contains("document.documentElement ?? document"));
+    assert!(script.contains("'战网昵称'"));
+    assert!(script.contains("'战网昵称'"));
     assert!(!script.contains("outerHTML"));
 }
 
@@ -273,7 +346,7 @@ fn login_role_rejects_auxiliary_only_evidence_even_when_it_agrees() {
 }
 
 #[test]
-fn login_role_rejects_auxiliary_role_that_conflicts_with_current_role() {
+fn login_role_prefers_current_page_after_switching_from_stale_profile_role() {
     let current = vec![
         "https://ds.163.com/?role_id=202202".to_string(),
         "战网昵称：Second#2222".to_string(),
@@ -282,6 +355,32 @@ fn login_role_rejects_auxiliary_role_that_conflicts_with_current_role() {
 
     assert_eq!(
         extract_login_role_id(&current, &storage, &[], false),
+        RoleIdExtraction::Found("202202".to_string())
+    );
+}
+
+#[test]
+fn login_role_matches_visible_battletag_to_its_own_browser_record() {
+    let candidates = vec![
+        r#"{"roleId":"101101","battleTag":"First#1111"}"#.to_string(),
+        r#"{"roleId":"202202","battleTag":"Second#2222"}"#.to_string(),
+    ];
+
+    assert_eq!(
+        extract_role_id_for_battle_tag(&candidates, "Second#2222"),
+        RoleIdExtraction::Found("202202".to_string())
+    );
+}
+
+#[test]
+fn login_role_rejects_ambiguous_records_for_the_same_battletag() {
+    let candidates = vec![
+        r#"{"roleId":"101101","battleTag":"Same#1111"}"#.to_string(),
+        r#"{"roleId":"202202","battleTag":"Same#1111"}"#.to_string(),
+    ];
+
+    assert_eq!(
+        extract_role_id_for_battle_tag(&candidates, "Same#1111"),
         RoleIdExtraction::Conflict
     );
 }

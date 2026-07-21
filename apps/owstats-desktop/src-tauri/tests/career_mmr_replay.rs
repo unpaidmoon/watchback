@@ -1,8 +1,22 @@
 use owstats_desktop_lib::{
-    career_mmr::replay::{rebuild_career_mmr, BASELINE_MODEL_VERSION},
+    career_mmr::{
+        input::{ModeFamily, PerformanceTier, Role, TrainingCohort},
+        performance_selection::SelectedRoleModel,
+        replay::{
+            rebuild_career_mmr, rebuild_career_mmr_active, rebuild_career_mmr_v3,
+            BASELINE_MODEL_VERSION, PACKAGED_V3_ARTIFACT_JSON, PERFORMANCE_MODEL_VERSION,
+        },
+        training_report::{
+            recompute_v3_config_hash, validate_parsed_v3_artifact, AggregateEvidenceArtifact,
+            CareerMmrV3Artifact, PerformanceModelArtifact, SharedFamilyArtifact,
+            V3_ARTIFACT_ALGORITHM, V3_SCHEMA_VERSION,
+        },
+    },
     import_payload_value_embedded, OwDatabase,
 };
 use rusqlite::{params, Connection};
+use serde_json::json;
+use std::collections::BTreeMap;
 use tempfile::tempdir;
 
 fn database() -> (tempfile::TempDir, OwDatabase) {
@@ -10,6 +24,24 @@ fn database() -> (tempfile::TempDir, OwDatabase) {
     let db = OwDatabase::new(dir.path().join("replay.sqlite3"));
     db.initialize().unwrap();
     (dir, db)
+}
+
+#[test]
+fn packaged_v3_artifact_is_valid_and_product_entrypoint_targets_v3() {
+    let packaged: PerformanceModelArtifact =
+        serde_json::from_str(PACKAGED_V3_ARTIFACT_JSON).unwrap();
+    let artifact = packaged.v3_runtime.unwrap();
+    validate_parsed_v3_artifact(&artifact).unwrap();
+    assert_eq!(artifact.schema_version, V3_SCHEMA_VERSION);
+    assert_eq!(artifact.selected_models.len(), 3);
+    let (_dir, db) = database();
+    let conn = db.connect().unwrap();
+    insert_match(&conn, "packaged-tank", 23, 100, "tank", "win");
+    insert_match(&conn, "packaged-damage", 23, 200, "damage", "win");
+    insert_match(&conn, "packaged-support", 23, 300, "support", "win");
+    drop(conn);
+    let summary = rebuild_career_mmr_active(&db).unwrap();
+    assert_eq!(summary.model_version, PERFORMANCE_MODEL_VERSION);
 }
 
 fn insert_match(conn: &Connection, id: &str, season: i64, ts: i64, role: &str, result: &str) {
@@ -557,4 +589,386 @@ fn import_commits_matches_and_returns_safe_warning_when_rebuild_fails() {
             .unwrap(),
         0
     );
+}
+
+fn stadium_match_for_role(
+    conn: &Connection,
+    id: &str,
+    season: i64,
+    ts: i64,
+    hero_guid: &str,
+    hero_role: &str,
+    final_hit: f64,
+    kill: f64,
+    assist: f64,
+    death: f64,
+) {
+    conn.execute(
+        "INSERT INTO matches (match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid, begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at) VALUES (?1, ?2, 'stadium', 'SportFight', 'arena', 'win', 'map', ?3, ?4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 900, ?5, 'now')",
+        params![id, season, hero_guid, ts, json!({"roleType": hero_role}).to_string()],
+    ).unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO hero_dict (guid,name,role,updated_at) VALUES (?1,?2,?3,'now')",
+        params![hero_guid, hero_role, hero_role],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO match_players (match_id,season,side,bnet_id,player_name,hero_guid,is_current_player,raw_json,updated_at) VALUES (?1,?2,'teammate','synthetic-current','????',?3,1,'{}','now')",
+        params![id, season, hero_guid],
+    ).unwrap();
+    let player = json!({
+        "bnetId": "synthetic-current",
+        "heroGuid": hero_guid,
+        "finalHit": final_hit,
+        "kill": kill,
+        "assist": assist,
+        "death": death
+    });
+    let detail = json!({"payload":{"data":{"roundCountList":[
+        {"roundIndex":1,"teammateList":[player],"enemyList":[]}
+    ]}}});
+    conn.execute(
+        "INSERT INTO match_details (match_id,match_kind,raw_detail_json,updated_at) VALUES (?1,'arena',?2,'now')",
+        params![id, detail.to_string()],
+    ).unwrap();
+}
+
+fn selected_model(role: Role, tier: PerformanceTier) -> SelectedRoleModel {
+    let mut weights = BTreeMap::new();
+    // A small, valid signed weight: final_hit is non-negative, death stays non-positive.
+    weights.insert("final_hit".to_string(), 1.0);
+    weights.insert("death".to_string(), -0.5);
+    SelectedRoleModel {
+        role,
+        tier,
+        weights,
+        base_offset: 0.0,
+        shrink: 0.3,
+        training_cohort: TrainingCohort::StadiumCompetitive,
+        config_hash: format!("test:{}:{}", tier.as_str(), role.as_str()),
+    }
+}
+
+fn synthetic_v3_artifact_json() -> String {
+    let mut selected_models = BTreeMap::new();
+    selected_models.insert(
+        Role::Tank,
+        selected_model(Role::Tank, PerformanceTier::Learned),
+    );
+    selected_models.insert(
+        Role::Damage,
+        selected_model(Role::Damage, PerformanceTier::Shrunk),
+    );
+    selected_models.insert(
+        Role::Support,
+        selected_model(Role::Support, PerformanceTier::Percentile),
+    );
+    let aggregate = AggregateEvidenceArtifact {
+        total_rows: 3,
+        role_rows: [(Role::Tank, 1), (Role::Damage, 1), (Role::Support, 1)]
+            .into_iter()
+            .collect(),
+        mode_rows: [(ModeFamily::StadiumCompetitive, 3)].into_iter().collect(),
+        account_count: 1,
+        season_count: 1,
+        tier_selection: selected_models
+            .iter()
+            .map(|(role, m)| (*role, m.tier.as_str().to_string()))
+            .collect(),
+    };
+    let mut artifact = CareerMmrV3Artifact {
+        schema_version: V3_SCHEMA_VERSION,
+        algorithm: V3_ARTIFACT_ALGORITHM.to_string(),
+        ordinary_shared_v3: SharedFamilyArtifact {
+            cohort: TrainingCohort::RoleQueue,
+            shared_parameter_version: "ordinary-shared-v3".to_string(),
+            modes: vec![
+                ModeFamily::RoleCompetitive,
+                ModeFamily::RoleQuick,
+                ModeFamily::OpenCompetitive,
+                ModeFamily::OpenQuick,
+            ],
+        },
+        stadium_shared_v3: SharedFamilyArtifact {
+            cohort: TrainingCohort::StadiumCompetitive,
+            shared_parameter_version: "stadium-shared-v3".to_string(),
+            modes: vec![ModeFamily::StadiumCompetitive, ModeFamily::StadiumQuick],
+        },
+        mode_scales: [(ModeFamily::StadiumCompetitive, 0.5)]
+            .into_iter()
+            .collect(),
+        selected_models,
+        aggregate_evidence: aggregate,
+        config_hash: String::new(),
+    };
+    artifact.config_hash = recompute_v3_config_hash(&artifact).unwrap();
+    serde_json::to_string(&artifact).unwrap()
+}
+
+fn seed_v3_stadium_matches(conn: &Connection) {
+    stadium_match_for_role(
+        conn,
+        "tank-match",
+        22,
+        100,
+        "stadium-tank",
+        "tank",
+        99.0,
+        10.0,
+        5.0,
+        1.0,
+    );
+    stadium_match_for_role(
+        conn,
+        "damage-match",
+        22,
+        200,
+        "stadium-dps",
+        "dps",
+        50.0,
+        20.0,
+        8.0,
+        2.0,
+    );
+    stadium_match_for_role(
+        conn,
+        "support-match",
+        22,
+        300,
+        "stadium-healer",
+        "healer",
+        12.0,
+        2.0,
+        30.0,
+        3.0,
+    );
+}
+
+fn active_version(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT version FROM mmr_model_versions WHERE is_active=1",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+#[test]
+fn v3_events_contain_nonzero_bounded_corrections_for_one_role_per_tier() {
+    let (_dir, db) = database();
+    {
+        let conn = db.connect().unwrap();
+        seed_v3_stadium_matches(&conn);
+    }
+    rebuild_career_mmr(&db).unwrap();
+    let v2_count: i64;
+    {
+        let conn = db.connect().unwrap();
+        v2_count = conn
+            .query_row(
+                "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+    }
+    assert!(v2_count > 0);
+
+    let artifact = synthetic_v3_artifact_json();
+    let summary = rebuild_career_mmr_v3(&db, &artifact).unwrap();
+    assert_eq!(summary.model_version, PERFORMANCE_MODEL_VERSION);
+    let conn = db.connect().unwrap();
+    assert_eq!(active_version(&conn), PERFORMANCE_MODEL_VERSION);
+
+    let rows: Vec<(String, f64, String)> = conn
+        .prepare("SELECT role, performance_adjustment, performance_tier FROM career_mmr_events WHERE model_version=?1 ORDER BY role")
+        .unwrap()
+        .query_map([PERFORMANCE_MODEL_VERSION], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    let mut tiers = std::collections::BTreeSet::new();
+    let mut nonzero = 0;
+    for (role, adj, tier) in &rows {
+        assert_eq!(
+            tier.as_str(),
+            match role.as_str() {
+                "tank" => "learned",
+                "damage" => "shrunk",
+                "support" => "percentile",
+                _ => panic!("unexpected role {role}"),
+            }
+        );
+        tiers.insert(tier.clone());
+        let cap = ModeFamily::StadiumCompetitive.runtime_correction_cap(match tier.as_str() {
+            "learned" => PerformanceTier::Learned,
+            "shrunk" => PerformanceTier::Shrunk,
+            _ => PerformanceTier::Percentile,
+        });
+        assert!(
+            *adj <= cap + 1e-9 && *adj >= -cap - 1e-9,
+            "adjustment {adj} exceeds tier cap {cap}"
+        );
+        if adj.abs() > 1e-9 {
+            nonzero += 1;
+        }
+    }
+    assert_eq!(tiers.len(), 3, "exactly one role per tier must appear");
+    assert!(
+        nonzero >= 3,
+        "each role must receive a non-zero bounded correction"
+    );
+
+    // v2 rows are retained untouched.
+    let v2_after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v2_after, v2_count);
+    let v2_tier_null: i64 = conn.query_row("SELECT COUNT(*) FROM career_mmr_events WHERE model_version=2 AND performance_tier IS NOT NULL", [], |r| r.get(0)).unwrap();
+    assert_eq!(v2_tier_null, 0);
+}
+
+#[test]
+fn v3_rebuild_is_byte_for_byte_identical() {
+    let (_dir, db) = database();
+    {
+        let conn = db.connect().unwrap();
+        seed_v3_stadium_matches(&conn);
+    }
+    let artifact = synthetic_v3_artifact_json();
+    let first = rebuild_career_mmr_v3(&db, &artifact).unwrap();
+    let first_rows = {
+        let conn = db.connect().unwrap();
+        persisted_mmr_rows(&conn)
+    };
+    let second = rebuild_career_mmr_v3(&db, &artifact).unwrap();
+    let second_rows = {
+        let conn = db.connect().unwrap();
+        persisted_mmr_rows(&conn)
+    };
+    assert_eq!(first.event_digest, second.event_digest);
+    assert_eq!(
+        first_rows, second_rows,
+        "v3 persisted rows must be byte-for-byte identical across rebuilds"
+    );
+}
+
+#[test]
+fn v2_rows_remain_queryable_after_v3_activation() {
+    let (_dir, db) = database();
+    {
+        let conn = db.connect().unwrap();
+        seed_v3_stadium_matches(&conn);
+    }
+    rebuild_career_mmr(&db).unwrap();
+    let artifact = synthetic_v3_artifact_json();
+    rebuild_career_mmr_v3(&db, &artifact).unwrap();
+    let conn = db.connect().unwrap();
+    assert_eq!(active_version(&conn), PERFORMANCE_MODEL_VERSION);
+    let v2_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(v2_rows > 0, "v2 rows must still be present for rollback");
+    let v2_role: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM career_role_mmr WHERE model_version=2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v2_role, 3, "v2 role summaries must remain");
+}
+
+#[test]
+fn injected_mid_transaction_failure_leaves_v2_active_and_rolls_back_v3() {
+    let (_dir, db) = database();
+    {
+        let conn = db.connect().unwrap();
+        seed_v3_stadium_matches(&conn);
+    }
+    rebuild_career_mmr(&db).unwrap();
+    let v2_events: i64 = {
+        let conn = db.connect().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    {
+        let conn = db.connect().unwrap();
+        assert_eq!(active_version(&conn), BASELINE_MODEL_VERSION);
+    }
+    // Inject a failure during v3 summary persistence.
+    {
+        let conn = db.connect().unwrap();
+        conn.execute_batch("CREATE TRIGGER fail_v3_summary BEFORE INSERT ON career_role_mode_summary WHEN NEW.model_version=3 BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+    }
+    let artifact = synthetic_v3_artifact_json();
+    let result = rebuild_career_mmr_v3(&db, &artifact);
+    assert!(
+        result.is_err(),
+        "v3 activation must fail when injected fault fires"
+    );
+    let conn = db.connect().unwrap();
+    conn.execute_batch("DROP TRIGGER fail_v3_summary").unwrap();
+    assert_eq!(
+        active_version(&conn),
+        BASELINE_MODEL_VERSION,
+        "v2 must remain active after rollback"
+    );
+    let v3_events: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=3",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v3_events, 0, "rolled-back v3 events must not persist");
+    let v2_after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        v2_after, v2_events,
+        "v2 events must be untouched by the failed v3 activation"
+    );
+}
+
+#[test]
+fn v3_activation_rejects_an_invalid_artifact_without_writing() {
+    let (_dir, db) = database();
+    let bad = serde_json::json!({
+        "schema_version": 3,
+        "algorithm": "career-mmr-v3-guaranteed-performance",
+        "ordinary_shared_v3": {"cohort":"role_queue","shared_parameter_version":"x","modes":[]},
+        "stadium_shared_v3": {"cohort":"stadium_competitive","shared_parameter_version":"x","modes":[]},
+        "mode_scales": {},
+        "selected_models": {},
+        "aggregate_evidence": {"total_rows":0,"role_rows":{},"mode_rows":{},"account_count":0,"season_count":0,"tier_selection":{}},
+        "config_hash": "deadbeef"
+    })
+    .to_string();
+    assert!(rebuild_career_mmr_v3(&db, &bad).is_err());
+    let conn = db.connect().unwrap();
+    let v3_events: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM career_mmr_events WHERE model_version=3",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v3_events, 0);
 }

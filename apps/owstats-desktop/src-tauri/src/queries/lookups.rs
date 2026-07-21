@@ -255,10 +255,24 @@ fn manual_arena_map_names() -> &'static [(&'static str, &'static str)] {
         ("576460752303428183", "泰晤士区"),
         ("576460752303428209", "火药桶矿井"),
         ("576460752303428223", "绿洲城 - 花园"),
+        ("576460752303429014", "绿洲城 - 大学"),
         ("576460752303428272", "埃斯佩兰萨"),
         ("576460752303428212", "塞伦扎"),
         ("576460752303428683", "漓江塔 - 夜市"),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manual_arena_map_name;
+
+    #[test]
+    fn resolves_oasis_university_arena_map_name() {
+        assert_eq!(
+            manual_arena_map_name("576460752303429014"),
+            Some("绿洲城 - 大学")
+        );
+    }
 }
 
 pub(super) fn result_label(result: &str) -> &'static str {

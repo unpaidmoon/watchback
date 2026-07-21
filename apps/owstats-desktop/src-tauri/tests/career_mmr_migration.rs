@@ -2,13 +2,14 @@ use anyhow::Result;
 use owstats_desktop_lib::OwDatabase;
 use rusqlite::{params, Connection};
 
-const MMR_TABLES: [&str; 6] = [
+const MMR_TABLES: [&str; 7] = [
     "mmr_model_versions",
     "mmr_match_inputs",
     "career_mmr_events",
     "career_role_mmr",
     "career_role_mode_summary",
     "career_role_season_summary",
+    "career_mmr_model_artifacts",
 ];
 
 fn assert_mmr_schema(conn: &Connection) -> Result<()> {
@@ -113,7 +114,7 @@ fn upgrades_existing_v5_database_that_predates_career_mmr_tables() -> Result<()>
     let conn = db.connect()?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        9
+        10
     );
     assert_mmr_schema(&conn)
 }
@@ -175,5 +176,118 @@ fn rejects_invalid_roles_ranges_and_duplicate_events() -> Result<()> {
     assert!(insert_event(1, "missing", "tank", 1.0, 1.0, 0.5, 1.0, 0.5).is_err());
     insert_event(1, "match-1", "tank", 1.0, 1.0, 0.5, 1.0, 0.5)?;
     assert!(insert_event(1, "match-1", "tank", 1.0, 1.0, 0.5, 1.0, 0.5).is_err());
+    Ok(())
+}
+
+#[test]
+fn v3_performance_tier_column_and_artifact_table_exist_and_are_nullable() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let db = OwDatabase::new(temp.path().join("v3.sqlite3"));
+    db.initialize()?;
+    let conn = db.connect()?;
+    let mut stmt = conn.prepare("PRAGMA table_info(career_mmr_events)")?;
+    let columns = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?
+        .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+    let tier = columns
+        .iter()
+        .find(|(name, _)| name == "performance_tier")
+        .expect("performance_tier column missing");
+    assert!(
+        !tier.1.contains("NOT NULL"),
+        "performance_tier must be nullable"
+    );
+    let artifact_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='career_mmr_model_artifacts'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(
+        artifact_count, 1,
+        "career_mmr_model_artifacts table missing"
+    );
+    let pk: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('career_mmr_model_artifacts') WHERE pk=1",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(
+        pk, 1,
+        "artifact table must be keyed by a single primary key"
+    );
+    Ok(())
+}
+
+#[test]
+fn v3_migration_is_idempotent_and_leaves_existing_v2_events_untouched() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let db = OwDatabase::new(temp.path().join("v3idem.sqlite3"));
+    db.initialize()?;
+    let conn = db.connect()?;
+    conn.execute(
+        "INSERT INTO mmr_model_versions (version, algorithm, config_json, is_active, created_at) VALUES (2, 'baseline', '{}', 1, 'now')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO matches (match_id, season, bucket, game_mode, match_kind, result, map_guid, hero_guid, begin_ts, team_score, opponent_score, kills, assists, deaths, damage, healing, mitigation, total_worth, duration_sec, raw_entry_json, updated_at) VALUES ('v2-row', 22, 'preset', 'SportPreset', 'normal', 'win', 'map', 'hero', 100, 1, 0, 0, 0, 0, 0, 0, 0, 0, 600, '{}', 'now')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO career_mmr_events(model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES (2,'v2-row','tank',22,100,'role_competitive',1.0,1.0,0.5,1.0,0.0,2500.0,800.0,2.0,2.0,2502.0,780.0,0.6,'hash','now')",
+        [],
+    )?;
+    drop(conn);
+    db.initialize()?;
+    db.initialize()?;
+    let conn = db.connect()?;
+    let tier: Option<String> = conn
+        .query_row(
+            "SELECT performance_tier FROM career_mmr_events WHERE model_version=2 AND match_id='v2-row'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert_eq!(
+        tier, None,
+        "existing v2 events keep a NULL performance tier"
+    );
+    let v2_active: i64 = conn.query_row(
+        "SELECT is_active FROM mmr_model_versions WHERE version=2",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(
+        v2_active, 1,
+        "v2 remains active until v3 is explicitly activated"
+    );
+    Ok(())
+}
+
+#[test]
+fn v3_migration_initializes_on_pre_mmr_and_v1_databases() -> Result<()> {
+    for version in [0i64, 1, 3, 5] {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join(format!("pre{version}.sqlite3"));
+        let db = OwDatabase::new(&path);
+        db.initialize()?;
+        let conn = db.connect()?;
+        conn.execute_batch("DROP TABLE IF EXISTS career_role_mode_summary; DROP TABLE IF EXISTS career_role_season_summary; DROP TABLE IF EXISTS career_role_mmr; DROP TABLE IF EXISTS career_mmr_events; DROP TABLE IF EXISTS mmr_match_inputs; DROP TABLE IF EXISTS mmr_model_versions; DROP TABLE IF EXISTS career_mmr_model_artifacts;")?;
+        conn.execute_batch(&format!("PRAGMA user_version = {version};"))?;
+        drop(conn);
+        db.initialize()?;
+        let conn = db.connect()?;
+        assert_mmr_schema(&conn)?;
+        let artifact_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='career_mmr_model_artifacts'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            artifact_count, 1,
+            "artifact table must be created for legacy db at v{version}"
+        );
+    }
     Ok(())
 }

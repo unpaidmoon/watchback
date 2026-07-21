@@ -144,25 +144,33 @@ pub async fn open_or_find_page(login_url: &str, port: u16) -> Result<String> {
     let client = reqwest::Client::new();
     let list_url = format!("http://127.0.0.1:{port}/json/list");
     let pages = json_get(&client, &list_url).await?;
-    if let Some(websocket_url) = find_dashen_websocket_url(&pages) {
+    if let Some(websocket_url) = find_login_websocket_url(&pages, login_url) {
         return Ok(websocket_url);
     }
 
-    let new_url = format!(
-        "http://127.0.0.1:{port}/json/new?{}",
-        percent_encode_for_query(login_url)
-    );
-    if let Ok(page) = json_get(&client, &new_url).await {
-        if let Some(websocket_url) = page
-            .get("webSocketDebuggerUrl")
-            .and_then(|item| item.as_str())
-        {
-            return Ok(websocket_url.to_string());
-        }
+    if let Ok(websocket_url) = open_new_page(login_url, port).await {
+        return Ok(websocket_url);
     }
 
     let pages = json_get(&client, &list_url).await?;
-    find_any_page_websocket_url(&pages).ok_or_else(|| anyhow!("未找到可调试的浏览器页面。"))
+    find_login_websocket_url(&pages, login_url)
+        .ok_or_else(|| anyhow!("未找到本次登录对应的浏览器页面。"))
+}
+
+pub async fn open_new_page(page_url: &str, port: u16) -> Result<String> {
+    let client = reqwest::Client::new();
+    let new_url = format!(
+        "http://127.0.0.1:{port}/json/new?{}",
+        percent_encode_for_query(page_url)
+    );
+    let page = match json_put(&client, &new_url).await {
+        Ok(page) => page,
+        Err(_) => json_get(&client, &new_url).await?,
+    };
+    page.get("webSocketDebuggerUrl")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("新建浏览器页面后未取得调试连接。"))
 }
 
 async fn json_get(client: &reqwest::Client, url: &str) -> Result<serde_json::Value> {
@@ -170,27 +178,23 @@ async fn json_get(client: &reqwest::Client, url: &str) -> Result<serde_json::Val
     Ok(response.json::<serde_json::Value>().await?)
 }
 
-fn find_dashen_websocket_url(pages: &serde_json::Value) -> Option<String> {
+async fn json_put(client: &reqwest::Client, url: &str) -> Result<serde_json::Value> {
+    let response = client.put(url).send().await?.error_for_status()?;
+    Ok(response.json::<serde_json::Value>().await?)
+}
+
+fn find_login_websocket_url(pages: &serde_json::Value, login_url: &str) -> Option<String> {
+    let login_route = login_url
+        .split_once('?')
+        .map_or(login_url, |(route, _)| route);
     pages.as_array()?.iter().find_map(|page| {
         let page_type = page.get("type").and_then(|item| item.as_str())?;
         let url = page.get("url").and_then(|item| item.as_str()).unwrap_or("");
         let websocket_url = page
             .get("webSocketDebuggerUrl")
             .and_then(|item| item.as_str())?;
-        if page_type == "page" && url.contains("ds.163.com") {
+        if page_type == "page" && url.starts_with(login_route) {
             Some(websocket_url.to_string())
-        } else {
-            None
-        }
-    })
-}
-
-fn find_any_page_websocket_url(pages: &serde_json::Value) -> Option<String> {
-    pages.as_array()?.iter().find_map(|page| {
-        if page.get("type").and_then(|item| item.as_str()) == Some("page") {
-            page.get("webSocketDebuggerUrl")
-                .and_then(|item| item.as_str())
-                .map(str::to_string)
         } else {
             None
         }
@@ -259,5 +263,62 @@ impl CdpPage {
                 .unwrap_or(serde_json::Value::Null));
         }
         Err(anyhow!("浏览器调试连接已关闭。"))
+    }
+
+    pub async fn add_script_to_evaluate_on_new_document(&mut self, source: &str) -> Result<()> {
+        let message_id = self.next_id;
+        self.next_id += 1;
+        let request = json!({
+            "id": message_id,
+            "method": "Page.addScriptToEvaluateOnNewDocument",
+            "params": {
+                "source": source
+            }
+        });
+        self.socket.send(Message::Text(request.to_string())).await?;
+        while let Some(message) = self.socket.next().await {
+            let message = message?;
+            let Message::Text(text) = message else {
+                continue;
+            };
+            let payload: serde_json::Value = serde_json::from_str(&text)?;
+            if payload.get("id").and_then(|item| item.as_i64()) != Some(message_id) {
+                continue;
+            }
+            if let Some(error) = payload.get("error") {
+                return Err(anyhow!("{}", error));
+            }
+            return Ok(());
+        }
+        Err(anyhow!("浏览器调试连接已关闭。"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_login_selects_the_new_login_page_instead_of_a_stale_dashen_tab() {
+        let pages = serde_json::json!([
+            {
+                "type": "page",
+                "url": "https://ds.163.com/",
+                "webSocketDebuggerUrl": "ws://stale-home"
+            },
+            {
+                "type": "page",
+                "url": "https://pay.ds.163.com/activity/ld5?setId=synthetic",
+                "webSocketDebuggerUrl": "ws://current-login"
+            }
+        ]);
+
+        assert_eq!(
+            find_login_websocket_url(
+                &pages,
+                "https://pay.ds.163.com/activity/ld5?setId=synthetic"
+            ),
+            Some("ws://current-login".to_string())
+        );
     }
 }

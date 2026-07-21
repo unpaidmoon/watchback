@@ -380,7 +380,14 @@ assert.match(overLimitEditor, /<button[^>]*class="primaryButton" disabled=""/);
 assert.match(matchesCss, /\.matchFavoriteEditor\s*\{/);
 assert.match(matchesCss, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 assert.match(matchesCss, /\.matchFavoriteEditor\.is-empty\s*\{[^}]*justify-content:\s*flex-end/s);
-assert.match(matchesCss, /\.matchFavoriteActions\s*\{[^}]*display:\s*grid/s);
+assert.match(
+  matchesCss,
+  /\.matchFavoriteActions\s*\{(?=[^}]*display:\s*grid)(?=[^}]*align-self:\s*start)(?=[^}]*margin-top:\s*calc\(21px\s*\+\s*var\(--space-2\)\))[^}]*\}/s,
+);
+assert.match(
+  matchesCss,
+  /@media \(max-width:\s*1099px\)\s*\{[\s\S]*?\.matchFavoriteActions\s*\{(?=[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\))(?=[^}]*margin-top:\s*0)[^}]*\}/s,
+);
 assert.match(matchesCss, /\.matchFavoriteError,\s*\.matchFavoriteNoteField \.is-over-limit\s*\{[^}]*color:\s*var\(--status-danger-strong\)/s);
 assert.doesNotMatch(
   matchesCss,

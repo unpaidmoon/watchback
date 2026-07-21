@@ -77,6 +77,8 @@ assert.doesNotMatch(pageSource, /nextStatus\.modelVersion === null/, "不能只�
 assert.doesNotMatch(pageSource, /nextStatus\.isBuilt[\s\S]*rebuildCareerMmr\(\)/, "少职责账号不能因 isBuilt=false 反复重建");
 assert.match(typeSource, /export type CareerRole = "tank" \| "damage" \| "support"/);
 assert.match(typeSource, /targetModelVersion: number/);
+assert.match(typeSource, /modelVersion: number \| null/);
+assert.match(pageSource, /模型 v\$\{buildStatus\.modelVersion/, "页面必须显示当前模型版本号");
 assert.match(typeSource, /needsRebuild: boolean/);
 assert.match(typeSource, /peakAt: number \| null/);
 assert.doesNotMatch(pageSource, /胜负、对局难度与数据质量共同形成/, "不能用通用文案伪装单场解释");

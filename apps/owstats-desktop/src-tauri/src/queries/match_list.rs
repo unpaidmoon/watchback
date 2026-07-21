@@ -118,13 +118,19 @@ pub(super) fn list_matches_impl(
                 .unwrap_or(row.get(18)?),
             is_favorite: row.get(25)?,
             evaluation: evaluation_from_row(row, 19)?,
-            team_awards: Vec::new(),
+            team_awards: if match_kind == "fight" {
+                stadium_team_awards(raw_detail_json.as_deref())
+            } else {
+                Vec::new()
+            },
         })
     })?;
     let mut matches = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     drop(stmt);
     for item in &mut matches {
-        item.team_awards = team_awards_from_match_players(&conn, &item.match_id)?;
+        if item.match_kind != "fight" {
+            item.team_awards = team_awards_from_match_players(&conn, &item.match_id)?;
+        }
     }
     Ok(matches)
 }

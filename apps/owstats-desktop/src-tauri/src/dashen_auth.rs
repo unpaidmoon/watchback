@@ -83,6 +83,41 @@ pub fn extract_role_id(candidates: &[String]) -> Option<String> {
     None
 }
 
+pub fn extract_role_id_for_battle_tag(candidates: &[String], battle_tag: &str) -> RoleIdExtraction {
+    let battle_tag = battle_tag.trim();
+    if battle_tag.is_empty() {
+        return RoleIdExtraction::Missing;
+    }
+
+    let role_ids = candidates
+        .iter()
+        .filter(|candidate| contains_exact_battle_tag(candidate, battle_tag))
+        .flat_map(|candidate| {
+            extract_all_digits_after_key(candidate, "role_id")
+                .into_iter()
+                .chain(extract_all_digits_after_key(candidate, "roleid"))
+        })
+        .collect::<BTreeSet<_>>();
+
+    match role_ids.len() {
+        0 => RoleIdExtraction::Missing,
+        1 => RoleIdExtraction::Found(role_ids.into_iter().next().expect("one role id")),
+        _ => RoleIdExtraction::Conflict,
+    }
+}
+
+fn contains_exact_battle_tag(candidate: &str, battle_tag: &str) -> bool {
+    candidate.match_indices(battle_tag).any(|(start, _)| {
+        let before = candidate[..start].chars().next_back();
+        let end = start + battle_tag.len();
+        let after = candidate[end..].chars().next();
+        let is_boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '#')
+        };
+        is_boundary(before) && is_boundary(after)
+    })
+}
+
 pub fn extract_login_role_id(
     current_candidates: &[String],
     storage_candidates: &[String],
@@ -109,12 +144,6 @@ pub fn extract_login_role_id(
     let Some(current_role_id) = current_role_ids.into_iter().next() else {
         return RoleIdExtraction::Missing;
     };
-    if auxiliary_role_ids
-        .iter()
-        .any(|role_id| role_id != &current_role_id)
-    {
-        return RoleIdExtraction::Conflict;
-    }
 
     RoleIdExtraction::Found(current_role_id)
 }
@@ -174,7 +203,6 @@ pub fn build_collect_candidates_script() -> String {
   const currentGroup = createGroup();
   const storageGroup = createGroup();
   const resourceGroup = createGroup();
-  const battleTagGroup = createGroup();
   const add = (group, value, limit = MAX_ROLE_EVIDENCE_VALUES) => {
     if (value === undefined || value === null) return;
     const text = String(value);
@@ -185,20 +213,22 @@ pub fn build_collect_candidates_script() -> String {
     }
     group.values.push(text);
   };
-  const collectBattleTags = (doc) => {
-    if (!doc?.body || battleTagGroup.truncated) return;
+  const collectBattleTags = (doc, group) => {
+    if (!doc?.body || group.truncated) return;
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const textNodes = [];
     while (walker.nextNode()) textNodes.push(walker.currentNode);
     for (let index = 0; index < textNodes.length; index += 1) {
       const text = String(textNodes[index].nodeValue ?? '');
-      const labelIndex = text.indexOf('战网昵称');
-      if (labelIndex < 0) continue;
-      let evidence = text.slice(labelIndex + '战网昵称'.length);
+      const label = ['战网昵称', '战网昵称']
+        .find((candidate) => text.includes(candidate));
+      if (!label) continue;
+      const labelIndex = text.indexOf(label);
+      let evidence = text.slice(labelIndex + label.length);
       for (let lookahead = 1; lookahead <= 4; lookahead += 1) {
         const match = evidence.match(/^\s*[:：]\s*([^\s#]+#[0-9]+)(?![0-9A-Za-z#])/);
         if (match) {
-          add(battleTagGroup, match[1], MAX_BATTLETAG_CANDIDATES);
+          add(group, match[1], MAX_BATTLETAG_CANDIDATES);
           break;
         }
         const nextNode = textNodes[index + lookahead];
@@ -208,13 +238,46 @@ pub fn build_collect_candidates_script() -> String {
     }
     for (const iframe of doc.querySelectorAll('iframe')) {
       try {
-        collectBattleTags(iframe.contentDocument);
+        collectBattleTags(iframe.contentDocument, group);
       } catch (_) {
         // Cross-origin frames are intentionally inaccessible.
       }
     }
   };
-  collectBattleTags(document);
+  const scanBattleTags = () => {
+    const next = createGroup();
+    collectBattleTags(document, next);
+    return next;
+  };
+  const captureKey = '__owstatsBattleTagCapture';
+  let capture = window[captureKey];
+  if (!capture || !Array.isArray(capture.values)) {
+    capture = { values: [], truncated: false, observer: null };
+    Object.defineProperty(window, captureKey, {
+      value: capture,
+      configurable: true,
+    });
+  }
+  const updateCapture = () => {
+    const next = scanBattleTags();
+    if (next.values.length > 0 || next.truncated) {
+      capture.values = next.values;
+      capture.truncated = next.truncated;
+    }
+  };
+  updateCapture();
+  if (!capture.observer) {
+    capture.observer = new MutationObserver(updateCapture);
+    capture.observer.observe(document.documentElement ?? document, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+  const battleTagGroup = {
+    values: [...capture.values],
+    truncated: capture.truncated,
+  };
   add(currentGroup, location.href);
   add(currentGroup, pageText);
   for (const storage of [localStorage, sessionStorage]) {

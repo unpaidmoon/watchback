@@ -1,5 +1,5 @@
 use super::{
-    input::ModeFamily, rating::outcome_delta_for_expected, replay::BASELINE_MODEL_VERSION,
+    input::ModeFamily, rating::outcome_delta_for_expected, replay::PERFORMANCE_MODEL_VERSION,
 };
 use crate::{
     CareerMmrBuildStatus, CareerMmrExplanationFactor, CareerMmrHistory, CareerMmrHistoryPoint,
@@ -31,6 +31,16 @@ fn confidence_label(value: f64) -> String {
         _ => "高置信度",
     }
     .into()
+}
+
+fn tier_label(tier: Option<&str>) -> Option<String> {
+    match tier? {
+        "learned" => Some("约束学习"),
+        "shrunk" => Some("强收缩"),
+        "percentile" => Some("稳健百分位"),
+        _ => None,
+    }
+    .map(String::from)
 }
 
 fn display_mmr(value: i64) -> i64 {
@@ -286,9 +296,19 @@ pub fn get_mmr_match_explanation(
     let Some(v) = active_version(&c)? else {
         bail!("未找到该场 MMR 记录")
     };
-    let row=c.query_row("SELECT base_delta,performance_adjustment,final_delta,data_quality,expected_win_rate,role_share,sigma_before,result,mode_family FROM career_mmr_events WHERE model_version=?1 AND match_id=?2 AND role=?3",params![v,match_id,role],|r|Ok((r.get::<_,f64>(0)?,r.get::<_,f64>(1)?,r.get::<_,f64>(2)?,r.get::<_,f64>(3)?,r.get::<_,f64>(4)?,r.get::<_,f64>(5)?,r.get::<_,f64>(6)?,r.get::<_,f64>(7)?,r.get::<_,String>(8)?))).optional()?;
-    let Some((base, performance, final_delta, quality, expected, role_share, sigma, result, mode)) =
-        row
+    let row=c.query_row("SELECT base_delta,performance_adjustment,final_delta,data_quality,expected_win_rate,role_share,sigma_before,result,mode_family,performance_tier FROM career_mmr_events WHERE model_version=?1 AND match_id=?2 AND role=?3",params![v,match_id,role],|r|Ok((r.get::<_,f64>(0)?,r.get::<_,f64>(1)?,r.get::<_,f64>(2)?,r.get::<_,f64>(3)?,r.get::<_,f64>(4)?,r.get::<_,f64>(5)?,r.get::<_,f64>(6)?,r.get::<_,f64>(7)?,r.get::<_,String>(8)?,r.get::<_,Option<String>>(9)?))).optional()?;
+    let Some((
+        base,
+        performance,
+        final_delta,
+        quality,
+        expected,
+        role_share,
+        sigma,
+        result,
+        mode,
+        tier,
+    )) = row
     else {
         bail!("未找到该场 MMR 记录")
     };
@@ -303,6 +323,7 @@ pub fn get_mmr_match_explanation(
         sigma,
         result,
         &mode,
+        tier.as_deref(),
     )?)
 }
 
@@ -318,6 +339,7 @@ fn build_explanation(
     sigma: f64,
     result: f64,
     mode: &str,
+    tier: Option<&str>,
 ) -> Result<CareerMmrMatchExplanation> {
     let neutral =
         outcome_delta_for_expected(sigma, mode_family(&mode)?, role_share, quality, result, 0.5);
@@ -325,7 +347,7 @@ fn build_explanation(
     let mut factors = vec![
         CareerMmrExplanationFactor {
             kind: "delta".into(),
-            label: "胜负基准变化".into(),
+            label: "胜负基础变化".into(),
             value: neutral,
             unit: "mmr".into(),
         },
@@ -337,9 +359,15 @@ fn build_explanation(
         },
         CareerMmrExplanationFactor {
             kind: "delta".into(),
-            label: "表现修正".into(),
+            label: "个人表现修正".into(),
             value: performance,
             unit: "mmr".into(),
+        },
+        CareerMmrExplanationFactor {
+            kind: "tier".into(),
+            label: tier_label(tier).unwrap_or_else(|| "未启用".into()),
+            value: 0.0,
+            unit: "tier".into(),
         },
         CareerMmrExplanationFactor {
             kind: "rate".into(),
@@ -393,7 +421,7 @@ pub fn get_recent_mmr_explanations(
     let conn = db.connect()?;
     let mut items = Vec::new();
     if let Some(version) = active_version(&conn)? {
-        let mut stmt = conn.prepare("SELECT begin_ts,season,base_delta,performance_adjustment,final_delta,data_quality,expected_win_rate,role_share,sigma_before,result,mode_family FROM career_mmr_events WHERE model_version=?1 AND role=?2 ORDER BY begin_ts DESC,input_hash DESC LIMIT ?3")?;
+        let mut stmt = conn.prepare("SELECT begin_ts,season,base_delta,performance_adjustment,final_delta,data_quality,expected_win_rate,role_share,sigma_before,result,mode_family,performance_tier FROM career_mmr_events WHERE model_version=?1 AND role=?2 ORDER BY begin_ts DESC,input_hash DESC LIMIT ?3")?;
         let rows = stmt.query_map(params![version, role, limit.clamp(1, 20) as i64], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -407,6 +435,7 @@ pub fn get_recent_mmr_explanations(
                 row.get::<_, f64>(8)?,
                 row.get::<_, f64>(9)?,
                 row.get::<_, String>(10)?,
+                row.get::<_, Option<String>>(11)?,
             ))
         })?;
         for row in rows {
@@ -422,6 +451,7 @@ pub fn get_recent_mmr_explanations(
                 sigma,
                 result,
                 mode,
+                tier,
             ) = row?;
             let explanation = build_explanation(
                 role,
@@ -434,6 +464,7 @@ pub fn get_recent_mmr_explanations(
                 sigma,
                 result,
                 &mode,
+                tier.as_deref(),
             )?;
             items.push(CareerMmrRecentExplanation {
                 timestamp,
@@ -490,13 +521,13 @@ pub fn get_career_mmr_build_status(db: &OwDatabase) -> Result<CareerMmrBuildStat
         0
     };
     let needs_rebuild = v
-        .map(|version| version < BASELINE_MODEL_VERSION)
+        .map(|version| version < PERFORMANCE_MODEL_VERSION)
         .unwrap_or(true);
     Ok(CareerMmrBuildStatus {
         model_version: v,
-        target_model_version: BASELINE_MODEL_VERSION,
+        target_model_version: PERFORMANCE_MODEL_VERSION,
         needs_rebuild,
         summary_count: count,
-        is_built: v == Some(BASELINE_MODEL_VERSION) && count == 3,
+        is_built: v == Some(PERFORMANCE_MODEL_VERSION) && count == 3,
     })
 }

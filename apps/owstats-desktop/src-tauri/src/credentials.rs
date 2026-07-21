@@ -1,14 +1,15 @@
 use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::browser_session::{
-    choose_debug_port, find_windows_browsers, launch_browser, open_or_find_page,
+    choose_debug_port, find_windows_browsers, launch_browser, open_new_page, open_or_find_page,
     wait_for_debug_endpoint, CdpPage,
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
     extract_battle_tag_candidates, extract_login_role_id, extract_role_id,
-    is_signature_helper_missing, BattleTagExtraction, RoleIdExtraction,
+    extract_role_id_for_battle_tag, is_signature_helper_missing, BattleTagExtraction,
+    RoleIdExtraction,
 };
-use crate::login_flow::LoginPhase;
+use crate::login_flow::{LoginPhase, LoginProgressReporter};
 use crate::models::{CredentialLoginCancelResult, CredentialStatus};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
@@ -256,13 +257,19 @@ pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials 
     }
 }
 
-async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<BrowserLoginOutcome> {
+async fn fetch_credentials_from_browser(
+    progress: &impl LoginProgressReporter,
+    port: u16,
+) -> Result<BrowserLoginOutcome> {
     let websocket_url = open_or_find_page(LOGIN_URL, port).await?;
     let mut page = CdpPage::connect(&websocket_url).await?;
+    page.add_script_to_evaluate_on_new_document(&build_collect_candidates_script())
+        .await?;
     let deadline = Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECONDS);
     let mut identity = LoginCaptureIdentity::default();
     let mut locked_credential_role_id: Option<String> = None;
     let mut locked_paired_identity: Option<(String, String)> = None;
+    let mut last_token_failure = "凭证接口请求未完成";
 
     while Instant::now() < deadline {
         if LOGIN_CANCELLED.load(Ordering::SeqCst) {
@@ -298,11 +305,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
             if identity.credential_role_id().is_some()
                 && identity.credential_role_id() != previous_role_id.as_deref()
             {
-                emit_login_progress(
-                    app,
-                    LoginPhase::RoleFound,
-                    "已识别玩家身份，正在换取同步凭证。",
-                );
+                progress.report(LoginPhase::RoleFound, "已识别玩家身份，正在换取同步凭证。");
             }
         }
 
@@ -340,8 +343,7 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                         detected_battle_tag,
                     });
                 }
-                emit_login_progress(
-                    app,
+                progress.report(
                     LoginPhase::WaitingForLogin,
                     "已取得同步凭证，正在稳定识别 BattleTag。",
                 );
@@ -349,21 +351,28 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                 continue;
             }
 
+            last_token_failure = report_token_failure_category(&result);
             if is_signature_helper_missing(&result) {
                 if locked_credential_role_id.is_none() {
-                    locked_paired_identity =
-                        paired_identity.filter(|(paired_role_id, _)| paired_role_id == &role_id);
+                    let Some(locked_identity) =
+                        paired_identity.filter(|(paired_role_id, _)| paired_role_id == &role_id)
+                    else {
+                        last_token_failure = "BattleTag 尚未稳定";
+                        progress.report(
+                            LoginPhase::WaitingForLogin,
+                            "已识别玩家身份，正在稳定识别 BattleTag。",
+                        );
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    };
+                    locked_paired_identity = Some(locked_identity);
                     locked_credential_role_id = Some(role_id);
-                    emit_login_progress(
-                        app,
+                    progress.report(
                         LoginPhase::LoadingSignPage,
                         "正在打开签名页面以完成凭证换取。",
                     );
-                    let script = format!(
-                        "location.href = {}; true",
-                        serde_json::to_string(SIGN_PAGE_URL)?
-                    );
-                    page.evaluate(&script, false).await?;
+                    let websocket_url = open_new_page(SIGN_PAGE_URL, port).await?;
+                    page = CdpPage::connect(&websocket_url).await?;
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 } else {
                     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -373,16 +382,11 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
                     .get("error")
                     .and_then(|item| item.as_str())
                     .unwrap_or("凭证暂未就绪");
-                emit_login_progress(
-                    app,
-                    LoginPhase::TokenPending,
-                    &format!("凭证暂未就绪：{detail}"),
-                );
+                progress.report(LoginPhase::TokenPending, &format!("凭证暂未就绪：{detail}"));
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
         } else {
-            emit_login_progress(
-                app,
+            progress.report(
                 LoginPhase::WaitingForLogin,
                 "请完成登录并进入守望先锋相关页面。",
             );
@@ -391,12 +395,35 @@ async fn fetch_credentials_from_browser(app: &AppHandle, port: u16) -> Result<Br
     }
 
     if locked_credential_role_id.is_some() || identity.credential_role_id().is_some() {
-        Err(anyhow!("已识别玩家身份，但在超时前未能换取同步凭证。"))
+        Err(anyhow!(
+            "已识别玩家身份，但在超时前未能换取同步凭证（{last_token_failure}）。"
+        ))
     } else {
         Err(anyhow!(
             "登录超时，未能识别玩家身份。请确认已完成登录并打开网易大神守望先锋页面。"
         ))
     }
+}
+
+fn report_token_failure_category(result: &serde_json::Value) -> &'static str {
+    if is_signature_helper_missing(result) {
+        return "签名页面尚未就绪";
+    }
+    let status = result.get("status").and_then(serde_json::Value::as_u64);
+    if matches!(status, Some(401 | 403)) {
+        return "凭证接口拒绝当前登录状态";
+    }
+    if result
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| error.contains("non-JSON response"))
+    {
+        return "凭证接口返回非预期响应";
+    }
+    if status.is_some_and(|status| (200..300).contains(&status)) {
+        return "凭证接口未返回 token";
+    }
+    "凭证接口请求未完成"
 }
 
 async fn collect_login_identity(
@@ -419,16 +446,31 @@ async fn collect_login_identity(
         .chain(&resource_candidates)
         .cloned()
         .collect::<Vec<_>>();
-    Some((
-        extract_role_id(&credential_candidates),
-        extract_login_role_id(
-            &current_candidates,
-            &storage_candidates,
-            &resource_candidates,
-            current_truncated || storage_truncated || resource_truncated,
+    let battle_tag = extract_battle_tag_candidates(&battle_tag_candidates, battle_tag_truncated);
+    let matched_role = match &battle_tag {
+        BattleTagExtraction::Found(battle_tag) => {
+            extract_role_id_for_battle_tag(&credential_candidates, battle_tag)
+        }
+        BattleTagExtraction::Missing => RoleIdExtraction::Missing,
+        BattleTagExtraction::Conflict => RoleIdExtraction::Conflict,
+    };
+    let fallback_credential_role = extract_role_id(&credential_candidates);
+    let (credential_role_id, paired_role_id) = match matched_role {
+        RoleIdExtraction::Found(role_id) => {
+            (Some(role_id.clone()), RoleIdExtraction::Found(role_id))
+        }
+        RoleIdExtraction::Conflict => (fallback_credential_role, RoleIdExtraction::Conflict),
+        RoleIdExtraction::Missing => (
+            fallback_credential_role,
+            extract_login_role_id(
+                &current_candidates,
+                &storage_candidates,
+                &resource_candidates,
+                current_truncated || storage_truncated || resource_truncated,
+            ),
         ),
-        extract_battle_tag_candidates(&battle_tag_candidates, battle_tag_truncated),
-    ))
+    };
+    Some((credential_role_id, paired_role_id, battle_tag))
 }
 
 fn candidate_group(value: &serde_json::Value) -> Option<(Vec<String>, bool)> {
@@ -451,6 +493,18 @@ fn string_candidates(value: &serde_json::Value) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct LiveProgress {
+        phases: Mutex<Vec<LoginPhase>>,
+    }
+
+    impl LoginProgressReporter for LiveProgress {
+        fn report(&self, phase: LoginPhase, _message: &str) {
+            self.phases.lock().unwrap().push(phase);
+        }
+    }
 
     #[tokio::test]
     async fn injectable_capture_runner_never_writes_a_final_credential_path() {
@@ -500,5 +554,216 @@ mod tests {
         .await;
         assert!(invalid.is_err());
         assert_eq!(std::fs::read(&sentinel).unwrap(), b"unchanged");
+    }
+
+    #[test]
+    fn report_token_failures_are_reduced_to_safe_fixed_categories() {
+        assert_eq!(
+            report_token_failure_category(&serde_json::json!({
+                "ok": false,
+                "status": 401,
+                "error": "private upstream detail"
+            })),
+            "凭证接口拒绝当前登录状态"
+        );
+        assert_eq!(
+            report_token_failure_category(&serde_json::json!({
+                "ok": false,
+                "status": 200,
+                "error": "getReportToken returned non-JSON response",
+                "text": "private response body"
+            })),
+            "凭证接口返回非预期响应"
+        );
+        assert_eq!(
+            report_token_failure_category(&serde_json::json!({
+                "ok": false,
+                "status": 200,
+                "error": "private business message"
+            })),
+            "凭证接口未返回 token"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an already authenticated dedicated login browser"]
+    async fn live_authenticated_browser_completes_capture_without_persisting_credentials() {
+        let port: u16 = std::env::var("OWSTATS_LIVE_LOGIN_DEBUG_PORT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .expect("set OWSTATS_LIVE_LOGIN_DEBUG_PORT to the dedicated browser port");
+        let websocket_url = open_or_find_page(LOGIN_URL, port)
+            .await
+            .expect("dedicated login page should be available");
+        let mut setup_page = CdpPage::connect(&websocket_url)
+            .await
+            .expect("dedicated login page should accept a CDP connection");
+        setup_page
+            .add_script_to_evaluate_on_new_document(&build_collect_candidates_script())
+            .await
+            .expect("transient identity collector should install");
+        let login_url = serde_json::to_string(LOGIN_URL).unwrap();
+        setup_page
+            .evaluate(&format!("location.replace({login_url})"), false)
+            .await
+            .expect("authenticated login page should reload");
+
+        let progress = LiveProgress::default();
+        let capture = tokio::time::timeout(
+            Duration::from_secs(30),
+            fetch_credentials_from_browser(&progress, port),
+        )
+        .await;
+        let outcome = match capture {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(_)) => {
+                let last_phase = progress.phases.lock().unwrap().last().cloned();
+                panic!("live capture failed at safe phase {last_phase:?}");
+            }
+            Err(_) => {
+                let phases = progress.phases.lock().unwrap().clone();
+                let identity_diagnostics = collect_login_identity(&mut setup_page)
+                    .await
+                    .map(|(credential_role_id, paired_role_id, battle_tag)| {
+                        let credential_matches_pair =
+                            match (credential_role_id.as_deref(), &paired_role_id) {
+                                (
+                                    Some(credential_role_id),
+                                    RoleIdExtraction::Found(paired_role_id),
+                                ) => Some(credential_role_id == paired_role_id),
+                                _ => None,
+                            };
+                        serde_json::json!({
+                            "credentialRolePresent": credential_role_id.is_some(),
+                            "pairedRoleStatus": match paired_role_id {
+                                RoleIdExtraction::Missing => "missing",
+                                RoleIdExtraction::Found(_) => "found",
+                                RoleIdExtraction::Conflict => "conflict",
+                            },
+                            "battleTagStatus": match battle_tag {
+                                BattleTagExtraction::Missing => "missing",
+                                BattleTagExtraction::Found(_) => "found",
+                                BattleTagExtraction::Conflict => "conflict",
+                            },
+                            "credentialMatchesPair": credential_matches_pair,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                let credential_role_for_dom = collect_login_identity(&mut setup_page)
+                    .await
+                    .and_then(|(credential_role_id, _, _)| credential_role_id);
+                let dom_relationship_diagnostics = if let Some(credential_role_id) =
+                    credential_role_for_dom
+                {
+                    let credential_role_id = serde_json::to_string(&credential_role_id).unwrap();
+                    setup_page
+                        .evaluate(
+                            &format!(
+                                r#"(() => {{
+                                      const credentialRole = {credential_role_id};
+                                      const walker = document.createTreeWalker(
+                                        document.body,
+                                        NodeFilter.SHOW_TEXT
+                                      );
+                                      let labelNode = null;
+                                      while (walker.nextNode()) {{
+                                        if (String(walker.currentNode.nodeValue ?? '')
+                                          .includes('战网昵称')) {{
+                                          labelNode = walker.currentNode;
+                                          break;
+                                        }}
+                                      }}
+                                      const levels = [];
+                                      let element = labelNode?.parentElement ?? null;
+                                      for (let depth = 0; element && depth < 10; depth += 1) {{
+                                        const text = element.innerText ?? '';
+                                        const roleIds = new Set(
+                                          [...text.matchAll(/role_?id\D{{0,12}}([0-9]{{5,}})/gi)]
+                                            .map((match) => match[1])
+                                        );
+                                        levels.push({{
+                                          depth,
+                                          roleCount: roleIds.size,
+                                          credentialPresent: roleIds.has(credentialRole),
+                                          textLength: text.length,
+                                        }});
+                                        element = element.parentElement;
+                                      }}
+                                      return {{ labelNodePresent: Boolean(labelNode), levels }};
+                                    }})()"#
+                            ),
+                            false,
+                        )
+                        .await
+                        .unwrap_or(serde_json::Value::Null)
+                } else {
+                    serde_json::Value::Null
+                };
+                let diagnostics = setup_page
+                    .evaluate(
+                        r#"(() => {
+                          const text = document.documentElement?.innerText ?? '';
+                          const capture = window.__owstatsBattleTagCapture;
+                          const storageValues = [];
+                          for (const storage of [window.localStorage, window.sessionStorage]) {
+                            for (let index = 0; index < storage.length; index += 1) {
+                              const key = storage.key(index);
+                              if (key) storageValues.push(storage.getItem(key) ?? '');
+                            }
+                          }
+                          const battleTagPattern = /[^\s#]+#[0-9]+/g;
+                          const pairedPattern = /role_?id[\s\S]{0,500}[^\s#]+#[0-9]+|[^\s#]+#[0-9]+[\s\S]{0,500}role_?id/i;
+                          let shallowGlobalPatternCount = 0;
+                          for (const key of Object.keys(window)) {
+                            try {
+                              const value = window[key];
+                              const serialized = typeof value === 'string'
+                                ? value
+                                : JSON.stringify(value);
+                              if (serialized && battleTagPattern.test(serialized.slice(0, 100000))) {
+                                shallowGlobalPatternCount += 1;
+                              }
+                              battleTagPattern.lastIndex = 0;
+                            } catch (_) {}
+                          }
+                          return {
+                            host: location.hostname,
+                            path: location.pathname,
+                            readyState: document.readyState,
+                            labelPresent: text.includes('战网昵称'),
+                            bodyPatternCount: (text.match(battleTagPattern) ?? []).length,
+                            capturePresent: Boolean(capture),
+                            captureValueCount: Array.isArray(capture?.values)
+                              ? capture.values.length
+                              : 0,
+                            captureObserverPresent: Boolean(capture?.observer),
+                            storagePatternValueCount: storageValues.filter((value) =>
+                              battleTagPattern.test(value)
+                            ).length,
+                            storagePairedValueCount: storageValues.filter((value) =>
+                              pairedPattern.test(value)
+                            ).length,
+                            shallowGlobalPatternCount,
+                          };
+                        })()"#,
+                        false,
+                    )
+                    .await
+                    .unwrap_or(serde_json::Value::Null);
+                panic!(
+                    "live capture timed out at safe phases {phases:?}; identity diagnostics \
+                     {identity_diagnostics}; DOM relationship diagnostics \
+                     {dom_relationship_diagnostics}; safe diagnostics {diagnostics}"
+                );
+            }
+        };
+        assert!(outcome.credentials.role_id > 0);
+        assert!(!outcome.credentials.token.trim().is_empty());
+        assert!(outcome
+            .detected_battle_tag
+            .split_once('#')
+            .is_some_and(|(name, suffix)| !name.is_empty()
+                && !suffix.is_empty()
+                && suffix.chars().all(|character| character.is_ascii_digit())));
     }
 }

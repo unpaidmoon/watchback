@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 9;
+pub const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 struct Migration {
     version: i64,
@@ -56,6 +56,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 9,
         name: "durable season sync state",
         apply: migrate_v9,
+    },
+    Migration {
+        version: 10,
+        name: "career mmr v3 performance artifact storage",
+        apply: migrate_v10,
     },
 ];
 
@@ -403,6 +408,26 @@ fn migrate_v9(transaction: &Transaction<'_>) -> Result<()> {
             latest_begin_ts = MAX(season_sync_cursors.latest_begin_ts, excluded.latest_begin_ts)
         "#,
         [crate::season_fetch::DASHEN_CURRENT_SEASON],
+    )?;
+    Ok(())
+}
+
+fn migrate_v10(transaction: &Transaction<'_>) -> Result<()> {
+    // Forward-compatible v3 launch surface: a nullable per-event performance
+    // tier plus a model-artifact table keyed by model version. Existing v2
+    // events are untouched (the column is nullable with no default), and the
+    // artifact table is created idempotently for pre-MMR, v1 and v2 databases.
+    add_column_if_missing(transaction, "career_mmr_events", "performance_tier", "TEXT")?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS career_mmr_model_artifacts (
+            model_version INTEGER PRIMARY KEY REFERENCES mmr_model_versions(version) ON DELETE CASCADE,
+            algorithm TEXT NOT NULL,
+            config_hash TEXT NOT NULL,
+            artifact_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        "#,
     )?;
     Ok(())
 }

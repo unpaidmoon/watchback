@@ -3,6 +3,8 @@ pub mod input;
 pub mod performance;
 pub mod performance_forward;
 pub mod performance_model;
+pub mod performance_runtime;
+pub mod performance_selection;
 pub mod performance_stability;
 pub mod query;
 pub mod rating;

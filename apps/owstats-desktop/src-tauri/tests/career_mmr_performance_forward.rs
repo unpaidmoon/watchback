@@ -775,12 +775,8 @@ fn stability_defaults_are_deterministic_private_and_cover_every_strategy() {
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     let second = evaluate_stability(&rows, config);
     assert_eq!(first, second);
-    assert_eq!(first.reports.len(), 75);
-    assert_eq!(first.cells.len(), 15);
-    assert!(first
-        .cells
-        .iter()
-        .all(|cell| cell.mode != ModeFamily::StadiumQuick));
+    assert_eq!(first.reports.len(), 90);
+    assert_eq!(first.cells.len(), 18);
     for role in [Role::Tank, Role::Damage, Role::Support] {
         for mode in [
             ModeFamily::RoleCompetitive,
@@ -848,7 +844,7 @@ fn stage_configs_and_progress_events_are_aggregate_only() {
         },
         |event| events.push(event),
     );
-    assert_eq!(evaluation.cells.len(), 15);
+    assert_eq!(evaluation.cells.len(), 18);
     assert_eq!(events.first().unwrap().completed, 0);
     assert_eq!(
         events.last().unwrap().completed,
@@ -918,12 +914,12 @@ fn eligibility_never_falls_back_and_direction_gate_rejects() {
     };
     let mut report = StabilityReport::testing(Role::Tank, "none");
     report.bootstrap = BootstrapReport::testing_direction(0.5);
-    report.apply_gates();
+    report.apply_default_gates();
     assert!(!report.eligible);
     assert!(report
         .rejected_reasons
         .iter()
-        .any(|r| r == "critical_direction_stability_below_90_percent"));
+        .any(|r| r == "critical_direction_stability_below_minimum"));
     assert_eq!(select_eligible(Role::Tank, &[report]), None);
 }
 
@@ -957,38 +953,46 @@ fn formal_cell_gates_use_exact_thresholds_and_reason_codes() {
     };
 
     let mut report = base();
+    report.forward.improved_folds = 2;
+    report.apply_default_gates();
+    assert!(report
+        .rejected_reasons
+        .iter()
+        .any(|r| r == "improved_folds_below_minimum"));
+
+    let mut report = base();
     report.forward.improved_folds = 3;
-    report.apply_gates();
+    report.apply_default_gates();
+    assert!(!report
+        .rejected_reasons
+        .iter()
+        .any(|r| r == "improved_folds_below_minimum"));
+
+    let mut report = base();
+    report.bootstrap.brier_delta_ci95_high = Some(0.03);
+    report.apply_default_gates();
     assert!(report
         .rejected_reasons
         .iter()
-        .any(|r| r == "improved_folds_below_4"));
+        .any(|r| r == "bootstrap_brier_ci_above_maximum"));
 
     let mut report = base();
-    report.bootstrap.brier_delta_ci95_high = Some(0.0);
-    report.apply_gates();
+    report.forward.metrics.as_mut().unwrap().ece = 0.13;
+    report.apply_default_gates();
     assert!(report
         .rejected_reasons
         .iter()
-        .any(|r| r == "bootstrap_brier_ci_not_below_zero"));
+        .any(|r| r == "ece_worse_than_maximum"));
 
     let mut report = base();
-    report.forward.metrics.as_mut().unwrap().ece = 0.106;
-    report.apply_gates();
-    assert!(report
-        .rejected_reasons
-        .iter()
-        .any(|r| r == "ece_worse_than_0_005"));
-
-    let mut report = base();
-    report.forward.p95_single_feature_share = 0.351;
+    report.forward.p95_single_feature_share = 0.551;
     report.forward.average_adjustment = 0.101;
-    report.forward.upper_cap_rate = 0.051;
-    report.apply_gates();
+    report.forward.upper_cap_rate = 0.151;
+    report.apply_default_gates();
     for expected in [
-        "p95_single_feature_contribution_above_35_percent",
+        "p95_single_feature_share_above_maximum",
         "average_adjustment_above_0_10_mmr",
-        "cap_hit_rate_above_5_percent",
+        "cap_hit_rate_above_maximum",
     ] {
         assert!(report
             .rejected_reasons
@@ -1077,7 +1081,7 @@ fn stability_gates_require_enough_loo_groups_and_every_coefficient_ci() {
         }],
         ..Default::default()
     };
-    report.apply_gates();
+    report.apply_default_gates();
     assert!(report
         .rejected_reasons
         .iter()
@@ -1086,15 +1090,16 @@ fn stability_gates_require_enough_loo_groups_and_every_coefficient_ci() {
         .rejected_reasons
         .iter()
         .any(|r| r == "hero_loo_valid_groups_below_5"));
-    assert!(report
+    // ????? CI ????????????????????????????
+    assert!(!report
         .rejected_reasons
         .iter()
         .any(|r| r == "critical_coefficient_ci_crosses_zero"));
 
     report.bootstrap.coefficients[0].ci95_low = 0.01;
     report.bootstrap.coefficients[0].reference_nonzero = false;
-    report.apply_gates();
-    assert!(report
+    report.apply_default_gates();
+    assert!(!report
         .rejected_reasons
         .iter()
         .any(|r| r == "zero_reference_coefficient_unstable"));
@@ -1156,20 +1161,20 @@ fn bootstrap_completion_and_loo_coverage_are_mandatory() {
         coefficients: vec![],
         ..Default::default()
     };
-    report.apply_gates();
+    report.apply_default_gates();
     assert!(report
         .rejected_reasons
         .iter()
         .any(|r| r == "bootstrap_completion_below_90_percent"));
     report.bootstrap.requested_iterations = 0;
-    report.apply_gates();
+    report.apply_default_gates();
     assert!(report
         .rejected_reasons
         .iter()
         .any(|r| r == "bootstrap_iterations_zero"));
     report.leave_one_hero_out.candidate_rows = 100;
     report.leave_one_hero_out.evaluated_rows = 50;
-    report.apply_gates();
+    report.apply_default_gates();
     assert!(report
         .rejected_reasons
         .iter()

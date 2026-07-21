@@ -9,8 +9,10 @@ use owstats_desktop_lib::career_mmr::{
     },
     training::{TrainingAudit, TrainingEnvironment, TrainingRow},
     training_report::{
-        build_training_outputs, recompute_config_hash, recompute_promotion_checksum,
-        validate_promotion_report, validate_report_boundary,
+        build_training_outputs, build_v3_runtime_artifact, recompute_config_hash,
+        recompute_promotion_checksum, recompute_v3_config_hash, training_records_from_rows,
+        validate_promotion_report, validate_report_boundary, validate_v3_artifact,
+        AggregateEvidenceArtifact, CareerMmrV3Artifact,
     },
 };
 use serde_json::{json, Value};
@@ -407,7 +409,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
     assert!(!artifact.feature_version.is_empty());
     assert_eq!(artifact.seed, 0x5eed);
     assert_eq!(artifact.roles.len(), 3);
-    assert_eq!(artifact.cells.len(), 15);
+    assert_eq!(artifact.cells.len(), 18);
     assert!(!artifact.normalization.baselines.is_empty());
     assert_eq!(artifact.normalization.mad_scale, 0.6745);
     assert_eq!(artifact.normalization.mad_floor_absolute, 1.0e-6);
@@ -421,7 +423,7 @@ fn produces_complete_replayable_and_privacy_safe_outputs() {
     assert_eq!(artifact.caps.quick_match_delta_mmr, 10.0);
     assert_eq!(artifact.config_hash.len(), 64);
     assert_eq!(report.dataset.account_datasets, 2);
-    assert_eq!(report.cells.len(), 15);
+    assert_eq!(report.cells.len(), 18);
     assert_eq!(report.stadium_quick.decision, CellDecision::OutcomeOnly);
     assert!(report
         .cells
@@ -829,6 +831,7 @@ fn artifact_uses_the_actual_evaluation_snapshot_and_rejects_seed_mismatch() {
             max_loo_worsened_fraction: 0.10,
             max_abs_average_adjustment: 0.05,
             promoted_candidates: None,
+            ..Default::default()
         },
     );
     assert_eq!(evaluation.config.seed, 23);
@@ -1294,4 +1297,121 @@ fn assert_shadow(
     assert!(cell
         .rejected_reasons
         .contains(&"invalid_validation_evidence".to_string()));
+}
+
+#[test]
+fn v3_runtime_artifact_carries_three_selected_roles_and_no_forbidden_fields() {
+    let (rows, audit, evaluation) = eligible_evaluation(0x5eed);
+    let (artifact, _report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
+    let records = training_records_from_rows(&rows);
+    let v3 = build_v3_runtime_artifact(&artifact, &evaluation, &records, "screen", 2).unwrap();
+    let value = serde_json::to_value(&v3).unwrap();
+    validate_v3_artifact(&value).expect("freshly-built v3 artifact must validate");
+
+    assert_eq!(value["schema_version"], 3);
+    assert_eq!(value["algorithm"], "career-mmr-v3-guaranteed-performance");
+    assert!(value.get("ordinary_shared_v3").is_some());
+    assert!(value.get("stadium_shared_v3").is_some());
+    assert_eq!(
+        value["ordinary_shared_v3"]["shared_parameter_version"],
+        "ordinary-shared-v3"
+    );
+    assert_eq!(
+        value["stadium_shared_v3"]["shared_parameter_version"],
+        "stadium-shared-v3"
+    );
+    assert_eq!(value["selected_models"].as_object().unwrap().len(), 3);
+    for role in ["tank", "damage", "support"] {
+        assert!(
+            value["selected_models"].get(role).is_some(),
+            "missing selected model for {role}"
+        );
+        assert!(
+            ["learned", "shrunk", "percentile"]
+                .contains(&value["selected_models"][role]["tier"].as_str().unwrap()),
+            "invalid tier for {role}"
+        );
+    }
+    let tier_selection = value["aggregate_evidence"]["tier_selection"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str().unwrap_or("")))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(tier_selection.len(), 3);
+    assert_eq!(value["config_hash"].as_str().unwrap().len(), 64);
+    validate_report_boundary(&value).expect("v3 artifact rejects forbidden fields");
+    // Recursive boundary check rejects induced forbidden keys.
+    let mut bad = value.clone();
+    bad["selected_models"]["tank"]["battleTag"] = serde_json::json!("leak");
+    assert!(
+        validate_report_boundary(&bad).is_err(),
+        "boundary check must reject injected battleTag key"
+    );
+}
+
+#[test]
+fn v3_runtime_artifact_rejects_forbidden_path_payload_keys() {
+    let (rows, audit, evaluation) = eligible_evaluation(0x5eed);
+    let (artifact, _report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
+    let records = training_records_from_rows(&rows);
+    let v3 = build_v3_runtime_artifact(&artifact, &evaluation, &records, "screen", 2).unwrap();
+    let value = serde_json::to_value(&v3).unwrap();
+    let mut bad = value.clone();
+    bad["aggregate_evidence"]["payload"] = serde_json::json!("leak");
+    assert!(
+        validate_report_boundary(&bad).is_err(),
+        "boundary check must reject injected payload key"
+    );
+}
+
+#[test]
+fn v3_runtime_artifact_rejects_missing_role_in_parsed_value() {
+    let (rows, audit, evaluation) = eligible_evaluation(0x5eed);
+    let (artifact, _report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
+    let records = training_records_from_rows(&rows);
+    let v3 = build_v3_runtime_artifact(&artifact, &evaluation, &records, "screen", 2).unwrap();
+    let mut value = serde_json::to_value(&v3).unwrap();
+    let removed = value["selected_models"]
+        .as_object_mut()
+        .unwrap()
+        .remove("support");
+    assert!(removed.is_some(), "test fixture must contain support role");
+    let err = validate_v3_artifact(&value).unwrap_err();
+    assert!(err.to_string().contains("role"));
+}
+
+#[test]
+fn v3_runtime_artifact_rejects_invalid_death_sign() {
+    let (rows, audit, evaluation) = eligible_evaluation(0x5eed);
+    let (artifact, _report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
+    let records = training_records_from_rows(&rows);
+    let mut v3 = build_v3_runtime_artifact(&artifact, &evaluation, &records, "screen", 2).unwrap();
+    {
+        let tank = v3.selected_models.get_mut(&Role::Tank).unwrap();
+        tank.weights.insert("death".to_string(), 0.5);
+    }
+    v3.config_hash = recompute_v3_config_hash(&v3).unwrap();
+    let value = serde_json::to_value(&v3).unwrap();
+    let err = validate_v3_artifact(&value).unwrap_err();
+    assert!(err.to_string().contains("death"), "got: {err}");
+}
+
+#[test]
+fn v3_runtime_artifact_round_trips_serde_and_keeps_hash() {
+    let (rows, audit, evaluation) = eligible_evaluation(0x5eed);
+    let (artifact, _report) = build_training_outputs(&rows, &audit, &evaluation, 0x5eed).unwrap();
+    let records = training_records_from_rows(&rows);
+    let v3 = build_v3_runtime_artifact(&artifact, &evaluation, &records, "final", 2).unwrap();
+    let _ = v3.aggregate_evidence.account_count;
+    let json = serde_json::to_string(&v3).unwrap();
+    let parsed: CareerMmrV3Artifact = serde_json::from_str(&json).unwrap();
+    assert_eq!(v3, parsed);
+    assert_eq!(
+        recompute_v3_config_hash(&parsed).unwrap(),
+        parsed.config_hash
+    );
+    let evidence: AggregateEvidenceArtifact =
+        serde_json::from_value(serde_json::to_value(&v3.aggregate_evidence).unwrap()).unwrap();
+    assert_eq!(evidence.tier_selection.len(), 3);
 }

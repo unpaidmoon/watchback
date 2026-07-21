@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRankings } from "../shared/api";
@@ -53,7 +53,6 @@ export function RankingPage() {
   const requestedSeason = parseSeasonParam(params.get("season"));
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(requestedSeason);
   const [sort, setSort] = useState<RankingSort>(() => defaultRankingSort(tab));
-  const [search, setSearch] = useState("");
   const [ranking, setRanking] = useState<RankingResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,15 +102,8 @@ export function RankingPage() {
           ? resolveHeroDisplayName(row.bestHeroGuid, row.bestHeroName)
           : row.bestHeroName,
     }));
-    const keyword = search.trim().toLowerCase();
-    const filtered = keyword
-      ? source.filter((row) => {
-          const haystack = tab === "maps" ? `${row.name} ${row.bestHeroName ?? ""}` : row.name;
-          return haystack.toLowerCase().includes(keyword);
-        })
-      : source;
-    return sortRankingRows(filtered, sort);
-  }, [ranking, search, sort, tab]);
+    return sortRankingRows(source, sort);
+  }, [ranking, sort, tab]);
 
   const sourceCount = tab === "maps" ? ranking?.maps.length ?? 0 : ranking?.heroes.length ?? 0;
   const availableSeasons = ranking?.availableSeasons ?? [];
@@ -173,13 +165,7 @@ export function RankingPage() {
             地图排行
           </button>
         </div>
-        <label className="searchBox phase6RankingSearch">
-          <Search size={16} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "maps" ? "搜索地图或英雄" : "搜索英雄"} />
-        </label>
-        <span className="phase6RankingCount">
-          {sourceCount} 项 · 当前 {rows.length} 项
-        </span>
+        <span className="phase6RankingCount">{sourceCount} 项</span>
       </div>
 
       {error ? (
@@ -189,9 +175,9 @@ export function RankingPage() {
       ) : rows.length === 0 ? (
         <PageEmptyState
           title="暂无排行"
-          description={search ? "没有与当前搜索匹配的条目。" : "本地赛季数据不足，暂无排行。"}
-          actionLabel={search ? "清除搜索" : "重新加载"}
-          onAction={() => search ? setSearch("") : setRetryRequest((value) => value + 1)}
+          description="本地赛季数据不足，暂无排行。"
+          actionLabel="重新加载"
+          onAction={() => setRetryRequest((value) => value + 1)}
         />
       ) : (
         <RankingTable rows={rows} tab={tab} sort={sort} onSort={changeSort} />

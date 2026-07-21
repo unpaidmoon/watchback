@@ -1,8 +1,8 @@
 use owstats_desktop_lib::career_mmr::input::{
     audit_career_mmr_inputs, classify_stadium_stat_shape, extract_ordinary_match,
     extract_ordinary_match_with_context, extract_stadium_match, extract_stadium_match_with_context,
-    normalize_mode_family, normalize_role, ExtractionContext, ModeFamily, Role, StadiumStatShape,
-    TrainingCohort,
+    normalize_mode_family, normalize_role, ExtractionContext, ModeFamily, PerformanceTier, Role,
+    StadiumStatShape, TrainingCohort,
 };
 use owstats_desktop_lib::OwDatabase;
 use rusqlite::{Connection, OpenFlags};
@@ -41,6 +41,10 @@ fn maps_every_upstream_mode_to_a_distinct_actual_mode() {
 
 #[test]
 fn modes_have_stable_names_training_cohorts_and_training_flags() {
+    // The four ordinary modes share one training cohort; both stadium modes share
+    // another. Training eligibility is true for all six modes (stadium quick joins
+    // the shared stadium training cohort), but runtime correction eligibility is
+    // tier- and mode-dependent via `runtime_correction_cap`.
     let cases = [
         (
             ModeFamily::RoleCompetitive,
@@ -59,14 +63,14 @@ fn modes_have_stable_names_training_cohorts_and_training_flags() {
         (
             ModeFamily::OpenCompetitive,
             "open_competitive",
-            TrainingCohort::OpenQueue,
+            TrainingCohort::RoleQueue,
             false,
             true,
         ),
         (
             ModeFamily::OpenQuick,
             "open_quick",
-            TrainingCohort::OpenQueue,
+            TrainingCohort::RoleQueue,
             true,
             true,
         ),
@@ -80,9 +84,9 @@ fn modes_have_stable_names_training_cohorts_and_training_flags() {
         (
             ModeFamily::StadiumQuick,
             "stadium_quick",
-            TrainingCohort::OutcomeOnly,
+            TrainingCohort::StadiumCompetitive,
             true,
-            false,
+            true,
         ),
     ];
     for (mode, name, cohort, quick, trains_performance) in cases {
@@ -99,6 +103,50 @@ fn modes_have_stable_names_training_cohorts_and_training_flags() {
         serialized,
         "[\"role_competitive\",\"role_quick\",\"open_competitive\",\"open_quick\",\"stadium_competitive\",\"stadium_quick\"]"
     );
+}
+
+#[test]
+fn stadium_quick_runtime_caps_are_tighter_than_training_eligibility() {
+    // Stadium quick trains performance (shared cohort) but its runtime correction
+    // is capped far below ordinary quick and below stadium competitive.
+    assert!(ModeFamily::StadiumQuick.trains_performance());
+    assert_eq!(
+        ModeFamily::StadiumQuick.training_cohort(),
+        TrainingCohort::StadiumCompetitive
+    );
+
+    // Required by the launch plan: tier-two (shrunk) 0.10, tier-three (percentile) 0.05.
+    assert!(
+        (ModeFamily::StadiumQuick.runtime_correction_cap(PerformanceTier::Shrunk) - 0.10).abs()
+            < f64::EPSILON
+    );
+    assert!(
+        (ModeFamily::StadiumQuick.runtime_correction_cap(PerformanceTier::Percentile) - 0.05).abs()
+            < f64::EPSILON
+    );
+
+    // Caps are monotonically non-increasing across tiers, and stadium quick is the
+    // tightest quick cap at every tier (distinguishing runtime from training eligibility).
+    for tier in [
+        PerformanceTier::Learned,
+        PerformanceTier::Shrunk,
+        PerformanceTier::Percentile,
+    ] {
+        assert!(
+            ModeFamily::StadiumQuick.runtime_correction_cap(tier)
+                <= ModeFamily::RoleQuick.runtime_correction_cap(tier)
+        );
+        assert!(
+            ModeFamily::StadiumQuick.runtime_correction_cap(tier)
+                <= ModeFamily::StadiumCompetitive.runtime_correction_cap(tier)
+        );
+        let learned = ModeFamily::StadiumQuick.runtime_correction_cap(PerformanceTier::Learned);
+        let shrunk = ModeFamily::StadiumQuick.runtime_correction_cap(PerformanceTier::Shrunk);
+        let percentile =
+            ModeFamily::StadiumQuick.runtime_correction_cap(PerformanceTier::Percentile);
+        assert!(learned >= shrunk);
+        assert!(shrunk >= percentile);
+    }
 }
 
 fn audit_read_only(

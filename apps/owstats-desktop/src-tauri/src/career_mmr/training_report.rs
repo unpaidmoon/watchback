@@ -3,6 +3,10 @@ use super::{
     performance::{build_feature_matrix, HealingTakenStrategy},
     performance_forward::{CalibrationScale, ModelVariant, NestedCellReport},
     performance_model::{fit_model, predict_probability, FitConfig},
+    performance_selection::{
+        select_role_model, LearnedArtifactSummary, PerformanceRecord, SelectedRoleModel,
+        TierOneEvidence,
+    },
     performance_stability::{
         CellDecision, CellEvaluation, PromotedCandidate, StabilityConfig, StabilityConfigSnapshot,
         StabilityEvaluation, StabilityReport, TrainingStage,
@@ -35,6 +39,8 @@ pub struct PerformanceModelArtifact {
     pub training_config: TrainingConfigArtifact,
     pub sample_buckets: Vec<AggregateSampleBucket>,
     pub config_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v3_runtime: Option<CareerMmrV3Artifact>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -290,6 +296,7 @@ pub fn build_training_outputs(
         training_config: training_config.clone(),
         sample_buckets,
         config_hash: String::new(),
+        v3_runtime: None,
     };
     // The immutable artifact is returned in exactly the representation that is
     // persisted. Besides rejecting non-finite floats through deserialization,
@@ -333,9 +340,10 @@ pub fn recompute_promotion_checksum(value: &Value) -> Result<String> {
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("训练报告无效"))?
         .remove("promotion_checksum");
+    let persisted: Value = serde_json::from_slice(&serde_json::to_vec(&canonical)?)?;
     Ok(format!(
         "{:x}",
-        Sha256::digest(serde_json::to_vec(&canonicalize_json(&canonical))?)
+        Sha256::digest(serde_json::to_vec(&canonicalize_json(&persisted))?)
     ))
 }
 
@@ -494,7 +502,6 @@ impl TrainingReport {
             TrainingStage::Candidate1000 | TrainingStage::Final10000 => {
                 let candidates = promoted
                     .as_ref()
-                    .filter(|items| !items.is_empty())
                     .ok_or_else(|| anyhow::anyhow!("上一阶段报告无效"))?;
                 let mut roles = BTreeSet::new();
                 if candidates.iter().any(|candidate| {
@@ -566,7 +573,7 @@ impl TrainingReport {
             .iter()
             .map(|cell| (cell.role, cell.mode))
             .collect::<BTreeSet<_>>();
-        if self.cells.len() != 15 || actual != expected {
+        if actual != expected || self.cells.len() != expected.len() {
             bail!("上一阶段报告无效");
         }
         for cell in &self.cells {
@@ -1211,24 +1218,22 @@ fn validate_config_snapshot(config: &StabilityConfigSnapshot) -> Result<()> {
         .promoted_candidates
         .as_ref()
         .is_some_and(|candidates| {
-            candidates.is_empty()
-                || candidates.iter().any(|candidate| {
-                    strategy_rank(&candidate.strategy) == usize::MAX
-                        || !config
-                            .fit_variants
-                            .contains(&variant_name(candidate.variant).to_owned())
-                        || !config
-                            .final_hit_multipliers
-                            .contains(&candidate.final_multiplier)
-                        || !config
-                            .regularization_candidates
-                            .contains(&[candidate.lambda_core, candidate.lambda_cohort])
-                })
-                || candidates.iter().enumerate().any(|(index, candidate)| {
-                    candidates[..index]
-                        .iter()
-                        .any(|previous| previous == candidate)
-                })
+            candidates.iter().any(|candidate| {
+                strategy_rank(&candidate.strategy) == usize::MAX
+                    || !config
+                        .fit_variants
+                        .contains(&variant_name(candidate.variant).to_owned())
+                    || !config
+                        .final_hit_multipliers
+                        .contains(&candidate.final_multiplier)
+                    || !config
+                        .regularization_candidates
+                        .contains(&[candidate.lambda_core, candidate.lambda_cohort])
+            }) || candidates.iter().enumerate().any(|(index, candidate)| {
+                candidates[..index]
+                    .iter()
+                    .any(|previous| previous == candidate)
+            })
         });
     if invalid_promoted
         || config.fit_variants.is_empty()
@@ -1281,6 +1286,17 @@ fn validate_config_snapshot(config: &StabilityConfigSnapshot) -> Result<()> {
         bail!("训练配置快照无效，拒绝生成模型产物");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod fallback_config_tests {
+    use super::*;
+
+    #[test]
+    fn candidate_snapshot_accepts_an_explicit_empty_promoted_set() {
+        let config = StabilityConfig::for_stage_with_promoted(TrainingStage::Candidate1000, vec![]);
+        assert!(validate_config_snapshot(&config.snapshot()).is_ok());
+    }
 }
 
 fn unit_interval(value: f64) -> bool {
@@ -1522,7 +1538,7 @@ fn require_complete_cells(evaluation: &StabilityEvaluation) -> Result<()> {
         .iter()
         .map(|cell| (cell.role, cell.mode))
         .collect::<BTreeSet<_>>();
-    if expected != actual || evaluation.cells.len() != 15 {
+    if expected != actual || evaluation.cells.len() != expected.len() {
         bail!("训练报告缺少职责模式验收格");
     }
     Ok(())
@@ -1966,7 +1982,7 @@ pub fn validate_report_boundary(value: &Value) -> Result<()> {
                     .filter(|ch| ch.is_ascii_alphanumeric())
                     .flat_map(char::to_lowercase)
                     .collect::<String>();
-                const FORBIDDEN: [&str; 12] = [
+                const FORBIDDEN: [&str; 14] = [
                     "token",
                     "customertoken",
                     "authorization",
@@ -1979,6 +1995,8 @@ pub fn validate_report_boundary(value: &Value) -> Result<()> {
                     "matchid",
                     "rawjson",
                     "databasepath",
+                    "payload",
+                    "pathname",
                 ];
                 FORBIDDEN.iter().any(|needle| normalized.contains(needle)) || visit(value)
             }),
@@ -2005,4 +2023,326 @@ fn environment_name(environment: TrainingEnvironment) -> &'static str {
         TrainingEnvironment::Ordinary => "ordinary",
         TrainingEnvironment::Stadium => "stadium",
     }
+}
+
+// ---------------------------------------------------------------------------
+// Career MMR v3 runtime artifact: guaranteed per-role performance model.
+//
+// The v1 hierarchical artifact above remains the engine for shadow replay and
+// the trained coefficients. The v3_runtime block records, per role, which of
+// the three guaranteed tiers (learned / shrunk / percentile) was selected and
+// carries the normalized feature weights needed for deterministic runtime
+// correction. It never contains account identifiers, BattleTag, match ids,
+// file paths or raw rows: the recursive boundary check in
+// validate_report_boundary already forbids those keys, and the dedicated
+// validator below additionally rejects structural/numeric failures before the
+// artifact is allowed to publish.
+// ---------------------------------------------------------------------------
+
+pub const V3_SCHEMA_VERSION: u32 = 3;
+pub const V3_ARTIFACT_ALGORITHM: &str = "career-mmr-v3-guaranteed-performance";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CareerMmrV3Artifact {
+    pub schema_version: u32,
+    pub algorithm: String,
+    pub ordinary_shared_v3: SharedFamilyArtifact,
+    pub stadium_shared_v3: SharedFamilyArtifact,
+    pub mode_scales: BTreeMap<ModeFamily, f64>,
+    pub selected_models: BTreeMap<Role, SelectedRoleModel>,
+    pub aggregate_evidence: AggregateEvidenceArtifact,
+    pub config_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SharedFamilyArtifact {
+    pub cohort: TrainingCohort,
+    pub shared_parameter_version: String,
+    pub modes: Vec<ModeFamily>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AggregateEvidenceArtifact {
+    pub total_rows: usize,
+    pub role_rows: BTreeMap<Role, usize>,
+    pub mode_rows: BTreeMap<ModeFamily, usize>,
+    pub account_count: usize,
+    pub season_count: usize,
+    pub tier_selection: BTreeMap<Role, String>,
+}
+
+/// Extract anonymous, normalized per-role performance records from training
+/// projection rows. Only rows that the upstream pipeline allows to train
+/// performance contribute. Values are robust per-10-min statistics clipped to
+/// [-1, 1] per design section 4.3; the cohort follows the row mode family so
+/// the shared training families stay separable.
+pub fn training_records_from_rows(rows: &[TrainingRow]) -> BTreeMap<Role, Vec<PerformanceRecord>> {
+    let mut out: BTreeMap<Role, Vec<PerformanceRecord>> = BTreeMap::new();
+    for row in rows.iter().filter(|row| row.allow_performance) {
+        let Some(role) = role_from_str(&row.role) else {
+            continue;
+        };
+        let cohort = row.mode_family.training_cohort();
+        let duration_min = row.duration_sec.max(1.0) / 60.0;
+        let per10 = |value: Option<f64>| value.unwrap_or(0.0) / duration_min;
+        let clip = |v: f64| v.tanh();
+        let final_hit = clip(per10(row.final_hit));
+        let kill = per10(row.kill);
+        let nonfinal = clip((kill - per10(row.final_hit)).max(0.0));
+        let assist = clip(per10(row.assist));
+        let death = -clip(per10(row.death));
+        for (feature, value) in [
+            ("final_hit", final_hit),
+            ("nonfinal", nonfinal),
+            ("assist", assist),
+            ("death", death),
+        ] {
+            out.entry(role).or_default().push(PerformanceRecord {
+                role,
+                cohort,
+                feature: feature.to_string(),
+                value,
+                outcome: row.result,
+            });
+        }
+    }
+    out
+}
+
+/// Build the v3 runtime artifact. Every non-empty role dataset must land on
+/// exactly one tier; if a role has neither an eligible learned artifact nor
+/// projection records, selection errors and the artifact is not published.
+pub fn build_v3_runtime_artifact(
+    artifact: &PerformanceModelArtifact,
+    evaluation: &StabilityEvaluation,
+    records: &BTreeMap<Role, Vec<PerformanceRecord>>,
+    stage_label: &str,
+    account_count: usize,
+) -> Result<CareerMmrV3Artifact> {
+    let _ = stage_label;
+    let mut selected_models: BTreeMap<Role, SelectedRoleModel> = BTreeMap::new();
+    for role in [Role::Tank, Role::Damage, Role::Support] {
+        let tier_one = tier_one_evidence_for(role, evaluation, artifact);
+        let learned = if tier_one.eligible {
+            Some(LearnedArtifactSummary {
+                role,
+                eligible: true,
+                core_weights: artifact
+                    .roles
+                    .get(&role)
+                    .map(|role_artifact| role_artifact.feature_weights.clone())
+                    .unwrap_or_default(),
+                cohort_offset: BTreeMap::new(),
+                base_offset: 0.0,
+            })
+        } else {
+            None
+        };
+        let role_records = records.get(&role).cloned().unwrap_or_default();
+        let selected = select_role_model(role, &role_records, &tier_one, learned.as_ref())
+            .map_err(|message| anyhow::anyhow!("{}", message))?;
+        selected_models.insert(role, selected);
+    }
+    let mode_scales = artifact.training_config.mode_weights.clone();
+    let aggregate_evidence = build_aggregate_evidence(artifact, &selected_models, account_count);
+    let mut v3 = CareerMmrV3Artifact {
+        schema_version: V3_SCHEMA_VERSION,
+        algorithm: V3_ARTIFACT_ALGORITHM.to_string(),
+        ordinary_shared_v3: SharedFamilyArtifact {
+            cohort: TrainingCohort::RoleQueue,
+            shared_parameter_version: "ordinary-shared-v3".to_string(),
+            modes: vec![
+                ModeFamily::RoleCompetitive,
+                ModeFamily::RoleQuick,
+                ModeFamily::OpenCompetitive,
+                ModeFamily::OpenQuick,
+            ],
+        },
+        stadium_shared_v3: SharedFamilyArtifact {
+            cohort: TrainingCohort::StadiumCompetitive,
+            shared_parameter_version: "stadium-shared-v3".to_string(),
+            modes: vec![ModeFamily::StadiumCompetitive, ModeFamily::StadiumQuick],
+        },
+        mode_scales,
+        selected_models,
+        aggregate_evidence,
+        config_hash: String::new(),
+    };
+    v3.config_hash = recompute_v3_config_hash(&v3)?;
+    Ok(v3)
+}
+
+fn tier_one_evidence_for(
+    role: Role,
+    evaluation: &StabilityEvaluation,
+    artifact: &PerformanceModelArtifact,
+) -> TierOneEvidence {
+    let cell = evaluation
+        .cells
+        .iter()
+        .find(|cell| cell.role == role && cell.mode == ModeFamily::RoleCompetitive);
+    let Some(cell) = cell else {
+        return TierOneEvidence::failed(role);
+    };
+    let report = cell.reports.iter().find(|report| report.eligible);
+    let Some(report) = report else {
+        return TierOneEvidence::failed(role);
+    };
+    let direction_stability = report
+        .bootstrap
+        .coefficients
+        .iter()
+        .filter(|coef| coef.critical_constraint)
+        .map(|coef| coef.direction_stability)
+        .min_by(|a, b| a.total_cmp(b))
+        .unwrap_or(1.0);
+    let mean_abs_adjustment = report.forward.average_adjustment.abs();
+    let cap_hit_rate = report
+        .forward
+        .upper_cap_rate
+        .max(report.forward.lower_cap_rate);
+    let mut factor_directions: BTreeMap<String, f64> = BTreeMap::new();
+    if let Some(role_artifact) = artifact.roles.get(&role) {
+        for (name, weight) in &role_artifact.feature_weights {
+            if weight.abs() > 0.0 {
+                factor_directions.insert(name.clone(), weight.signum());
+            }
+        }
+    }
+    TierOneEvidence {
+        role,
+        eligible: true,
+        direction_stability,
+        brier_delta_ci95_high: report.bootstrap.brier_delta_ci95_high,
+        improved_folds: report.forward.improved_folds,
+        mean_abs_adjustment,
+        cap_hit_rate,
+        factor_directions,
+    }
+}
+
+fn build_aggregate_evidence(
+    artifact: &PerformanceModelArtifact,
+    selected_models: &BTreeMap<Role, SelectedRoleModel>,
+    account_count: usize,
+) -> AggregateEvidenceArtifact {
+    let mut total_rows = 0usize;
+    let mut role_rows: BTreeMap<Role, usize> = BTreeMap::new();
+    let mut mode_rows: BTreeMap<ModeFamily, usize> = BTreeMap::new();
+    let mut seasons = BTreeSet::new();
+    for bucket in &artifact.sample_buckets {
+        let rows = bucket.rows;
+        total_rows += rows;
+        if let Ok(role) =
+            serde_json::from_value::<Role>(serde_json::Value::String(bucket.role.clone().into()))
+        {
+            *role_rows.entry(role).or_default() += rows;
+        }
+        *mode_rows.entry(bucket.mode).or_default() += rows;
+        seasons.insert(bucket.season);
+    }
+    let tier_selection = selected_models
+        .iter()
+        .map(|(role, model)| (*role, model.tier().as_str().to_string()))
+        .collect();
+    AggregateEvidenceArtifact {
+        total_rows,
+        role_rows,
+        mode_rows,
+        account_count,
+        season_count: seasons.len(),
+        tier_selection,
+    }
+}
+
+/// Recompute the v3 config hash over the artifact with the config_hash field
+/// removed, so a mismatched hash is detected before publication.
+pub fn recompute_v3_config_hash(artifact: &CareerMmrV3Artifact) -> Result<String> {
+    validate_v3_numeric_boundary(artifact)?;
+    let mut value = serde_json::to_value(artifact)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("v3 artifact not an object"))?;
+    object.remove("config_hash");
+    let bytes = serde_json::to_vec(&value)?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn validate_v3_numeric_boundary(artifact: &CareerMmrV3Artifact) -> Result<()> {
+    for (_, model) in &artifact.selected_models {
+        if !model.base_offset.is_finite() || !model.shrink.is_finite() {
+            bail!("v3 artifact contains a non-finite model scalar");
+        }
+        for (_, weight) in &model.weights {
+            if !weight.is_finite() {
+                bail!("v3 artifact contains a non-finite feature weight");
+            }
+            if weight.abs() > 1.0 {
+                bail!("v3 artifact feature weight exceeds the normalized band");
+            }
+        }
+    }
+    for (_, scale) in &artifact.mode_scales {
+        if !scale.is_finite() || *scale < 0.0 {
+            bail!("v3 artifact contains an invalid mode scale");
+        }
+    }
+    Ok(())
+}
+
+/// Validate a parsed v3 runtime artifact value. Returns Ok only when the
+/// schema, role coverage, business signs and config hash all match.
+pub fn validate_v3_artifact(value: &Value) -> Result<()> {
+    let artifact: CareerMmrV3Artifact = serde_json::from_value(value.clone())?;
+    validate_parsed_v3_artifact(&artifact)
+}
+
+/// Validate an already-parsed v3 artifact. Exposed for replay and the CLI
+/// publication sequence; both must reject a structurally invalid artifact
+/// before activation.
+pub fn validate_parsed_v3_artifact(artifact: &CareerMmrV3Artifact) -> Result<()> {
+    if artifact.schema_version != V3_SCHEMA_VERSION {
+        bail!("v3 artifact schema version mismatch");
+    }
+    if artifact.algorithm != V3_ARTIFACT_ALGORITHM {
+        bail!("v3 artifact algorithm mismatch");
+    }
+    if artifact.selected_models.len() != 3 {
+        bail!("v3 artifact must select exactly one model for each role");
+    }
+    for role in [Role::Tank, Role::Damage, Role::Support] {
+        if !artifact.selected_models.contains_key(&role) {
+            bail!("v3 artifact is missing a required role selection");
+        }
+    }
+    for (role, model) in &artifact.selected_models {
+        if model.role != *role {
+            bail!("v3 artifact role selection is mislabeled");
+        }
+        if let Some(sign) = signed_feature_weight(*role, "death") {
+            if let Some(weight) = model.weights.get("death") {
+                if sign < 0.0 && *weight > 0.0 {
+                    bail!("v3 artifact death weight must not be positive");
+                }
+            }
+        }
+    }
+    let recomputed = recompute_v3_config_hash(artifact)?;
+    if recomputed != artifact.config_hash {
+        bail!("v3 artifact config hash mismatch");
+    }
+    Ok(())
+}
+
+fn role_from_str(value: &str) -> Option<Role> {
+    match value {
+        "tank" => Some(Role::Tank),
+        "damage" => Some(Role::Damage),
+        "support" => Some(Role::Support),
+        _ => None,
+    }
+}
+
+fn signed_feature_weight(role: Role, name: &str) -> Option<f64> {
+    super::performance_runtime::signed_feature_weight(role, name)
 }

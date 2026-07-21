@@ -8,8 +8,9 @@ use owstats_desktop_lib::{
         shadow::{aggregate_shadow_summaries, simulate_shadow_replay},
         training::build_multi_account_projection,
         training_report::{
-            build_training_outputs, recompute_config_hash, validate_promotion_report,
-            validate_report_boundary, PerformanceModelArtifact,
+            build_training_outputs, build_v3_runtime_artifact, recompute_config_hash,
+            training_records_from_rows, validate_promotion_report, validate_report_boundary,
+            validate_v3_artifact, PerformanceModelArtifact,
         },
         training_sources::discover_training_sources,
     },
@@ -204,7 +205,7 @@ fn run() -> Result<(), &'static str> {
         );
     });
     emit_evaluation_summary(&evaluation);
-    let (artifact, report) = build_training_outputs(
+    let (mut artifact, report) = build_training_outputs(
         &projection.rows,
         projection.public_audit(),
         &evaluation,
@@ -247,13 +248,33 @@ fn run() -> Result<(), &'static str> {
                 serde_json::json!({"candidate_count": candidates.len()}),
             );
     }
-    let artifact_value = serde_json::to_value(artifact).map_err(|_| "无法序列化模型产物")?;
+    let records = training_records_from_rows(&projection.rows);
+    let v3 =
+        build_v3_runtime_artifact(&artifact, &evaluation, &records, stage_label, sources.len())
+            .map_err(|_| "v3 build failed")?;
+    let v3_value = serde_json::to_value(&v3).map_err(|_| "v3 serialize failed")?;
+    validate_v3_artifact(&v3_value).map_err(|_| "v3 validate failed")?;
+    artifact.v3_runtime = Some(v3);
+    artifact.config_hash = recompute_config_hash(&artifact).map_err(|_| "artifact hash failed")?;
+    sync_report_config_hash(&mut report_value, &artifact.config_hash)?;
+    let artifact_value = serde_json::to_value(&artifact).map_err(|_| "无法序列化模型产物")?;
     validate_report_boundary(&artifact_value).map_err(|_| "模型产物包含不允许的字段")?;
     let report_bytes =
         finalize_report_for_write(report_value, args.stage.promotion_label(), args.seed)?;
     let artifact_bytes =
         serde_json::to_vec_pretty(&artifact_value).map_err(|_| "无法序列化模型产物")?;
     write_pair_atomic(&args.report, &report_bytes, &args.artifact, &artifact_bytes)?;
+    Ok(())
+}
+
+fn sync_report_config_hash(
+    report: &mut serde_json::Value,
+    config_hash: &str,
+) -> Result<(), &'static str> {
+    report.as_object_mut().ok_or("训练报告结构无效")?.insert(
+        "config_hash".into(),
+        serde_json::Value::String(config_hash.to_owned()),
+    );
     Ok(())
 }
 
@@ -265,6 +286,8 @@ fn finalize_report_for_write(
     if report.get("shadow").is_none() {
         return Err("训练报告缺少影子聚合结果");
     }
+    let normalized_bytes = serde_json::to_vec_pretty(&report).map_err(|_| "无法序列化训练报告")?;
+    report = serde_json::from_slice(&normalized_bytes).map_err(|_| "训练报告结构无效")?;
     let checksum =
         owstats_desktop_lib::career_mmr::training_report::recompute_promotion_checksum(&report)
             .map_err(|_| "无法生成训练报告校验和")?;
@@ -275,7 +298,12 @@ fn finalize_report_for_write(
     validate_report_boundary(&report).map_err(|_| "训练报告包含不允许的字段")?;
     validate_promotion_report(&report, expected_stage, expected_seed)
         .map_err(|_| "训练报告结构无效")?;
-    serde_json::to_vec_pretty(&report).map_err(|_| "无法序列化训练报告")
+    let bytes = serde_json::to_vec_pretty(&report).map_err(|_| "无法序列化训练报告")?;
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| "训练报告结构无效")?;
+    validate_promotion_report(&persisted, expected_stage, expected_seed)
+        .map_err(|_| "训练报告持久化校验失败")?;
+    Ok(bytes)
 }
 
 #[cfg(windows)]
@@ -288,31 +316,32 @@ fn ensure_training_write_platform() -> Result<(), &'static str> {
     Err("分阶段训练写入仅支持 Windows")
 }
 
-const FIXED_REJECTION_CODES: [&str; 26] = [
+const FIXED_REJECTION_CODES: [&str; 27] = [
     "account_coverage_limited",
     "average_adjustment_above_0_10_mmr",
-    "bootstrap_brier_ci_not_below_zero",
+    "bootstrap_brier_ci_above_maximum",
     "bootstrap_completion_below_90_percent",
     "bootstrap_iterations_zero",
-    "cap_hit_rate_above_5_percent",
+    "cap_hit_rate_above_maximum",
+    "cohort_shared_promotion",
     "critical_coefficient_ci_crosses_zero",
-    "critical_direction_stability_below_90_percent",
-    "ece_worse_than_0_005",
+    "critical_direction_stability_below_minimum",
+    "ece_worse_than_maximum",
     "final_weight_not_strictly_above_nonfinal",
     "hero_loo_mean_brier_delta_above_zero",
     "hero_loo_row_coverage_below_80_percent",
     "hero_loo_valid_groups_below_5",
-    "hero_loo_worsened_fraction_above_25_percent",
-    "improved_folds_below_4",
+    "hero_loo_worsened_fraction_above_maximum",
+    "improved_folds_below_minimum",
     "no_eligible_strategy",
     "no_promoted_candidate",
-    "p95_single_feature_contribution_above_35_percent",
+    "p95_single_feature_share_above_maximum",
     "resource_debt_ci_upper_not_below_zero",
     "role_core_rows_below_500",
     "season_loo_mean_brier_delta_above_zero",
     "season_loo_row_coverage_below_80_percent",
     "season_loo_valid_groups_below_2",
-    "season_loo_worsened_fraction_above_25_percent",
+    "season_loo_worsened_fraction_above_maximum",
     "selection_degraded",
     "zero_reference_coefficient_unstable",
 ];
@@ -429,10 +458,13 @@ fn load_promoted_candidates(
     {
         return Err("上一阶段报告无效");
     }
-    if candidates.is_empty() {
-        return Err("无可晋级候选");
-    }
-    Ok(Some(candidates))
+    accept_promoted_candidates(candidates).map(Some)
+}
+
+fn accept_promoted_candidates(
+    candidates: Vec<PromotedCandidate>,
+) -> Result<Vec<PromotedCandidate>, &'static str> {
+    Ok(candidates)
 }
 
 fn validate_paths(args: &CliArgs) -> Result<(), &'static str> {
@@ -1118,6 +1150,18 @@ fn main() {
 #[cfg(all(test, windows))]
 mod io_race_tests {
     use super::*;
+
+    #[test]
+    fn empty_promoted_candidates_are_valid_for_guaranteed_fallback_stages() {
+        assert_eq!(accept_promoted_candidates(Vec::new()), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn final_artifact_hash_is_copied_into_the_report_before_publication() {
+        let mut report = serde_json::json!({"config_hash": "old"});
+        sync_report_config_hash(&mut report, "new").unwrap();
+        assert_eq!(report["config_hash"], "new");
+    }
 
     #[test]
     fn evaluation_summary_uses_only_fixed_reason_codes_and_counts() {

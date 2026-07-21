@@ -9,7 +9,7 @@
 
 ## Codebase Memory MCP
 
-- 进行架构分析、跨文件调用链追踪、变更影响分析或模块边界调查时，agent 应自主优先使用 `codebase-memory-mcp`，无需等待用户逐次指定。
+- 进行架构分析、跨文件调用链追踪、变更影响分析或模块边界调查时，agent 应自主优先使用 `codebase-memory-mcp`。
 - 开始图谱查询前先运行 `index_status`；索引不存在或明显过期时，只允许索引当前项目根目录。
 - 架构调查优先使用 `get_architecture`、`search_graph`、`trace_path` 和 `detect_changes`；关键结论仍需用 `rg` 与源码读取复核。
 - 简单的精确文本查找继续优先使用 `rg`，不必为每个小修改调用代码图谱。
@@ -22,17 +22,17 @@
 1. 本文件与 `README.md`。
 2. 涉及新页面、组件视觉调整或页面重构时，必须先完整阅读根目录 `design.md`；它是当前视觉规范，若与较早视觉说明冲突，以它为准。
 3. `docs/maintenance.md`、`docs/windows-release.md`。
-4. `docs/superpowers/specs/` 中最新且与任务直接相关的设计，以及 `main-thread-log.md`。
+4. `docs/superpowers/specs/` 中最新且与任务直接相关的设计。
 
 - 用户可见文本必须使用中文；内部 API、字段名和上游协议字段保持原名。
 - 新页面和视觉重构必须遵循 `design.md` 的颜色、字体、间距、表面层级、可访问性和视觉验收规则；不得自行引入新的品牌色、字体、圆角、阴影或卡片语言。
-- 当前赛季产品边界是固定 S21/S22/S23，页面各自维护赛季筛选；不要新增全局赛季状态或“一键同步全部”。
 - 同步产品方向以 `docs/superpowers/specs/2026-07-03-phase-8-login-account-season-sync-design.md` 为准：仅同步当前浏览器登录账号的数据，BattleTag 绑定与 `searchBnetAccount` 属于旧流程，除非用户明确要求，不要恢复或扩展它。
-- `data/players/5479_s22_full_season.json` 是原始匿名完整赛季 fixture；不得把真实用户数据、凭据或浏览器 profile 加入提示词、提交或文档。
+- `data/players/5479_s22_full_season.json` 是原始匿名完整赛季 fixture。
 
 ## 原始运行时数据与发布边界
 
 - 同步、导入、SQLite、赛季快照、查询 raw JSON 和既有错误面原样保留上游自然出现的字段与错误文本；不得新增运行时递归脱敏、遮盖、清理、空操作或功能开关。
+- 本节是当前产品边界，并覆盖旧设计、旧计划和旧测试中关于运行时脱敏的要求；后续维护、审查、重构和测试不得恢复 `redact`、`sanitize`、`mask` 或等价处理。发现历史文档仍描述递归脱敏时，将其视为历史记录，而不是当前实现依据。
 - 不得主动把凭据文件中的 `token`、`customerToken`、cookie、authorization 或 credential 复制到原本不包含它们的 DTO、账号索引、登录进度或后台事件、日志及其他 payload；既有账号与事件 schema 的字段最小化边界继续有效。
 - 构建资源、共享运行时配置、账号索引、登录进度、后台事件、提交内容和安装包中不得出现任何真实凭据或私密数据；无论其来自主动复制还是被动带入，都必须拒绝 `token`、`customerToken`、cookie、authorization、credential、浏览器 profile、真实用户数据 dump 和本地 SQLite。仅 Git 忽略不足以构成安全边界。
 - 测试只能使用合成值；诊断和性能计时只能输出阶段、匿名计数、耗时与文件大小，不得打印 ID、路径、行、payload 或凭据。临时副本和输出由操作者负责清理。

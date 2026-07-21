@@ -32,6 +32,27 @@ pub enum TrainingCohort {
     OutcomeOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerformanceTier {
+    /// Tier 1: constrained learned model, promoted only when balanced gates pass.
+    Learned,
+    /// Tier 2: strongly shrunk model keeping only directionally stable features.
+    Shrunk,
+    /// Tier 3: robust within-role percentile model, the guaranteed launch fallback.
+    Percentile,
+}
+
+impl PerformanceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Learned => "learned",
+            Self::Shrunk => "shrunk",
+            Self::Percentile => "percentile",
+        }
+    }
+}
+
 impl ModeFamily {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -58,19 +79,51 @@ impl ModeFamily {
 
     pub fn training_cohort(self) -> TrainingCohort {
         match self {
-            Self::RoleCompetitive | Self::RoleQuick => TrainingCohort::RoleQueue,
-            Self::OpenCompetitive | Self::OpenQuick => TrainingCohort::OpenQueue,
-            Self::StadiumCompetitive => TrainingCohort::StadiumCompetitive,
-            Self::StadiumQuick => TrainingCohort::OutcomeOnly,
+            // 普通四种模式合并为一个训练组；角斗两种模式合并为一个训练组。
+            // 模式差异通过逐模式归一化基线、样本权重与单场变化上限区分。
+            Self::RoleCompetitive | Self::RoleQuick | Self::OpenCompetitive | Self::OpenQuick => {
+                TrainingCohort::RoleQueue
+            }
+            Self::StadiumCompetitive | Self::StadiumQuick => TrainingCohort::StadiumCompetitive,
         }
     }
 
     pub fn trains_performance(self) -> bool {
-        self != Self::StadiumQuick
+        true
     }
 
     pub fn is_quick(self) -> bool {
         matches!(self, Self::RoleQuick | Self::OpenQuick | Self::StadiumQuick)
+    }
+
+    /// Absolute per-match personal-performance correction cap (MMR) for this mode
+    /// and runtime tier. Training eligibility (`trains_performance`/`training_cohort`)
+    /// is separate from runtime eligibility: stadium quick joins the shared stadium
+    /// training cohort but applies only a tiny runtime correction.
+    pub fn runtime_correction_cap(self, tier: PerformanceTier) -> f64 {
+        match (self, tier) {
+            // Learned: bounded by 5% of the competitive (+/-30) / quick (+/-10) base.
+            (Self::RoleCompetitive, PerformanceTier::Learned)
+            | (Self::OpenCompetitive, PerformanceTier::Learned)
+            | (Self::StadiumCompetitive, PerformanceTier::Learned) => 1.5,
+            (Self::RoleQuick, PerformanceTier::Learned)
+            | (Self::OpenQuick, PerformanceTier::Learned) => 0.50,
+            (Self::StadiumQuick, PerformanceTier::Learned) => 0.10,
+            // Shrunk: min(5% of base, absolute ceiling) per design section 4.2.
+            (Self::RoleCompetitive, PerformanceTier::Shrunk)
+            | (Self::OpenCompetitive, PerformanceTier::Shrunk)
+            | (Self::StadiumCompetitive, PerformanceTier::Shrunk) => 1.0,
+            (Self::RoleQuick, PerformanceTier::Shrunk)
+            | (Self::OpenQuick, PerformanceTier::Shrunk) => 0.25,
+            (Self::StadiumQuick, PerformanceTier::Shrunk) => 0.10,
+            // Percentile: smallest caps per design section 4.3.
+            (Self::RoleCompetitive, PerformanceTier::Percentile)
+            | (Self::OpenCompetitive, PerformanceTier::Percentile)
+            | (Self::StadiumCompetitive, PerformanceTier::Percentile) => 0.5,
+            (Self::RoleQuick, PerformanceTier::Percentile)
+            | (Self::OpenQuick, PerformanceTier::Percentile) => 0.1,
+            (Self::StadiumQuick, PerformanceTier::Percentile) => 0.05,
+        }
     }
 }
 

@@ -13,6 +13,7 @@ use std::{
 
 pub struct TrainingSourceSpec {
     pub account_group: String,
+    pub battle_tag: String,
     database_path: PathBuf,
     expected_canonical_account_root: PathBuf,
     expected_database_identity: DatabaseIdentity,
@@ -164,6 +165,7 @@ fn discover_training_sources_inner(paths: &SharedAppPaths) -> Result<Vec<Trainin
         }
         sources.push(TrainingSourceSpec {
             account_group: format!("dataset-{:03}", index + 1),
+            battle_tag: manifest.battle_tag.clone(),
             database_path,
             expected_canonical_account_root: canonical_account_root,
             expected_database_identity: database_identity(&fs::metadata(&canonical_database)?),

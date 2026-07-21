@@ -113,7 +113,7 @@ fn history_filters_display_without_changing_overview_current() -> Result<()> {
     seed_role(&conn, "damage", 2700, 0.8)?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     for (id, season, ts, after) in [("a", 20, 100, 2500.0), ("b", 23, 200, 2700.0)] {
-        conn.execute("INSERT INTO career_mmr_events VALUES(1,?1,'damage',?2,?3,'role_competitive',1,1,.5,.8,0,2400,200,10,10,?4,190,.8,'hash','now')", params![id, season, ts, after])?;
+        conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(1,?1,'damage',?2,?3,'role_competitive',1,1,.5,.8,0,2400,200,10,10,?4,190,.8,'hash','now')", params![id, season, ts, after])?;
     }
     let history = get_role_mmr_history(
         &db,
@@ -148,7 +148,7 @@ fn breakdowns_and_explanation_only_report_stored_factors() -> Result<()> {
     conn.execute("INSERT INTO career_role_mode_summary VALUES(1,'support','role_competitive',3,3600,1,1,1,24,'now')", [])?;
     conn.execute("INSERT INTO career_role_season_summary VALUES(1,23,'support',4,2500,2600,2620,100,1,2,'now')", [])?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
-    conn.execute("INSERT INTO career_mmr_events VALUES(1,'safe-local-match','support',23,2,'role_competitive',1,1,.6,.82,0,2500,200,8,8,2508,190,.65,'hash','now')", [])?;
+    conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(1,'safe-local-match','support',23,2,'role_competitive',1,1,.6,.82,0,2500,200,8,8,2508,190,.65,'hash','now')", [])?;
     let modes = get_role_mmr_mode_breakdown(&db, "support")?;
     let seasons = get_role_mmr_season_breakdown(&db, "support")?;
     let explanation = get_mmr_match_explanation(&db, "safe-local-match", "support")?;
@@ -166,7 +166,7 @@ fn breakdowns_and_explanation_only_report_stored_factors() -> Result<()> {
     let neutral = explanation
         .factors
         .iter()
-        .find(|f| f.label == "胜负基准变化")
+        .find(|f| f.label == "胜负基础变化")
         .unwrap()
         .value;
     let difficulty = explanation
@@ -212,7 +212,7 @@ fn recent_explanations_are_real_ordered_and_privacy_safe() -> Result<()> {
         ("private-first", 100, 8.0, 8.0),
         ("private-latest", 200, 30.0, 20.0),
     ] {
-        conn.execute("INSERT INTO career_mmr_events VALUES(1,?1,'tank',23,?2,'role_competitive',1,1,.6,1,0,2500,833,?3,?4,2520,800,.5,'private-hash','now')", params![id, ts, base, final_delta])?;
+        conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(1,?1,'tank',23,?2,'role_competitive',1,1,.6,1,0,2500,833,?3,?4,2520,800,.5,'private-hash','now')", params![id, ts, base, final_delta])?;
     }
     let recent = get_recent_mmr_explanations(&db, "tank", 1)?;
     assert_eq!(recent.role, "tank");
@@ -239,7 +239,7 @@ fn missing_explanation_is_chinese_and_build_status_is_derived() -> Result<()> {
         .to_string();
     assert!(error.contains("未找到"));
     let status = get_career_mmr_build_status(&db)?;
-    assert_eq!(status.target_model_version, 2);
+    assert_eq!(status.target_model_version, 3);
     assert!(status.needs_rebuild);
     assert_eq!(status.summary_count, 0);
     assert!(!status.is_built);
@@ -253,7 +253,7 @@ fn missing_explanation_is_chinese_and_build_status_is_derived() -> Result<()> {
     seed_role(&conn, "support", 2500, 0.8)?;
     let legacy_complete = get_career_mmr_build_status(&db)?;
     assert_eq!(legacy_complete.model_version, Some(1));
-    assert_eq!(legacy_complete.target_model_version, 2);
+    assert_eq!(legacy_complete.target_model_version, 3);
     assert!(legacy_complete.needs_rebuild);
     assert_eq!(legacy_complete.summary_count, 3);
     assert!(!legacy_complete.is_built);
@@ -261,14 +261,14 @@ fn missing_explanation_is_chinese_and_build_status_is_derived() -> Result<()> {
     seed_model_version(&conn, 2)?;
     let current_empty = get_career_mmr_build_status(&db)?;
     assert_eq!(current_empty.model_version, Some(2));
-    assert_eq!(current_empty.target_model_version, 2);
-    assert!(!current_empty.needs_rebuild);
+    assert_eq!(current_empty.target_model_version, 3);
+    assert!(current_empty.needs_rebuild);
     assert_eq!(current_empty.summary_count, 0);
     assert!(!current_empty.is_built);
     for role in ["tank", "damage", "support"] {
         seed_role_version(&conn, 2, role, 2500, 0.8)?;
     }
-    assert!(get_career_mmr_build_status(&db)?.is_built);
+    assert!(!get_career_mmr_build_status(&db)?.is_built);
 
     seed_model_version(&conn, 3)?;
     for role in ["tank", "damage", "support"] {
@@ -276,10 +276,10 @@ fn missing_explanation_is_chinese_and_build_status_is_derived() -> Result<()> {
     }
     let future_complete = get_career_mmr_build_status(&db)?;
     assert_eq!(future_complete.model_version, Some(3));
-    assert_eq!(future_complete.target_model_version, 2);
+    assert_eq!(future_complete.target_model_version, 3);
     assert!(!future_complete.needs_rebuild);
     assert_eq!(future_complete.summary_count, 3);
-    assert!(!future_complete.is_built);
+    assert!(future_complete.is_built);
     assert_private(&status);
     Ok(())
 }
@@ -310,7 +310,7 @@ fn history_aggregates_by_season_bucket_and_limits_latest_points() -> Result<()> 
         ("b", 20, 200, 3.0, 2505.0),
         ("c", 23, 300, 4.0, 2509.0),
     ] {
-        conn.execute("INSERT INTO career_mmr_events VALUES(1,?1,'tank',?2,?3,'role_competitive',1,1,.5,1,0,2500,200,?4,?4,?5,190,.8,'h','now')",params![id,season,ts,delta,mmr])?;
+        conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(1,?1,'tank',?2,?3,'role_competitive',1,1,.5,1,0,2500,200,?4,?4,?5,190,.8,'h','now')",params![id,season,ts,delta,mmr])?;
     }
     let day = get_role_mmr_history(
         &db,
@@ -382,7 +382,7 @@ fn history_clamps_match_day_and_week_mmr_to_public_display_range() -> Result<()>
     seed_model(&conn)?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     for (id, ts, mmr) in [("too-low", 100, -500.0), ("too-high", 200, 5500.0)] {
-        conn.execute("INSERT INTO career_mmr_events VALUES(1,?1,'tank',23,?2,'role_competitive',1,1,.5,1,0,2500,200,10,10,?3,190,.8,'h','now')",params![id,ts,mmr])?;
+        conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(1,?1,'tank',23,?2,'role_competitive',1,1,.5,1,0,2500,200,10,10,?3,190,.8,'h','now')",params![id,ts,mmr])?;
     }
     let request = |granularity: &str| CareerMmrHistoryRequest {
         role: "tank".into(),
@@ -417,7 +417,7 @@ fn match_cursor_keeps_same_timestamp_rows_and_capped_explanation_closes() -> Res
     seed_model(&conn)?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     for (id, hash) in [("same-a", "aaa"), ("same-z", "zzz")] {
-        conn.execute("INSERT INTO career_mmr_events VALUES(1,?1,'tank',23,500,'role_competitive',1,1,0,1,0,2500,833,20,20,2520,800,.5,?2,'now')",params![id,hash])?;
+        conn.execute("INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(1,?1,'tank',23,500,'role_competitive',1,1,0,1,0,2500,833,20,20,2520,800,.5,?2,'now')",params![id,hash])?;
     }
     let request = |before, before_hash| CareerMmrHistoryRequest {
         role: "tank".into(),
@@ -443,5 +443,44 @@ fn match_cursor_keeps_same_timestamp_rows_and_capped_explanation_closes() -> Res
         .map(|f| f.value)
         .sum();
     assert!((sum - 20.0).abs() < 1e-9);
+    Ok(())
+}
+
+#[test]
+fn active_v3_explanation_reports_performance_tier() -> Result<()> {
+    let (_temp, db) = database()?;
+    let conn = db.connect()?;
+    seed_model_version(&conn, 3)?;
+    for role in ["tank", "damage", "support"] {
+        seed_role_version(&conn, 3, role, 2500, 0.8)?;
+    }
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    conn.execute(
+        "INSERT INTO career_mmr_events (model_version,match_id,role,season,begin_ts,mode_family,role_share,result,expected_win_rate,data_quality,performance_adjustment,performance_tier,mu_before,sigma_before,base_delta,final_delta,mu_after,sigma_after,confidence_after,input_hash,computed_at) VALUES(3,'m-tier','tank',23,2,'role_competitive',1,1,.6,.82,8,'learned',2500,200,8,16,2516,190,.65,'hash-tier','now')",
+        [],
+    )?;
+    let status = get_career_mmr_build_status(&db)?;
+    assert_eq!(status.target_model_version, 3);
+    assert!(status.is_built);
+    let explanation = get_mmr_match_explanation(&db, "m-tier", "tank")?;
+    assert!(explanation
+        .factors
+        .iter()
+        .any(|f| f.kind == "tier" && f.label == "约束学习" && f.unit == "tier"));
+    assert!(explanation
+        .factors
+        .iter()
+        .any(|f| f.label == "个人表现修正"));
+    assert!(explanation
+        .factors
+        .iter()
+        .any(|f| f.label == "胜负基础变化"));
+    let recent = get_recent_mmr_explanations(&db, "tank", 10)?;
+    assert!(recent.items.iter().any(|item| item
+        .factors
+        .iter()
+        .any(|f| f.kind == "tier" && f.label == "约束学习" && f.unit == "tier")));
+    assert_private(&explanation);
+    assert_private(&recent);
     Ok(())
 }

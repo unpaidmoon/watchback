@@ -268,12 +268,13 @@ const STAT_HEALING_PRIMARY: &str = "603482350067646913";
 const STAT_HEALING_FALLBACK: &str = "603482350067647479";
 const STAT_OBJECTIVE_TIME: &str = "603482350067648534";
 pub fn build_training_projection(conn: &Connection) -> Result<TrainingProjection> {
-    build_training_projection_for_account(conn, "dataset-001")
+    build_training_projection_for_account(conn, "dataset-001", None)
 }
 
 pub fn build_training_projection_for_account(
     conn: &Connection,
     account_group: &str,
+    battle_tag: Option<&str>,
 ) -> Result<TrainingProjection> {
     let mut active_events = HashMap::new();
     if table_exists(conn, "career_mmr_events")? && table_exists(conn, "mmr_model_versions")? {
@@ -359,13 +360,25 @@ pub fn build_training_projection_for_account(
         |row| row.get::<_, usize>(0),
     )?;
     if stadium_candidates > 0 {
-        let current_player_key = if column_exists(conn, "match_players", "bnet_id")? {
+        let use_arena_fallback = battle_tag.is_some() && table_exists(conn, "arena_match_players")?;
+        let match_players_key = if column_exists(conn, "match_players", "bnet_id")? {
             r#"(SELECT p.bnet_id FROM match_players p
                   WHERE p.match_id=m.match_id AND p.is_current_player=1
                   AND p.bnet_id=TRIM(p.bnet_id) AND TRIM(p.bnet_id)<>''
-                  AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1)"#
+                  AND (SELECT COUNT(*) FROM match_players x WHERE x.match_id=m.match_id AND x.is_current_player=1)=1 LIMIT 1)"#.to_string()
         } else {
-            "NULL"
+            "NULL".to_string()
+        };
+        // 角斗比赛不在 match_players 中记录玩家行，需要用账号 battleTag
+        // 从 arena_match_players 找回当前玩家的 bnet_id。
+        let current_player_key = if use_arena_fallback {
+            format!(
+                "COALESCE({match_players_key}, (SELECT a.bnet_id FROM arena_match_players a
+                   WHERE a.match_id=m.match_id AND a.player_name=?1
+                   AND (SELECT COUNT(*) FROM arena_match_players x WHERE x.match_id=m.match_id AND x.player_name=?1)=1 LIMIT 1))"
+            )
+        } else {
+            match_players_key
         };
         let stadium_sql = format!(
             r#"SELECT m.match_id,m.season,m.begin_ts,{map_guid},{team_score},{opponent_score},
@@ -379,9 +392,14 @@ pub fn build_training_projection_for_account(
                ORDER BY m.begin_ts,m.season,m.match_id"#,
         );
         let mut stadium_stmt = conn.prepare(&stadium_sql)?;
+        let stadium_params: Vec<&str> = if use_arena_fallback {
+            vec![battle_tag.unwrap_or_default()]
+        } else {
+            Vec::new()
+        };
         raw.extend(
             stadium_stmt
-                .query_map([], |r| {
+                .query_map(rusqlite::params_from_iter(stadium_params), |r| {
                     Ok(RawRow {
                         match_id: r.get(0)?,
                         season: r.get(1)?,
@@ -860,8 +878,11 @@ pub fn build_multi_account_projection(
         for source in sources {
             let conn = open_query_only(source)?;
             validate_training_schema(&conn)?;
-            let source_projection =
-                build_training_projection_for_account(&conn, &source.account_group)?;
+            let source_projection = build_training_projection_for_account(
+                &conn,
+                &source.account_group,
+                Some(&source.battle_tag),
+            )?;
             if conn.total_changes() != 0 {
                 bail!("training source was modified");
             }
