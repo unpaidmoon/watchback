@@ -12,11 +12,25 @@ import {
   registerLoadingInterval,
   unregisterLoadingInterval,
 } from '../src/features/matches/AiMatchRoast';
+import {
+  DeepSeekSettings,
+  deepSeekStatusLabel,
+  nextDeepSeekKeyValue,
+} from '../src/features/command-center/DeepSeekSettings';
 
 const apiSource = readFileSync(new URL('../src/shared/api.ts', import.meta.url), 'utf8');
 const typesSource = readFileSync(new URL('../src/shared/types.ts', import.meta.url), 'utf8');
 const componentSource = readFileSync(
   new URL('../src/features/matches/AiMatchRoast.tsx', import.meta.url),
+  'utf8',
+);
+const settingsSource = readFileSync(
+  new URL('../src/features/command-center/DeepSeekSettings.tsx', import.meta.url),
+  'utf8',
+);
+const onboardingSource = readFileSync(new URL('../src/pages/OnboardingPage.tsx', import.meta.url), 'utf8');
+const commandCenterCssSource = readFileSync(
+  new URL('../src/styles/features/command-center.css', import.meta.url),
   'utf8',
 );
 
@@ -28,6 +42,38 @@ assert.match(typesSource, /export type MatchDetailView\s*=\s*\{[\s\S]*?aiRoast:\
 assert.match(apiSource, /invoke<DeepSeekKeyStatus>\(\x22get_deepseek_key_status\x22\)/);
 assert.match(apiSource, /invoke<DeepSeekKeyStatus>\(\x22save_deepseek_key\x22,\s*\{\s*apiKey\s*\}\)/s);
 assert.match(apiSource, /invoke<AiRoastGenerationResult>\(\x22generate_match_ai_roast\x22,\s*\{\s*matchId\s*\}\)/s);
+
+const settingsMarkup = renderToStaticMarkup(createElement(DeepSeekSettings));
+assert.match(settingsMarkup, new RegExp('AI \\u9510\\u8bc4'));
+assert.match(settingsMarkup, new RegExp('\\u672a\\u914d\\u7f6e'));
+assert.match(settingsMarkup, /<label[^>]*for=\x22deepseek-api-key\x22[^>]*>DeepSeek API Key<\/label>/);
+assert.match(settingsMarkup, /<input[^>]*id=\x22deepseek-api-key\x22[^>]*type=\x22password\x22/);
+assert.match(settingsMarkup, /autoComplete=\x22new-password\x22/);
+assert.match(settingsMarkup, new RegExp('<button[^>]*>\\u4fdd\\u5b58\\u5e76\\u9a8c\\u8bc1<\\/button>'));
+assert.match(settingsMarkup, new RegExp('\\u4ec5\\u53d1\\u9001\\u533f\\u540d\\u5bf9\\u5c40\\u4e8b\\u5b9e\\u3001\\u8bc4\\u4ef7\\u4e0e\\u56de\\u5408\\u8d8b\\u52bf'));
+assert.match(settingsMarkup, new RegExp('\\u4e0d\\u4f1a\\u53d1\\u9001\\u73a9\\u5bb6\\u540d\\u79f0\\u3001\\u73a9\\u5bb6 ID\\u3001\\u7b14\\u8bb0\\u3001\\u539f\\u59cb JSON \\u6216\\u5b8c\\u6574\\u9635\\u5bb9'));
+assert.doesNotMatch(settingsMarkup, new RegExp('\\u5220\\u9664|\\u6a21\\u578b|\\u98ce\\u683c|Base URL|\\u6d4b\\u8bd5 Key|\\u5c3e\\u53f7|\\u7247\\u6bb5'));
+assert.equal(deepSeekStatusLabel({ state: 'ready', message: 'sk-test-fragment' }), '\u5df2\u914d\u7f6e\u5e76\u9a8c\u8bc1');
+assert.equal(deepSeekStatusLabel({ state: 'missing', message: 'anything' }), '\u672a\u914d\u7f6e');
+assert.equal(nextDeepSeekKeyValue('synthetic-secret', true), '');
+assert.equal(nextDeepSeekKeyValue('synthetic-secret', false), 'synthetic-secret');
+assert.match(settingsSource, /useEffect\([\s\S]*?getDeepSeekKeyStatus\(\)/);
+assert.match(settingsSource, /hasDesktopBackend\(\)/);
+assert.match(settingsSource, /saveDeepSeekKey\(trimmedApiKey\)/);
+assert.match(settingsSource, /if\s*\(submitting\)\s*\{\s*return;/);
+assert.match(settingsSource, /const trimmedApiKey = apiKey\.trim\(\)/);
+assert.match(settingsSource, /setApiKey\(nextDeepSeekKeyValue\(apiKey, true\)\)/);
+assert.doesNotMatch(settingsSource, /status\.message|console\.|apiKey[^\n]*(error|feedback|status)/i);
+assert.match(settingsSource, /aria-live=\x22polite\x22/);
+assert.match(onboardingSource, /import \{ DeepSeekSettings \} from \x22\.\.\/features\/command-center\/DeepSeekSettings\x22/);
+assert.match(
+  onboardingSource,
+  /<section className=\x22commandCenterTools\x22[\s\S]*?<DeepSeekSettings \/>[\s\S]*?<\/section>[\s\S]*?accountStatus\.activeAccountId/s,
+  'DeepSeek settings must stay in the tools area outside account-only content',
+);
+assert.match(commandCenterCssSource, /\.deepSeekSettings[\s\S]*?border-radius:\s*12px/);
+assert.match(commandCenterCssSource, /\.deepSeekSettings[^}]*box-shadow:\s*none/);
+assert.match(commandCenterCssSource, /\.deepSeekSettings(?:Input|Submit)[\s\S]*?min-height:\s*44px/);
 
 const initialMarkup = renderToStaticMarkup(
   createElement(AiMatchRoast, { matchId: 'match-a', initialRoast: null, detailReady: true }),

@@ -31,6 +31,7 @@ import {
   syncSeason,
 } from "../shared/api";
 import { AccountManager } from "../features/command-center/AccountManager";
+import { DeepSeekSettings } from "../features/command-center/DeepSeekSettings";
 import {
   loadDashboardRequest,
   runAddAccountOperation,
@@ -664,6 +665,17 @@ export function OnboardingPage() {
         <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
       </div> : null}
 
+      <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
+        <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>
+        <DeepSeekSettings />
+        <div className="phase6SettingsLauncherGrid syncSecondaryActions">
+          <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setNotice("版本号入口后续提供")} />
+          <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => setNotice("日志文件入口后续提供")} />
+          <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => setNotice("数据存放路径入口后续提供")} />
+          <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => setNotice("Github地址入口后续提供")} />
+        </div>
+      </section>
+
       <QaRegion id="CMD-PROFILE" className="phase6QaBlockRegion">
         {accountStatus === null || accountContextInvalidated ? (
           <div className="seasonSyncWorkbenchLoading" role="status">
@@ -773,15 +785,6 @@ export function OnboardingPage() {
           </aside>
         </div>
 
-        <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
-          <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>
-          <div className="phase6SettingsLauncherGrid syncSecondaryActions">
-                <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setNotice("版本号入口后续提供")} />
-                <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => setNotice("日志文件入口后续提供")} />
-                <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => setNotice("数据存放路径入口后续提供")} />
-                <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => setNotice("Github地址入口后续提供")} />
-          </div>
-        </section>
         </> : (
           <section className="commandCenterAccountEmpty" id="local-data" tabIndex={-1} aria-labelledby="command-center-empty-title">
             <h2 id="command-center-empty-title">尚未添加账号</h2>
