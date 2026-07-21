@@ -633,6 +633,46 @@ fn single_player_draw_returns_insufficient_detail_without_fake_comparisons() -> 
 }
 
 #[test]
+fn single_player_with_same_role_history_still_returns_insufficient_detail() -> Result<()> {
+    let (_dir, db) = database()?;
+    let conn = db.connect()?;
+    for (index, value) in [stats(16, 6, 3, 14_000, 0, 0), stats(14, 5, 4, 12_000, 0, 0)]
+        .into_iter()
+        .enumerate()
+    {
+        let historical = format!("synthetic-single-player-history-{index}");
+        seed_match(&conn, &historical, 23, "win", 2_686 + index as i64)?;
+        seed_player(
+            &conn,
+            &historical,
+            23,
+            "teammate",
+            &format!("synthetic-history-account-{index}"),
+            &format!("SyntheticHistory#{index}"),
+            &format!("synthetic-history-hero-{index}"),
+            "dps",
+            true,
+            value,
+        )?;
+    }
+    let match_id = "synthetic-single-player-with-history";
+    seed_match(&conn, match_id, 23, "loss", 2_688)?;
+    seed_team(
+        &conn,
+        match_id,
+        &[("dps", true, stats(1, 1, 12, 1_000, 0, 0))],
+    )?;
+
+    let error = build_roast_material(&conn, match_id).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "\u{5f53}\u{524d}\u{5bf9}\u{5c40}\u{7f3a}\u{5c11}\u{8db3}\u{591f}\u{7684}\u{53ef}\u{6838}\u{9a8c}\u{9510}\u{8bc4}\u{7ec6}\u{8282}"
+    );
+    Ok(())
+}
+
+#[test]
 fn selected_facts_are_subject_scoped_and_uniquely_identified() -> Result<()> {
     let (_dir, db) = database()?;
     let conn = db.connect()?;

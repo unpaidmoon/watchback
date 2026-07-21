@@ -191,6 +191,11 @@ pub fn build_roast_material(conn: &Connection, match_id: &str) -> Result<RoastMa
         .map(|value| safe_evaluation(value, &context.result))
         .unwrap_or_else(|| neutral_evaluation(&context.result));
     let players = teammate_metrics(conn, match_id)?;
+    if players.len() < 2 {
+        return Err(anyhow!(
+            "\u{5f53}\u{524d}\u{5bf9}\u{5c40}\u{7f3a}\u{5c11}\u{8db3}\u{591f}\u{7684}\u{53ef}\u{6838}\u{9a8c}\u{9510}\u{8bc4}\u{7ec6}\u{8282}"
+        ));
+    }
     let relationship_selection = select_relationship(conn, &context, &evaluation, &players)?;
     let mut selected_candidates = vec![result_fact_candidate(&context.result)?];
     if let Some(current) = players.iter().find(|player| player.current) {
