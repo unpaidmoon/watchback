@@ -8,6 +8,7 @@ import {
   AI_ROAST_LIVE_MESSAGE,
   AiMatchRoast,
   classifyAiRoastError,
+  clearBusyMatch,
 } from '../src/features/matches/AiMatchRoast';
 
 const apiSource = readFileSync(new URL('../src/shared/api.ts', import.meta.url), 'utf8');
@@ -85,6 +86,11 @@ assert.deepEqual(classifyAiRoastError('这场对局暂时没有足够的安全�
 });
 assert.equal(classifyAiRoastError('对局标识无效。').recoverable, false);
 
+assert.equal(
+  classifyAiRoastError('\u5df2\u6709\u4e00\u573a AI \u9510\u8bc4\u6b63\u5728\u751f\u6210\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5').recoverable,
+  true,
+);
+
 assert.match(componentSource, /getDeepSeekKeyStatus\(\)/, 'key status should be requested lazily by the action');
 assert.doesNotMatch(
   componentSource,
@@ -95,7 +101,13 @@ assert.match(componentSource, /requestTokenRef/);
 assert.match(componentSource, /requestMatchId/);
 assert.match(componentSource, /requestTokenRef\.current\s*!==\s*requestToken/);
 assert.match(componentSource, /requestMatchId\s*!==\s*matchIdRef\.current/);
-assert.match(componentSource, /clearInterval\(/);
+assert.equal(clearBusyMatch('match-a', 'match-a'), null);
+assert.equal(clearBusyMatch('match-b', 'match-a'), 'match-b');
+assert.match(
+  componentSource,
+  /finally\s*\{[\s\S]*?clearInterval\(loadingInterval\)[\s\S]*?setBusyMatchId\(\(current\)\s*=>\s*clearBusyMatch\(current,\s*requestMatchId\)\)/,
+  'each request must clear its interval and only its own busy match in finally',
+);
 assert.match(componentSource, /aria-live=\x22polite\x22/);
 assert.match(componentSource, /visuallyHidden/);
 assert.match(componentSource, /recoverable\s*&&[\s\S]*?>重试<\/button>/);

@@ -33,6 +33,13 @@ type MatchScopedValue<T> = {
   value: T;
 };
 
+export function clearBusyMatch(
+  currentBusyMatchId: string | null,
+  requestMatchId: string,
+) {
+  return currentBusyMatchId === requestMatchId ? null : currentBusyMatchId;
+}
+
 function errorMessage(error: unknown) {
   if (typeof error === "string") {
     return error;
@@ -72,6 +79,7 @@ export function classifyAiRoastError(error: unknown): AiRoastError {
   }
 
   const recoverable = [
+    "\u5df2\u6709\u4e00\u573a AI \u9510\u8bc4\u6b63\u5728\u751f\u6210",
     "请求过于频繁",
     "服务暂时繁忙",
     "无法连接 DeepSeek 服务",
@@ -169,12 +177,7 @@ export function AiMatchRoast({
       if (intervalRef.current === loadingInterval) {
         intervalRef.current = null;
       }
-      if (
-        requestTokenRef.current === requestToken &&
-        requestMatchId === matchIdRef.current
-      ) {
-        setBusyMatchId(null);
-      }
+      setBusyMatchId((current) => clearBusyMatch(current, requestMatchId));
     }
   }
 
