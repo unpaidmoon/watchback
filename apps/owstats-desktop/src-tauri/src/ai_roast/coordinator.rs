@@ -107,6 +107,11 @@ impl Drop for ActiveRoastGuard {
 }
 
 impl AiRoastCoordinator {
+    #[cfg(test)]
+    fn is_active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
+    }
+
     pub async fn run<T, F, Fut>(&self, operation: F) -> Result<T, AiRoastCoordinatorError>
     where
         F: FnOnce() -> Fut,
@@ -294,24 +299,28 @@ mod tests {
     use super::*;
     use futures_util::FutureExt;
     use std::panic::AssertUnwindSafe;
-    use tokio::time::{sleep, Duration};
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn second_concurrent_request_returns_safe_busy_error() {
         let coordinator = AiRoastCoordinator::default();
         let first = coordinator.clone();
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
         let task = tokio::spawn(async move {
             first
-                .run(|| async {
-                    sleep(Duration::from_millis(50)).await;
+                .run(|| async move {
+                    started_tx.send(()).unwrap();
+                    release_rx.await.unwrap();
                     1
                 })
                 .await
         });
-        sleep(Duration::from_millis(5)).await;
+        started_rx.await.unwrap();
 
         let second = coordinator.run(|| async { 2 }).await;
         assert_eq!(second, Err(AiRoastCoordinatorError::Busy));
+        release_tx.send(()).unwrap();
         assert_eq!(task.await.unwrap().unwrap(), 1);
     }
 
@@ -322,7 +331,7 @@ mod tests {
             .run(|| async { Err::<(), _>("synthetic") })
             .await;
         assert_eq!(result.unwrap().unwrap_err(), "synthetic");
-        assert!(!coordinator.is_active().await);
+        assert!(!coordinator.is_active());
         assert!(coordinator.run(|| async { 3 }).await.is_ok());
     }
 
@@ -339,8 +348,7 @@ mod tests {
             }
         });
         assert!(task.await.unwrap());
-        sleep(Duration::from_millis(5)).await;
-        assert!(!coordinator.is_active().await);
+        assert!(!coordinator.is_active());
         assert!(coordinator.run(|| async { 4 }).await.is_ok());
     }
 }
