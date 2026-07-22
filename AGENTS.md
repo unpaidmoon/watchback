@@ -44,7 +44,6 @@
 - 不得新增 `D:\Codex\...`、`/@fs/` 或其他开发机绝对路径依赖。
 - 构建或运行时必需的 JSON、图片、字典必须被跟踪并由 Vite/Tauri 正式打包，或通过 Tauri 的资源目录与 app data 目录解析；不得依赖被 `.gitignore` 忽略的本机文件。
 - 同步、导入与设置必须使用 Tauri `app_data_dir`/资源目录，不得用 `CARGO_MANIFEST_DIR` 推导安装版数据路径。
-- 涉及发布、资源或路径的改动，至少验证干净 checkout 构建和安装后烟测；仅本机 `tauri build` 成功不能证明异机可用。
 
 ## 角斗映射协作
 
