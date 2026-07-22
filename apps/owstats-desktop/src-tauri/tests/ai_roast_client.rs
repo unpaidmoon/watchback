@@ -336,8 +336,63 @@ async fn invalid_output_gets_exactly_one_anonymous_correction() {
         .as_str()
         .unwrap();
     assert!(correction.contains("校验失败"));
+    assert!(correction.contains("matchThesis"));
+    assert!(correction.contains("\"keyActors\":[]"));
+    assert!(correction.contains("不要在 judgment、title、commentary 中书写阿拉伯数字"));
+    assert!(!correction.contains("五区块"));
+    assert!(!correction.contains("closingRoast"));
     assert!(!correction.contains("private-first-output"));
     assert!(!correction.contains("我方安娜"));
+}
+
+#[tokio::test]
+async fn structurally_valid_v3_output_is_not_blocked_by_content_validation() {
+    let mut output = narrative();
+    output.analysis.match_thesis.evidence_refs = vec!["model-chosen-reference".into()];
+    output.analysis.current_player.evidence_refs = vec!["another-model-reference".into()];
+    output.commentary = "这把肯定是他的问题，输出位坐牢坐得像来打卡。".into();
+    let valid = serde_json::to_string(&output).unwrap();
+    let (url, requests, handle) = server(vec![Reply {
+        status: 200,
+        body: completion(&valid, "stop"),
+        delay: Duration::ZERO,
+    }]);
+
+    let actual = client(&url, Duration::from_secs(2))
+        .generate("sk-synthetic", &snapshot())
+        .await
+        .unwrap();
+
+    handle.join();
+    assert_eq!(actual, output);
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn title_and_commentary_survive_hidden_analysis_shape_drift() {
+    let output = json!({
+        "analysis": {"modelOwnedReasoning": ["shape may change"]},
+        "title": "标题照常回来",
+        "commentary": "隐藏分析是模型自己的草稿，桌面端只需要稳定拿到这一篇连续正文。"
+    });
+    let (url, requests, handle) = server(vec![Reply {
+        status: 200,
+        body: completion(&output.to_string(), "stop"),
+        delay: Duration::ZERO,
+    }]);
+
+    let actual = client(&url, Duration::from_secs(2))
+        .generate("sk-synthetic", &snapshot())
+        .await
+        .unwrap();
+
+    handle.join();
+    assert_eq!(actual.title, "标题照常回来");
+    assert_eq!(
+        actual.commentary,
+        "隐藏分析是模型自己的草稿，桌面端只需要稳定拿到这一篇连续正文。"
+    );
+    assert_eq!(requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

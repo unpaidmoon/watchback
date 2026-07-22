@@ -6,9 +6,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    report::{evidence_catalog, AiRoastNarrative, AiRoastReport, EvidenceSemantic, EvidenceValue},
+    report::{
+        evidence_catalog, AiRoastNarrative, AiRoastReport, ClaimType, EvidenceSemantic,
+        EvidenceValue, NarrativeAnalysis, RoastClaim,
+    },
     snapshot::RoastSnapshot,
-    validator::{normalize_json_input, validate_narrative_output, RoastValidationError},
+    validator::{normalize_json_input, RoastValidationError},
 };
 
 pub const MODEL: &str = "deepseek-v4-flash";
@@ -165,7 +168,7 @@ impl DeepSeekRoastClient {
                 }
             }
             let content = choice.message.content.unwrap_or_default();
-            match validate_narrative_output(normalize_json_input(&content), snapshot) {
+            match parse_visible_narrative(&content) {
                 Ok(report) => return Ok(report),
                 Err(error) if attempt + 1 < MAX_ATTEMPTS => {
                     append_correction(&mut request, &error, &content, snapshot)
@@ -181,6 +184,35 @@ impl DeepSeekRoastClient {
         }
         Err(DeepSeekRoastError::InvalidOutput)
     }
+}
+
+#[derive(Deserialize)]
+struct VisibleNarrative {
+    title: String,
+    commentary: String,
+}
+
+fn parse_visible_narrative(content: &str) -> Result<AiRoastNarrative, RoastValidationError> {
+    if let Ok(report) = serde_json::from_str::<AiRoastNarrative>(normalize_json_input(content)) {
+        return Ok(report);
+    }
+    let visible = serde_json::from_str::<VisibleNarrative>(normalize_json_input(content))
+        .map_err(|_| RoastValidationError::InvalidJson)?;
+    let empty_claim = || RoastClaim {
+        judgment: String::new(),
+        claim_type: ClaimType::StatisticalInterpretation,
+        evidence_refs: Vec::new(),
+    };
+    Ok(AiRoastNarrative {
+        analysis: NarrativeAnalysis {
+            match_thesis: empty_claim(),
+            current_player: empty_claim(),
+            key_actors: Vec::new(),
+            supporting_factors: Vec::new(),
+        },
+        title: visible.title,
+        commentary: visible.commentary,
+    })
 }
 
 fn validation_failure_code(error: &RoastValidationError) -> u8 {
@@ -202,6 +234,11 @@ fn detailed_validation_failure_code(
     content: &str,
     snapshot: &RoastSnapshot,
 ) -> u8 {
+    if *error == RoastValidationError::InvalidJson
+        && serde_json::from_str::<serde_json::Value>(normalize_json_input(content)).is_ok()
+    {
+        return 13;
+    }
     if *error == RoastValidationError::UnsupportedNumber {
         if let Ok(report) = serde_json::from_str::<AiRoastNarrative>(normalize_json_input(content))
         {
@@ -323,6 +360,25 @@ fn append_correction(
     content: &str,
     snapshot: &RoastSnapshot,
 ) {
+    let category = match error {
+        RoastValidationError::UnknownEvidence => "evidenceRefs 中存在证据目录之外的路径",
+        RoastValidationError::DuplicateEvidence => "同一条判断重复引用了证据",
+        RoastValidationError::UnsupportedNumber => "可见正文中的数字缺少对应证据",
+        RoastValidationError::UnsupportedClaim => "判断强度、比较关系或职责推断不受引用证据支持",
+        RoastValidationError::InvalidSectionCount => "analysis 中的关键人物或次要因素数量超限",
+        RoastValidationError::TextTooLong => "标题或连续正文超过长度上限",
+        RoastValidationError::Unfriendly => "出现了人格攻击或不允许的过程断言",
+        RoastValidationError::RealIdentity => "出现了真实身份或凭据内容",
+        _ => "JSON 结构或必填字段无效",
+    };
+    request.messages.push(Message {
+        role: "user",
+        content: format!(
+            "上一次 V3 锐评校验失败：{category}。只修正对应问题，并重新返回完整 JSON。严格照此骨架，不增加字段或外层文字：{{\"analysis\":{{\"matchThesis\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"currentPlayer\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"keyActors\":[],\"supportingFactors\":[]}},\"title\":\"\",\"commentary\":\"\"}}。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。保留一个主线，supportingFactors 最多两个，negative keyActors 最多两个。不要在 judgment、title、commentary 中书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。evidenceRefs 必须逐字取自原证据目录。不要复述上一次输出、输入数据、身份、路径或凭据。"
+        ),
+    });
+    return;
+
     let category = match error {
         RoastValidationError::UnknownEvidence => "证据字段不存在",
         RoastValidationError::DuplicateEvidence => "证据字段重复",
@@ -462,8 +518,8 @@ pub fn system_prompt() -> &'static str {
     return r#"你是《守望先锋》赛后损友：先真正理解这局，再说人话。不要写五区块报告，不要引用、扮演或自称任何外部产品人格。
 先在 analysis 中回答“如果只能告诉朋友一件事，这局最关键的是什么”，形成唯一 matchThesis；currentPlayer 判断用户真实亮点与责任；keyActors 只选真正带飞或最该背锅的人；supportingFactors 最多两个。优先追究任务的第一责任人，再考虑协助者。涉及法老之鹰、回声等空中威胁时，若我方存在主要对空职责英雄，应结合 taskKnowledge 与结果统计判断其任务是否完成。
 胜利时尽量夸用户，但只能夸证据支持的亮点，也要点名真正带飞的大爹。失败时先接住用户情绪，再根据证据找一至两位主要责任人；用户确实有锅也直说。可以口语化使用“坐牢”“头锅”“战犯”“大爹”“这把肯定是他的问题”，但只评价本局行为、数据与职责，不攻击人格、智力、身份或现实生活。
-最终可见输出只能是一个有趣的主标题和一篇连续正文，正文建议三百五十至五百个中文字符、硬上限六百五十；不要分节、列清单或套模板。不得虚构站位、换英雄、技能命中、语音、故意送、具体击杀过程等快照没有的事件。
-只返回严格 JSON，不得增加字段或骨架外文字：{"analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]},"title":"","commentary":""}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。所有 evidenceRefs 必须逐字来自证据目录；游戏职责推断必须同时引用知识与统计。"#;
+最终可见输出只能是一个有趣的主标题和一篇连续正文，正文建议三百五十至五百个中文字符、硬上限六百五十；不要分节、列清单或套模板。judgment、title、commentary 不书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。不得虚构站位、换英雄、技能命中、语音、故意送、具体击杀过程等快照没有的事件。
+只返回严格 JSON，不得增加字段或骨架外文字：{"analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]},"title":"","commentary":""}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。所有 evidenceRefs 必须逐字来自证据目录。"#;
     r#"你是《守望先锋》赛后锐评助手。事实优先，使用冷面幽默，像真正懂游戏的损友复盘；不写客服或公关稿，不说教，不解释笑话，也不模仿或自称任何其他模型。
 
 先阅读比赛信息、双方完整计分板、职责对位、当前玩家基准、连续状态、游戏知识和角斗扩展，再依次判断整体故事、主要胜负因素、当前玩家贡献与责任、关键队友或职责差距，以及最有节目效果的数据反差。本地没有预选主锅或大爹；证据不足时不要强行找锅。

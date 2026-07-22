@@ -199,26 +199,27 @@ async fn run() -> Result<(), FailureCategory> {
             .generate(request, &keys, &client)
             .await
             .map_err(|message| classify_generation_failure(&message))?;
-        let report = generated.ai_roast.report.ok_or(FailureCategory::Validate)?;
-        let report_chars =
-            validate_live_report(&database, &candidate.match_id, &report).map_err(|failure| {
-                match failure {
-                    LiveValidationFailure::Duplicate => FailureCategory::ValidateDuplicate,
-                    LiveValidationFailure::Cliche => FailureCategory::ValidateCliche,
-                    LiveValidationFailure::Identity => FailureCategory::ValidateIdentity,
-                    LiveValidationFailure::Length => FailureCategory::ValidateLength,
-                    LiveValidationFailure::Rebuild => FailureCategory::ValidateRebuild,
-                    LiveValidationFailure::Recheck => FailureCategory::ValidateRecheck,
-                    LiveValidationFailure::Structure => FailureCategory::ValidateStructure,
-                }
-            })?;
+        let title = generated.ai_roast.award.trim();
+        let commentary = generated.ai_roast.commentary.trim();
+        if title.is_empty()
+            || commentary.is_empty()
+            || title.chars().count() > 36
+            || commentary.chars().count() > 650
+            || generated.ai_roast.report.is_some()
+        {
+            return Err(FailureCategory::ValidateStructure);
+        }
+        let report_chars = title.chars().count() + commentary.chars().count();
         let variation = if index == 3 {
-            first_ending.as_ref().is_some_and(|(title, closing)| {
-                title != &report.verdict.title || closing != &report.closing_roast
-            }) || first_ending.is_none()
+            first_ending
+                .as_ref()
+                .is_some_and(|(first_title, first_commentary)| {
+                    first_title != title || first_commentary != commentary
+                })
+                || first_ending.is_none()
         } else {
             if index == 0 {
-                first_ending = Some((report.verdict.title.clone(), report.closing_roast.clone()));
+                first_ending = Some((title.to_string(), commentary.to_string()));
             }
             false
         };
