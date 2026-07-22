@@ -743,6 +743,15 @@
       "local_path": "data/assets/overwatch/maps/nepal.jpg"
     },
     {
+      "key": "neon-junction",
+      "name": "Neon Junction",
+      "cn_name": "霓虹枢纽",
+      "aliases": [
+        "霓虹枢纽"
+      ],
+      "local_path": "data/assets/overwatch/maps/neon-junction.jpg"
+    },
+    {
       "key": "new-junk-city",
       "name": "New Junk City",
       "cn_name": "New Junk City",

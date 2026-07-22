@@ -78,6 +78,7 @@ pub(super) fn get_personal_season_review_impl(
         .collect::<Vec<_>>();
     let baseline_aggregate = aggregate(&baseline_rows);
     let total_aggregate = aggregate(&rows);
+    let (season_matches, season_wins) = season_outcomes(db, season)?;
     let baseline = build_baseline(&rows, &baseline_rows, &baseline_aggregate, threshold);
     let personal_bests = personal_bests(&rows);
     let streaks = streaks(&rows);
@@ -92,11 +93,11 @@ pub(super) fn get_personal_season_review_impl(
         available_seasons,
         summary: ReviewSummary {
             season,
-            total_matches: total_aggregate.matches,
+            total_matches: season_matches,
             baseline_matches: baseline_aggregate.matches,
-            wins: total_aggregate.wins,
-            losses: total_aggregate.matches - total_aggregate.wins,
-            win_rate: round2(total_aggregate.win_rate()),
+            wins: season_wins,
+            losses: season_matches - season_wins,
+            win_rate: round2(ratio(season_wins, season_matches)),
             avg_kills: round2(avg(total_aggregate.kills, total_aggregate.matches)),
             avg_deaths: round2(avg(total_aggregate.deaths, total_aggregate.matches)),
             avg_damage: round2(avg(total_aggregate.damage, total_aggregate.matches)),
@@ -112,6 +113,25 @@ pub(super) fn get_personal_season_review_impl(
         hero_pool,
         maps,
     })
+}
+
+fn season_outcomes(db: &OwDatabase, season: Option<i64>) -> Result<(i64, i64)> {
+    let conn = db.connect()?;
+    if let Some(season) = season {
+        conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN result='win' THEN 1 ELSE 0 END), 0) FROM matches WHERE season=?",
+            params![season],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(Into::into)
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN result='win' THEN 1 ELSE 0 END), 0) FROM matches",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(Into::into)
+    }
 }
 
 pub(super) fn available_review_seasons(db: &OwDatabase) -> Result<Vec<i64>> {

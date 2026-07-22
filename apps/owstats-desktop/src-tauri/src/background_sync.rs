@@ -93,7 +93,7 @@ impl BackgroundSeasonSyncManager {
             running.insert(key.clone(), Arc::clone(&notify));
         }
         let manager = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             manager
                 .run_task(&key, paths, customer_base_url, events.as_ref())
                 .await;

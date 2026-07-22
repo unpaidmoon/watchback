@@ -13,9 +13,12 @@ const assetManifest = JSON.parse(
 ) as { heroes: Array<{ key: string; cn_name: string }> };
 const shion = assetManifest.heroes.find((hero) => hero.key === "shion");
 const viteConfig = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
+const assetsInventory = readFileSync(new URL("../runtime-config/assets-inventory.json", import.meta.url), "utf8");
 
 assertEqual(viteConfig.includes("server.fs"), false, "Vite does not allow machine-specific filesystem roots");
 assertEqual(viteConfig.includes("assets/stadium/manifest.json"), true, "build removes the non-runtime stadium source manifest from dist");
+assertEqual(assetsInventory.includes("achievements/achievement-glow-tier-2.webp"), true, "tier II achievement glow is packaged");
+assertEqual(assetsInventory.includes("achievements/achievement-glow-tier-3.webp"), true, "tier III achievement glow is packaged");
 
 assertEqual(shion?.cn_name, "死怨", "Shion uses the localized Chinese hero name");
 
@@ -109,6 +112,16 @@ assertEqual(
   mapAssetUrl("576460752303428266"),
   "/assets/maps/arena-victoriae.jpg",
   "stadium arena victoriae map guid uses its mapped preview",
+);
+assertEqual(
+  mapAssetUrl("霓虹枢纽"),
+  "/assets/maps/neon-junction.jpg",
+  "neon junction localized name uses its mapped preview",
+);
+assertEqual(
+  mapAssetUrl("576460752303427628"),
+  "/assets/maps/neon-junction.jpg",
+  "neon junction map guid uses its mapped preview",
 );
 
 const localizedMapExpectations: Array<[string, string]> = [

@@ -710,6 +710,7 @@ fn personal_review_exposes_stadium_competitive_role_ranks_separately() {
     let review =
         get_personal_season_review(&db, PersonalReviewRequest { season: Some(22) }).unwrap();
 
+    assert_eq!(review.summary.total_matches, 2);
     assert_eq!(review.stadium_role_summaries.len(), 3);
     let tank = review
         .stadium_role_summaries

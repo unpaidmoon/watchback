@@ -49,7 +49,7 @@
 
 - 人工编辑主表：`docs/superpowers/specs/2026-07-13-stadium-asset-mapping.xlsx`。中立单独 sheet、每位英雄各自一个 sheet，固定五列：GUID、装备/异能、名称、描述、资产路径。
 - 主表中的 GUID 使用十进制文本，必须存在；名称、描述、资产路径可以留空。运行时 manifest 与文件名继续使用十六进制 GUID。
-- 用户编辑主表后，以“同步角斗映射表”为指令：先校验十进制 GUID、sheet 归属、资产路径和重复项，再将名称、描述与已验证的资产路径同步到 `assets/stadium/manifest.json`，随后运行 `npm run prepare:assets` 和资源测试。
+- 用户编辑主表后，以“同步角斗映射表”为指令：先校验十进制 GUID、sheet 归属、资产路径和重复项，再将名称、描述与已验证的资产路径同步到 `assets/stadium/manifest.json`，资源清单也同步更新，随后运行 `npm run prepare:assets` 和资源测试。
 - 对于新增或替换图标，用户可以先填可访问的本地源文件路径；同步时将其复制/转换到正式 `assets/stadium/` 路径，并把主表回写为该正式路径。不得把开发机绝对路径写入 manifest 或运行时 UI。
 
 ## 数据库与同步

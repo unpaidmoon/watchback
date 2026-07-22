@@ -633,6 +633,29 @@ async fn manager_deduplicates_wakes_for_the_same_account_and_season() -> Result<
     Ok(())
 }
 
+#[test]
+fn manager_wake_can_start_outside_a_tokio_runtime() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let shared = owstats_desktop_lib::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+    let account_id = owstats_desktop_lib::account_store::AccountId::parse(
+        "22222222-2222-4222-8222-222222222222",
+    )?;
+    let paths = shared.account(&account_id);
+    std::fs::create_dir_all(paths.root())?;
+    let manager = BackgroundSeasonSyncManager::default();
+
+    assert!(manager.wake_headless(
+        account_id.as_str(),
+        paths,
+        22,
+        "http://127.0.0.1:9/customer".to_string(),
+    ));
+    tauri::async_runtime::block_on(manager.wait_for_idle(account_id.as_str(), 22));
+
+    assert_eq!(manager.active_count(), 0);
+    Ok(())
+}
+
 #[tokio::test]
 async fn recovery_pagination_resumes_at_first_uncommitted_page() -> Result<()> {
     let temp = tempfile::tempdir()?;

@@ -218,7 +218,11 @@ for (const [guid, hero] of Object.entries(queryTool.heroes ?? {})) {
 }
 for (const [guid, map] of Object.entries(queryTool.maps ?? {})) {
   const name = map.name?.trim();
-  if (name) mapDisplayNames.set(guid, resolveDisplayName(name, name, mapDisplayNames, name));
+  if (name) {
+    const key = assetKey(name, mapLookup);
+    if (key) mapLookup.set(guid, key);
+    mapDisplayNames.set(guid, resolveDisplayName(name, name, mapDisplayNames, name));
+  }
 }
 const perkIconLookup = buildPerkIconLookup(manifest.perks ?? []);
 const perkLookup = buildPerkLookup(queryTool, perkIconLookup);

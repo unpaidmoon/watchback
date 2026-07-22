@@ -256,6 +256,7 @@ fn manual_arena_map_names() -> &'static [(&'static str, &'static str)] {
         ("576460752303428209", "火药桶矿井"),
         ("576460752303428223", "绿洲城 - 花园"),
         ("576460752303429014", "绿洲城 - 大学"),
+        ("576460752303428469", "五行大学 - 水学院"),
         ("576460752303428272", "埃斯佩兰萨"),
         ("576460752303428212", "塞伦扎"),
         ("576460752303428683", "漓江塔 - 夜市"),
@@ -271,6 +272,14 @@ mod tests {
         assert_eq!(
             manual_arena_map_name("576460752303429014"),
             Some("绿洲城 - 大学")
+        );
+    }
+
+    #[test]
+    fn resolves_wuxing_university_water_college_arena_map_name() {
+        assert_eq!(
+            manual_arena_map_name("576460752303428469"),
+            Some("五行大学 - 水学院")
         );
     }
 }
