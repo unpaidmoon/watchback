@@ -1,0 +1,111 @@
+{
+  "version": 2,
+  "archetypes": {
+    "狗坦": {"role":"tank","description":"依靠机动切入、压迫后排并及时脱离的坦克。","statExpectations":{"damage":"总伤害不是唯一价值，需要结合击杀参与和存活。","deaths":"切入风险较高，但无收益阵亡仍是负面表现。"}},
+    "地面坦": {"role":"tank","description":"在正面建立空间并承接推进压力的坦克。","statExpectations":{"damageTaken":"高承伤需要结合推进收益和阵亡解释。","mitigation":"减伤与生存共同反映前排承压，但不能单独决定表现。"}},
+    "消耗坦": {"role":"tank","description":"通过中距离压制、资源交换或持续威胁建立空间的坦克。","statExpectations":{"damage":"持续伤害需要结合击杀转化。","healingReceived":"高资源占用应与实际产出一并解释。"}},
+    "枪位": {"role":"damage","description":"以稳定直射或远程火力提供持续压力的输出。","statExpectations":{"damage":"通常应提供稳定持续输出。","killsAndFinalHits":"需要判断伤害是否形成击杀转化。","context":"面对空中或暴露目标时通常承担更直接的压力任务。"}},
+    "狗位": {"role":"damage","description":"依靠机动、侧翼与收割制造关键目标压力的输出。","statExpectations":{"damage":"总伤害可能低于正面持续输出英雄。","killsAndFinalHits":"击杀参与、收割和关键目标压力更重要。","objectiveTime":"执行侧翼任务时目标时间较低不一定是问题。"}},
+    "阵地输出": {"role":"damage","description":"依赖角度、区域或持续阵地压力制造输出的英雄。","statExpectations":{"damage":"高伤害需要结合击杀和最后一击判断有效转化。","deaths":"阵地被反复突破后的高阵亡通常削弱持续压力。"}},
+    "治疗型": {"role":"support","description":"主要通过稳定治疗维持队伍续航的支援。","statExpectations":{"healing":"治疗是重要贡献，但领先不自动证明职责全部完成。","deaths":"存活影响持续治疗能力。"}},
+    "进攻型": {"role":"support","description":"同时以伤害或进攻增益参与压力制造的支援。","statExpectations":{"damage":"伤害是正常且重要的支援贡献。","healing":"治疗低于治疗型支援不能直接判定失职。"}},
+    "功能型": {"role":"support","description":"通过机动、增益或功能性能力改变交战条件的支援。","statExpectations":{"damage":"个人伤害偏低可能符合英雄职责。","assists":"助攻、存活和队伍环境比单一伤害更有解释力。"}}
+  },
+  "heroes": {
+    "死神":{"primaryArchetype":"狗位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "猎空":{"primaryArchetype":"狗位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "天使":{"primaryArchetype":"功能型","overrides":{"damage":"个人伤害很低不构成负面证据，应结合治疗、助攻、存活和敌方远程压力解释。"},"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "半藏":{"primaryArchetype":"阵地输出","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "托比昂":{"primaryArchetype":"阵地输出","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "莱因哈特":{"primaryArchetype":"地面坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "法老之鹰":{"primaryArchetype":"阵地输出","limitations":["没有目标伤害或事件数据时，不得断言她具体压制了哪名玩家。"],"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "温斯顿":{"primaryArchetype":"狗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "黑百合":{"primaryArchetype":"枪位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "堡垒":{"primaryArchetype":"阵地输出","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "秩序之光":{"primaryArchetype":"阵地输出","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "禅雅塔":{"primaryArchetype":"进攻型","overrides":{"healing":"高伤害是正常且重要的支援贡献，治疗低于治疗型支援不能直接判定失职。"},"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "源氏":{"primaryArchetype":"狗位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "路霸":{"primaryArchetype":"消耗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "卡西迪":{"primaryArchetype":"枪位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "狂鼠":{"primaryArchetype":"阵地输出","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "查莉娅":{"primaryArchetype":"地面坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "士兵：76":{"primaryArchetype":"枪位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "卢西奥":{"primaryArchetype":"功能型","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "D.Va":{"primaryArchetype":"狗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "美":{"primaryArchetype":"阵地输出","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "黑影":{"primaryArchetype":"狗位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "末日铁拳":{"primaryArchetype":"狗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "安娜":{"primaryArchetype":"治疗型","secondaryArchetypes":["功能型"],"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "奥丽莎":{"primaryArchetype":"地面坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "布丽吉塔":{"primaryArchetype":"功能型","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "莫伊拉":{"primaryArchetype":"治疗型","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "破坏球":{"primaryArchetype":"狗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "索杰恩":{"primaryArchetype":"枪位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "艾什":{"primaryArchetype":"枪位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "回声":{"primaryArchetype":"狗位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "巴蒂斯特":{"primaryArchetype":"进攻型","secondaryArchetypes":["治疗型"],"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "雾子":{"primaryArchetype":"功能型","secondaryArchetypes":["进攻型"],"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "渣客女王":{"primaryArchetype":"地面坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "西格玛":{"primaryArchetype":"消耗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "拉玛刹":{"primaryArchetype":"地面坦","secondaryArchetypes":["消耗坦"],"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "生命之梭":{"primaryArchetype":"治疗型","overrides":{"damage":"个人伤害通常较低，不能单凭伤害排名判定失职。"},"limitations":["没有技能事件时不得判断生命之握质量。"],"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "毛加":{"primaryArchetype":"消耗坦","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "伊拉锐":{"primaryArchetype":"进攻型","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "探奇":{"primaryArchetype":"狗位","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "骇灾":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "朱诺":{"primaryArchetype":"功能型","reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "弗蕾娅":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "无漾":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "安燃":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "埃姆雷":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "金驭":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "瑞稀":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "飞天猫":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "斩仇":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "西拉":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]},
+    "死怨":{"primaryArchetype":null,"reviewSources":["https://overwatch.blizzard.com/heroes/"]}
+  },
+  "universalTasks": {
+    "frontline_value": {
+      "label": "前排承压与推进收益",
+      "explanation": "高承伤需要结合阵亡、减伤、击杀参与和队伍结果解释。",
+      "evaluationFields": ["damageTaken", "deaths", "mitigation", "killParticipationRate"],
+      "limitations": ["最终计分板不能证明具体推进过程。"]
+    },
+    "damage_conversion": {
+      "label": "输出到击杀的转化",
+      "explanation": "高伤害需要结合击杀、最后一击、参与率和存活判断。",
+      "evaluationFields": ["damage", "kills", "finalHits", "killParticipationRate", "deaths"],
+      "limitations": ["不能推断伤害具体打给了谁。"]
+    },
+    "backline_survival": {
+      "label": "后排生存与保护",
+      "explanation": "支援高阵亡可能压缩全队输出窗口，但不能仅凭死亡断言保护者具体失误。",
+      "evaluationFields": ["deaths", "healing", "assists", "damageTaken"],
+      "limitations": ["不能推断单次死亡来源或站位。"]
+    },
+    "resource_conversion": {
+      "label": "资源占用与产出",
+      "explanation": "高治疗承接或高承伤需要与击杀、最后一击、参与和存活共同解释。",
+      "evaluationFields": ["healingReceived", "damageTaken", "kills", "finalHits", "deaths"],
+      "limitations": ["资源数据不等于具体治疗或保护目标。"]
+    }
+  },
+  "matchupTasks": {
+    "anti_air": {
+      "label": "对空与空中威胁处理",
+      "threatHeroes": ["法老之鹰", "回声"],
+      "primaryResponders": ["士兵：76", "卡西迪", "艾什", "黑百合", "索杰恩"],
+      "secondaryResponders": ["D.Va", "安娜", "巴蒂斯特", "伊拉锐"],
+      "evaluationFields": ["kills", "finalHits", "killParticipationRate", "damage", "deaths"],
+      "limitations": ["可以判断主要对空任务是否形成结果，不能断言具体攻击目标或英雄切换。"]
+    }
+  },
+  "maps": {
+    "阿特利斯":{"traits":["交火距离偏短","转点快"],"limitations":["地图环境只能支持上下文推断，不能直接判定表现好坏。"]},
+    "伊利奥斯":{"traits":["短图","拉扯快"],"limitations":["无法确认子地图时不得推断具体视野或地形。"]},
+    "伊利奥斯深井":{"traits":["拉扯快","近距离地形影响明显"],"limitations":["地图环境不能直接判定表现好坏。"]},
+    "伊利奥斯灯塔":{"traits":["拉扯快","交火距离偏短"],"limitations":["地图环境不能直接判定表现好坏。"]},
+    "伊利奥斯废墟":{"traits":["拉扯快","远距离视野更重要"],"limitations":["地图环境不能直接判定表现好坏。"]}
+  }
+}
