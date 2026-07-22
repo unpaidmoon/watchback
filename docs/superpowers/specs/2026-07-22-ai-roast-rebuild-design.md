@@ -434,5 +434,3 @@ SQLite 迁移必须前向兼容且幂等，不重写或删除历史锐评。旧�
 
 - [DeepSeek Chat Completion API](https://api-docs.deepseek.com/api/create-chat-completion/)：思考模式、采样参数和 JSON 输出。
 - [DeepSeek Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/)：模型只发起工具调用，具体工具需要应用执行；本设计因此不把运行时联网搜索作为首版依赖。
-- [xAI Grok 官方介绍](https://x.ai/news/grok)：机智和反叛的产品定位。
-- [xAI 官方公开 Grok prompts](https://github.com/xai-org/grok-prompts)：直接、简洁、事实优先、不说教等公开行为线索。本文只提取可测试的风格特征，不复制或要求模型扮演 Grok。
