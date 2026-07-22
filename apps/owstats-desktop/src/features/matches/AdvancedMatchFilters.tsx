@@ -25,13 +25,6 @@ export function AdvancedMatchFilters(props: AdvancedMatchFiltersProps) {
         </select>
       </label>
       <label>
-        地图
-        <select value={props.filters.map ?? ""} onChange={(event) => props.onPatch({ map: emptyOrValue(event.target.value) })}>
-          <option value="">全部</option>
-          {props.options.maps.map((map) => <option key={map.id} value={map.id}>{map.label}</option>)}
-        </select>
-      </label>
-      <label>
         复盘标签
         <select value={props.filters.primaryTag ?? ""} onChange={(event) => props.onPatch({ primaryTag: emptyOrValue(event.target.value) })}>
           <option value="">全部</option>

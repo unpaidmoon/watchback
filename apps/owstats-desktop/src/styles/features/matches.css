@@ -881,7 +881,7 @@
 }
 
 .matchFilterToolbar.phase6FilterRowPrimary {
-  grid-template-columns: minmax(128px, 0.75fr) minmax(112px, 0.65fr) minmax(220px, 1.5fr) auto auto;
+  grid-template-columns: minmax(128px, 0.75fr) minmax(112px, 0.65fr) minmax(112px, 0.65fr) minmax(180px, 1fr) auto auto;
   align-items: end;
 }
 
@@ -913,7 +913,7 @@
 }
 
 .advancedMatchFilters.phase6FilterRowSecondary {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
 }

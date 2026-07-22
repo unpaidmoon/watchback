@@ -42,6 +42,13 @@ export function MatchFilterToolbar(props: MatchFilterToolbarProps) {
           {props.options.heroes.map((hero) => <option key={hero.id} value={hero.id}>{hero.label}</option>)}
         </select>
       </label>
+      <label>
+        地图
+        <select value={props.filters.map ?? ""} onChange={(event) => props.onPatch({ map: emptyOrValue(event.target.value) })}>
+          <option value="">全部</option>
+          {props.options.maps.map((map) => <option key={map.id} value={map.id}>{map.label}</option>)}
+        </select>
+      </label>
       <label className="phase6PlayerSearchLabel">
         玩家名称
         <span className="phase6PlayerSearchBox">

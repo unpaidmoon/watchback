@@ -2,7 +2,7 @@ import type { FilterOptions, MatchFilters } from "../../shared/types";
 import { modeLabel } from "../../shared/rankingUtils";
 import { preserveQaParam } from "../../shared/qaFeedback";
 
-export const advancedMatchFilterKeys = ["result", "map", "primaryTag", "dateFrom", "dateTo", "favoriteOnly"] as const;
+export const advancedMatchFilterKeys = ["result", "primaryTag", "dateFrom", "dateTo", "favoriteOnly"] as const;
 export type VisibleMatchFilterKey = Exclude<keyof MatchFilters, "season">;
 
 export type ActiveMatchFilterChip = {
