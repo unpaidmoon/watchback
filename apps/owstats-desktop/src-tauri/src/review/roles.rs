@@ -383,7 +383,7 @@ pub(super) fn role_type_from_match_player(
     ""
 }
 
-pub(super) fn normalize_role_type(role_type: &str) -> &'static str {
+pub(crate) fn normalize_role_type(role_type: &str) -> &'static str {
     match role_type.trim().to_ascii_lowercase().as_str() {
         "tank" => "tank",
         "dps" | "damage" => "dps",
@@ -396,7 +396,7 @@ pub(super) fn normalize_role_type(role_type: &str) -> &'static str {
 const STADIUM_ROLE_ORDER: [(&str, &str); 3] =
     [("tank", "重装"), ("dps", "输出"), ("healer", "支援")];
 
-fn embedded_hero_roles() -> Result<HashMap<String, String>> {
+pub(crate) fn embedded_hero_roles() -> Result<HashMap<String, String>> {
     let lookup: Value =
         serde_json::from_str(include_str!("../../../runtime-config/ow-lookups.json"))
             .context("内置英雄职责映射无效")?;

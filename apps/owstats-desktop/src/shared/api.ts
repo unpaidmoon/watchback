@@ -82,8 +82,11 @@ export function saveDeepSeekKey(apiKey: string) {
   return invoke<DeepSeekKeyStatus>("save_deepseek_key", { apiKey });
 }
 
-export function generateMatchAiRoast(matchId: string) {
-  return invoke<AiRoastGenerationResult>("generate_match_ai_roast", { matchId });
+export function generateMatchAiRoast(matchId: string, regenerate = false) {
+  return invoke<AiRoastGenerationResult>("generate_match_ai_roast", {
+    matchId,
+    regenerate,
+  });
 }
 
 export function saveMatchFavorite(request: MatchFavoriteRequest) {

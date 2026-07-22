@@ -53,14 +53,17 @@ const matchListSources = [
   readFileSync(new URL('../src/features/matches/MatchFilterToolbar.tsx', import.meta.url), 'utf8'),
 ].join('\n');
 
-assert.match(typesSource, /export type AiMatchRoastView\s*=\s*\{\s*award:\s*string;\s*commentary:\s*string;\s*\}/s);
+assert.match(typesSource, /export type AiRoastClaimType\s*=\s*[\s\S]*?direct_fact[\s\S]*?statistical_interpretation[\s\S]*?game_context_inference/);
+assert.match(typesSource, /export type AiRoastInsight\s*=\s*\{[\s\S]*?claimType:\s*AiRoastClaimType;[\s\S]*?evidenceRefs:\s*string\[\];[\s\S]*?\}/);
+assert.match(typesSource, /export type AiRoastReport\s*=\s*\{[\s\S]*?decisiveFactors:\s*AiRoastInsight\[\];[\s\S]*?currentPlayer:\s*AiRoastInsight;[\s\S]*?teamAndMatchups:[\s\S]*?closingRoast:\s*string;[\s\S]*?\}/);
+assert.match(typesSource, /export type AiMatchRoastView\s*=\s*\{\s*award:\s*string;\s*commentary:\s*string;\s*report:\s*AiRoastReport\s*\|\s*null;\s*\}/s);
 assert.match(typesSource, /export type DeepSeekKeyStatus\s*=\s*\{\s*state:\s*\x27ready\x27\s*\|\s*\x27missing\x27;\s*message:\s*string;\s*\}/s);
 assert.match(typesSource, /export type AiRoastGenerationResult\s*=\s*\{\s*aiRoast:\s*AiMatchRoastView;\s*\}/s);
 assert.match(typesSource, /export type MatchDetailView\s*=\s*\{[\s\S]*?aiRoast:\s*AiMatchRoastView\s*\|\s*null;/);
 
 assert.match(apiSource, /invoke<DeepSeekKeyStatus>\(\x22get_deepseek_key_status\x22\)/);
 assert.match(apiSource, /invoke<DeepSeekKeyStatus>\(\x22save_deepseek_key\x22,\s*\{\s*apiKey\s*\}\)/s);
-assert.match(apiSource, /invoke<AiRoastGenerationResult>\(\x22generate_match_ai_roast\x22,\s*\{\s*matchId\s*\}\)/s);
+assert.match(apiSource, /invoke<AiRoastGenerationResult>\(\x22generate_match_ai_roast\x22,\s*\{\s*matchId,\s*regenerate,?\s*\}\)/s);
 
 const settingsMarkup = renderToStaticMarkup(createElement(DeepSeekSettings));
 assert.match(settingsMarkup, new RegExp('AI \\u9510\\u8bc4'));
@@ -114,13 +117,43 @@ assert.match(incompleteMarkup, /<button[^>]*disabled=\x22\x22[^>]*>对局详情�
 const savedMarkup = renderToStaticMarkup(
   createElement(AiMatchRoast, {
     matchId: 'match-c',
-    initialRoast: { award: '逆风定海针', commentary: '匿名事实一。匿名事实二。' },
+    initialRoast: {
+      award: '逆风定海针',
+      commentary: '旧版匿名事实。',
+      report: {
+        verdict: { title: '准星在线，胜负离线', summary: '我方士兵：76 打出了压制力，但关键回合没能兑现。' },
+        decisiveFactors: [
+          { title: '输出领先', commentary: '伤害位列全场第一。', claimType: 'direct_fact', evidenceRefs: ['我方士兵：76.stats.damage'] },
+          { title: '阵亡代价', commentary: '每次阵亡损失的输出高于队内平均。', claimType: 'statistical_interpretation', evidenceRefs: ['我方士兵：76.derived.damagePerDeath'] },
+        ],
+        currentPlayer: { title: '你这局', commentary: '枪线有压迫感，目标处理还可更果断。', claimType: 'statistical_interpretation', evidenceRefs: ['我方士兵：76.stats.damage'] },
+        teamAndMatchups: [
+          { type: 'matchup', title: '枪位对局', commentary: '对空任务没有形成结果。', claimType: 'game_context_inference', evidenceRefs: ['gameKnowledge.heroes.法老之鹰'] },
+        ],
+        closingRoast: '数据像主角，结局却给你安排了群演席。',
+      },
+    },
     detailReady: true,
   }),
 );
-assert.match(savedMarkup, /<h3[^>]*>逆风定海针<\/h3>/);
-assert.match(savedMarkup, /<p[^>]*>匿名事实一。匿名事实二。<\/p>/);
-assert.doesNotMatch(savedMarkup, /本场封号|AI 生成|换一个|重新生成|<button/);
+for (const heading of ['本场判词', '胜负手', '你这局', '队友与对位', '终审锐评']) {
+  assert.match(savedMarkup, new RegExp(`<h3[^>]*>${heading}<\\/h3>`));
+}
+assert.ok(savedMarkup.indexOf('输出领先') < savedMarkup.indexOf('阵亡代价'));
+assert.match(savedMarkup, /<h4[^>]*>准星在线，胜负离线<\/h4>/);
+assert.match(savedMarkup, /数据像主角，结局却给你安排了群演席。/);
+assert.doesNotMatch(savedMarkup, /evidenceRefs|claimType|我方士兵：76\.stats\.damage|game_context_inference/);
+assert.match(savedMarkup, /<button[^>]*>重新生成<\/button>/);
+
+const legacyMarkup = renderToStaticMarkup(
+  createElement(AiMatchRoast, {
+    matchId: 'match-legacy',
+    initialRoast: { award: '逆风定海针', commentary: '匿名事实一。匿名事实二。', report: null },
+    detailReady: true,
+  }),
+);
+assert.match(legacyMarkup, /<h3[^>]*>逆风定海针<\/h3>/);
+assert.match(legacyMarkup, /<p[^>]*>匿名事实一。匿名事实二。<\/p>/);
 
 assert.deepEqual(AI_ROAST_LOADING_PHRASES, [
   '正在翻阅本场数据…',
@@ -212,7 +245,8 @@ assert.match(
 assert.match(componentSource, /aria-live=\x22polite\x22/);
 assert.match(componentSource, /visuallyHidden/);
 assert.match(componentSource, /recoverable\s*&&[\s\S]*?>重试<\/button>/);
-assert.doesNotMatch(componentSource, /本场封号|AI 生成|换一个|重新生成/);
+assert.match(componentSource, /generateMatchAiRoast\(requestMatchId, regenerate\)/);
+assert.match(componentSource, /generateRoast\(true\)/);
 
 assert.match(matchDetailPageSource, /import \{ AiMatchRoast \} from "\.\.\/features\/matches\/AiMatchRoast"/);
 assert.match(compactMatchDetailSource, /import \{ AiMatchRoast \} from "\.\/AiMatchRoast"/);
@@ -242,8 +276,21 @@ assert.match(matchesCssSource, /\.aiMatchRoast\s*\{[\s\S]*?min-height:/);
 assert.match(matchesCssSource, /\.aiMatchRoastAction\s*\{/);
 assert.match(matchesCssSource, /\.aiMatchRoastResult\s*\{/);
 assert.match(matchesCssSource, /\.aiMatchRoastResult h3\s*\{[\s\S]*?font-size:/);
+assert.match(matchesCssSource, /\.aiMatchRoastReport\s*\{[^}]*background:\s*var\(--surface-secondary\)[^}]*border-radius:\s*var\(--radius-control\)/s);
+assert.match(matchesCssSource, /\.aiMatchRoastSection\s*\+\s*\.aiMatchRoastSection\s*\{[^}]*border-top:\s*1px solid var\(--border-subtle\)/s);
+assert.match(matchesCssSource, /\.aiMatchRoastSection\s*>\s*h3\s*\{[^}]*color:\s*var\(--text-secondary\)[^}]*font-size:\s*18px[^}]*font-weight:\s*400/s);
+assert.match(matchesCssSource, /\.aiMatchRoastSection:first-child\s+\.aiMatchRoastEntry\s+h4\s*\{[^}]*color:\s*var\(--text-primary\)[^}]*font-weight:\s*700/s);
+const roastEntryRule = matchesCssSource.match(/\.aiMatchRoastEntry\s*\{([^}]*)\}/)?.[1] ?? '';
+assert.ok(roastEntryRule, 'report entries need a layout rule');
+assert.doesNotMatch(roastEntryRule, /background|box-shadow|border-radius/);
+assert.match(matchesCssSource, /\.aiMatchRoastEntry\s+p[^}]*\{[^}]*color:\s*var\(--text-secondary\)[^}]*font-size:\s*14px/s);
 assert.match(matchesCssSource, /\.aiMatchRoastError\s*\{[\s\S]*?var\(--status-danger-strong\)/);
 assert.match(matchesCssSource, /\.aiMatchRoast button\s*\{[\s\S]*?min-height:\s*44px/);
+assert.match(
+  matchesCssSource,
+  /\.aiMatchRoast button\s*\{[^}]*justify-self:\s*end/,
+  'AI roast actions must align with the right-aligned favorite action',
+);
 assert.match(
   matchesCssSource,
   /\.aiMatchRoast \.visuallyHidden\s*\{[\s\S]*?position:\s*absolute[\s\S]*?clip-path:\s*inset\(50%\)/,

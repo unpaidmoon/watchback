@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 11;
+pub const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 struct Migration {
     version: i64,
@@ -66,6 +66,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 11,
         name: "permanent match AI roasts",
         apply: migrate_v11,
+    },
+    Migration {
+        version: 12,
+        name: "structured AI roast reports",
+        apply: migrate_v12,
     },
 ];
 
@@ -452,6 +457,29 @@ fn migrate_v11(transaction: &Transaction<'_>) -> Result<()> {
             created_at TEXT NOT NULL
         );
         "#,
+    )?;
+    Ok(())
+}
+
+fn migrate_v12(transaction: &Transaction<'_>) -> Result<()> {
+    add_column_if_missing(transaction, "match_ai_roasts", "report_json", "TEXT")?;
+    add_column_if_missing(
+        transaction,
+        "match_ai_roasts",
+        "report_schema_version",
+        "INTEGER",
+    )?;
+    add_column_if_missing(
+        transaction,
+        "match_ai_roasts",
+        "input_schema_version",
+        "INTEGER",
+    )?;
+    add_column_if_missing(
+        transaction,
+        "match_ai_roasts",
+        "knowledge_version",
+        "INTEGER",
     )?;
     Ok(())
 }

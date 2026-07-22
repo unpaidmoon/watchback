@@ -1,427 +1,798 @@
-use super::{
-    arena::ArenaRoastMaterial,
-    material::{RoastFact, RoastMaterial},
-};
-use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
 use thiserror::Error;
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RoastOutput {
-    pub award: String,
-    pub commentary: String,
-    #[serde(rename = "usedFactIds")]
-    pub used_fact_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RoastValidationVocabulary {
-    known_terms: HashSet<String>,
-    allowed_terms: HashSet<String>,
-}
-
-impl RoastValidationVocabulary {
-    pub fn new(known_terms: HashSet<String>, allowed_terms: HashSet<String>) -> Self {
-        Self {
-            known_terms,
-            allowed_terms,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RoastValidationContext {
-    fact_texts: HashMap<String, String>,
-    minimum_fact_count: usize,
-    known_terms: HashSet<String>,
-    allowed_terms: HashSet<String>,
-    allowed_numeric_literals: HashSet<String>,
-    requires_relationship_fact: bool,
-    forbids_economic_causality: bool,
-}
+use super::{
+    report::{
+        evidence_catalog, ActorImpact, AiRoastNarrative, AiRoastReport, ClaimType, EvidenceCatalog,
+        EvidenceEntry, EvidenceSemantic, EvidenceValue, RoastClaim, RoastInsight,
+    },
+    snapshot::RoastSnapshot,
+};
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RoastValidationError {
-    #[error("JSON\u{65e0}\u{6548}")]
+    #[error("JSON无效")]
     InvalidJson,
-    #[error("\u{7f3a}\u{5b57}\u{6bb5}: {0}")]
+    #[error("缺字段: {0}")]
     MissingField(&'static str),
-    #[error("\u{672a}\u{77e5}\u{5b57}\u{6bb5}")]
+    #[error("未知字段")]
     ExtraFields,
-    #[error("\u{5956}\u{9879}\u{4e3a}\u{7a7a}")]
-    EmptyAward,
-    #[error("\u{5956}\u{9879}\u{5fc5}\u{987b}\u{4e2d}\u{6587}\u{4e14}\u{4e0d}\u{8d85}16\u{5b57}")]
-    AwardTooLongOrNotChinese,
-    #[error("\u{8bc4}\u{8bba}\u{9700}2-3\u{6bb5}")]
-    SentenceCount,
-    #[error("\u{8bc4}\u{8bba}\u{8d85}\u{8fc7}180\u{5b57}")]
-    CommentaryTooLong,
-    #[error("\u{4e0d}\u{652f}\u{6301}\u{7684}\u{8f93}\u{51fa}\u{683c}\u{5f0f}")]
-    UnsupportedFormat,
-    #[error("\u{672a}\u{77e5}\u{540d}\u{79f0}\u{6216}\u{82f1}\u{96c4}")]
-    UnknownTerm,
-    #[error("\u{672a}\u{77e5}\u{4e8b}\u{5b9e} ID")]
-    UnknownFact,
-    #[error("\u{4e8b}\u{5b9e} ID\u{91cd}\u{590d}")]
-    DuplicateFact,
-    #[error("\u{4e8b}\u{5b9e}\u{4e0d}\u{8db3}")]
-    InsufficientFacts,
-    #[error("\u{7f3a}\u{5c11}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}")]
-    MissingRelationshipFact,
-    #[error("\u{6570}\u{5b57}\u{65e0}\u{4e8b}\u{5b9e}\u{4f9d}\u{636e}")]
+    #[error("报告区块数量无效")]
+    InvalidSectionCount,
+    #[error("报告字段为空")]
+    EmptyField,
+    #[error("报告文本过长")]
+    TextTooLong,
+    #[error("证据引用不存在")]
+    UnknownEvidence,
+    #[error("证据引用重复")]
+    DuplicateEvidence,
+    #[error("数字无事实依据")]
     UnsupportedNumber,
-    #[error("\u{65e0}\u{4f9d}\u{636e}\u{7684}\u{65ad}\u{8a00}")]
+    #[error("无依据的断言")]
     UnsupportedClaim,
-    #[error("\u{653b}\u{51fb}\u{6027}\u{8868}\u{8ff0}")]
+    #[error("攻击性表述")]
     Unfriendly,
-    #[error("\u{4e0d}\u{5f97}\u{5305}\u{542b}\u{8eab}\u{4efd} ID")]
+    #[error("不得包含身份 ID 或凭据")]
     RealIdentity,
 }
 
-impl RoastValidationContext {
-    pub fn for_match(material: &RoastMaterial, vocabulary: RoastValidationVocabulary) -> Self {
-        let facts = material.selected_facts.clone();
-        let requires_relationship_fact = material.relationship.is_some()
-            && facts
-                .iter()
-                .any(|fact| fact.subject == super::material::FactSubject::RelationshipSubject);
-        Self::from_facts(
-            facts,
-            vocabulary,
-            material.streak.before_current.to_string(),
-            requires_relationship_fact,
-            false,
-        )
-    }
-
-    pub fn for_arena(material: &ArenaRoastMaterial, vocabulary: RoastValidationVocabulary) -> Self {
-        Self::from_facts(
-            material.candidate_facts.clone(),
-            vocabulary,
-            String::new(),
-            false,
-            true,
-        )
-    }
-
-    fn from_facts(
-        facts: Vec<RoastFact>,
-        vocabulary: RoastValidationVocabulary,
-        streak: String,
-        requires_relationship_fact: bool,
-        forbids_economic_causality: bool,
-    ) -> Self {
-        let fact_texts = facts
-            .into_iter()
-            .map(|fact| (fact.id, fact.text))
-            .collect::<HashMap<_, _>>();
-        let mut numeric_context = fact_texts.values().cloned().collect::<Vec<_>>();
-        if !streak.is_empty() {
-            numeric_context.push(streak);
-        }
-        Self {
-            fact_texts,
-            minimum_fact_count: 2,
-            known_terms: vocabulary.known_terms,
-            allowed_terms: vocabulary.allowed_terms,
-            allowed_numeric_literals: numeric_literals(&numeric_context.join(" ")),
-            requires_relationship_fact,
-            forbids_economic_causality,
-        }
-    }
-}
-
-pub fn validate_roast_output(
+pub fn validate_report_output(
     input: &str,
-    context: &RoastValidationContext,
-) -> Result<RoastOutput, RoastValidationError> {
-    let value: serde_json::Value =
-        serde_json::from_str(input).map_err(|_| RoastValidationError::InvalidJson)?;
+    snapshot: &RoastSnapshot,
+) -> Result<AiRoastReport, RoastValidationError> {
+    let value: serde_json::Value = serde_json::from_str(normalize_json_input(input))
+        .map_err(|_| RoastValidationError::InvalidJson)?;
     let object = value.as_object().ok_or(RoastValidationError::InvalidJson)?;
-    for field in ["award", "commentary", "usedFactIds"] {
+    for field in [
+        "verdict",
+        "decisiveFactors",
+        "currentPlayer",
+        "teamAndMatchups",
+        "closingRoast",
+    ] {
         if !object.contains_key(field) {
             return Err(RoastValidationError::MissingField(field));
         }
     }
-    if object.len() != 3 {
+    if object.len() != 5 {
         return Err(RoastValidationError::ExtraFields);
     }
-    let output: RoastOutput =
+    let report: AiRoastReport =
         serde_json::from_value(value).map_err(|_| RoastValidationError::InvalidJson)?;
-    if output.award.is_empty() {
-        return Err(RoastValidationError::EmptyAward);
-    }
-    if output.award.chars().count() > 16 || !output.award.chars().all(is_han) {
-        return Err(RoastValidationError::AwardTooLongOrNotChinese);
-    }
-    let commentary = output.commentary.trim();
-    if commentary.is_empty() || !(2..=3).contains(&sentence_count(commentary)) {
-        return Err(RoastValidationError::SentenceCount);
-    }
-    if commentary.chars().count() > 180 {
-        return Err(RoastValidationError::CommentaryTooLong);
-    }
-    if commentary != output.commentary || contains_unsupported_format(commentary) {
-        return Err(RoastValidationError::UnsupportedFormat);
-    }
-
-    let used = output.used_fact_ids.iter().collect::<HashSet<_>>();
-    if used.len() != output.used_fact_ids.len() {
-        return Err(RoastValidationError::DuplicateFact);
-    }
-    if used.iter().any(|id| !context.fact_texts.contains_key(*id)) {
-        return Err(RoastValidationError::UnknownFact);
-    }
-    if used.len() < context.minimum_fact_count {
-        return Err(RoastValidationError::InsufficientFacts);
-    }
-    if context.requires_relationship_fact
-        && !used
-            .iter()
-            .any(|id| id.starts_with("relationship_subject:"))
+    if !(2..=3).contains(&report.decisive_factors.len())
+        || !(1..=3).contains(&report.team_and_matchups.len())
     {
-        return Err(RoastValidationError::MissingRelationshipFact);
+        return Err(RoastValidationError::InvalidSectionCount);
     }
-    if contains_disallowed_known_term(&output.award, context)
-        || contains_disallowed_known_term(commentary, context)
-        || quoted_unknown_term(commentary, context)
-    {
-        return Err(RoastValidationError::UnknownTerm);
-    }
-    if numeric_literals(commentary)
+    let insights = report
+        .decisive_factors
         .iter()
-        .any(|number| !context.allowed_numeric_literals.contains(number))
+        .chain(std::iter::once(&report.current_player))
+        .chain(report.team_and_matchups.iter().map(|item| &item.insight))
+        .collect::<Vec<_>>();
+    let visible = std::iter::once(report.verdict.title.as_str())
+        .chain(std::iter::once(report.verdict.summary.as_str()))
+        .chain(
+            insights
+                .iter()
+                .flat_map(|item| [item.title.as_str(), item.commentary.as_str()]),
+        )
+        .chain(std::iter::once(report.closing_roast.as_str()))
+        .collect::<Vec<_>>();
+    if visible.iter().any(|text| text.trim().is_empty()) {
+        return Err(RoastValidationError::EmptyField);
+    }
+    if report.verdict.title.chars().count() > 24
+        || report.verdict.summary.chars().count() > 100
+        || report.closing_roast.chars().count() > 100
+        || insights
+            .iter()
+            .any(|item| item.title.chars().count() > 24 || item.commentary.chars().count() > 160)
+        || visible
+            .iter()
+            .map(|text| text.chars().count())
+            .sum::<usize>()
+            > 600
+    {
+        return Err(RoastValidationError::TextTooLong);
+    }
+    if visible.iter().any(|text| contains_unfriendly(text)) {
+        return Err(RoastValidationError::Unfriendly);
+    }
+    if visible
+        .iter()
+        .any(|text| contains_identity_or_credential(text))
+    {
+        return Err(RoastValidationError::RealIdentity);
+    }
+    let catalog = evidence_catalog(snapshot);
+    for insight in &insights {
+        validate_insight(insight, &catalog, snapshot)?;
+    }
+    validate_current_player(&report.current_player, snapshot)?;
+    if [
+        &report.verdict.title,
+        &report.verdict.summary,
+        &report.closing_roast,
+    ]
+    .iter()
+    .any(|text| !numeric_mentions_for_snapshot(text, snapshot).is_empty())
     {
         return Err(RoastValidationError::UnsupportedNumber);
     }
-    if contains_unsupported_claim(commentary)
-        || (context.forbids_economic_causality && contains_economic_causality(commentary))
+    Ok(report)
+}
+
+pub fn validate_narrative_output(
+    input: &str,
+    snapshot: &RoastSnapshot,
+) -> Result<AiRoastNarrative, RoastValidationError> {
+    let report: AiRoastNarrative = serde_json::from_str(normalize_json_input(input))
+        .map_err(|_| RoastValidationError::InvalidJson)?;
+    if report.title.trim().is_empty() || report.commentary.trim().is_empty() {
+        return Err(RoastValidationError::EmptyField);
+    }
+    if report.title.chars().count() > 36 || report.commentary.chars().count() > 650 {
+        return Err(RoastValidationError::TextTooLong);
+    }
+    if report.analysis.supporting_factors.len() > 2 || report.analysis.key_actors.len() > 3 {
+        return Err(RoastValidationError::InvalidSectionCount);
+    }
+    if report
+        .analysis
+        .key_actors
+        .iter()
+        .filter(|actor| actor.impact == ActorImpact::Negative)
+        .count()
+        > 2
+    {
+        return Err(RoastValidationError::InvalidSectionCount);
+    }
+    let catalog = evidence_catalog(snapshot);
+    validate_narrative_thesis(&report.analysis.match_thesis, &catalog, snapshot)?;
+    validate_narrative_claim(&report.analysis.current_player, &catalog, snapshot)?;
+    if !report
+        .analysis
+        .current_player
+        .evidence_refs
+        .iter()
+        .any(|path| path.starts_with(&format!("{}.", snapshot.current_player)))
     {
         return Err(RoastValidationError::UnsupportedClaim);
     }
-    if contains_unfriendly_text(commentary) {
+    for actor in &report.analysis.key_actors {
+        if !snapshot
+            .scoreboard
+            .team
+            .iter()
+            .chain(&snapshot.scoreboard.opponent)
+            .any(|player| player.subject == actor.subject)
+        {
+            return Err(RoastValidationError::UnsupportedClaim);
+        }
+        validate_narrative_claim(&actor.claim, &catalog, snapshot)?;
+    }
+    for factor in &report.analysis.supporting_factors {
+        validate_narrative_claim(factor, &catalog, snapshot)?;
+    }
+    let claims = std::iter::once(&report.analysis.match_thesis)
+        .chain(std::iter::once(&report.analysis.current_player))
+        .chain(report.analysis.key_actors.iter().map(|actor| &actor.claim))
+        .chain(report.analysis.supporting_factors.iter())
+        .collect::<Vec<_>>();
+    let visible = format!("{} {}", report.title, report.commentary);
+    if contains_unfriendly(&visible) {
         return Err(RoastValidationError::Unfriendly);
     }
-    if contains_identity_text(commentary) {
+    if contains_identity_or_credential(&visible) {
         return Err(RoastValidationError::RealIdentity);
     }
-    Ok(output)
-}
-
-fn contains_unsupported_format(text: &str) -> bool {
-    [
-        "#",
-        "- ",
-        "* ",
-        "```",
-        "AI",
-        "JSON",
-        "usedFactIds",
-        "\u{6a21}\u{578b}",
-        "\u{63d0}\u{793a}\u{8bcd}",
-    ]
-    .iter()
-    .any(|value| text.contains(value))
-}
-
-fn contains_unsupported_claim(text: &str) -> bool {
-    [
-        "\u{7edd}\u{5bf9}",
-        "\u{5168}\u{573a}\u{6700}\u{5f3a}",
-        "\u{552f}\u{4e00}",
-        "\u{6beb}\u{65e0}\u{53cd}\u{4f8b}",
-        "\u{6c38}\u{8fdc}",
-        "\u{4ece}\u{4e0d}",
-        "\u{767e}\u{5206}\u{767e}",
-    ]
-    .iter()
-    .any(|value| text.contains(value))
-}
-
-fn contains_economic_causality(text: &str) -> bool {
-    let mentions_economy = ["\u{8d44}\u{91d1}", "\u{7ecf}\u{6d4e}", "\u{8d22}\u{529b}"]
+    if contains_unsupported_process_claim(&visible) {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    let visible_entries = claims
         .iter()
-        .any(|value| text.contains(value));
-    let claims_causality = [
-        "\u{56e0}\u{6b64}",
-        "\u{6240}\u{4ee5}",
-        "\u{5bfc}\u{81f4}",
-        "\u{9020}\u{6210}",
-        "\u{5168}\u{9760}",
-        "\u{9760}\u{8fd9}",
-        "\u{9760}\u{7740}",
-        "\u{624d}\u{80fd}",
-        "\u{624d}\u{8d62}",
-        "\u{5e26}\u{961f}",
-    ]
-    .iter()
-    .any(|value| text.contains(value));
-    mentions_economy && claims_causality
-}
-
-fn contains_unfriendly_text(text: &str) -> bool {
-    [
-        "\u{83dc}\u{72d7}",
-        "\u{5e9f}\u{7269}",
-        "\u{8822}\u{8d27}",
-        "\u{95ed}\u{5634}",
-        "\u{53bb}\u{6b7b}",
-    ]
-    .iter()
-    .any(|value| text.contains(value))
-}
-
-fn contains_identity_text(text: &str) -> bool {
-    [
-        "bnet",
-        "BattleTag",
-        "player_name",
-        "\u{73a9}\u{5bb6}ID",
-        "\u{771f}\u{540d}",
-    ]
-    .iter()
-    .any(|value| text.contains(value))
-}
-
-fn sentence_count(text: &str) -> usize {
-    let mut count = 0;
-    let mut in_terminal = false;
-    for character in text.chars() {
-        if matches!(character, '\u{3002}' | '\u{ff01}' | '\u{ff1f}' | '!' | '?') {
-            if !in_terminal {
-                count += 1;
-            }
-            in_terminal = true;
-        } else {
-            in_terminal = false;
+        .flat_map(|claim| claim.evidence_refs.iter())
+        .filter_map(|path| catalog.get(path))
+        .collect::<Vec<_>>();
+    validate_comparison(&visible, &visible_entries, &catalog)?;
+    for mention in numeric_mentions_for_snapshot(&visible, snapshot) {
+        if !visible_entries
+            .iter()
+            .any(|entry| supports_number(&entry.value, mention))
+        {
+            return Err(RoastValidationError::UnsupportedNumber);
         }
     }
-    count
+    let planned_subjects = claims
+        .iter()
+        .flat_map(|claim| claim.evidence_refs.iter())
+        .filter_map(|path| path.split('.').next())
+        .collect::<HashSet<_>>();
+    for player in snapshot
+        .scoreboard
+        .team
+        .iter()
+        .chain(&snapshot.scoreboard.opponent)
+    {
+        if visible.contains(&player.subject)
+            && player.subject != snapshot.current_player
+            && !planned_subjects.contains(player.subject.as_str())
+            && !report
+                .analysis
+                .key_actors
+                .iter()
+                .any(|actor| actor.subject == player.subject)
+        {
+            return Err(RoastValidationError::UnsupportedClaim);
+        }
+    }
+    Ok(report)
 }
 
-fn quoted_unknown_term(text: &str, context: &RoastValidationContext) -> bool {
-    let mut current = String::new();
-    let mut quote_end = None;
-    for character in text.chars() {
-        if quote_end.is_none() {
-            quote_end = match character {
-                '\u{300c}' => Some('\u{300d}'),
-                '\u{300e}' => Some('\u{300f}'),
-                '\u{201c}' => Some('\u{201d}'),
-                '"' => Some('"'),
-                '\'' => Some('\''),
-                _ => None,
-            };
-            if quote_end.is_some() {
-                current.clear();
+fn validate_narrative_thesis(
+    claim: &RoastClaim,
+    catalog: &EvidenceCatalog,
+    snapshot: &RoastSnapshot,
+) -> Result<(), RoastValidationError> {
+    let dimensions = claim
+        .evidence_refs
+        .iter()
+        .map(|path| {
+            if path.starts_with("taskKnowledge.") || path.starts_with("gameKnowledge.") {
+                "knowledge"
+            } else if path.starts_with("roleMatchups.") {
+                "role_matchup"
+            } else {
+                path.split('.').next().unwrap_or("unknown")
+            }
+        })
+        .collect::<HashSet<_>>();
+    if claim.evidence_refs.len() < 2 || dimensions.len() < 2 {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    validate_narrative_claim(claim, catalog, snapshot)
+}
+
+fn validate_narrative_claim(
+    claim: &RoastClaim,
+    catalog: &EvidenceCatalog,
+    snapshot: &RoastSnapshot,
+) -> Result<(), RoastValidationError> {
+    if claim.judgment.trim().is_empty() {
+        return Err(RoastValidationError::EmptyField);
+    }
+    let unique = claim.evidence_refs.iter().collect::<HashSet<_>>();
+    if unique.len() != claim.evidence_refs.len() {
+        return Err(RoastValidationError::DuplicateEvidence);
+    }
+    if claim.evidence_refs.is_empty()
+        || claim
+            .evidence_refs
+            .iter()
+            .any(|path| !catalog.contains_key(path))
+    {
+        return Err(RoastValidationError::UnknownEvidence);
+    }
+    let entries = claim
+        .evidence_refs
+        .iter()
+        .filter_map(|path| catalog.get(path))
+        .collect::<Vec<_>>();
+    let has_knowledge = entries
+        .iter()
+        .any(|entry| entry.semantic == EvidenceSemantic::GameKnowledge);
+    match claim.claim_type {
+        ClaimType::GameContextInference
+            if !has_knowledge
+                || !entries
+                    .iter()
+                    .any(|entry| entry.semantic != EvidenceSemantic::GameKnowledge) =>
+        {
+            return Err(RoastValidationError::UnsupportedClaim)
+        }
+        ClaimType::DirectFact | ClaimType::StatisticalInterpretation if has_knowledge => {
+            return Err(RoastValidationError::UnsupportedClaim)
+        }
+        _ => {}
+    }
+    validate_comparison(&claim.judgment, &entries, catalog)?;
+    if contains_unsupported_process_claim(&claim.judgment)
+        || contains_unsupported_causation(&claim.judgment)
+    {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    for mention in numeric_mentions_for_snapshot(&claim.judgment, snapshot) {
+        if !entries
+            .iter()
+            .any(|entry| supports_number(&entry.value, mention))
+        {
+            return Err(RoastValidationError::UnsupportedNumber);
+        }
+    }
+    Ok(())
+}
+
+fn validate_insight(
+    insight: &RoastInsight,
+    catalog: &EvidenceCatalog,
+    snapshot: &RoastSnapshot,
+) -> Result<(), RoastValidationError> {
+    let unique = insight.evidence_refs.iter().collect::<HashSet<_>>();
+    if unique.len() != insight.evidence_refs.len() {
+        return Err(RoastValidationError::DuplicateEvidence);
+    }
+    if insight.evidence_refs.is_empty()
+        || insight
+            .evidence_refs
+            .iter()
+            .any(|path| !catalog.contains_key(path))
+    {
+        return Err(RoastValidationError::UnknownEvidence);
+    }
+    let entries = insight
+        .evidence_refs
+        .iter()
+        .filter_map(|path| catalog.get(path))
+        .collect::<Vec<_>>();
+    let has_knowledge = entries
+        .iter()
+        .any(|entry| entry.semantic == EvidenceSemantic::GameKnowledge);
+    match insight.claim_type {
+        ClaimType::GameContextInference
+            if !has_knowledge
+                || !entries
+                    .iter()
+                    .any(|entry| entry.semantic != EvidenceSemantic::GameKnowledge) =>
+        {
+            return Err(RoastValidationError::UnsupportedClaim)
+        }
+        ClaimType::DirectFact | ClaimType::StatisticalInterpretation if has_knowledge => {
+            return Err(RoastValidationError::UnsupportedClaim)
+        }
+        _ => {}
+    }
+    let text = format!("{} {}", insight.title, insight.commentary);
+    validate_comparison(&text, &entries, catalog)?;
+    if contains_unsupported_causation(&text) || violates_role_context(&text, insight, snapshot) {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    for mention in numeric_mentions_for_snapshot(&text, snapshot) {
+        if !entries
+            .iter()
+            .any(|entry| supports_number(&entry.value, mention))
+        {
+            return Err(RoastValidationError::UnsupportedNumber);
+        }
+    }
+    Ok(())
+}
+
+fn numeric_mentions_for_snapshot(text: &str, snapshot: &RoastSnapshot) -> Vec<Mention> {
+    numeric_mentions(&strip_known_numeric_labels(text, snapshot))
+}
+
+pub(crate) fn has_ascii_number_for_diagnostic(text: &str, snapshot: &RoastSnapshot) -> bool {
+    strip_known_numeric_labels(text, snapshot)
+        .chars()
+        .any(|character| character.is_ascii_digit())
+}
+
+fn strip_known_numeric_labels(text: &str, snapshot: &RoastSnapshot) -> String {
+    let mut claim = text.to_string();
+    let mut labels = Vec::new();
+    for player in snapshot
+        .scoreboard
+        .team
+        .iter()
+        .chain(&snapshot.scoreboard.opponent)
+    {
+        labels.push(player.subject.as_str());
+        labels.push(player.hero.as_str());
+        claim = claim.replace(&player.subject, "").replace(&player.hero, "");
+    }
+    if let Some(map) = snapshot.match_context.map.as_deref() {
+        labels.push(map);
+        claim = claim.replace(map, "");
+    }
+    for label in labels {
+        let mut digits = String::new();
+        for character in label.chars().chain(std::iter::once(' ')) {
+            if character.is_ascii_digit() {
+                digits.push(character);
+            } else if !digits.is_empty() {
+                claim = claim.replace(&digits, "");
+                digits.clear();
+            }
+        }
+    }
+    claim
+}
+
+fn validate_current_player(
+    insight: &RoastInsight,
+    snapshot: &RoastSnapshot,
+) -> Result<(), RoastValidationError> {
+    let Some(player) = snapshot
+        .scoreboard
+        .team
+        .iter()
+        .chain(&snapshot.scoreboard.opponent)
+        .find(|player| player.subject == snapshot.current_player)
+    else {
+        return Ok(());
+    };
+    if player.derived.team_objective_time_rank == Some(1) {
+        let objective_path = format!("{}.derived.teamObjectiveTimeRank", player.subject);
+        if !insight
+            .evidence_refs
+            .iter()
+            .any(|path| path == &objective_path)
+        {
+            return Err(RoastValidationError::UnsupportedClaim);
+        }
+        let combat_bottom = [
+            player.derived.team_kills_rank,
+            player.derived.team_damage_rank,
+            player.derived.team_final_hits_rank,
+        ]
+        .iter()
+        .all(|rank| rank.is_some_and(|rank| rank >= 5));
+        if combat_bottom
+            && ["免责", "不算问题", "足以洗白"]
+                .iter()
+                .any(|word| insight.commentary.contains(word))
+        {
+            return Err(RoastValidationError::UnsupportedClaim);
+        }
+    }
+    Ok(())
+}
+
+fn violates_role_context(text: &str, insight: &RoastInsight, snapshot: &RoastSnapshot) -> bool {
+    if !["失职", "拖累", "背锅", "问题"]
+        .iter()
+        .any(|word| text.contains(word))
+    {
+        return false;
+    }
+    snapshot
+        .scoreboard
+        .team
+        .iter()
+        .chain(&snapshot.scoreboard.opponent)
+        .any(|player| {
+            if !insight
+                .evidence_refs
+                .iter()
+                .any(|path| path.starts_with(&format!("{}.", player.subject)))
+            {
+                return false;
+            }
+            (player.hero == "禅雅塔"
+                && insight
+                    .evidence_refs
+                    .iter()
+                    .any(|path| path.contains("HealingRank"))
+                && !insight
+                    .evidence_refs
+                    .iter()
+                    .any(|path| path.starts_with("gameKnowledge.")))
+                || (matches!(player.hero.as_str(), "天使" | "生命之梭")
+                    && insight
+                        .evidence_refs
+                        .iter()
+                        .any(|path| path.contains("DamageRank"))
+                    && !insight
+                        .evidence_refs
+                        .iter()
+                        .any(|path| path.starts_with("gameKnowledge.")))
+        })
+}
+
+fn contains_unsupported_causation(text: &str) -> bool {
+    text.contains("整局没打过")
+        || (text.contains("因为")
+            && text.contains("所以")
+            && (text.contains("表现优秀")
+                || text.contains("完成了翻盘")
+                || text.contains("完成翻盘")))
+}
+
+fn contains_unsupported_process_claim(text: &str) -> bool {
+    [
+        "整局没打过",
+        "从来没打",
+        "拒绝换英雄",
+        "故意送",
+        "故意摆烂",
+        "没交大",
+        "不开麦",
+    ]
+    .iter()
+    .any(|word| text.contains(word))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Mention {
+    pub(crate) value: f64,
+    pub(crate) percent: bool,
+    tolerance: f64,
+}
+pub(crate) fn numeric_mentions_for_diagnostic(
+    text: &str,
+    snapshot: &RoastSnapshot,
+) -> Vec<Mention> {
+    numeric_mentions_for_snapshot(text, snapshot)
+}
+pub(crate) fn evidence_supports_number_for_diagnostic(
+    value: &EvidenceValue,
+    mention: Mention,
+) -> bool {
+    supports_number(value, mention)
+}
+fn numeric_mentions(text: &str) -> Vec<Mention> {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() || ('０'..='９').contains(&chars[i]) {
+            let start = i;
+            while i < chars.len()
+                && (chars[i].is_ascii_digit()
+                    || ('０'..='９').contains(&chars[i])
+                    || matches!(chars[i], '.' | ',' | '，'))
+            {
+                i += 1;
+            }
+            let raw = chars[start..i]
+                .iter()
+                .filter_map(|value| match value {
+                    '０'..='９' => char::from_u32(*value as u32 - 0xff10 + 0x30),
+                    ',' | '，' => None,
+                    value => Some(*value),
+                })
+                .collect::<String>();
+            if let Ok(mut value) = raw.parse::<f64>() {
+                let multiplier = match chars.get(i) {
+                    Some('万') => 10_000.0,
+                    Some('千') => 1_000.0,
+                    _ => 1.0,
+                };
+                let decimals =
+                    raw.split_once('.')
+                        .map_or(0, |(_, fraction)| fraction.len()) as i32;
+                value *= multiplier;
+                out.push(Mention {
+                    value,
+                    percent: chars
+                        .get(i)
+                        .is_some_and(|value| matches!(value, '%' | '％')),
+                    tolerance: if multiplier > 1.0 {
+                        multiplier * 0.5 * 10f64.powi(-decimals)
+                    } else {
+                        0.011
+                    },
+                });
             }
             continue;
         }
-        if Some(character) == quote_end {
-            if !current.is_empty()
-                && !context.allowed_terms.contains(&current)
-                && !context
-                    .fact_texts
-                    .values()
-                    .any(|fact| fact.contains(&current))
-            {
-                return true;
+        if is_chinese_numeral(chars[i]) {
+            let start = i;
+            while i < chars.len() && is_chinese_numeral(chars[i]) {
+                i += 1;
             }
-            quote_end = None;
-            current.clear();
-        } else {
-            current.push(character);
+            let previous = start.checked_sub(1).and_then(|index| chars.get(index));
+            let next = chars.get(i);
+            if previous != Some(&'第')
+                && (previous.is_some_and(|value| is_number_marker(*value))
+                    || next.is_some_and(|value| is_number_marker(*value)))
+            {
+                if let Some(value) = chinese_number(&chars[start..i]) {
+                    out.push(Mention {
+                        value: value as f64,
+                        percent: false,
+                        tolerance: 0.011,
+                    });
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+fn chinese_number(chars: &[char]) -> Option<i64> {
+    let digit = |value| match value {
+        '零' => Some(0),
+        '一' => Some(1),
+        '二' => Some(2),
+        '三' => Some(3),
+        '四' => Some(4),
+        '五' => Some(5),
+        '六' => Some(6),
+        '七' => Some(7),
+        '八' => Some(8),
+        '九' => Some(9),
+        _ => None,
+    };
+    let mut total = 0;
+    let mut section = 0;
+    let mut number = 0;
+    for value in chars {
+        match value {
+            '十' | '百' | '千' => {
+                let unit = match value {
+                    '十' => 10,
+                    '百' => 100,
+                    _ => 1000,
+                };
+                section += if number == 0 { unit } else { number * unit };
+                number = 0
+            }
+            '万' => {
+                total += (section + number) * 10000;
+                section = 0;
+                number = 0
+            }
+            value => number = digit(*value)?,
         }
     }
-    false
+    Some(total + section + number)
 }
-
-fn contains_disallowed_known_term(text: &str, context: &RoastValidationContext) -> bool {
-    context.known_terms.iter().any(|term| {
-        !term.is_empty() && !context.allowed_terms.contains(term) && text.contains(term)
+fn supports_number(value: &EvidenceValue, mention: Mention) -> bool {
+    let values = match value {
+        EvidenceValue::Integer(value) => vec![*value as f64],
+        EvidenceValue::Decimal(value) => vec![*value],
+        EvidenceValue::Text(text) => numeric_mentions(text)
+            .into_iter()
+            .map(|item| item.value)
+            .collect(),
+    };
+    let tolerance = if mention.percent {
+        0.501
+    } else {
+        mention.tolerance
+    };
+    values.into_iter().any(|value| {
+        ((if mention.percent {
+            value * 100.0
+        } else {
+            value
+        }) - mention.value)
+            .abs()
+            < tolerance
     })
 }
 
-fn numeric_literals(text: &str) -> HashSet<String> {
-    let characters = text.chars().collect::<Vec<_>>();
-    let mut output = HashSet::new();
-    let mut index = 0;
-    while index < characters.len() {
-        if characters[index].is_ascii_digit()
-            || ('\u{ff10}'..='\u{ff19}').contains(&characters[index])
-        {
-            let start = index;
-            while index < characters.len()
-                && (characters[index].is_ascii_digit()
-                    || ('\u{ff10}'..='\u{ff19}').contains(&characters[index]))
-            {
-                index += 1;
-            }
-            output.insert(characters[start..index].iter().collect());
-            continue;
-        }
-        if is_chinese_numeral(characters[index]) {
-            let start = index;
-            while index < characters.len() && is_chinese_numeral(characters[index]) {
-                index += 1;
-            }
-            let previous = start
-                .checked_sub(1)
-                .and_then(|position| characters.get(position));
-            let next = characters.get(index);
-            if previous.is_some_and(|value| is_number_marker(*value))
-                || next.is_some_and(|value| is_number_marker(*value))
-            {
-                output.insert(characters[start..index].iter().collect());
-            }
-            continue;
-        }
-        index += 1;
+fn validate_comparison(
+    text: &str,
+    entries: &[&EvidenceEntry],
+    catalog: &EvidenceCatalog,
+) -> Result<(), RoastValidationError> {
+    let max_worth = catalog
+        .values()
+        .filter(|entry| entry.semantic == EvidenceSemantic::FinalWorth)
+        .filter_map(|entry| match entry.value {
+            EvidenceValue::Integer(value) => Some(value),
+            _ => None,
+        })
+        .max();
+    let has_max_worth = entries.iter().any(|entry| {
+        entry.semantic == EvidenceSemantic::FinalWorth
+            && matches!(entry.value,EvidenceValue::Integer(value)if Some(value)==max_worth)
+    });
+    let money_superlative = (text.contains("资金") || text.contains("最有钱")) && has_max_worth;
+    if ["最高", "第一"].iter().any(|word| text.contains(word))
+        && !money_superlative
+        && !entries.iter().any(|entry| {
+            entry.semantic == EvidenceSemantic::Rank
+                && matches!(entry.value, EvidenceValue::Integer(1))
+        })
+    {
+        return Err(RoastValidationError::UnsupportedClaim);
     }
-    output
+    if ["最低", "垫底"].iter().any(|word| text.contains(word))
+        && !entries
+            .iter()
+            .any(|entry| entry.semantic == EvidenceSemantic::Rank)
+    {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    if ["领先", "落后", "高于", "低于"]
+        .iter()
+        .any(|word| text.contains(word))
+    {
+        let supported = entries.iter().any(|entry| {
+            matches!(
+                entry.semantic,
+                EvidenceSemantic::Delta | EvidenceSemantic::Rank
+            )
+        }) || entries
+            .iter()
+            .filter(|entry| entry.semantic == EvidenceSemantic::RawStat)
+            .count()
+            >= 2;
+        if !supported {
+            return Err(RoastValidationError::UnsupportedClaim);
+        }
+    }
+    if ["让三追四", "连赢", "决胜回合"]
+        .iter()
+        .any(|word| text.contains(word))
+        && !entries
+            .iter()
+            .any(|entry| entry.semantic == EvidenceSemantic::RoundResult)
+    {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    if ["最有钱", "资金第一"]
+        .iter()
+        .any(|word| text.contains(word))
+        && !has_max_worth
+    {
+        return Err(RoastValidationError::UnsupportedClaim);
+    }
+    Ok(())
 }
 
-fn is_number_marker(character: char) -> bool {
-    matches!(
-        character,
-        '\u{7b2c}'
-            | '\u{540d}'
-            | '\u{5c40}'
-            | '\u{573a}'
-            | '\u{4eba}'
-            | '\u{6b21}'
-            | '\u{8fde}'
-            | '\u{8f6e}'
-            | '\u{6bd4}'
-            | '\u{5206}'
-            | '\u{6740}'
-    )
+pub(super) fn normalize_json_input(input: &str) -> &str {
+    let trimmed = input.trim();
+    let Some(value) = trimmed.strip_prefix("```") else {
+        return trimmed;
+    };
+    let Some(value) = value.strip_suffix("```") else {
+        return trimmed;
+    };
+    let value = value.trim();
+    value
+        .strip_prefix("json")
+        .and_then(|value| value.strip_prefix(['\r', '\n']))
+        .map(str::trim)
+        .unwrap_or(value)
 }
-
-fn is_chinese_numeral(character: char) -> bool {
-    matches!(
-        character,
-        '\u{96f6}'
-            | '\u{4e00}'
-            | '\u{4e8c}'
-            | '\u{4e09}'
-            | '\u{56db}'
-            | '\u{4e94}'
-            | '\u{516d}'
-            | '\u{4e03}'
-            | '\u{516b}'
-            | '\u{4e5d}'
-            | '\u{5341}'
-            | '\u{767e}'
-            | '\u{5343}'
-            | '\u{4e07}'
-    )
+fn contains_unfriendly(text: &str) -> bool {
+    ["菜狗", "废物", "蠢货", "闭嘴", "去死"]
+        .iter()
+        .any(|value| text.contains(value))
 }
-
-fn is_han(character: char) -> bool {
+fn contains_identity_or_credential(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "bnet",
+        "battletag",
+        "player_name",
+        "玩家id",
+        "真名",
+        "token",
+        "customertoken",
+        "cookie",
+        "authorization",
+        "credential",
+    ]
+    .iter()
+    .any(|value| lower.contains(value))
+}
+fn is_number_marker(value: char) -> bool {
+    value == '杀'
+}
+fn is_chinese_numeral(value: char) -> bool {
     matches!(
-        character,
-        '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}'
+        value,
+        '零' | '一'
+            | '二'
+            | '三'
+            | '四'
+            | '五'
+            | '六'
+            | '七'
+            | '八'
+            | '九'
+            | '十'
+            | '百'
+            | '千'
+            | '万'
     )
 }

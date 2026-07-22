@@ -166,9 +166,9 @@ async fn generate_captured(
     let conn = request.database.connect().map_err(|_| STORAGE_MESSAGE)?;
     let record = AiRoastRecord {
         match_id: request.match_id,
-        award: output.verdict.title.clone(),
-        commentary: output.verdict.summary.clone(),
-        report: Some(output),
+        award: output.title.clone(),
+        commentary: output.commentary.clone(),
+        report: Some(super::report::StoredRoastPayload::Narrative(output)),
         used_fact_ids: Vec::new(),
         model: MODEL.to_string(),
         evaluation_rule_version: 0,

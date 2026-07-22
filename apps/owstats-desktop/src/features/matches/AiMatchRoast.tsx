@@ -3,7 +3,7 @@ import {
   generateMatchAiRoast,
   getDeepSeekKeyStatus,
 } from "../../shared/api";
-import type { AiMatchRoastView } from "../../shared/types";
+import type { AiMatchRoastView, AiRoastInsight } from "../../shared/types";
 
 export const AI_ROAST_LOADING_PHRASES = [
   "正在翻阅本场数据…",
@@ -32,6 +32,59 @@ type MatchScopedValue<T> = {
   matchId: string;
   value: T;
 };
+
+function RoastInsightEntry({ insight }: { insight: AiRoastInsight }) {
+  return (
+    <article className="aiMatchRoastEntry">
+      <h4>{insight.title}</h4>
+      <p>{insight.commentary}</p>
+    </article>
+  );
+}
+
+function RoastReport({ roast }: { roast: AiMatchRoastView }) {
+  const report = roast.report;
+  if (!report) {
+    return (
+      <div className="aiMatchRoastNarrative">
+        <h3>{roast.award}</h3>
+        <p>{roast.commentary}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="aiMatchRoastReport">
+      <section className="aiMatchRoastSection">
+        <h3>本场判词</h3>
+        <article className="aiMatchRoastEntry">
+          <h4>{report.verdict.title}</h4>
+          <p>{report.verdict.summary}</p>
+        </article>
+      </section>
+      <section className="aiMatchRoastSection">
+        <h3>胜负手</h3>
+        {report.decisiveFactors.map((insight, index) => (
+          <RoastInsightEntry key={`${index}-${insight.title}`} insight={insight} />
+        ))}
+      </section>
+      <section className="aiMatchRoastSection">
+        <h3>你这局</h3>
+        <RoastInsightEntry insight={report.currentPlayer} />
+      </section>
+      <section className="aiMatchRoastSection">
+        <h3>队友与对位</h3>
+        {report.teamAndMatchups.map((insight, index) => (
+          <RoastInsightEntry key={`${index}-${insight.title}`} insight={insight} />
+        ))}
+      </section>
+      <section className="aiMatchRoastSection">
+        <h3>终审锐评</h3>
+        <p className="aiMatchRoastClosing">{report.closingRoast}</p>
+      </section>
+    </div>
+  );
+}
 
 export function clearBusyMatch(
   currentBusyMatchId: string | null,
@@ -142,8 +195,8 @@ export function AiMatchRoast({
   const currentError = error?.matchId === matchId ? error.value : null;
   const busy = busyMatchId === matchId;
 
-  async function generateRoast() {
-    if (!detailReady || busy || roast) {
+  async function generateRoast(regenerate = false) {
+    if (!detailReady || busy || (roast && !regenerate)) {
       return;
     }
 
@@ -183,7 +236,7 @@ export function AiMatchRoast({
         return;
       }
 
-      const result = await generateMatchAiRoast(requestMatchId);
+      const result = await generateMatchAiRoast(requestMatchId, regenerate);
       if (
         requestTokenRef.current !== requestToken ||
         requestMatchId !== matchIdRef.current
@@ -223,8 +276,19 @@ export function AiMatchRoast({
 
       {roast ? (
         <div className="aiMatchRoastResult">
-          <h3>{roast.award}</h3>
-          <p>{roast.commentary}</p>
+          <RoastReport roast={roast} />
+          {currentError ? (
+            <p className="aiMatchRoastError" role="alert">
+              {currentError.message}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            disabled={!detailReady || busy}
+            onClick={() => void generateRoast(true)}
+          >
+            {busy ? "正在重新生成…" : "重新生成"}
+          </button>
         </div>
       ) : (
         <div className="aiMatchRoastAction">

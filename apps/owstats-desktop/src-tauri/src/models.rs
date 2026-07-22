@@ -280,6 +280,7 @@ pub struct HeroStat {
 pub struct AiMatchRoastView {
     pub award: String,
     pub commentary: String,
+    pub report: Option<crate::ai_roast::report::AiRoastReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

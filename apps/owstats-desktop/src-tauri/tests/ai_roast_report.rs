@@ -11,7 +11,9 @@ use owstats_desktop_lib::ai_roast::snapshot::{
     RoastPlayer, RoastScoreboard, RoastSnapshot, RoleMatchup, INPUT_SCHEMA_VERSION,
 };
 use owstats_desktop_lib::ai_roast::task::{TaskAssignment, TaskKnowledgeContext};
-use owstats_desktop_lib::ai_roast::validator::{validate_report_output, RoastValidationError};
+use owstats_desktop_lib::ai_roast::validator::{
+    validate_narrative_output, validate_report_output, RoastValidationError,
+};
 use std::collections::BTreeMap;
 
 fn insight(title: &str) -> RoastInsight {
@@ -340,6 +342,33 @@ fn narrative_claim(judgment: &str) -> RoastClaim {
     }
 }
 
+fn synthetic_narrative() -> AiRoastNarrative {
+    AiRoastNarrative {
+        analysis: NarrativeAnalysis {
+            match_thesis: RoastClaim {
+                judgment: "我方输出没有把伤害转成同等击杀收益".to_string(),
+                claim_type: ClaimType::StatisticalInterpretation,
+                evidence_refs: vec![
+                    "我方士兵：76.stats.damage".to_string(),
+                    "敌方艾什.stats.damage".to_string(),
+                ],
+            },
+            current_player: RoastClaim {
+                judgment: "当前玩家有输出但转化不足".to_string(),
+                claim_type: ClaimType::StatisticalInterpretation,
+                evidence_refs: vec![
+                    "我方士兵：76.stats.damage".to_string(),
+                    "我方士兵：76.stats.finalHits".to_string(),
+                ],
+            },
+            key_actors: Vec::new(),
+            supporting_factors: Vec::new(),
+        },
+        title: "伤害账单很豪华，结账没带钱包".to_string(),
+        commentary: "这个士兵：76到底在忙什么？输出账单看着挺热闹，真正该收掉的人却没留下多少结果，这把说他交了张白卷不算冤。".to_string(),
+    }
+}
+
 #[test]
 fn narrative_report_has_hidden_plan_title_and_commentary() {
     let report = AiRoastNarrative {
@@ -389,4 +418,31 @@ fn task_assignments_are_available_as_game_knowledge_evidence() {
         .unwrap();
     assert_eq!(entry.semantic, EvidenceSemantic::GameKnowledge);
     assert_eq!(entry.value, EvidenceValue::Text("我方士兵：76".to_string()));
+}
+
+#[test]
+fn narrative_requires_one_thesis_and_at_most_two_supporting_factors() {
+    let snapshot = synthetic_snapshot();
+    let mut report = synthetic_narrative();
+    report.analysis.supporting_factors = vec![
+        narrative_claim("辅助因素一"),
+        narrative_claim("辅助因素二"),
+        narrative_claim("辅助因素三"),
+    ];
+    assert_eq!(
+        validate_narrative_output(&serde_json::to_string(&report).unwrap(), &snapshot),
+        Err(RoastValidationError::InvalidSectionCount)
+    );
+}
+
+#[test]
+fn narrative_allows_game_slang_but_rejects_identity_attacks() {
+    let snapshot = synthetic_snapshot();
+    let mut report = synthetic_narrative();
+    assert!(validate_narrative_output(&serde_json::to_string(&report).unwrap(), &snapshot).is_ok());
+    report.commentary = "这个玩家就是蠢货。".to_string();
+    assert_eq!(
+        validate_narrative_output(&serde_json::to_string(&report).unwrap(), &snapshot),
+        Err(RoastValidationError::Unfriendly)
+    );
 }

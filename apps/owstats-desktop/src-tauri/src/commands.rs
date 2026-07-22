@@ -178,9 +178,14 @@ pub async fn generate_match_ai_roast(
     keys: State<'_, DeepSeekKeyManager>,
     coordinator: State<'_, AiRoastCoordinator>,
     match_id: String,
+    regenerate: bool,
 ) -> Result<AiRoastGenerationResult, String> {
     let account = active_account(&accounts)?;
-    let request = CapturedRoastRequest::new(account.database(), match_id)?;
+    let request = if regenerate {
+        CapturedRoastRequest::regenerate(account.database(), match_id)?
+    } else {
+        CapturedRoastRequest::new(account.database(), match_id)?
+    };
     let client = DeepSeekRoastClient::new().map_err(|_| {
         "\u{65e0}\u{6cd5}\u{521d}\u{59cb}\u{5316} DeepSeek \u{670d}\u{52a1}\u{3002}".to_string()
     })?;

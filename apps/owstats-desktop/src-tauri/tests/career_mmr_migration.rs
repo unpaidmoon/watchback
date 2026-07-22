@@ -114,7 +114,7 @@ fn upgrades_existing_v5_database_that_predates_career_mmr_tables() -> Result<()>
     let conn = db.connect()?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        11
+        12
     );
     assert_mmr_schema(&conn)
 }

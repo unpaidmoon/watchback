@@ -1,5 +1,12 @@
 use anyhow::Result;
-use owstats_desktop_lib::ai_roast::store::{roast_for_match, save_roast_once, AiRoastRecord};
+use owstats_desktop_lib::ai_roast::report::{
+    AiRoastReport, ClaimType, RoastInsight, RoastVerdict, TeamInsight, TeamInsightKind,
+    REPORT_SCHEMA_VERSION,
+};
+use owstats_desktop_lib::ai_roast::snapshot::INPUT_SCHEMA_VERSION;
+use owstats_desktop_lib::ai_roast::store::{
+    replace_roast, roast_for_match, save_roast_once, AiRoastRecord,
+};
 use owstats_desktop_lib::{get_match_detail, OwDatabase};
 use rusqlite::{params, Connection};
 use serde_json::json;
@@ -27,17 +34,21 @@ fn roast(match_id: &str, award: &str, commentary: &str) -> AiRoastRecord {
         match_id: match_id.to_string(),
         award: award.to_string(),
         commentary: commentary.to_string(),
+        report: None,
         used_fact_ids: vec!["fact.synthetic.1".to_string()],
         model: "synthetic-model".to_string(),
         evaluation_rule_version: 1,
         material_version: 2,
-        prompt_version: 3,
+        prompt_version: 1,
+        report_schema_version: None,
+        input_schema_version: None,
+        knowledge_version: None,
         created_at: "2026-07-21T00:00:00Z".to_string(),
     }
 }
 
 #[test]
-fn migrates_v10_to_v11_idempotently_and_preserves_matches() -> Result<()> {
+fn migrates_v10_through_v12_idempotently_and_preserves_matches() -> Result<()> {
     let dir = tempdir()?;
     let db = OwDatabase::new(dir.path().join("migration.sqlite3"));
     db.initialize()?;
@@ -53,7 +64,7 @@ fn migrates_v10_to_v11_idempotently_and_preserves_matches() -> Result<()> {
 
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        11
+        12
     );
     assert_eq!(
         conn.query_row(
@@ -74,6 +85,119 @@ fn migrates_v10_to_v11_idempotently_and_preserves_matches() -> Result<()> {
     Ok(())
 }
 
+fn structured_report() -> AiRoastReport {
+    let insight = |title: &str, path: &str| RoastInsight {
+        title: title.into(),
+        commentary: "合成分析。".into(),
+        claim_type: ClaimType::DirectFact,
+        evidence_refs: vec![path.into(), "z.path".into(), path.into()],
+    };
+    AiRoastReport {
+        verdict: RoastVerdict {
+            title: "结构化标题".into(),
+            summary: "结构化总评。".into(),
+        },
+        decisive_factors: vec![insight("因素一", "b.path"), insight("因素二", "a.path")],
+        current_player: insight("你这局", "c.path"),
+        team_and_matchups: vec![TeamInsight {
+            kind: TeamInsightKind::RoleMatchup,
+            insight: insight("对位", "d.path"),
+        }],
+        closing_roast: "结构化收尾。".into(),
+    }
+}
+
+#[test]
+fn structured_report_round_trips_and_derives_sorted_unique_evidence() -> Result<()> {
+    let dir = tempdir()?;
+    let db = OwDatabase::new(dir.path().join("structured.sqlite3"));
+    db.initialize()?;
+    let conn = db.connect()?;
+    seed_match(&conn, "structured", "normal")?;
+    let report = structured_report();
+    let mut record = roast("structured", &report.verdict.title, &report.verdict.summary);
+    record.report =
+        Some(owstats_desktop_lib::ai_roast::report::StoredRoastPayload::Legacy(report.clone()));
+    record.report_schema_version = Some(REPORT_SCHEMA_VERSION);
+    record.input_schema_version = Some(INPUT_SCHEMA_VERSION);
+    record.knowledge_version = Some(1);
+    let view = save_roast_once(&conn, &record)?;
+    assert_eq!(view.report, Some(report));
+    let stored: String = conn.query_row(
+        "SELECT used_fact_ids_json FROM match_ai_roasts WHERE match_id='structured'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&stored)?,
+        vec!["a.path", "b.path", "c.path", "d.path", "z.path"]
+    );
+    Ok(())
+}
+
+#[test]
+fn malicious_report_json_is_rejected_and_failed_replace_preserves_old_record() -> Result<()> {
+    let dir = tempdir()?;
+    let db = OwDatabase::new(dir.path().join("invalid.sqlite3"));
+    db.initialize()?;
+    let conn = db.connect()?;
+    seed_match(&conn, "invalid", "normal")?;
+    save_roast_once(&conn, &roast("invalid", "旧标题", "旧正文"))?;
+    conn.execute(
+        "UPDATE match_ai_roasts SET report_json='{{malicious' WHERE match_id='invalid'",
+        [],
+    )?;
+    assert!(roast_for_match(&conn, "invalid").is_err());
+    conn.execute(
+        "UPDATE match_ai_roasts SET report_json=NULL WHERE match_id='invalid'",
+        [],
+    )?;
+    let mut bad = roast("invalid", "", "新正文");
+    bad.report = Some(
+        owstats_desktop_lib::ai_roast::report::StoredRoastPayload::Legacy(structured_report()),
+    );
+    assert!(replace_roast(&conn, &bad).is_err());
+    let old = roast_for_match(&conn, "invalid")?.unwrap();
+    assert_eq!(old.award, "旧标题");
+    assert_eq!(old.commentary, "旧正文");
+    Ok(())
+}
+
+#[test]
+fn migrates_v11_to_v12_idempotently_without_rewriting_legacy_roasts() -> Result<()> {
+    let dir = tempdir()?;
+    let db = OwDatabase::new(dir.path().join("v12.sqlite3"));
+    db.initialize()?;
+    let conn = db.connect()?;
+    seed_match(&conn, "legacy", "normal")?;
+    conn.execute("INSERT INTO match_ai_roasts(match_id,award,commentary,used_fact_ids_json,model,evaluation_rule_version,material_version,prompt_version,created_at) VALUES('legacy','旧标题','旧正文','[]','legacy-model',1,1,1,'now')",[])?;
+    conn.pragma_update(None, "user_version", 11)?;
+    drop(conn);
+    db.initialize()?;
+    db.initialize()?;
+    let conn = db.connect()?;
+    assert_eq!(
+        conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+        12
+    );
+    let mut stmt = conn.prepare("PRAGMA table_info(match_ai_roasts)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for column in [
+        "report_json",
+        "report_schema_version",
+        "input_schema_version",
+        "knowledge_version",
+    ] {
+        assert!(columns.contains(&column.to_string()));
+    }
+    let legacy = roast_for_match(&conn, "legacy")?.unwrap();
+    assert_eq!(legacy.award, "旧标题");
+    assert!(legacy.report.is_none());
+    Ok(())
+}
+
 #[test]
 fn saves_only_the_first_roast_and_cascades_with_match() -> Result<()> {
     let dir = tempdir()?;
@@ -90,6 +214,25 @@ fn saves_only_the_first_roast_and_cascades_with_match() -> Result<()> {
 
     conn.execute("DELETE FROM matches WHERE match_id='normal'", [])?;
     assert_eq!(roast_for_match(&conn, "normal")?, None);
+    Ok(())
+}
+
+#[test]
+fn explicit_regeneration_replaces_existing_roast() -> Result<()> {
+    let dir = tempdir()?;
+    let db = OwDatabase::new(dir.path().join("prompt-upgrade.sqlite3"));
+    db.initialize()?;
+    let conn = db.connect()?;
+    seed_match(&conn, "normal", "normal")?;
+    save_roast_once(&conn, &roast("normal", "旧奖", "旧锐评"))?;
+    assert_eq!(
+        replace_roast(&conn, &roast("normal", "新奖", "新版锐评"))?.award,
+        "新奖"
+    );
+    assert_eq!(
+        roast_for_match(&conn, "normal")?.unwrap().commentary,
+        "新版锐评"
+    );
     Ok(())
 }
 

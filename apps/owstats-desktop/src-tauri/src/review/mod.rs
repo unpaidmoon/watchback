@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 mod command_center;
 mod personal;
-mod roles;
+pub(crate) mod roles;
 
 use command_center::*;
 use personal::*;

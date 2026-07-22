@@ -93,7 +93,7 @@ export function DeepSeekSettings() {
         <span className="deepSeekSettingsStatus">{deepSeekStatusLabel(status)}</span>
       </div>
       <p className="deepSeekSettingsDisclosure">
-        仅发送匿名对局事实、评价与回合趋势；不会发送玩家名称、玩家 ID、笔记、原始 JSON 或完整阵容。
+        仅发送匿名英雄阵容、计分板、派生指标与回合趋势；不会发送玩家名称、玩家 ID、笔记、原始 JSON、对局 ID 或凭据。
       </p>
       <form className="deepSeekSettingsForm" onSubmit={(event) => void submit(event)}>
         <label htmlFor="deepseek-api-key">DeepSeek API Key</label>

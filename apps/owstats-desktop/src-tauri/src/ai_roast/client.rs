@@ -1,30 +1,48 @@
-use super::{
-    arena::ArenaRoastMaterial,
-    material::{
-        AnonymousOrdinal, AnonymousPlayerRole, FactSubject, RoastFact, RoastMaterial,
-        RoastRelationshipKind, RoastRelationshipSubject,
-    },
-    validator::{
-        validate_roast_output, RoastOutput, RoastValidationContext, RoastValidationVocabulary,
-    },
-};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
+
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use thiserror::Error;
 
-pub const MODEL: &str = "deepseek-v4-flash";
-pub const PROMPT_VERSION: i64 = 1;
-pub const MAX_TOKENS: u32 = 500;
-pub const PRODUCTION_TIMEOUT: Duration = Duration::from_secs(60);
+use super::{
+    report::{evidence_catalog, AiRoastNarrative, AiRoastReport, EvidenceSemantic, EvidenceValue},
+    snapshot::RoastSnapshot,
+    validator::{normalize_json_input, validate_narrative_output, RoastValidationError},
+};
 
+pub const MODEL: &str = "deepseek-v4-flash";
+pub const PROMPT_VERSION: i64 = 3;
+pub const MAX_TOKENS: u32 = 4_000;
+pub const PRODUCTION_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
+const MAX_ATTEMPTS: usize = 2;
+static LAST_VALIDATION_FAILURE: AtomicU8 = AtomicU8::new(0);
 
-#[derive(Debug, Clone, Copy)]
-pub enum RoastPromptMaterial<'a> {
-    Match(&'a RoastMaterial),
-    Arena(&'a ArenaRoastMaterial),
+#[doc(hidden)]
+pub fn take_validation_failure_category() -> Option<&'static str> {
+    match LAST_VALIDATION_FAILURE.swap(0, Ordering::AcqRel) {
+        1 => Some("json"),
+        2 => Some("sections"),
+        3 => Some("text"),
+        4 => Some("evidence"),
+        5 => Some("number"),
+        6 => Some("claim"),
+        7 => Some("safety"),
+        8 => Some("text_total"),
+        9 => Some("text_field"),
+        10 => Some("text_empty"),
+        11 => Some("number_percent"),
+        12 => Some("number_other"),
+        13 => Some("response_shape"),
+        14 => Some("response_length"),
+        15 => Some("response_filter"),
+        16 => Some("finish_reason"),
+        17 => Some("number_ascii"),
+        18 => Some("number_chinese"),
+        _ => None,
+    }
 }
 
 #[derive(Clone)]
@@ -36,25 +54,23 @@ pub struct DeepSeekRoastClient {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DeepSeekRoastError {
-    #[error("DeepSeek API Key \u{65e0}\u{6548}")]
+    #[error("DeepSeek API Key 无效")]
     InvalidKey,
-    #[error("DeepSeek \u{4f59}\u{989d}\u{4e0d}\u{8db3}")]
+    #[error("DeepSeek 余额不足")]
     InsufficientBalance,
-    #[error("\u{8bf7}\u{6c42}\u{8fc7}\u{4e8e}\u{9891}\u{7e41}\u{ff0c}\u{8bf7}\u{7a0d}\u{540e}\u{518d}\u{8bd5}")]
+    #[error("请求过于频繁，请稍后再试")]
     TooFrequent,
-    #[error("DeepSeek \u{670d}\u{52a1}\u{6682}\u{65f6}\u{7e41}\u{5fd9}")]
+    #[error("DeepSeek 服务暂时繁忙")]
     Busy,
-    #[error("\u{751f}\u{6210}\u{8d85}\u{65f6}\u{ff0c}\u{8bf7}\u{7a0d}\u{540e}\u{518d}\u{8bd5}")]
+    #[error("生成超时，请稍后再试")]
     Timeout,
-    #[error("\u{65e0}\u{6cd5}\u{8fde}\u{63a5} DeepSeek \u{670d}\u{52a1}")]
+    #[error("无法连接 DeepSeek 服务")]
     Transport,
-    #[error("\u{751f}\u{6210}\u{5185}\u{5bb9}\u{8d85}\u{51fa}\u{957f}\u{5ea6}\u{9650}\u{5236}")]
+    #[error("生成内容超出长度限制")]
     Length,
-    #[error(
-        "\u{751f}\u{6210}\u{5185}\u{5bb9}\u{88ab}\u{5b89}\u{5168}\u{89c4}\u{5219}\u{62e6}\u{622a}"
-    )]
+    #[error("生成内容被安全规则拦截")]
     ContentFilter,
-    #[error("DeepSeek \u{8fd4}\u{56de}\u{4e86}\u{65e0}\u{6548}\u{5185}\u{5bb9}")]
+    #[error("DeepSeek 返回了无效内容")]
     InvalidOutput,
 }
 
@@ -88,40 +104,28 @@ impl DeepSeekRoastClient {
     pub async fn generate(
         &self,
         api_key: &str,
-        material: RoastPromptMaterial<'_>,
-        vocabulary: &RoastValidationVocabulary,
-    ) -> Result<RoastOutput, DeepSeekRoastError> {
+        snapshot: &RoastSnapshot,
+    ) -> Result<AiRoastNarrative, DeepSeekRoastError> {
+        LAST_VALIDATION_FAILURE.store(0, Ordering::Release);
         if api_key.trim().is_empty() {
             return Err(DeepSeekRoastError::InvalidKey);
         }
-        if prompt_fact_count(material) < 2 {
-            return Err(DeepSeekRoastError::InvalidOutput);
-        }
-        let context = match material {
-            RoastPromptMaterial::Match(value) => {
-                RoastValidationContext::for_match(value, vocabulary.clone())
-            }
-            RoastPromptMaterial::Arena(value) => {
-                RoastValidationContext::for_arena(value, vocabulary.clone())
-            }
-        };
-        let request = build_request(material);
-
+        let request = build_request(snapshot);
         tokio::time::timeout(
             self.timeout,
-            self.generate_with_retries(api_key, &request, &context),
+            self.generate_with_correction(api_key, request, snapshot),
         )
         .await
         .map_err(|_| DeepSeekRoastError::Timeout)?
     }
 
-    async fn generate_with_retries(
+    async fn generate_with_correction(
         &self,
         api_key: &str,
-        request: &ChatRequest,
-        context: &RoastValidationContext,
-    ) -> Result<RoastOutput, DeepSeekRoastError> {
-        for attempt in 0..=1 {
+        mut request: ChatRequest,
+        snapshot: &RoastSnapshot,
+    ) -> Result<AiRoastNarrative, DeepSeekRoastError> {
+        for attempt in 0..MAX_ATTEMPTS {
             let response = self
                 .client
                 .post(format!("{}/chat/completions", self.base_url))
@@ -136,41 +140,115 @@ impl DeepSeekRoastClient {
                 return Err(map_status(status));
             }
             let body = response.bytes().await.map_err(map_request_error)?;
-            let completion = match serde_json::from_slice::<CompletionResponse>(&body) {
-                Ok(value) => value,
-                Err(_) if attempt == 0 => continue,
-                Err(_) => return Err(DeepSeekRoastError::InvalidOutput),
-            };
-            let Some(choice) = completion.choices.into_iter().next() else {
-                if attempt == 0 {
-                    continue;
-                }
-                return Err(DeepSeekRoastError::InvalidOutput);
-            };
+            let completion = serde_json::from_slice::<CompletionResponse>(&body).map_err(|_| {
+                LAST_VALIDATION_FAILURE.store(13, Ordering::Release);
+                DeepSeekRoastError::InvalidOutput
+            })?;
+            let choice = completion.choices.into_iter().next().ok_or_else(|| {
+                LAST_VALIDATION_FAILURE.store(13, Ordering::Release);
+                DeepSeekRoastError::InvalidOutput
+            })?;
             match choice.finish_reason.as_deref() {
                 Some("stop") => {}
-                Some("length") => return Err(DeepSeekRoastError::Length),
-                Some("content_filter") => return Err(DeepSeekRoastError::ContentFilter),
+                Some("length") => {
+                    LAST_VALIDATION_FAILURE.store(14, Ordering::Release);
+                    return Err(DeepSeekRoastError::Length);
+                }
+                Some("content_filter") => {
+                    LAST_VALIDATION_FAILURE.store(15, Ordering::Release);
+                    return Err(DeepSeekRoastError::ContentFilter);
+                }
                 Some("insufficient_system_resource") => return Err(DeepSeekRoastError::Busy),
-                _ => return Err(DeepSeekRoastError::InvalidOutput),
+                _ => {
+                    LAST_VALIDATION_FAILURE.store(16, Ordering::Release);
+                    return Err(DeepSeekRoastError::InvalidOutput);
+                }
             }
             let content = choice.message.content.unwrap_or_default();
-            match validate_roast_output(&content, &context) {
-                Ok(output) => return Ok(output),
-                Err(_) if attempt == 0 => continue,
-                Err(_) => return Err(DeepSeekRoastError::InvalidOutput),
+            match validate_narrative_output(normalize_json_input(&content), snapshot) {
+                Ok(report) => return Ok(report),
+                Err(error) if attempt + 1 < MAX_ATTEMPTS => {
+                    append_correction(&mut request, &error, &content, snapshot)
+                }
+                Err(error) => {
+                    LAST_VALIDATION_FAILURE.store(
+                        detailed_validation_failure_code(&error, &content, snapshot),
+                        Ordering::Release,
+                    );
+                    return Err(DeepSeekRoastError::InvalidOutput);
+                }
             }
         }
         Err(DeepSeekRoastError::InvalidOutput)
     }
 }
 
+fn validation_failure_code(error: &RoastValidationError) -> u8 {
+    match error {
+        RoastValidationError::InvalidJson
+        | RoastValidationError::MissingField(_)
+        | RoastValidationError::ExtraFields => 1,
+        RoastValidationError::InvalidSectionCount => 2,
+        RoastValidationError::EmptyField | RoastValidationError::TextTooLong => 3,
+        RoastValidationError::UnknownEvidence | RoastValidationError::DuplicateEvidence => 4,
+        RoastValidationError::UnsupportedNumber => 5,
+        RoastValidationError::UnsupportedClaim => 6,
+        RoastValidationError::Unfriendly | RoastValidationError::RealIdentity => 7,
+    }
+}
+
+fn detailed_validation_failure_code(
+    error: &RoastValidationError,
+    content: &str,
+    snapshot: &RoastSnapshot,
+) -> u8 {
+    if *error == RoastValidationError::UnsupportedNumber {
+        if let Ok(report) = serde_json::from_str::<AiRoastNarrative>(normalize_json_input(content))
+        {
+            let visible = [report.title.as_str(), report.commentary.as_str()];
+            if visible
+                .iter()
+                .flat_map(|text| super::validator::numeric_mentions_for_diagnostic(text, snapshot))
+                .any(|mention| mention.percent)
+            {
+                return 11;
+            }
+            if visible
+                .iter()
+                .any(|text| super::validator::has_ascii_number_for_diagnostic(text, snapshot))
+            {
+                return 17;
+            }
+            return 18;
+        }
+    }
+    if matches!(
+        error,
+        RoastValidationError::EmptyField | RoastValidationError::TextTooLong
+    ) {
+        if let Ok(report) = serde_json::from_str::<AiRoastNarrative>(normalize_json_input(content))
+        {
+            let visible = [report.title.as_str(), report.commentary.as_str()];
+            if visible.iter().any(|text| text.trim().is_empty()) {
+                return 10;
+            }
+            if report.title.chars().count() > 36 || report.commentary.chars().count() > 650 {
+                return 9;
+            }
+            return 8;
+        }
+    }
+    validation_failure_code(error)
+}
+
 #[derive(Serialize)]
 struct ChatRequest {
     model: &'static str,
-    messages: [Message; 2],
+    messages: Vec<Message>,
     max_tokens: u32,
+    temperature: f32,
     thinking: Thinking,
+    reasoning_effort: &'static str,
     response_format: ResponseFormat,
     stream: bool,
 }
@@ -180,17 +258,229 @@ struct Message {
     role: &'static str,
     content: String,
 }
-
 #[derive(Serialize)]
 struct Thinking {
     #[serde(rename = "type")]
     kind: &'static str,
 }
-
 #[derive(Serialize)]
 struct ResponseFormat {
     #[serde(rename = "type")]
     kind: &'static str,
+}
+
+fn build_request(snapshot: &RoastSnapshot) -> ChatRequest {
+    let evidence_directory = evidence_catalog(snapshot)
+        .into_iter()
+        .map(|(path, entry)| {
+            let value = match entry.value {
+                EvidenceValue::Integer(value) => serde_json::json!(value),
+                EvidenceValue::Decimal(value) => serde_json::json!(value),
+                EvidenceValue::Text(value) => serde_json::json!(value),
+            };
+            let semantic = match entry.semantic {
+                EvidenceSemantic::RawStat => "raw_stat",
+                EvidenceSemantic::Rank => "rank",
+                EvidenceSemantic::Share => "share",
+                EvidenceSemantic::Delta => "delta",
+                EvidenceSemantic::RoundResult => "round_result",
+                EvidenceSemantic::FinalWorth => "final_worth",
+                EvidenceSemantic::GameKnowledge => "game_knowledge",
+            };
+            (path, serde_json::json!({"value":value,"semantic":semantic}))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let current_objective_requirement = snapshot
+        .scoreboard
+        .team
+        .iter()
+        .find(|player| player.subject == snapshot.current_player)
+        .and_then(|player| {
+            (player.derived.team_objective_time_rank == Some(1)).then(|| {
+                format!(
+                    "currentPlayer.evidenceRefs 必须包含 {}.derived.teamObjectiveTimeRank。",
+                    player.subject
+                )
+            })
+        })
+        .unwrap_or_default();
+    let mut request = ChatRequest{
+        model:MODEL,
+        messages:vec![Message{role:"system",content:system_prompt().to_string()},Message{role:"user",content:format!("以下是匿名、结构化的完整对局快照，以及由同一快照生成的证据目录（路径映射到值和语义）。只依据这些内容生成五区块 JSON 报告；evidenceRefs 必须逐字选自目录键，正文数字必须与目录值一致，claimType 必须符合目录语义。{current_objective_requirement}凡使用最高、第一、最低、垫底、领先、落后、高于或低于，必须在同一条目的 evidenceRefs 中引用支持该比较的 rank、delta 或双方 raw_stat；拿不准就改写为不含比较词的事实描述。所有可见文本禁止出现击杀数量写法，包括“一杀”至“百杀”、“双杀”和任何其他中文数词加“杀”；只写击杀表现靠前、偏低或转化不足，并引用对应证据。不要使用因为……所以……、整局没打过、失职、拖累、背锅、免责、洗白等因果或归责套话。每条 commentary 写到六十至九十个汉字，完整报告目标三百五十至四百五十个可见字符。\n快照：{}\n证据目录（路径映射到值和语义）：{}",serde_json::to_string(snapshot).expect("snapshot serializes"),serde_json::to_string(&evidence_directory).expect("evidence directory serializes"))}],
+        max_tokens:MAX_TOKENS,temperature:0.8,thinking:Thinking{kind:"enabled"},reasoning_effort:"high",response_format:ResponseFormat{kind:"json_object"},stream:false,
+    };
+    request.messages[1].content = format!(
+        "以下是匿名完整对局快照及证据目录（路径映射到值和语义）。只依据它们生成 V3 JSON。evidenceRefs 必须逐字选自目录键；比较结论需引用 rank、delta 或双方原始统计；涉及英雄任务与克制关系时，必须同时引用 taskKnowledge/gameKnowledge 与相关统计。不得虚构站位、换人、技能使用、语音交流或具体击杀过程。\n快照：{}\n证据目录（路径映射到值和语义）：{}",
+        serde_json::to_string(snapshot).expect("snapshot serializes"),
+        serde_json::to_string(&evidence_directory).expect("evidence directory serializes")
+    );
+    request
+}
+
+fn append_correction(
+    request: &mut ChatRequest,
+    error: &RoastValidationError,
+    content: &str,
+    snapshot: &RoastSnapshot,
+) {
+    let category = match error {
+        RoastValidationError::UnknownEvidence => "证据字段不存在",
+        RoastValidationError::DuplicateEvidence => "证据字段重复",
+        RoastValidationError::UnsupportedNumber => "数字没有对应证据",
+        RoastValidationError::UnsupportedClaim => "比较或推断强度不受证据支持",
+        RoastValidationError::InvalidSectionCount => "区块条目数量无效",
+        RoastValidationError::TextTooLong => "文本长度超限",
+        RoastValidationError::Unfriendly => "出现攻击性内容",
+        RoastValidationError::RealIdentity => "出现身份或凭据内容",
+        _ => "JSON 结构或必填字段无效",
+    };
+    let location =
+        validation_location(error, content, snapshot).unwrap_or_else(|| "整份报告".to_string());
+    let instruction = if matches!(
+        error,
+        RoastValidationError::InvalidJson
+            | RoastValidationError::MissingField(_)
+            | RoastValidationError::ExtraFields
+    ) {
+        "严格按系统提示中的 JSON 骨架返回；不得增加字段、注释、Markdown 或骨架外文字。"
+    } else if *error == RoastValidationError::UnsupportedNumber {
+        "检查并删除整份报告中除英雄或地图固有名称外的所有阿拉伯数字、中文数字、百分比和比分，尤其删除一杀、双杀、三杀等中文数词加杀的写法；改用有证据的最高、靠前、领先或偏低等定性表述。"
+    } else if matches!(
+        error,
+        RoastValidationError::UnknownEvidence | RoastValidationError::DuplicateEvidence
+    ) {
+        "逐项检查整份报告的 evidenceRefs：每个值必须逐字复制自证据路径目录，同一条目不得重复，禁止使用数组下标路径或缩写。"
+    } else if *error == RoastValidationError::UnsupportedClaim {
+        "逐项检查整份报告：最高或第一只引用值为一的 Rank；领先、落后、高于、低于必须引用 Rank、Delta 或双方原始值；知识引用必须标为 game_context_inference 并同时引用统计；目标时间全队最高时 currentPlayer 必须引用 teamObjectiveTimeRank。删除无法满足这些条件的断言。"
+    } else if matches!(
+        error,
+        RoastValidationError::EmptyField | RoastValidationError::TextTooLong
+    ) {
+        "保留所有必填区块并压缩整份报告：标题控制在十六字内，总评控制在七十字内，单条正文控制在一百字内，收尾控制在六十字内，所有可见字符控制在四百五十以内。"
+    } else {
+        "只修正无效引用或对应结论。"
+    };
+    request.messages.push(Message{role:"user",content:format!("上一次报告的 {location} 校验失败：{category}。{instruction}保持其他区块语义不变，并重新返回完整 JSON。不得复述输入、错误输出、身份、路径或凭据。")});
+}
+
+fn validation_location(
+    error: &RoastValidationError,
+    content: &str,
+    snapshot: &RoastSnapshot,
+) -> Option<String> {
+    let report = serde_json::from_str::<AiRoastReport>(normalize_json_input(content)).ok()?;
+    if *error == RoastValidationError::UnsupportedNumber {
+        for (location, text) in [
+            ("verdict.title", report.verdict.title.as_str()),
+            ("verdict.summary", report.verdict.summary.as_str()),
+            ("closingRoast", report.closing_roast.as_str()),
+        ] {
+            if !super::validator::numeric_mentions_for_diagnostic(text, snapshot).is_empty() {
+                return Some(location.to_string());
+            }
+        }
+    }
+    if matches!(
+        error,
+        RoastValidationError::EmptyField | RoastValidationError::TextTooLong
+    ) {
+        if report.verdict.title.trim().is_empty() || report.verdict.title.chars().count() > 24 {
+            return Some("verdict.title".to_string());
+        }
+        if report.verdict.summary.trim().is_empty() || report.verdict.summary.chars().count() > 100
+        {
+            return Some("verdict.summary".to_string());
+        }
+        if report.closing_roast.trim().is_empty() || report.closing_roast.chars().count() > 100 {
+            return Some("closingRoast".to_string());
+        }
+    }
+    let catalog = evidence_catalog(snapshot);
+    let items = report
+        .decisive_factors
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (format!("decisiveFactors[{index}]"), item))
+        .chain(std::iter::once((
+            "currentPlayer".to_string(),
+            &report.current_player,
+        )))
+        .chain(
+            report
+                .team_and_matchups
+                .iter()
+                .enumerate()
+                .map(|(index, item)| (format!("teamAndMatchups[{index}]"), &item.insight)),
+        );
+    for (location, item) in items {
+        if matches!(
+            error,
+            RoastValidationError::EmptyField | RoastValidationError::TextTooLong
+        ) && (item.title.trim().is_empty()
+            || item.commentary.trim().is_empty()
+            || item.title.chars().count() > 24
+            || item.commentary.chars().count() > 160)
+        {
+            return Some(location);
+        }
+        if matches!(
+            error,
+            RoastValidationError::UnknownEvidence | RoastValidationError::DuplicateEvidence
+        ) && item
+            .evidence_refs
+            .iter()
+            .any(|path| !catalog.contains_key(path))
+        {
+            return Some(location);
+        }
+        if *error == RoastValidationError::UnsupportedNumber {
+            let entries = item
+                .evidence_refs
+                .iter()
+                .filter_map(|path| catalog.get(path))
+                .collect::<Vec<_>>();
+            let text = format!("{} {}", item.title, item.commentary);
+            if super::validator::numeric_mentions_for_diagnostic(&text, snapshot)
+                .into_iter()
+                .any(|mention| {
+                    !entries.iter().any(|entry| {
+                        super::validator::evidence_supports_number_for_diagnostic(
+                            &entry.value,
+                            mention,
+                        )
+                    })
+                })
+            {
+                return Some(location);
+            }
+        }
+    }
+    None
+}
+
+pub fn system_prompt() -> &'static str {
+    return r#"你是《守望先锋》赛后损友：先真正理解这局，再说人话。不要写五区块报告，不要引用、扮演或自称任何外部产品人格。
+先在 analysis 中回答“如果只能告诉朋友一件事，这局最关键的是什么”，形成唯一 matchThesis；currentPlayer 判断用户真实亮点与责任；keyActors 只选真正带飞或最该背锅的人；supportingFactors 最多两个。优先追究任务的第一责任人，再考虑协助者。涉及法老之鹰、回声等空中威胁时，若我方存在主要对空职责英雄，应结合 taskKnowledge 与结果统计判断其任务是否完成。
+胜利时尽量夸用户，但只能夸证据支持的亮点，也要点名真正带飞的大爹。失败时先接住用户情绪，再根据证据找一至两位主要责任人；用户确实有锅也直说。可以口语化使用“坐牢”“头锅”“战犯”“大爹”“这把肯定是他的问题”，但只评价本局行为、数据与职责，不攻击人格、智力、身份或现实生活。
+最终可见输出只能是一个有趣的主标题和一篇连续正文，正文建议三百五十至五百个中文字符、硬上限六百五十；不要分节、列清单或套模板。不得虚构站位、换英雄、技能命中、语音、故意送、具体击杀过程等快照没有的事件。
+只返回严格 JSON，不得增加字段或骨架外文字：{"analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]},"title":"","commentary":""}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。所有 evidenceRefs 必须逐字来自证据目录；游戏职责推断必须同时引用知识与统计。"#;
+    r#"你是《守望先锋》赛后锐评助手。事实优先，使用冷面幽默，像真正懂游戏的损友复盘；不写客服或公关稿，不说教，不解释笑话，也不模仿或自称任何其他模型。
+
+先阅读比赛信息、双方完整计分板、职责对位、当前玩家基准、连续状态、游戏知识和角斗扩展，再依次判断整体故事、主要胜负因素、当前玩家贡献与责任、关键队友或职责差距，以及最有节目效果的数据反差。本地没有预选主锅或大爹；证据不足时不要强行找锅。
+
+解释边界：高承伤不自动等于坦克失职；高伤害要结合击杀、最后一击、参与率和存活；治疗低不自动等于支援失职；目标时间可以解释机会成本但不是万能免责；枪位面对空中威胁只能形成职责推断。不得推测站位、技能命中、具体伤害目标、语音交流、故意送、摆烂或主观意图。
+
+只返回一个 JSON 对象，固定为五区块：verdict（title、summary）、decisiveFactors（2至3条）、currentPlayer、teamAndMatchups（1至3条）和 closingRoast。每个分析条目包含 title、commentary、claimType、evidenceRefs；teamAndMatchups 另含 type。claimType 只能是 direct_fact、statistical_interpretation、game_context_inference；type 只能是 positive_player、negative_player、role_matchup、arena_trend。每个分析条目附 evidenceRefs，不能自创。推断条目必须同时引用统计和游戏知识；引用游戏知识的条目必须标为 game_context_inference。verdict 和 closingRoast 没有 evidenceRefs，因此其中不得写数字、百分比或名次。
+
+严格 JSON 骨架如下，不得增加任何字段或骨架外文字：{"verdict":{"title":"","summary":""},"decisiveFactors":[{"title":"","commentary":"","claimType":"direct_fact","evidenceRefs":[""]},{"title":"","commentary":"","claimType":"statistical_interpretation","evidenceRefs":[""]}],"currentPlayer":{"title":"","commentary":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"teamAndMatchups":[{"type":"role_matchup","title":"","commentary":"","claimType":"statistical_interpretation","evidenceRefs":[""]}],"closingRoast":""}。空字符串必须替换为实际内容或目录中的证据路径。
+
+证据路径只能逐字复制用户消息末尾“证据路径目录”中当前实际存在的字符串，系统提示中的任何说明、英雄名或字段名都不是可复制的证据路径。不得自行拼接路径，不得写 scoreboard.team[0]、roleMatchups[0] 等数组下标路径。
+
+本场判词用强梗但不堆数字；胜负手事实为主；你这局直接诚实；队友与对位只选关键项且同一人不重复处刑；终审锐评一句收尾。除英雄或地图固有名称外，所有可见正文都不要写阿拉伯数字、中文数字、百分比或比分；改用有证据引用支持的最高、靠前、领先、偏低等定性表述。生成目标要明显短于硬上限：整份报告控制在三百五十至四百五十个可见字符，数据不足可缩短；标题控制在十六字内，总评控制在七十字内，每条 commentary 写六十至九十个汉字，收尾控制在六十字内。嘲讽行为、数据结果和职责完成情况，不攻击人格、智力、身份或现实生活。
+
+反例“伤害高所以尽力了”；正例应比较伤害与击杀转化后再判断。反例“目标时间高所以免责”；正例应说明目标时间的机会成本，同时检查战斗数据是否全面垫底。反例“枪位完全没打过法老之鹰”；正例应写“对空任务没有形成结果”，并标为 game_context_inference。不要照抄这些例句。
+
+禁止以“从数据来看”“综合来看”“整体而言”开头；避免“表现较为稳定”“节奏掌控良好”“压制力十足”“已经尽力”“这锅不背”和万能封号。不要为了玩梗篡改事实。"#
 }
 
 #[derive(Deserialize)]
@@ -198,223 +488,14 @@ struct CompletionResponse {
     #[serde(default)]
     choices: Vec<Choice>,
 }
-
 #[derive(Deserialize)]
 struct Choice {
     message: CompletionMessage,
     finish_reason: Option<String>,
 }
-
 #[derive(Deserialize)]
 struct CompletionMessage {
     content: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MatchPrompt<'a> {
-    kind: &'static str,
-    prompt_version: i64,
-    evaluation: PromptEvaluation<'a>,
-    selected_facts: Vec<PromptFact<'a>>,
-    anonymous_relation: Option<PromptRelationship<'a>>,
-    streak: PromptStreak<'a>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ArenaPrompt<'a> {
-    kind: &'static str,
-    prompt_version: i64,
-    candidate_facts: Vec<PromptFact<'a>>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PromptEvaluation<'a> {
-    primary_tag: &'a str,
-    evidence_tags: &'a [String],
-}
-
-#[derive(Serialize)]
-struct PromptFact<'a> {
-    id: &'a str,
-    subject: &'static str,
-    text: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PromptRelationship<'a> {
-    kind: &'static str,
-    anonymous_subject: String,
-    fact_ids: Vec<&'a str>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PromptStreak<'a> {
-    before_current: usize,
-    previous_event: Option<&'a str>,
-    current_event: &'a str,
-}
-
-fn build_request(material: RoastPromptMaterial<'_>) -> ChatRequest {
-    ChatRequest {
-        model: MODEL,
-        messages: [
-            Message {
-                role: "system",
-                content: system_prompt().to_string(),
-            },
-            Message {
-                role: "user",
-                content: user_prompt(material),
-            },
-        ],
-        max_tokens: MAX_TOKENS,
-        thinking: Thinking { kind: "disabled" },
-        response_format: ResponseFormat {
-            kind: "json_object",
-        },
-        stream: false,
-    }
-}
-
-fn system_prompt() -> &'static str {
-    concat!(
-        "\u{4f60}\u{662f}\u{5b88}\u{671b}\u{5148}\u{950b}\u{5bf9}\u{5c40}\u{9510}\u{8bc4}\u{52a9}\u{624b}\u{3002}",
-        "\u{76ee}\u{6807}\u{662f}\u{8ba9}\u{7528}\u{6237}\u{770b}\u{5f97}\u{5f00}\u{5fc3}\u{3002}",
-        "\u{80dc}\u{5229}\u{6216}\u{6709}\u{5e26}\u{98de}\u{8bc1}\u{636e}\u{65f6}\u{ff0c}\u{5148}\u{5938}\u{5f53}\u{524d}\u{73a9}\u{5bb6}\u{6709}\u{4e8b}\u{5b9e}\u{652f}\u{6301}\u{7684}\u{4f18}\u{70b9}\u{ff0c}\u{4e5f}\u{53ef}\u{6839}\u{636e}\u{672c}\u{5730}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{4fcf}\u{76ae}\u{5730}\u{70b9}\u{51fa}\u{533f}\u{540d}\u{5f31}\u{70b9}\u{6216}\u{5927}\u{7239}\u{3002}",
-        "\u{5931}\u{5229}\u{65f6}\u{ff0c}\u{53ea}\u{80fd}\u{4f9d}\u{636e}\u{672c}\u{5730}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{8fdb}\u{884c}\u{5e7d}\u{9ed8}\u{7529}\u{9505}\u{3002}",
-        "\u{59cb}\u{7ec8}\u{907f}\u{514d}\u{4ee4}\u{4eba}\u{6cc4}\u{6c14}\u{3001}\u{8fb1}\u{9a82}\u{3001}\u{4ec7}\u{6068}\u{6216}\u{9488}\u{5bf9}\u{8eab}\u{4efd}\u{7684}\u{8868}\u{8fbe}\u{3002}",
-        "\u{8bc4}\u{8bed}\u{5fc5}\u{987b}\u{5199}\u{6210}\u{8fde}\u{8d2f}\u{81ea}\u{7136}\u{6bb5}\u{ff0c}\u{4e0d}\u{8981}\u{6807}\u{7b7e}\u{6216}\u{5217}\u{8868}\u{3002}",
-        "\u{53ea}\u{80fd}\u{4f7f}\u{7528}\u{7528}\u{6237}\u{6d88}\u{606f}\u{4e2d}\u{7684}\u{533f}\u{540d}\u{4e8b}\u{5b9e}\u{ff0c}",
-        "\u{4e0d}\u{5f97}\u{731c}\u{6d4b}\u{82f1}\u{96c4}\u{3001}\u{6570}\u{503c}\u{3001}\u{771f}\u{5b9e}\u{8eab}\u{4efd}\u{6216}\u{9690}\u{79c1}\u{4fe1}\u{606f}\u{3002}",
-        "\u{53ea}\u{8fd4}\u{56de} JSON \u{5bf9}\u{8c61}\u{ff0c}\u{4e14}\u{53ea}\u{5305}\u{542b} award\u{3001}commentary\u{3001}usedFactIds\u{3002}",
-        "award \u{53ea}\u{7528}\u{4e2d}\u{6587}\u{4e14}\u{4e0d}\u{8d85}\u{8fc7}16\u{5b57}\u{ff1b}",
-        "commentary \u{7528}2\u{5230}3\u{53e5}\u{4e2d}\u{6587}\u{81ea}\u{7136}\u{6bb5}\u{ff0c}\u{4e0d}\u{8d85}\u{8fc7}180\u{5b57}\u{ff0c}\u{4e0d}\u{7528} Markdown\u{3002}",
-        "usedFactIds \u{81f3}\u{5c11}\u{5f15}\u{7528}2\u{4e2a}\u{63d0}\u{4f9b}\u{7684}\u{4e8b}\u{5b9e} ID\u{ff1b}",
-        "\u{5982}\u{679c}\u{5b58}\u{5728}\u{533f}\u{540d}\u{5173}\u{7cfb}\u{5bf9}\u{8c61}\u{ff0c}\u{5fc5}\u{987b}\u{5f15}\u{7528}\u{81f3}\u{5c11}1\u{4e2a}\u{5173}\u{7cfb}\u{4e8b}\u{5b9e}\u{3002}"
-    )
-}
-
-fn prompt_fact_count(material: RoastPromptMaterial<'_>) -> usize {
-    match material {
-        RoastPromptMaterial::Match(value) => value.selected_facts.len(),
-        RoastPromptMaterial::Arena(value) => value.candidate_facts.len(),
-    }
-}
-
-fn user_prompt(material: RoastPromptMaterial<'_>) -> String {
-    let payload = match material {
-        RoastPromptMaterial::Match(value) => serde_json::to_string(&match_prompt(value)),
-        RoastPromptMaterial::Arena(value) => serde_json::to_string(&arena_prompt(value)),
-    }
-    .expect("roast prompt payload serializes");
-    let arena_rule = matches!(material, RoastPromptMaterial::Arena(_)).then_some(
-        "\u{89d2}\u{6597}\u{8d44}\u{91d1}\u{53ea}\u{80fd}\u{9648}\u{8ff0}\u{6700}\u{7ec8}\u{6392}\u{540d}\u{ff0c}\u{4e0d}\u{5f97}\u{89e3}\u{91ca}\u{4e3a}\u{80dc}\u{8d1f}\u{3001}\u{7ffb}\u{76d8}\u{6216}\u{56de}\u{5408}\u{7ed3}\u{679c}\u{7684}\u{539f}\u{56e0}\u{3002}",
-    );
-    format!(
-        "{}\u{4f7f}\u{7528}\u{4e0b}\u{5217}\u{533f}\u{540d}\u{6750}\u{6599}\u{751f}\u{6210}\u{4e00}\u{6b21}\u{5bf9}\u{5c40}\u{9510}\u{8bc4}\u{ff0c}\u{4e0d}\u{8981}\u{8f93}\u{51fa} Markdown\u{6216}\u{89e3}\u{91ca}\u{ff1a}{payload}",
-        arena_rule.unwrap_or_default(),
-    )
-}
-
-fn match_prompt(material: &RoastMaterial) -> MatchPrompt<'_> {
-    MatchPrompt {
-        kind: "match",
-        prompt_version: PROMPT_VERSION,
-        evaluation: PromptEvaluation {
-            primary_tag: &material.evaluation.primary_tag,
-            evidence_tags: &material.evaluation.evidence_tags,
-        },
-        selected_facts: prompt_facts(&material.selected_facts),
-        anonymous_relation: material.relationship.as_ref().and_then(|relationship| {
-            let fact_ids = material
-                .selected_facts
-                .iter()
-                .filter(|fact| fact.subject == FactSubject::RelationshipSubject)
-                .map(|fact| fact.id.as_str())
-                .collect::<Vec<_>>();
-            (!fact_ids.is_empty()).then(|| PromptRelationship {
-                kind: relationship_kind(&relationship.kind),
-                anonymous_subject: relationship_subject(&relationship.subject),
-                fact_ids,
-            })
-        }),
-        streak: PromptStreak {
-            before_current: material.streak.before_current,
-            previous_event: material.streak.previous_event.as_deref(),
-            current_event: &material.streak.current_event,
-        },
-    }
-}
-
-fn arena_prompt(material: &ArenaRoastMaterial) -> ArenaPrompt<'_> {
-    ArenaPrompt {
-        kind: "arena",
-        prompt_version: PROMPT_VERSION,
-        candidate_facts: prompt_facts(&material.candidate_facts),
-    }
-}
-
-fn prompt_facts(facts: &[RoastFact]) -> Vec<PromptFact<'_>> {
-    facts
-        .iter()
-        .map(|fact| PromptFact {
-            id: &fact.id,
-            subject: subject(fact.subject),
-            text: &fact.text,
-        })
-        .collect()
-}
-
-fn subject(value: FactSubject) -> &'static str {
-    match value {
-        FactSubject::CurrentPlayer => "current_player",
-        FactSubject::RelationshipSubject => "anonymous_relation",
-        FactSubject::Team => "team",
-        FactSubject::Match => "match",
-    }
-}
-
-fn relationship_kind(value: &RoastRelationshipKind) -> &'static str {
-    match value {
-        RoastRelationshipKind::WeakLink => "weak_link",
-        RoastRelationshipKind::Carry => "carry",
-        RoastRelationshipKind::Scapegoat => "scapegoat",
-        RoastRelationshipKind::SelfRoast => "self_roast",
-    }
-}
-
-fn relationship_subject(value: &RoastRelationshipSubject) -> String {
-    match value {
-        RoastRelationshipSubject::CurrentPlayer => "\u{5f53}\u{524d}\u{73a9}\u{5bb6}".into(),
-        RoastRelationshipSubject::Teammate { role, ordinal } => format!(
-            "\u{533f}\u{540d}{}\u{53f7}{}\u{4f4d}",
-            ordinal_label(*ordinal),
-            role_label(*role)
-        ),
-    }
-}
-
-fn ordinal_label(value: AnonymousOrdinal) -> &'static str {
-    match value {
-        AnonymousOrdinal::First => "\u{4e00}",
-        AnonymousOrdinal::Second => "\u{4e8c}",
-        AnonymousOrdinal::Third => "\u{4e09}",
-        AnonymousOrdinal::Fourth => "\u{56db}",
-        AnonymousOrdinal::Fifth => "\u{4e94}",
-    }
-}
-
-fn role_label(value: AnonymousPlayerRole) -> &'static str {
-    match value {
-        AnonymousPlayerRole::Tank => "\u{5766}\u{514b}",
-        AnonymousPlayerRole::Damage => "\u{8f93}\u{51fa}",
-        AnonymousPlayerRole::Support => "\u{652f}\u{63f4}",
-    }
 }
 
 fn map_request_error(error: reqwest::Error) -> DeepSeekRoastError {
@@ -424,7 +505,6 @@ fn map_request_error(error: reqwest::Error) -> DeepSeekRoastError {
         DeepSeekRoastError::Transport
     }
 }
-
 fn map_status(status: StatusCode) -> DeepSeekRoastError {
     match status.as_u16() {
         401 => DeepSeekRoastError::InvalidKey,

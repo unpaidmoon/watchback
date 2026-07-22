@@ -34,9 +34,37 @@ export type MatchFavoriteRequest = {
   note: string;
 };
 
+export type AiRoastClaimType =
+  | "direct_fact"
+  | "statistical_interpretation"
+  | "game_context_inference";
+
+export type AiRoastInsight = {
+  title: string;
+  commentary: string;
+  claimType: AiRoastClaimType;
+  evidenceRefs: string[];
+};
+
+export type AiRoastTeamInsight = AiRoastInsight & {
+  type: "positive_player" | "negative_player" | "role_matchup" | "arena_trend";
+};
+
+export type AiRoastReport = {
+  verdict: {
+    title: string;
+    summary: string;
+  };
+  decisiveFactors: AiRoastInsight[];
+  currentPlayer: AiRoastInsight;
+  teamAndMatchups: AiRoastTeamInsight[];
+  closingRoast: string;
+};
+
 export type AiMatchRoastView = {
   award: string;
   commentary: string;
+  report: AiRoastReport | null;
 };
 
 export type DeepSeekKeyStatus = {
