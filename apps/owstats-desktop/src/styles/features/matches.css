@@ -1260,6 +1260,11 @@
   color: var(--text-primary);
 }
 
+.phase7CompactArenaDetail .phase7ArenaTab.win:not(.active),
+.phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.win:not(.active) {
+  background: var(--status-success-bg);
+}
+
 .phase7CompactArenaDetail .phase7ArenaTab.active,
 .phase6DetailPage > .phase7ArenaSelector .phase7ArenaTab.active {
   border-color: var(--action-primary);
