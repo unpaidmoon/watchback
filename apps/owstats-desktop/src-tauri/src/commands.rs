@@ -117,7 +117,7 @@ pub fn get_friend_analytics(
     query_friend_analytics(&account.database(), filters).map_err(to_message)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_friend_details(
     accounts: State<'_, AccountContextManager>,
     bnet_id: String,
@@ -141,7 +141,7 @@ pub fn get_onboarding_status(
     Ok(status)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_personal_season_review(
     accounts: State<'_, AccountContextManager>,
     request: PersonalReviewRequest,
@@ -526,7 +526,7 @@ pub fn get_rankings(
     crate::ranking::get_rankings(&account.database(), season).map_err(to_message)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_season_analysis(
     accounts: State<'_, AccountContextManager>,
     season: Option<i64>,

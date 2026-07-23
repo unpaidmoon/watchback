@@ -2096,7 +2096,7 @@ fn command_source<'a>(source: &'a str, command: &str) -> &'a str {
         .or_else(|| source.find(&regular_signature))
         .unwrap_or_else(|| panic!("missing command {command}"));
     let rest = &source[start..];
-    let end = rest.find("\n#[tauri::command]").unwrap_or(rest.len());
+    let end = rest.find("\n#[tauri::command").unwrap_or(rest.len());
     &rest[..end]
 }
 

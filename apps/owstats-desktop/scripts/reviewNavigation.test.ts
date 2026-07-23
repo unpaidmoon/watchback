@@ -13,6 +13,16 @@ import {
 
 const reviewPageSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
 assert.match(reviewPageSource, /if \(!Number\.isFinite\(scrollY\)\) \{ sessionStorage\.removeItem\(reviewScrollKey\(href\)\); return; \}/, "invalid persisted review scroll values must be cleared");
+assert.match(
+  reviewPageSource,
+  /requestFrame:\s*\(callback\)\s*=>\s*requestAnimationFrame\(callback\)/,
+  "原生 requestAnimationFrame 必须通过闭包调用，避免 WebView2 中因 this 绑定错误触发 Illegal invocation 白屏",
+);
+assert.match(
+  reviewPageSource,
+  /cancelFrame:\s*\(frame\)\s*=>\s*cancelAnimationFrame\(frame\)/,
+  "原生 cancelAnimationFrame 必须通过闭包调用，避免 WebView2 中因 this 绑定错误触发 Illegal invocation",
+);
 
 assert.equal(buildReviewHref(23), "/review?season=23");
 assert.equal(buildAchievementsHref(23), "/achievements");

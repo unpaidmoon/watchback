@@ -63,7 +63,16 @@ assert.equal(compactSource.includes("暂无装备"), false, "empty compact arena
 assert.equal(compactSource.includes("暂无异能"), false, "empty compact arena trait slots should not render empty copy");
 assert.match(styleSource, /\.phase7CompactArenaExpansion\s*\{[^}]*grid-template-columns:\s*minmax\(110px,\s*0\.55fr\)\s+minmax\(180px,\s*1fr\)\s+minmax\(240px,\s*1\.25fr\)/s, "compact arena expansion should organize economy, traits, and equipment horizontally when space allows");
 assert.match(styleSource, /@media\s*\(max-width:\s*1080px\)\s*\{[\s\S]*\.phase7CompactArenaExpansion\s*\{[^}]*grid-template-columns:\s*1fr/s, "narrow compact arena expansion should stack economy, traits, and equipment vertically");
-assert.match(styleSource, /\.phase7CompactArenaExpansion\s*\{[^}]*grid-template-columns:\s*150px\s+minmax\(300px,\s*1fr\)\s+minmax\(260px,\s*0\.82fr\)/s, "compact arena expansion should organize economy, traits, and equipment like the expected dark panel");
+assert.match(styleSource, /\.phase7CompactArenaExpansion\s*\{[^}]*grid-template-columns:\s*150px\s+minmax\(300px,\s*1fr\)\s+minmax\(260px,\s*0\.82fr\)/s, "compact arena expansion should organize economy, traits, and equipment like the expected panel");
+assert.match(styleSource, /\.phase7CompactArenaExpansion\s*\{[^}]*background:\s*var\(--surface-control\)/s, "compact arena player expansion should use the light gray control surface");
+assert.match(styleSource, /\.phase7CompactArenaEconomy\s*\{[^}]*background:\s*var\(--surface-control\)/s, "compact arena economy should use the same light gray surface as the expansion");
+assert.match(styleSource, /\.phase7CompactArenaEconomy strong\s*\{[^}]*color:\s*var\(--text-primary\)/s, "compact arena economy value should stay readable on the light surface");
+assert.match(styleSource, /\.phase7CompactArenaMoneyLabel\s*\{[^}]*color:\s*var\(--text-secondary\)/s, "compact arena economy label should stay readable on the light surface");
+assert.match(styleSource, /\.phase7ArenaSlotGroup\s*\{[^}]*background:\s*var\(--surface-control\)/s, "compact arena trait and equipment groups should use the same light gray surface as the expansion");
+assert.match(styleSource, /\.phase7ArenaSlotGroup\s*>\s*span\s*\{[^}]*color:\s*var\(--text-secondary\)/s, "compact arena group labels should stay readable on the light surface");
+assert.match(styleSource, /\.phase7ArenaSlotName\s*\{[^}]*color:\s*var\(--text-primary\)/s, "compact arena trait names should stay readable on the light surface");
+assert.match(styleSource, /\.phase7ArenaSlot\.trait\s*\{[^}]*background:\s*var\(--surface-control\)/s, "compact arena trait slots should use a light gray surface");
+assert.match(styleSource, /\.phase7ArenaSlot\.mod\s*\{[^}]*background:\s*var\(--surface-control\)/s, "compact arena equipment slots should use a light gray surface");
 assert.match(styleSource, /\.phase7ArenaSlotGroup\.trait \.phase7ArenaSlots\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s, "compact arena traits should render as a two-by-two icon and name grid");
 assert.match(styleSource, /\.phase7ArenaSlotGroup\.mod \.phase7ArenaSlots\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*48px\)/s, "compact arena equipment should render as a three-by-two round icon grid");
 assert.match(styleSource, /\.phase7ArenaSlot\.mod\s*\{[^}]*border-radius:\s*999px/s, "compact arena equipment slots should be round");

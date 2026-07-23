@@ -514,6 +514,25 @@ fn request_season_candidates(season: i64) -> Vec<Option<i64>> {
     }
 }
 
+#[cfg(test)]
+mod season_candidate_tests {
+    use super::{request_season_candidates, DASHEN_CURRENT_SEASON};
+
+    #[test]
+    fn current_fallback_season_keeps_the_compatible_request_order() {
+        assert_eq!(
+            request_season_candidates(DASHEN_CURRENT_SEASON),
+            vec![None, Some(DASHEN_CURRENT_SEASON)]
+        );
+    }
+
+    #[test]
+    fn future_seasons_never_fall_back_to_an_unscoped_request() {
+        assert_eq!(request_season_candidates(24), vec![Some(24)]);
+        assert_eq!(request_season_candidates(25), vec![Some(25)]);
+    }
+}
+
 fn payload_has_meaningful_data(payload: &Value) -> bool {
     let Some(data) = payload.get("data") else {
         return false;

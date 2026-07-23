@@ -1,11 +1,7 @@
 use super::*;
 
 pub(super) const MIN_SYNC_SEASON: i64 = 15;
-pub(super) const CURRENT_SEASON: i64 = 23;
-
-fn syncable_seasons() -> Vec<i64> {
-    (MIN_SYNC_SEASON..=CURRENT_SEASON).rev().collect()
-}
+pub(super) const DEFAULT_SYNC_SEASON: i64 = 23;
 
 pub(super) fn get_onboarding_status_impl(
     db: &OwDatabase,
@@ -20,20 +16,27 @@ pub(super) fn get_onboarding_status_impl(
             .collect::<rusqlite::Result<Vec<i64>>>()?;
         rows
     };
-    let selected = request
-        .season
-        .filter(|season| (MIN_SYNC_SEASON..=CURRENT_SEASON).contains(season))
-        .or(Some(CURRENT_SEASON));
+    let selected = match request.season {
+        Some(season) if season < MIN_SYNC_SEASON => {
+            anyhow::bail!("最低支持 S{MIN_SYNC_SEASON}");
+        }
+        Some(season) => season,
+        None => available_seasons
+            .iter()
+            .copied()
+            .filter(|season| *season >= MIN_SYNC_SEASON)
+            .max()
+            .unwrap_or(DEFAULT_SYNC_SEASON),
+    };
     let status_seasons = available_seasons
         .iter()
         .copied()
-        .filter(|season| (MIN_SYNC_SEASON..=CURRENT_SEASON).contains(season))
+        .filter(|season| *season >= MIN_SYNC_SEASON)
         .rev()
         .collect::<Vec<_>>();
     let season_statuses = command_center_season_statuses(db, &status_seasons)?;
-    let (preset_matches, detail_matches, last_seen) = if let Some(season) = selected {
-        conn.query_row(
-            r#"
+    let (preset_matches, detail_matches, last_seen) = conn.query_row(
+        r#"
             SELECT
                 COUNT(m.match_id),
                 COUNT(d.match_id),
@@ -42,12 +45,9 @@ pub(super) fn get_onboarding_status_impl(
             LEFT JOIN match_details d ON d.match_id = m.match_id
             WHERE m.bucket='preset' AND m.season=?
             "#,
-            params![season],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?
-    } else {
-        (0, 0, None)
-    };
+        params![selected],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
     let can_enter_review = preset_matches > 0;
     let mut warnings = Vec::new();
     if preset_matches == 0 {
@@ -57,9 +57,9 @@ pub(super) fn get_onboarding_status_impl(
     }
 
     Ok(OnboardingStatus {
-        selected_season: selected,
-        current_season: CURRENT_SEASON,
-        syncable_seasons: syncable_seasons(),
+        selected_season: Some(selected),
+        minimum_sync_season: MIN_SYNC_SEASON,
+        default_season: DEFAULT_SYNC_SEASON,
         available_seasons,
         can_enter_review,
         credential_status: CredentialStatus {
@@ -71,7 +71,7 @@ pub(super) fn get_onboarding_status_impl(
         },
         local_data: LocalDataStatus {
             data_source: "本地 SQLite".to_string(),
-            season: selected,
+            season: Some(selected),
             preset_matches,
             detail_matches,
             last_synced_or_imported_at: last_seen,

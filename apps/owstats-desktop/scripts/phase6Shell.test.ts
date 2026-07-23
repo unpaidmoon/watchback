@@ -45,7 +45,7 @@ const styles = [
 ].join("\n");
 const commandCenterStyles = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
 const pageShellStyles = readFileSync(new URL("../src/styles/page-shell.css", import.meta.url), "utf8");
-const { resolveCommandCenterSeason } = seasonSyncWorkbench;
+const { decrementTargetSeason, incrementTargetSeason, resolveCommandCenterSeason } = seasonSyncWorkbench;
 const runSeasonQuickUpdate = Reflect.get(seasonSyncWorkbench, "runSeasonQuickUpdate") as undefined | ((season: number, onQuickUpdate: (season: number) => void) => void);
 assertEqual(typeof runSeasonQuickUpdate, "function", "row updates expose a directly testable quick-update handler");
 if (runSeasonQuickUpdate) {
@@ -84,6 +84,26 @@ assertEqual(/\.commandCenterSyncPanel,[\s\S]*?\.commandCenterAccountPanel[\s\S]*
 assertEqual(/@media \(max-width: 1440px\)[\s\S]*?\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "1440px folds metrics into two columns");
 assertEqual(/\.commandCenterAccountPanel \.phase6ProfileAvatar\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*56px;/.test(commandCenterStyles), true, "account identity uses a compact neutral avatar");
 assertEqual(/\.commandCenterTools \.phase6SettingsLauncherGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "tools use four columns on wide screens");
+assertEqual(
+  /\.phase6CommandCenter \.phase6SettingsPlaceholderAction\s*\{(?=[^}]*border:\s*1px solid var\(--border-subtle\))(?=[^}]*background:\s*var\(--surface-control\))(?=[^}]*color:\s*var\(--text-primary\))[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "settings tool buttons use a distinct secondary surface",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6SettingsPlaceholderAction:hover:not\(:disabled\)\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--text-primary\) 5%, var\(--surface-control\)\);[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "settings tool buttons provide restrained hover feedback",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6SettingsPlaceholderAction:disabled\s*\{(?=[^}]*cursor:\s*not-allowed)(?=[^}]*opacity:\s*0\.58)[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "disabled settings tool buttons remain visibly distinct",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6SettingsPlaceholderAction:focus-visible\s*\{(?=[^}]*outline:\s*2px solid var\(--data-primary\))(?=[^}]*outline-offset:\s*2px)[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "settings tool buttons retain a visible keyboard focus ring",
+);
 assertEqual(/\.phase6CommandCenter \.accountManagerPanel\s*\{[\s\S]*?background:\s*var\(--glass-secondary\);/.test(commandCenterStyles), true, "account manager uses the approved secondary glass surface");
 assertEqual(/\.pageHeader h1\s*\{[\s\S]*?font-weight:\s*700;/.test(pageShellStyles), true, "page titles use the only bold text tier");
 assertEqual(/\.commandCenterMetricsRow > span > strong\s*\{[\s\S]*?color:\s*var\(--text-primary\);[\s\S]*?font-weight:\s*400;/.test(commandCenterStyles), true, "metric values stay neutral and regular weight");
@@ -91,7 +111,36 @@ assertEqual(/\.commandCenterMetricsRow > span\.(?:good|warn) > strong/.test(comm
 assertEqual(/\.commandCenterSectionHeading h2,[\s\S]*?font-weight:\s*400;/.test(commandCenterStyles), true, "command center section titles stay regular weight");
 assertEqual(/\.phase6CommandCenter \.phase6Eyebrow\s*\{[\s\S]*?color:\s*var\(--text-secondary\);/.test(commandCenterStyles), true, "command center eyebrow text does not use purple");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?color:\s*var\(--text-primary\);/.test(commandCenterStyles), true, "season ledger facts keep neutral text");
-assertEqual(/\.phase6CommandCenter \.phase6DataHealthGrid span\s*\{[\s\S]*?background:\s*transparent;/.test(commandCenterStyles), true, "health rows remove colored pills");
+assertEqual(
+  /function HealthItem[\s\S]*?return <span className=\{ok \? "good" : "bad"\}>\{label\}<\/span>/.test(onboardingSource),
+  true,
+  "health labels use text and semantic classes without status icons",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6DataHealthGrid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "health labels use four equal columns on wide screens",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6DataHealthGrid span\s*\{(?=[^}]*width:\s*100%)(?=[^}]*min-height:\s*36px)(?=[^}]*justify-content:\s*center)(?=[^}]*border-radius:\s*var\(--radius-control\))(?=[^}]*white-space:\s*normal)[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "health labels share stable aligned dimensions",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6DataHealthGrid span\.good\s*\{(?=[^}]*border-color:\s*color-mix\(in srgb, var\(--status-success\) 34%, var\(--glass-border\)\))(?=[^}]*background:\s*var\(--status-success-bg\))[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "healthy labels use a restrained green surface",
+);
+assertEqual(
+  /\.phase6CommandCenter \.phase6DataHealthGrid span\.bad\s*\{(?=[^}]*border-color:\s*color-mix\(in srgb, var\(--status-danger\) 34%, var\(--glass-border\)\))(?=[^}]*background:\s*var\(--status-danger-bg\))[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "unhealthy labels use a restrained red surface",
+);
+assertEqual(
+  /@media \(max-width: 720px\)[\s\S]*?\.phase6CommandCenter \.phase6DataHealthGrid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles),
+  true,
+  "health labels fold to two columns on narrow screens",
+);
 assertEqual(/\.phase6CommandCenter \.syncTargetStrip\s*\{[\s\S]*?background:\s*rgba\(250, 251, 247, 0\.38\);/.test(commandCenterStyles), true, "target strip removes the opaque white inner card");
 assertEqual(/\.phase6CommandCenter \.phase6DataCoverageCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "coverage card is flattened into the account surface");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--glass-border\);/.test(commandCenterStyles), true, "season ledger rows use dividers instead of floating cards");
@@ -127,8 +176,12 @@ assertEqual(
   "07-12 10:56",
   "compact timestamp removes only the year while preserving local month day and minute",
 );
-assertEqual(resolveCommandCenterSeason(21, [23, 22, 21, 20, 19, 18, 17, 16, 15], 23), 21, "valid user selection survives refresh");
-assertEqual(resolveCommandCenterSeason(24, [23, 22, 21, 20, 19, 18, 17, 16, 15], 23), 23, "invalid selection falls back to current season");
+assertEqual(resolveCommandCenterSeason(21, 15, 23), 21, "valid user selection survives refresh");
+assertEqual(resolveCommandCenterSeason(24, 15, 23), 24, "future season selection survives refresh");
+assertEqual(resolveCommandCenterSeason(14, 15, 23), 23, "selection below the minimum falls back to the default");
+assertEqual(decrementTargetSeason(15, 15), 15, "target season cannot decrease below the minimum");
+assertEqual(decrementTargetSeason(16, 15), 15, "target season decreases by one");
+assertEqual(incrementTargetSeason(23), 24, "target season has no upper limit");
 assertEqual(seasonSyncGateCopy(false, false, false, false, false).statusLabel, "需要登录", "missing credentials keep the login status copy");
 assertEqual(seasonSyncGateCopy(false, false, false, false, false).syncHint, "登录后可同步", "missing credentials keep the login recovery copy");
 assertEqual(seasonSyncGateCopy(true, false, false, false, false).statusLabel, "目标待确认", "ready credentials distinguish a blocked target");
@@ -225,8 +278,13 @@ assertEqual(
   "target recovery focus is recorded only after the enabled button receives focus",
 );
 assertEqual(onboardingSource.includes("<SeasonSyncWorkbench"), true, "command center renders the dynamic season workbench");
-assertEqual(seasonWorkbenchSource.includes('aria-label="选择同步赛季"'), true, "dynamic season select has a Chinese accessible name");
-assertEqual(seasonWorkbenchSource.includes("syncableSeasons.map"), true, "season options come from the backend catalog");
+assertEqual(seasonWorkbenchSource.includes('aria-label="选择目标赛季"'), true, "target season stepper has a Chinese accessible name");
+assertEqual(seasonWorkbenchSource.includes('aria-label="减少目标赛季"'), true, "target season decrement has a Chinese accessible name");
+assertEqual(seasonWorkbenchSource.includes('aria-label="增加目标赛季"'), true, "target season increment has a Chinese accessible name");
+assertEqual(seasonWorkbenchSource.includes("<select"), false, "target season no longer uses a fixed select catalog");
+assertEqual(seasonWorkbenchSource.includes("syncableSeasons"), false, "target season has no fixed upper catalog");
+assertEqual(seasonWorkbenchSource.includes("当前赛季"), false, "target season does not claim runtime current-season knowledge");
+assertEqual(seasonWorkbenchSource.includes("最低支持 S"), true, "target season explains its fixed lower bound");
 assertEqual(seasonWorkbenchSource.includes("已同步数据"), true, "ledger has the confirmed Chinese heading");
 assertEqual(seasonWorkbenchSource.includes("详情覆盖度"), true, "ledger shows coverage");
 assertEqual(seasonWorkbenchSource.includes("本地对局"), true, "ledger shows local matches");
@@ -242,7 +300,8 @@ assertEqual(seasonWorkbenchSource.includes('"更新"'), true, "synced-season row
 assertEqual(/runSeasonQuickUpdate\(seasonStatus\.season, onQuickUpdate\)/.test(seasonWorkbenchSource), true, "row update uses its own season through the tested handler");
 assertEqual(/<button[^>]*className=.*syncedSeasonLedgerRow[\s\S]*?<button/.test(seasonWorkbenchSource), false, "season rows do not nest buttons");
 assertEqual(onboardingSource.includes("同步全部"), false, "command center has no sync-all action");
-assertEqual(onboardingSource.includes("status.currentSeason"), true, "command center consumes the backend current season without global state");
+assertEqual(onboardingSource.includes("status.minimumSyncSeason"), true, "command center consumes the backend minimum season");
+assertEqual(onboardingSource.includes("status.defaultSeason"), true, "command center consumes the backend default season");
 assertEqual(onboardingSource.includes("dump_season_json"), false, "command center does not expose diagnostic dump command");
 assertEqual(onboardingSource.includes("dumpSeason"), false, "command center does not expose diagnostic dump API wrapper");
 assertEqual(onboardingSource.includes("commandCenterMetricsRow"), true, "top metrics own credential, match count, coverage and last sync facts");
@@ -286,8 +345,8 @@ assertEqual(credentialTone("failed"), "bad", "failed credential is bad");
 
 const status: OnboardingStatus = {
   selectedSeason: 22,
-  currentSeason: 23,
-  syncableSeasons: [23, 22, 21, 20, 19, 18, 17, 16, 15],
+  minimumSyncSeason: 15,
+  defaultSeason: 23,
   availableSeasons: [22],
   canEnterReview: true,
   credentialStatus: {

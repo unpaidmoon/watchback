@@ -184,25 +184,62 @@
   gap: 4px;
 }
 
-.seasonSyncControl label {
+.seasonSyncControl label,
+.seasonSyncControlLabel {
   color: var(--text-primary);
   font-size: 18px;
   font-weight: 400;
 }
 
-.seasonSyncControl select {
+.seasonTargetStepper {
   width: 100%;
   min-height: 44px;
-  padding: 0 12px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   background: var(--surface-control);
   color: var(--text-primary);
+}
+
+.seasonTargetStepper button,
+.seasonTargetStepper output {
+  min-width: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
   font: inherit;
+}
+
+.seasonTargetStepper button {
+  font-size: 20px;
   cursor: pointer;
 }
 
-.seasonSyncControl select:focus-visible,
+.seasonTargetStepper button:first-child {
+  border-right: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.seasonTargetStepper button:last-child {
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+.seasonTargetStepper button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--surface-control));
+}
+
+.seasonTargetStepper button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.seasonTargetStepper button:focus-visible,
 .syncedSeasonSelect:focus-visible,
 .syncedSeasonUpdateButton:focus-visible {
   outline: 2px solid var(--data-primary);
@@ -521,18 +558,31 @@
   box-shadow: none;
 }
 
-.phase6CommandCenter .phase6DataHealthGrid span {
-  border-color: var(--glass-border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-weight: 400;
+.phase6CommandCenter .phase6DataHealthGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.phase6CommandCenter .phase6DataHealthGrid span.good,
-.phase6CommandCenter .phase6DataHealthGrid span.warn {
+.phase6CommandCenter .phase6DataHealthGrid span {
+  width: 100%;
+  min-height: 36px;
+  justify-content: center;
+  padding: 0 8px;
   border-color: var(--glass-border);
-  background: transparent;
-  color: var(--text-secondary);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font-weight: 400;
+  text-align: center;
+  white-space: normal;
+}
+
+.phase6CommandCenter .phase6DataHealthGrid span.good {
+  border-color: color-mix(in srgb, var(--status-success) 34%, var(--glass-border));
+  background: var(--status-success-bg);
+}
+
+.phase6CommandCenter .phase6DataHealthGrid span.bad {
+  border-color: color-mix(in srgb, var(--status-danger) 34%, var(--glass-border));
+  background: var(--status-danger-bg);
 }
 
 .phase6CommandCenter .phase6DataCoverageCard {
@@ -552,6 +602,27 @@
   border-color: var(--border-subtle);
   background: var(--surface-control);
   color: var(--text-primary);
+}
+
+.phase6CommandCenter .phase6SettingsPlaceholderAction {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease;
+}
+
+.phase6CommandCenter .phase6SettingsPlaceholderAction:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--surface-control));
+}
+
+.phase6CommandCenter .phase6SettingsPlaceholderAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.phase6CommandCenter .phase6SettingsPlaceholderAction:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
 }
 
 .phase6CommandCenter .dangerButton {
@@ -605,6 +676,10 @@
   }
 
   .commandCenterTools .phase6SettingsLauncherGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .phase6CommandCenter .phase6DataHealthGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

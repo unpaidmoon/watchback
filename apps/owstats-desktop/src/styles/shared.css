@@ -3222,11 +3222,11 @@ select {
   gap: 10px;
   padding: 10px 14px 14px;
   overflow: visible;
-  border: 1px solid rgb(15 23 42 / 0.62);
+  border: 1px solid var(--border-subtle);
   border-top: 0;
   border-radius: 0 0 4px 4px;
-  background: #0f131a;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  background: var(--surface-control);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5);
 }
 
 .phase7CompactArenaEconomy {
@@ -3237,7 +3237,7 @@ select {
   gap: 6px;
   min-height: 130px;
   padding: 12px 10px;
-  background: #11161f;
+  background: var(--surface-control);
 }
 
 .phase7CompactArenaMoneyIcon {
@@ -3249,7 +3249,7 @@ select {
 .phase7CompactArenaEconomy strong {
   width: auto;
   max-width: 100%;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 25px;
   line-height: 1;
   overflow: hidden;
@@ -3257,7 +3257,7 @@ select {
 }
 
 .phase7CompactArenaMoneyLabel {
-  color: rgb(255 255 255 / 0.88);
+  color: var(--text-secondary);
   font-size: 14px;
   font-weight: 800;
 }
@@ -3876,11 +3876,11 @@ select {
   min-height: 130px;
   padding: 12px;
   overflow: visible;
-  background: #11161f;
+  background: var(--surface-control);
 }
 
 .phase7ArenaSlotGroup > span {
-  color: rgb(255 255 255 / 0.72);
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 800;
 }
@@ -3905,8 +3905,8 @@ select {
 .phase7ArenaSlot {
   position: relative;
   min-width: 0;
-  background: rgb(15 23 42 / 0.16);
-  outline: 1px solid rgb(255 255 255 / 0.1);
+  background: var(--surface-control);
+  outline: 1px solid var(--border-subtle);
   overflow: visible;
   outline-offset: 2px;
 }
@@ -3918,7 +3918,7 @@ select {
   gap: 8px;
   min-height: 42px;
   padding: 4px 8px 4px 4px;
-  background: rgb(8 12 18 / 0.4);
+  background: var(--surface-control);
 }
 
 .phase7ArenaSlot.mod {
@@ -3927,12 +3927,12 @@ select {
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  background: rgb(8 12 18 / 0.42);
+  background: var(--surface-control);
 }
 
 .phase7ArenaSlot.filled {
-  background: rgb(8 12 18 / 0.54);
-  outline-color: rgb(255 255 255 / 0.18);
+  background: var(--surface-control);
+  outline-color: var(--glass-border);
 }
 
 .phase7ArenaSlot img {
@@ -3950,7 +3950,7 @@ select {
 
 .phase7ArenaSlotName {
   min-width: 0;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 850;
   overflow: hidden;

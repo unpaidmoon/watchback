@@ -847,8 +847,8 @@ pub struct MapReview {
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingStatus {
     pub selected_season: Option<i64>,
-    pub current_season: i64,
-    pub syncable_seasons: Vec<i64>,
+    pub minimum_sync_season: i64,
+    pub default_season: i64,
     pub available_seasons: Vec<i64>,
     pub can_enter_review: bool,
     pub credential_status: CredentialStatus,

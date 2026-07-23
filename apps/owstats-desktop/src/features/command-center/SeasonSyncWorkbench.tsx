@@ -6,8 +6,7 @@ import { formatCompactTimestamp, seasonSyncGateCopy } from "./SeasonHealthPanel"
 
 export type SeasonSyncWorkbenchProps = {
   selectedSeason: number;
-  currentSeason: number;
-  syncableSeasons: number[];
+  minimumSyncSeason: number;
   seasonStatuses: SeasonDataStatus[];
   credentialReady: boolean;
   targetSyncAllowed: boolean;
@@ -26,10 +25,18 @@ export type SeasonSyncWorkbenchProps = {
 
 export function resolveCommandCenterSeason(
   requested: number,
-  syncableSeasons: number[],
-  currentSeason: number,
+  minimumSyncSeason: number,
+  defaultSeason: number,
 ) {
-  return syncableSeasons.includes(requested) ? requested : currentSeason;
+  return requested >= minimumSyncSeason ? requested : defaultSeason;
+}
+
+export function decrementTargetSeason(season: number, minimumSyncSeason: number) {
+  return Math.max(minimumSyncSeason, season - 1);
+}
+
+export function incrementTargetSeason(season: number) {
+  return season + 1;
 }
 
 export function runSeasonQuickUpdate(
@@ -41,8 +48,7 @@ export function runSeasonQuickUpdate(
 
 export function SeasonSyncWorkbench({
   selectedSeason,
-  currentSeason,
-  syncableSeasons,
+  minimumSyncSeason,
   seasonStatuses,
   credentialReady,
   targetSyncAllowed,
@@ -71,29 +77,33 @@ export function SeasonSyncWorkbench({
     isSyncing,
     selectedHasData,
   );
-  const firstSeason = syncableSeasons[syncableSeasons.length - 1] ?? currentSeason;
-
   return (
     <section className="seasonSyncWorkbench" aria-label="赛季同步工作台">
       <section className="seasonSyncControl" aria-labelledby="season-sync-control-title">
         <div>
           <span className="phase6Eyebrow">赛季同步</span>
-          <label id="season-sync-control-title" htmlFor="command-center-season-select">同步一个赛季</label>
+          <span id="season-sync-control-title" className="seasonSyncControlLabel">目标赛季</span>
         </div>
-        <select
-          id="command-center-season-select"
-          aria-label="选择同步赛季"
-          value={selectedSeason}
-          onChange={(event) => onSelectSeason(Number(event.target.value))}
-          disabled={syncingSeason !== null || syncableSeasons.length === 0}
-        >
-          {syncableSeasons.map((season) => (
-            <option key={season} value={season}>
-              {season === currentSeason ? `S${season} · 当前赛季` : `S${season}`}
-            </option>
-          ))}
-        </select>
-        <p className="seasonSyncRange">{`可同步范围：S${firstSeason}–S${currentSeason} · 当前赛季 S${currentSeason}`}</p>
+        <div className="seasonTargetStepper" aria-label="选择目标赛季">
+          <button
+            type="button"
+            aria-label="减少目标赛季"
+            onClick={() => onSelectSeason(decrementTargetSeason(selectedSeason, minimumSyncSeason))}
+            disabled={syncingSeason !== null || selectedSeason <= minimumSyncSeason}
+          >
+            −
+          </button>
+          <output aria-live="polite">{`S${selectedSeason}`}</output>
+          <button
+            type="button"
+            aria-label="增加目标赛季"
+            onClick={() => onSelectSeason(incrementTargetSeason(selectedSeason))}
+            disabled={syncingSeason !== null}
+          >
+            +
+          </button>
+        </div>
+        <p className="seasonSyncRange">{`最低支持 S${minimumSyncSeason}`}</p>
         <button
           className="primaryButton seasonSyncButton"
           type="button"

@@ -68,14 +68,56 @@ fn command_center_status_returns_no_seasons_for_an_empty_database() {
 
     let status = get_onboarding_status(&db, OnboardingStatusRequest { season: None }).unwrap();
 
-    assert_eq!(status.current_season, 23);
-    assert_eq!(status.syncable_seasons, (15..=23).rev().collect::<Vec<_>>());
+    assert_eq!(status.selected_season, Some(23));
+    assert_eq!(status.minimum_sync_season, 15);
+    assert_eq!(status.default_season, 23);
     let seasons = status
         .season_statuses
         .iter()
         .map(|item| item.season)
         .collect::<Vec<_>>();
     assert!(seasons.is_empty());
+}
+
+#[test]
+fn command_center_defaults_to_the_highest_local_supported_season() {
+    let db = status_db();
+    seed_match(
+        &db,
+        24,
+        "s24-normal",
+        "preset",
+        "normal",
+        "2026-08-01T01:00:00Z",
+        true,
+    );
+
+    let status = get_onboarding_status(&db, OnboardingStatusRequest { season: None }).unwrap();
+
+    assert_eq!(status.selected_season, Some(24));
+    assert_eq!(status.minimum_sync_season, 15);
+    assert_eq!(status.default_season, 23);
+    assert_eq!(
+        status
+            .season_statuses
+            .iter()
+            .map(|item| item.season)
+            .collect::<Vec<_>>(),
+        vec![24]
+    );
+}
+
+#[test]
+fn command_center_accepts_future_targets_and_rejects_below_minimum() {
+    let db = status_db();
+
+    let future = get_onboarding_status(&db, OnboardingStatusRequest { season: Some(25) }).unwrap();
+    assert_eq!(future.selected_season, Some(25));
+
+    let error = get_onboarding_status(&db, OnboardingStatusRequest { season: Some(14) })
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("最低支持 S15"));
 }
 
 #[test]

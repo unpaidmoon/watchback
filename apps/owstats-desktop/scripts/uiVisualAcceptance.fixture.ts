@@ -494,6 +494,8 @@ export const fixtureRanking = {
 
 export const fixtureOnboarding = {
   selectedSeason: 23,
+  minimumSyncSeason: 15,
+  defaultSeason: 23,
   availableSeasons: [23, 22, 21],
   canEnterReview: true,
   credentialStatus: {

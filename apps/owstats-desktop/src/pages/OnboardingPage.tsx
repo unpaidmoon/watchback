@@ -278,9 +278,9 @@ export function OnboardingPage() {
     setTargetStatus(snapshot.targetStatus);
     setSelectedSeason((current) => snapshot.status
       ? resolveCommandCenterSeason(
-          current ?? snapshot.status.currentSeason,
-          snapshot.status.syncableSeasons,
-          snapshot.status.currentSeason,
+          current ?? snapshot.status.selectedSeason ?? snapshot.status.defaultSeason,
+          snapshot.status.minimumSyncSeason,
+          snapshot.status.defaultSeason,
         )
       : null);
   }
@@ -724,8 +724,7 @@ export function OnboardingPage() {
               {status && selectedSeason !== null ? (
                 <SeasonSyncWorkbench
                   selectedSeason={selectedSeason}
-                  currentSeason={status.currentSeason}
-                  syncableSeasons={status?.syncableSeasons ?? []}
+                  minimumSyncSeason={status.minimumSyncSeason}
                   seasonStatuses={status.seasonStatuses}
                   credentialReady={credentialReady}
                   targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
@@ -839,10 +838,5 @@ function SettingsPlaceholder({ icon, label, onClick }: { icon: React.ReactNode; 
 }
 
 function HealthItem({ label, ok }: { label: string; ok: boolean }) {
-  return (
-    <span className={ok ? "good" : "warn"}>
-      <CheckCircle2 size={14} />
-      {label}
-    </span>
-  );
+  return <span className={ok ? "good" : "bad"}>{label}</span>;
 }
