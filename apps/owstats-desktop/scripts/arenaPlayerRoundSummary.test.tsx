@@ -135,8 +135,11 @@ assert.match(tableSource, /className="phase6CompactAvatarPlate phase7CompactAvat
 const styles = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
 assert.match(styles, /\.phase7SummaryDialogBackdrop\s*\{[^}]*position:\s*fixed/s);
 assert.match(styles, /\.phase7SummaryDialog\s*\{[^}]*max-height:\s*min\(760px,\s*calc\(100dvh - 48px\)\)/s);
+assert.match(styles, /\.phase7SummaryDialog\s*\{[^}]*background:\s*#f4f6f0/s);
 assert.match(styles, /\.phase7SummaryRound\s*\{[^}]*grid-template-columns:/s);
-assert.match(styles, /\.phase7SummarySlots\.trait\s*\{[^}]*grid-template-columns:\s*repeat\(4,/s);
+assert.match(styles, /\.phase7SummarySlots\.trait\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*44px\)/s);
 assert.match(styles, /\.phase7SummarySlots\.mod\s*\{[^}]*grid-template-columns:\s*repeat\(6,/s);
+assert.match(styles, /\.phase7SummaryTraitSlot,[\s\S]*?height:\s*44px/s);
+assert.match(styles, /\.phase7SummaryModSlot\s*\{[^}]*border-radius:\s*999px/s);
 assert.match(styles, /@media\s*\(max-width:\s*900px\)/s);
 assert.doesNotMatch(styles, /\.phase7SummaryDialog[\s\S]*overflow-x:\s*(auto|scroll)/s);
