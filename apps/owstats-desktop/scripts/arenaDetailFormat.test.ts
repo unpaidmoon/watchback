@@ -73,9 +73,10 @@ assert.match(styleSource, /\.phase7ArenaSlot \.phase6PerkTooltipPanel\s*\{[^}]*z
 assert.match(compactSource, /className=\{player\.worthMax \? "phase6StatHighlight" : ""\}/, "worthMax should highlight the compact economy value");
 assert.match(
   compactSource,
-  /if \(player\.worth !== null && player\.endWorth !== null && player\.worth !== player\.endWorth\)[\s\S]*if \(player\.endWorth !== null\) return String\(player\.endWorth\);[\s\S]*if \(player\.worth !== null\) return String\(player\.worth\);/,
-  "compact arena economy should show worth transitions, then final worth, then available worth",
+  /if \(mode === "round"\) \{[\s\S]*if \(player\.endWorth !== null\) return String\(player\.endWorth\);[\s\S]*if \(player\.worth !== null\) return String\(player\.worth\);/,
+  "compact arena round economy should show cumulative end worth without a transition",
 );
+assert.doesNotMatch(compactSource, /return `\$\{player\.worth\} -> \$\{player\.endWorth\}`;/);
 assert.equal(compactSource.includes('economyMode={selected.key === "summary" ? "final" : "round"}'), true, "compact arena summary and rounds should use separate economy display modes");
 assert.equal(compactSource.includes('function formatCompactArenaEconomy(player: PlayerRow, mode: "final" | "round"): string'), true, "compact arena economy formatter should know whether it is rendering summary or round detail");
 const highlightRule = styleSource.match(/\.phase6StatHighlight\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";

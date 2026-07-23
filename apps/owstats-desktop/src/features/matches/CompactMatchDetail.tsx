@@ -248,10 +248,9 @@ function formatCompactArenaEconomy(player: PlayerRow, mode: "final" | "round"): 
     if (player.worth !== null) return String(player.worth);
     return "-";
   }
-  if (player.worth !== null && player.endWorth !== null && player.worth !== player.endWorth) {
-    return `${player.worth} -> ${player.endWorth}`;
+  if (mode === "round") {
+    if (player.endWorth !== null) return String(player.endWorth);
+    if (player.worth !== null) return String(player.worth);
   }
-  if (player.endWorth !== null) return String(player.endWorth);
-  if (player.worth !== null) return String(player.worth);
   return "-";
 }
