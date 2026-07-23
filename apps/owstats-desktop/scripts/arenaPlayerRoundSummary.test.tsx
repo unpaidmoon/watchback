@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ArenaPlayerRoundSummaryDialog } from "../src/features/matches/ArenaPlayerRoundSummaryDialog";
@@ -110,3 +111,13 @@ assert.match(dialogMarkup, />3000</);
 assert.equal((dialogMarkup.match(/phase7SummaryTraitSlot/g) ?? []).length, rows.length * 4);
 assert.equal((dialogMarkup.match(/phase7SummaryModSlot/g) ?? []).length, rows.length * 6);
 assert.doesNotMatch(dialogMarkup, /phase6PerkTooltipPanel/);
+
+const compactSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const tableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
+
+assert.match(compactSource, /selected\.key === "summary" \? openArenaPlayerSummary : undefined/);
+assert.match(compactSource, /buildArenaPlayerRoundSummary\(summaryTarget\.player, arena\.rounds\)/);
+assert.match(tableSource, /onSelectPlayerSummary\?: \(player: PlayerRow, trigger: HTMLButtonElement\) => void/);
+assert.match(tableSource, /aria-label=\{`查看\$\{player\.name\}的汇总卡片`\}/);
+assert.match(tableSource, /className="phase7CompactPlayerRowToggle"/);
+assert.match(tableSource, /className="phase6CompactAvatarPlate phase7CompactAvatarSummaryButton"/);

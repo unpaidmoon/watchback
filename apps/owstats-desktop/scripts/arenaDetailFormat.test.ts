@@ -40,8 +40,9 @@ assert.equal(detailSource.includes('allowExpansion={true}'), false, "full arena 
 assert.equal(detailSource.includes("const [expanded, setExpanded] = useState(false)"), false, "player rows should not keep isolated local expansion state");
 assert.equal(compactSource.includes("phase7CompactExpandButton"), false, "compact detail should not show a separate expansion button");
 assert.equal(teamTableSource.includes("phase7CompactPlayerExpandable"), true, "compact arena player rows should be directly clickable for expansion");
-assert.equal(teamTableSource.includes("onClick={onToggle}"), true, "compact arena player rows should toggle expansion from the row itself");
-assert.equal(teamTableSource.includes("aria-expanded={expanded}"), true, "clickable compact arena rows should expose expanded state");
+assert.equal(teamTableSource.includes("phase7CompactPlayerRowToggle"), true, "compact arena rows should keep a dedicated expansion control");
+assert.equal(teamTableSource.includes("phase7CompactAvatarSummaryButton"), true, "compact arena summary rows should expose a dedicated avatar control");
+assert.equal(teamTableSource.includes("onSelectPlayerSummary"), true, "compact arena tables should accept the summary-card avatar action");
 assert.equal(detailSource.includes('className="phase7ExpandButton"'), false, "full detail should not keep the mistaken expansion button");
 assert.match(styleSource, /\.phase7PlayerCardMain\s*\{[^}]*grid-template-columns:\s*168px\s+minmax\(0,\s*1fr\)/s, "expanded arena rows should reserve stable portrait and content columns");
 assert.match(styleSource, /\.phase6PlayerStats header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s, "expand control should stay in a dedicated header column");

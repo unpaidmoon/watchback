@@ -6,9 +6,11 @@ import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from ".
 import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";
 import { AiMatchRoast } from "./AiMatchRoast";
+import { ArenaPlayerRoundSummaryDialog } from "./ArenaPlayerRoundSummaryDialog";
 import { MatchDetailHeader } from "./MatchDetailHeader";
 import { MatchFavoriteEditor } from "./MatchFavoriteEditor";
 import { MatchTeamTable } from "./MatchTeamTable";
+import { buildArenaPlayerRoundSummary } from "./arenaPlayerRoundSummary";
 import type { MatchFavoriteController } from "./useMatchFavoriteEditor";
 
 export type CompactMatchDetailProps = {
@@ -73,10 +75,15 @@ function CompactArenaDetail({
   const arena = detail.arenaDetail;
   const [selectedKey, setSelectedKey] = useState("summary");
   const [expandedCompactArenaPlayerKeys, setExpandedCompactArenaPlayerKeys] = useState<Set<string>>(() => new Set());
+  const [summaryTarget, setSummaryTarget] = useState<{
+    player: PlayerRow;
+    trigger: HTMLButtonElement;
+  } | null>(null);
 
   useEffect(() => {
     setSelectedKey("summary");
     setExpandedCompactArenaPlayerKeys(new Set());
+    setSummaryTarget(null);
   }, [detail.matchId]);
 
   if (!arena) return null;
@@ -91,6 +98,7 @@ function CompactArenaDetail({
     }
     setSelectedKey(nextKey);
     setExpandedCompactArenaPlayerKeys(new Set());
+    setSummaryTarget(null);
   }
 
   function toggleCompactArenaPlayer(playerKey: string) {
@@ -100,6 +108,16 @@ function CompactArenaDetail({
       else next.add(playerKey);
       return next;
     });
+  }
+
+  function openArenaPlayerSummary(player: PlayerRow, trigger: HTMLButtonElement) {
+    setSummaryTarget({ player, trigger });
+  }
+
+  function closeArenaPlayerSummary() {
+    const trigger = summaryTarget?.trigger;
+    setSummaryTarget(null);
+    requestAnimationFrame(() => trigger?.focus());
   }
 
   const selected =
@@ -155,6 +173,7 @@ function CompactArenaDetail({
               showPerks={false}
               expandedPlayerKeys={expandedCompactArenaPlayerKeys}
               onTogglePlayer={toggleCompactArenaPlayer}
+              onSelectPlayerSummary={selected.key === "summary" ? openArenaPlayerSummary : undefined}
               renderExpansion={(player) => (
                 <CompactArenaPlayerExpansion
                   player={player}
@@ -169,6 +188,7 @@ function CompactArenaDetail({
               showPerks={false}
               expandedPlayerKeys={expandedCompactArenaPlayerKeys}
               onTogglePlayer={toggleCompactArenaPlayer}
+              onSelectPlayerSummary={selected.key === "summary" ? openArenaPlayerSummary : undefined}
               renderExpansion={(player) => (
                 <CompactArenaPlayerExpansion
                   player={player}
@@ -189,6 +209,13 @@ function CompactArenaDetail({
           </>
         )}
       </div>
+      {summaryTarget && (
+        <ArenaPlayerRoundSummaryDialog
+          player={summaryTarget.player}
+          rows={buildArenaPlayerRoundSummary(summaryTarget.player, arena.rounds)}
+          onClose={closeArenaPlayerSummary}
+        />
+      )}
     </section>
   );
 }

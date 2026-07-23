@@ -12,6 +12,7 @@ export type MatchTeamTableProps = {
   showPerks?: boolean;
   expandedPlayerKeys?: ReadonlySet<string>;
   onTogglePlayer?: (playerKey: string) => void;
+  onSelectPlayerSummary?: (player: PlayerRow, trigger: HTMLButtonElement) => void;
   renderExpansion?: (player: PlayerRow) => ReactNode;
 };
 
@@ -22,6 +23,7 @@ export function MatchTeamTable({
   showPerks = true,
   expandedPlayerKeys,
   onTogglePlayer,
+  onSelectPlayerSummary,
   renderExpansion,
 }: MatchTeamTableProps) {
   const highlights = playerHighlightMap(players);
@@ -41,6 +43,7 @@ export function MatchTeamTable({
                 highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()}
                 expanded={expanded}
                 onToggle={onTogglePlayer ? () => onTogglePlayer(key) : undefined}
+                onSelectPlayerSummary={onSelectPlayerSummary}
               />
               {expanded && renderExpansion ? renderExpansion(player) : null}
             </div>
@@ -58,12 +61,14 @@ function MatchTeamPlayerRow({
   highlights,
   expanded = false,
   onToggle,
+  onSelectPlayerSummary,
 }: {
   player: PlayerRow;
   showPerks?: boolean;
   highlights: Set<HighlightMetric>;
   expanded?: boolean;
   onToggle?: () => void;
+  onSelectPlayerSummary?: (player: PlayerRow, trigger: HTMLButtonElement) => void;
 }) {
   const rankIcon = arenaRankAssetUrl(player.rankKey);
   const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
@@ -73,11 +78,11 @@ function MatchTeamPlayerRow({
         return info ? [info] : [];
       })
     : [];
-  const rowContent = (
+  const avatar = (
+    <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
+  );
+  const playerContent = (
     <>
-      <span className="phase6CompactAvatarPlate">
-        <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
-      </span>
       <span className="phase6CompactPlayerName">
         <span className="phase7CompactPlayerNameLine">
           <strong>{player.name}</strong>
@@ -133,19 +138,38 @@ function MatchTeamPlayerRow({
 
   if (onToggle) {
     return (
-      <button
-        type="button"
-        className="phase6CompactPlayerRow phase7CompactPlayerExpandable"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-label={`${player.name}${expanded ? "收起角斗详情" : "展开角斗详情"}`}
-      >
-        {rowContent}
-      </button>
+      <div className="phase6CompactPlayerRow phase7CompactPlayerExpandable" aria-expanded={expanded}>
+        {onSelectPlayerSummary ? (
+          <button
+            type="button"
+            className="phase6CompactAvatarPlate phase7CompactAvatarSummaryButton"
+            onClick={(event) => onSelectPlayerSummary(player, event.currentTarget)}
+            aria-label={`查看${player.name}的汇总卡片`}
+          >
+            {avatar}
+          </button>
+        ) : (
+          <span className="phase6CompactAvatarPlate">{avatar}</span>
+        )}
+        <button
+          type="button"
+          className="phase7CompactPlayerRowToggle"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={`${player.name}${expanded ? "收起角斗详情" : "展开角斗详情"}`}
+        >
+          {playerContent}
+        </button>
+      </div>
     );
   }
 
-  return <article className="phase6CompactPlayerRow">{rowContent}</article>;
+  return (
+    <article className="phase6CompactPlayerRow">
+      <span className="phase6CompactAvatarPlate">{avatar}</span>
+      {playerContent}
+    </article>
+  );
 }
 
 function MatchTeamHighlight({ value, active }: { value: number; active: boolean }) {
