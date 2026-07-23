@@ -430,6 +430,25 @@ export const fixtureAnalysis = {
     homeField: { key: "fixture-map-shambali", title: "稳定主场", name: "香巴里寺院", matches: 5, winRate: 0.8, route: "/ranking?season=23&tab=maps" },
     rareGuest: { key: "fixture-map-hanamura", title: "低频地图", name: "花村", matches: 3, winRate: 0.333, route: "/ranking?season=23&tab=maps" },
   },
+  choiceRankings: {
+    minSample: 5,
+    confidenceLevel: 0.95,
+    normalPerks: [
+      { key: "fixture-perk-1", matches: 18, wins: 13, winRate: 0.722 },
+      { key: "fixture-perk-2", matches: 12, wins: 8, winRate: 0.667 },
+      { key: "fixture-perk-3", matches: 9, wins: 6, winRate: 0.667 },
+    ],
+    stadiumTraits: [
+      { key: "0xF100000000000001", matches: 14, wins: 10, winRate: 0.714 },
+      { key: "0xF100000000000002", matches: 10, wins: 7, winRate: 0.7 },
+      { key: "0xF100000000000003", matches: 8, wins: 5, winRate: 0.625 },
+    ],
+    stadiumMods: [
+      { key: "0xF200000000000001", matches: 16, wins: 11, winRate: 0.688 },
+      { key: "0xF200000000000002", matches: 11, wins: 7, winRate: 0.636 },
+      { key: "0xF200000000000003", matches: 7, wins: 4, winRate: 0.571 },
+    ],
+  },
 } satisfies SeasonAnalysis;
 
 export const fixtureCareerOverview = {

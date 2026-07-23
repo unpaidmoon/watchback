@@ -199,10 +199,10 @@ for (const [legacySelector, property, value] of [
   [".searchBox input", "outline", "0"],
   [".seasonSelect select", "outline", "0"],
   [".phase6CompactPlayerRow.phase7CompactPlayerExpandable:focus-visible", "outline", "2px solid rgb(255 255 255 / 0.9)"],
-  [".phase7ArenaSlot", "outline", "1px solid rgb(255 255 255 / 0.1)"],
-  [".phase7ArenaSlot.filled", "outline-color", "rgb(255 255 255 / 0.18)"],
+  [".phase7ArenaSlot", "outline", "1px solid var(--border-subtle)"],
+  [".phase7ArenaSlot.filled", "outline-color", "var(--glass-border)"],
 ] as const) {
-  assertDeclaration(declarationsForSelector(shared, legacySelector), property, value, `${legacySelector} keeps the tracked legacy focus conflict`);
+  assertDeclaration(declarationsForSelector(shared, legacySelector), property, value, `${legacySelector} keeps its intentional focus or border contract`);
 }
 
 const reducedMotion = blockForAtRule(base, "@media (prefers-reduced-motion: reduce)");

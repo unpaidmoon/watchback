@@ -1019,6 +1019,26 @@ pub struct SeasonAnalysis {
     pub season: Option<i64>,
     pub friend: FriendAnalytics,
     pub map_cards: MapAnalysisCards,
+    pub choice_rankings: ChoiceRankings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceRankings {
+    pub min_sample: i64,
+    pub confidence_level: f64,
+    pub normal_perks: Vec<ChoiceRankingEntry>,
+    pub stadium_traits: Vec<ChoiceRankingEntry>,
+    pub stadium_mods: Vec<ChoiceRankingEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceRankingEntry {
+    pub key: String,
+    pub matches: i64,
+    pub wins: i64,
+    pub win_rate: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
