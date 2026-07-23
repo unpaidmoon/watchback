@@ -479,6 +479,48 @@ fn stadium_numeric_bnet_id_drives_wealth_and_trimmed_rank() {
 }
 
 #[test]
+fn stadium_achievements_use_last_valid_round_and_total_count_rank() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("stadium-real-shape.sqlite3"));
+    db.initialize().unwrap();
+    seed_stadium_match(
+        &db,
+        "real-shaped-stadium",
+        550,
+        0,
+        r#"{"payload":{"data":{
+            "totalCount":{"teammateList":[
+                {"bnetId":"current-player","rankInfo":{"rankName":"Grandmaster"}}
+            ]},
+            "roundCountList":[
+                {"roundIndex":1,"teammateList":[
+                    {"bnetId":"current-player","endWorth":100000}
+                ]},
+                {"roundIndex":2,"teammateList":[]}
+            ]
+        }}}"#,
+    );
+    let conn = db.connect().unwrap();
+    conn.execute(
+        "DELETE FROM match_players WHERE match_id='real-shaped-stadium'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at)
+         VALUES ('current-player', 'current-player', '合成当前玩家', '{}', 'synthetic')",
+        [],
+    )
+    .unwrap();
+
+    let achievements = get_career_achievements(&db).unwrap();
+    let achievement = |key: &str| achievements.iter().find(|item| item.key == key).unwrap();
+
+    assert_eq!(achievement("wealth-tycoon").current_level, 3);
+    assert_eq!(achievement("stadium-ascendant").current_level, 3);
+}
+
+#[test]
 fn stadium_rank_uses_last_round_current_player_across_roles_only() {
     let temp = tempfile::tempdir().unwrap();
     let db = OwDatabase::new(temp.path().join("stadium-rank.sqlite3"));

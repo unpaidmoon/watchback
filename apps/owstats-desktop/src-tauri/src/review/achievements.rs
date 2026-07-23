@@ -220,6 +220,12 @@ struct CareerMatchFact {
     evidence_tags: Vec<String>,
 }
 
+#[derive(Debug, Default)]
+struct StadiumAchievementFact {
+    end_worth: Option<i64>,
+    rank_level: i64,
+}
+
 pub(super) fn get_career_achievements_impl(db: &OwDatabase) -> Result<Vec<CareerAchievement>> {
     let facts = load_career_facts(db)?;
     let mut achievements = DEFINITIONS
@@ -257,7 +263,15 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
                EXISTS(SELECT 1 FROM match_players friend
                       WHERE friend.match_id = m.match_id AND friend.is_friend = 1),
                detail.raw_detail_json, evaluation.grade, evaluation.primary_tag,
-               evaluation.evidence_tags_json, m.bucket, m.game_mode, player.bnet_id
+               evaluation.evidence_tags_json, m.bucket, m.game_mode,
+               COALESCE(
+                   player.bnet_id,
+                   (SELECT profile.bnet_id
+                    FROM players profile
+                    WHERE TRIM(COALESCE(profile.bnet_id, '')) <> ''
+                    ORDER BY profile.updated_at DESC
+                    LIMIT 1)
+               )
         FROM matches m
         LEFT JOIN match_players player ON player.rowid = (
             SELECT current_player.rowid FROM match_players current_player
@@ -282,7 +296,7 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
                 raw_detail
                     .as_deref()
                     .zip(bnet_id.as_deref())
-                    .and_then(|(detail, bnet_id)| parse_stadium_player(detail, bnet_id))
+                    .and_then(|(detail, bnet_id)| parse_stadium_fact(detail, bnet_id))
             })
             .flatten();
         Ok(CareerMatchFact {
@@ -297,13 +311,8 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
             duration_sec: row.get(9)?,
             rank_level: parse_rank_level(&raw_entry),
             is_stadium,
-            stadium_end_worth: stadium
-                .as_ref()
-                .and_then(|value| value.get("endWorth").and_then(Value::as_i64)),
-            stadium_rank_level: stadium
-                .as_ref()
-                .map(|value| parse_rank_info(value))
-                .unwrap_or(0),
+            stadium_end_worth: stadium.as_ref().and_then(|value| value.end_worth),
+            stadium_rank_level: stadium.as_ref().map(|value| value.rank_level).unwrap_or(0),
             damage_taken: row.get(11)?,
             has_friend: row.get::<_, i64>(12)? == 1,
             arena_was_three_points_behind: result == "win"
@@ -320,14 +329,41 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
         .context("无法读取生涯成就对局事实")
 }
 
-fn parse_stadium_player(raw_detail: &str, bnet_id: &str) -> Option<Value> {
+fn parse_stadium_fact(raw_detail: &str, bnet_id: &str) -> Option<StadiumAchievementFact> {
     let root = serde_json::from_str::<Value>(raw_detail).ok()?;
     let data = root
         .pointer("/payload/data")
         .or_else(|| root.get("data"))
         .unwrap_or(&root);
-    let last_round = data.get("roundCountList")?.as_array()?.last()?;
-    last_round
+    let last_round_player = data
+        .get("roundCountList")
+        .and_then(Value::as_array)
+        .and_then(|rounds| {
+            rounds
+                .iter()
+                .rev()
+                .find_map(|round| stadium_player(round, bnet_id))
+        });
+    let total_player = data
+        .get("totalCount")
+        .and_then(|total| stadium_player(total, bnet_id));
+    if last_round_player.is_none() && total_player.is_none() {
+        return None;
+    }
+    Some(StadiumAchievementFact {
+        end_worth: last_round_player
+            .and_then(|player| player.get("endWorth"))
+            .and_then(Value::as_i64),
+        rank_level: total_player
+            .map(parse_rank_info)
+            .filter(|level| *level > 0)
+            .or_else(|| last_round_player.map(parse_rank_info))
+            .unwrap_or(0),
+    })
+}
+
+fn stadium_player<'a>(value: &'a Value, bnet_id: &str) -> Option<&'a Value> {
+    value
         .get("teammateList")?
         .as_array()?
         .iter()
@@ -339,7 +375,6 @@ fn parse_stadium_player(raw_detail: &str, bnet_id: &str) -> Option<Value> {
                 .as_deref()
                 == Some(bnet_id)
         })
-        .cloned()
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
