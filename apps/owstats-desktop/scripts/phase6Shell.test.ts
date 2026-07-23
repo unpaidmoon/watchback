@@ -60,6 +60,21 @@ if (runSeasonQuickUpdate) {
 assertEqual(/\.seasonSyncWorkbench\s*\{[\s\S]*?grid-template-columns:\s*minmax\(220px, 1fr\) minmax\(0, 2fr\)/.test(commandCenterStyles), true, "sync controls and ledger use the confirmed 1:2 layout");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "ledger rows meet the interaction target");
 assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?min-height:\s*44px/.test(commandCenterStyles), true, "row update controls meet the interaction target");
+assertEqual(
+  /\.syncedSeasonUpdateButton\s*\{(?=[^}]*border:\s*1px solid var\(--border-subtle\))(?=[^}]*background:\s*var\(--surface-control\))(?=[^}]*color:\s*var\(--text-primary\))[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "season update buttons use a distinct secondary surface",
+);
+assertEqual(
+  /\.syncedSeasonUpdateButton:hover:not\(:disabled\)\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--text-primary\) 5%, var\(--surface-control\)\);[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "season update buttons provide restrained hover feedback",
+);
+assertEqual(
+  /\.syncedSeasonUpdateButton:disabled\s*\{(?=[^}]*cursor:\s*not-allowed)(?=[^}]*opacity:\s*0\.58)[^}]*\}/s.test(commandCenterStyles),
+  true,
+  "disabled season update buttons remain visibly distinct",
+);
 assertEqual(/grid-template-columns:\s*minmax\(64px, 0\.55fr\) minmax\(150px, 1\.5fr\) minmax\(88px, 0\.75fr\) minmax\(112px, 0\.9fr\) 80px;/.test(commandCenterStyles), true, "ledger reserves a stable operation column for the updating label");
 assertEqual(/\.syncedSeasonUpdateButton\s*\{[\s\S]*?width:\s*80px;[\s\S]*?min-width:\s*80px;/.test(commandCenterStyles), true, "row update controls keep the same width while running");
 assertEqual(/\.syncedSeasonCoverageTrack > span\s*\{[\s\S]*?background:\s*var\(--data-primary\)/.test(commandCenterStyles), true, "coverage uses the approved data color");
@@ -255,7 +270,7 @@ assertEqual(onboardingSource.includes("phase6ThemeSelector"), false, "command ce
 assertEqual(onboardingSource.includes("phase6CompactSettingsActions"), false, "settings account actions move into the launcher grid");
 assertEqual(onboardingSource.includes("StatusBadge tone={credentialTone(status?.credentialStatus.state)}"), false, "profile card removes the right-side login status capsule");
 assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.lastIndexOf("<AccountManager"), true, "header update action appears before account management");
-assertEqual(onboardingSource.indexOf("commandCenterTools") < onboardingSource.lastIndexOf("<AccountManager"), true, "account management appears after the existing command-center content");
+assertEqual(onboardingSource.lastIndexOf("<AccountManager") < onboardingSource.indexOf("commandCenterTools"), true, "account management appears before the secondary command-center tools");
 assertEqual(onboardingSource.includes("phase6NextActions"), false, "command center does not duplicate capsule navigation with next-step entries");
 assertEqual(onboardingSource.includes("CommandEntry"), false, "command center removes duplicated next-step entry component");
 assertEqual(rankingSource.includes("<PageHeader"), true, "ranking page uses the shared lightweight page header");

@@ -50,8 +50,8 @@ assert.match(
 );
 assert.match(
   matchStyleSource,
-  /\.advancedMatchFilters\.phase6FilterRowSecondary\s*\{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s,
-  "wide advanced filters should expose all six fields in one row",
+  /\.advancedMatchFilters\.phase6FilterRowSecondary\s*\{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s,
+  "wide advanced filters should expose all five fields in one row",
 );
 assert.match(
   matchStyleSource,
