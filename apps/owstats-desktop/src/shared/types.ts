@@ -257,6 +257,7 @@ export type PlayerRow = {
   resistDamageMax: boolean;
   perks: PlayerPerk[];
   heroStats: HeroStat[];
+  partyGroup?: number | null;
 };
 
 export type PlayerPerk = {

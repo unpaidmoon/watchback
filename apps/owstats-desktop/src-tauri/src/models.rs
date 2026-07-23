@@ -259,6 +259,8 @@ pub struct PlayerRow {
     pub resist_damage_max: bool,
     pub perks: Vec<PlayerPerk>,
     pub hero_stats: Vec<HeroStat>,
+    #[serde(default)]
+    pub party_group: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

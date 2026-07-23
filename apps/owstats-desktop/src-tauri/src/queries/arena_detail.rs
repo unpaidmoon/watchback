@@ -109,7 +109,7 @@ pub(super) fn player_rows(
     value
         .and_then(Value::as_array)
         .map(|items| {
-            items
+            let rows = items
                 .iter()
                 .filter_map(|item| {
                     if !item.is_object() {
@@ -122,8 +122,8 @@ pub(super) fn player_rows(
                             string_field(item, "bnetId").unwrap_or_else(|| "未知玩家".to_string())
                         }),
                         bnet_id: string_field(item, "bnetId").unwrap_or_default(),
-                        rank_label: None,
-                        rank_key: None,
+                        rank_label: competitive_rank_label(item),
+                        rank_key: competitive_rank_key(item),
                         hero_guid: hero_guid.clone(),
                         hero_name: hero_names.get(&hero_guid).cloned().unwrap_or_else(|| {
                             fallback_name(String::new(), &hero_guid, "未知英雄")
@@ -150,9 +150,11 @@ pub(super) fn player_rows(
                         resist_damage_max: false,
                         perks: parse_player_perks(item),
                         hero_stats: parse_hero_stats(item),
+                        party_group: None,
                     })
                 })
-                .collect()
+                .collect();
+            assign_party_groups(items, rows)
         })
         .unwrap_or_default()
 }
@@ -303,7 +305,7 @@ pub(super) fn arena_summary_player_rows(
         .get(list_name)
         .filter(|value| value.as_array().is_some_and(|items| !items.is_empty()))
         .or_else(|| total.get(list_name));
-    let mut rows = arena_player_rows(source_list, side, name_map, hero_names);
+    let mut rows = arena_player_rows_unordered(source_list, side, name_map, hero_names);
     let aggregates = arena_round_damage_healing_totals(rounds_value, list_name);
     if let Some(items) = source_list.and_then(Value::as_array) {
         for (row, item) in rows.iter_mut().zip(items) {
@@ -316,7 +318,10 @@ pub(super) fn arena_summary_player_rows(
             }
         }
     }
-    rows
+    let Some(items) = source_list.and_then(Value::as_array) else {
+        return rows;
+    };
+    assign_party_groups(items, rows)
 }
 
 pub(super) fn arena_round_damage_healing_totals(
@@ -344,6 +349,19 @@ pub(super) fn arena_round_damage_healing_totals(
 }
 
 pub(super) fn arena_player_rows(
+    value: Option<&Value>,
+    side: &str,
+    name_map: &HashMap<String, String>,
+    hero_names: &HashMap<String, String>,
+) -> Vec<PlayerRow> {
+    let rows = arena_player_rows_unordered(value, side, name_map, hero_names);
+    let Some(items) = value.and_then(Value::as_array) else {
+        return rows;
+    };
+    assign_party_groups(items, rows)
+}
+
+fn arena_player_rows_unordered(
     value: Option<&Value>,
     side: &str,
     name_map: &HashMap<String, String>,
@@ -393,6 +411,7 @@ pub(super) fn arena_player_rows(
                         resist_damage_max: bool_field(item, "resistDamageMax"),
                         perks: Vec::new(),
                         hero_stats: parse_hero_stats(item),
+                        party_group: None,
                     })
                 })
                 .collect()
@@ -457,6 +476,10 @@ pub(super) fn round_duration_sum(value: Option<&Value>) -> Option<i64> {
 }
 
 pub(super) fn arena_rank_label(item: &Value) -> Option<String> {
+    competitive_rank_label(item)
+}
+
+pub(super) fn competitive_rank_label(item: &Value) -> Option<String> {
     let rank = item.get("rankInfo")?;
     let raw_name = string_field(rank, "rankName").or_else(|| string_field(rank, "rank_name"))?;
     let name = rank_name_label(&raw_name)?;
@@ -469,6 +492,10 @@ pub(super) fn arena_rank_label(item: &Value) -> Option<String> {
 }
 
 pub(super) fn arena_rank_key(item: &Value) -> Option<String> {
+    competitive_rank_key(item)
+}
+
+pub(super) fn competitive_rank_key(item: &Value) -> Option<String> {
     let rank = item.get("rankInfo")?;
     let raw_name = string_field(rank, "rankName").or_else(|| string_field(rank, "rank_name"))?;
     let key = normalize_rank_key(&raw_name)?;
@@ -614,4 +641,93 @@ pub(super) fn stat_value(value: &Value) -> Option<f64> {
         .as_f64()
         .or_else(|| value.as_i64().map(|number| number as f64))
         .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normal_player_rows_map_competitive_rank_info() {
+        let players = json!([{
+            "name": "合成玩家",
+            "heroGuid": "synthetic-hero",
+            "rankInfo": { "rankName": "Diamond", "rankSubTier": 4 }
+        }]);
+
+        let rows = player_rows(Some(&players), "teammate", &HashMap::new());
+
+        assert_eq!(rows[0].rank_key.as_deref(), Some("diamond"));
+        assert_eq!(rows[0].rank_label.as_deref(), Some("钻石 4"));
+    }
+
+    #[test]
+    fn normal_player_rows_support_snake_case_and_leave_unknown_rank_empty() {
+        let known = json!([{
+            "name": "合成玩家",
+            "heroGuid": "synthetic-hero",
+            "rankInfo": { "rank_name": "Master", "rank_sub_tier": 2 }
+        }]);
+        let unknown = json!([{
+            "name": "合成玩家",
+            "heroGuid": "synthetic-hero",
+            "rankInfo": { "rankName": "UnknownTier", "rankSubTier": 1 }
+        }]);
+
+        let known_rows = player_rows(Some(&known), "enemy", &HashMap::new());
+        let unknown_rows = player_rows(Some(&unknown), "enemy", &HashMap::new());
+
+        assert_eq!(known_rows[0].rank_key.as_deref(), Some("master"));
+        assert_eq!(known_rows[0].rank_label.as_deref(), Some("大师 2"));
+        assert_eq!(unknown_rows[0].rank_key, None);
+        assert_eq!(unknown_rows[0].rank_label, None);
+    }
+
+    #[test]
+    fn normal_player_rows_group_parties_without_exposing_friend_ids() {
+        let players = json!([
+            {"bnetId":"solo-a","name":"单排甲","heroGuid":"hero-a"},
+            {"bnetId":"party-a","name":"组队甲","heroGuid":"hero-b","friendBnetIds":["party-b"]},
+            {"bnetId":"solo-b","name":"单排乙","heroGuid":"hero-c"},
+            {"bnetId":"party-b","name":"组队乙","heroGuid":"hero-d","friendBnetIds":[]}
+        ]);
+
+        let rows = player_rows(Some(&players), "teammate", &HashMap::new());
+
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.name.as_str(), row.party_group))
+                .collect::<Vec<_>>(),
+            vec![
+                ("单排甲", None),
+                ("组队甲", Some(0)),
+                ("组队乙", Some(0)),
+                ("单排乙", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn arena_player_rows_apply_the_same_party_grouping() {
+        let players = json!([
+            {"bnetId":"party-a","heroGuid":"hero-a","friendBnetIds":["party-b"]},
+            {"bnetId":"solo","heroGuid":"hero-b"},
+            {"bnetId":"party-b","heroGuid":"hero-c"}
+        ]);
+        let names = HashMap::from([
+            ("party-a".to_string(), "组队甲".to_string()),
+            ("party-b".to_string(), "组队乙".to_string()),
+            ("solo".to_string(), "单排".to_string()),
+        ]);
+
+        let rows = arena_player_rows(Some(&players), "enemy", &names, &HashMap::new());
+
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.name.as_str(), row.party_group))
+                .collect::<Vec<_>>(),
+            vec![("组队甲", Some(0)), ("组队乙", Some(0)), ("单排", None),]
+        );
+        assert!(rows.iter().all(|row| row.bnet_id.is_empty()));
+    }
 }

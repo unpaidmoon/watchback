@@ -33,16 +33,6 @@ export const phase6QaPages: QaPageDefinition[] = [
     ],
   },
   {
-    key: "/matches/",
-    label: "对局详情",
-    regions: [
-      NAV_REGION,
-      { id: "MTD-HEADER", label: "详情首屏" },
-      { id: "MTD-SCORE", label: "评分与职责对比" },
-      { id: "MTD-PLAYERS", label: "玩家数据表" },
-    ],
-  },
-  {
     key: "/review",
     label: "复盘",
     regions: [

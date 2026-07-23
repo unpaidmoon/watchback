@@ -1,4 +1,4 @@
-import type { FilterOptions, ImportSummary, MatchFavoriteView, MatchFilters, MatchSummary, Overview } from "./types";
+import type { FilterOptions, ImportSummary, MatchFilters, MatchSummary, Overview } from "./types";
 
 export type MatchesPageCache = {
   overview: Overview | null;
@@ -96,18 +96,6 @@ export function clearMatchesPageCacheForSeason(_accountScope: string, season: nu
   if (cachedSeason === undefined || cachedSeason === season) {
     clearMatchesPageCache();
   }
-}
-
-export function invalidateStandaloneMatchFavoritePersistence() {
-  clearMatchesPageCache();
-}
-
-export function shouldInvalidateStandaloneFavoriteCache(
-  previousFavorite: MatchFavoriteView | null | undefined,
-  nextFavorite: MatchFavoriteView | null,
-) {
-  if (previousFavorite === undefined) return false;
-  return (previousFavorite !== null) !== (nextFavorite !== null);
 }
 
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {

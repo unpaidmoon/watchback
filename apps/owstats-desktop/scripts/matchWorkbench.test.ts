@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
 import { MatchListCard } from "../src/features/matches/MatchListCard";
 import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
-import { MatchDetailReport } from "../src/pages/MatchDetailPage";
 import type { MatchDetailView, MatchSummary, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
@@ -17,7 +16,6 @@ const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDeta
 const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCard.tsx", import.meta.url), "utf8");
 const listPaneSource = readFileSync(new URL("../src/features/matches/MatchListPane.tsx", import.meta.url), "utf8");
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
-const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const phase6ComponentsSource = readFileSync(new URL("../src/shared/phase6Components.tsx", import.meta.url), "utf8");
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
 const matchStyleSource = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
@@ -154,13 +152,14 @@ assert.equal(detailHeaderSource.includes("hasPrevious"), false, "detail header s
 assert.equal(detailHeaderSource.includes("hasNext"), false, "detail header should remove next navigation state");
 assert.equal(detailHeaderSource.includes("上一场"), false, "detail header should remove the previous button");
 assert.equal(detailHeaderSource.includes("下一场"), false, "detail header should remove the next button");
-assert.equal(teamTableSource.includes("matchTeamTableMarker"), true, "team tables should use a narrow semantic marker");
+assert.equal(teamTableSource.includes("matchTeamPartyRail"), true, "team tables should render one semantic rail per party");
+assert.equal(teamTableSource.includes("matchTeamTableMarker"), false, "team tables should remove the whole-side marker");
 assert.equal(teamTableSource.includes("renderExpansion"), true, "the shared table should preserve arena expansion content");
 assert.equal(teamTableSource.includes("<small>K/D/A</small>"), true, "detail tables should use the same K/D/A order as list cards");
 assert.match(teamTableSource, /value=\{player\.kills\}[\s\S]*\/>\/\{player\.deaths\}\/\{player\.assists\}/);
-assert.match(matchStyleSource, /\.matchTeamTableMarker\s*\{[\s\S]*background:\s*var\(--data-secondary\)/);
-assert.match(matchStyleSource, /\.matchTeamTableMarker\.enemy\s*\{[\s\S]*background:\s*var\(--status-danger\)/);
-assert.match(matchStyleSource, /\.matchTeamTable\.enemy \.phase6CompactPlayerRow\s*\{[\s\S]*border-left-color:\s*var\(--status-danger\)/);
+assert.match(matchStyleSource, /\.matchTeamPartyRail\s*\{[\s\S]*background:\s*var\(--data-secondary\)/);
+assert.match(matchStyleSource, /\.matchTeamTable\.enemy \.matchTeamPartyRail\s*\{[\s\S]*background:\s*var\(--status-danger\)/);
+assert.doesNotMatch(matchStyleSource, /border-left-color:\s*var\(--status-danger\)/);
 assert.doesNotMatch(matchStyleSource, /#1e8ee7|#dc304f/i, "feature styles should not restore saturated team-row fills");
 assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), false, "MatchListPane should no longer own the scroll ref");
 assert.equal(listPaneSource.includes("<MatchTimeline"), true, "MatchListPane should delegate streak rendering to MatchTimeline");
@@ -521,7 +520,6 @@ assert.match(
 );
 assert.match(matchStyleSource, /\.matchTeamTable \.phase6CompactPlayerMetric strong\s*\{[^}]*white-space:\s*nowrap/s);
 
-assert.equal(detailPageSource.includes("export function MatchDetailReport"), true, "Match detail page should export reusable detail content for the workbench");
 
 assert.equal(styleSource.includes(".phase6CompactDetail"), true, "styles should include the compact detail panel");
 assert.equal(styleSource.includes("overflow-y: auto"), true, "workbench list should support independent vertical scrolling");
@@ -600,7 +598,6 @@ assert.equal(detailHeaderSource.includes("mapKey={mapGuid ?? mapName}"), true, "
 assert.equal(detailHeaderSource.includes("resultEnglishLabel"), true, "detail header should derive the English result label");
 assert.equal(compactDetailSource.includes("mapGuid={detail.mapGuid}"), true, "normal detail should pass its map guid to the shared header");
 assert.equal(compactDetailSource.includes("mapGuid={selected.mapGuid}"), true, "arena detail should pass the selected slice map guid to the shared header");
-assert.equal(detailPageSource.includes("<MatchDetailHeader"), true, "standalone normal detail should reuse the shared result map banner");
 assert.equal(detailHeaderSource.includes("decorative"), true, "detail banner map preview should be hidden from assistive technology");
 assert.equal(detailHeaderSource.includes("matchDetailHeaderInfo"), true, "header should own one right-aligned information group");
 assert.ok(
@@ -739,55 +736,48 @@ assert.ok(
   "compact normal favorite editor should be the last item after team comparison",
 );
 
-const standaloneNormalMarkup = renderToStaticMarkup(
-  createElement(MatchDetailReport, {
-    detail: {
-      ...normalDetail,
-      evaluation: { grade: "A", primaryTag: "带飞局", evidenceTags: [], confidence: 0.9 },
-      teamAwards: [{ code: "damage", label: "本队伤害最高", tone: "gold" }],
-    },
+const rankedPlayer: PlayerRow = {
+  ...anonymousPlayer,
+  rankLabel: "钻石 4",
+  rankKey: "diamond",
+};
+
+for (const [gameMode, modeLabel] of [
+  ["SportPreset", "预设竞技"],
+  ["SportOpen", "开放竞技"],
+] as const) {
+  const matchId = `synthetic-${gameMode}`;
+  const markup = renderToStaticMarkup(
+    createElement(CompactMatchDetail, {
+      detail: {
+        ...normalDetail,
+        matchId,
+        gameMode,
+        modeLabel,
+        teammates: [rankedPlayer],
+      },
+      loading: false,
+      error: null,
+      matchId,
+      ...navigationProps,
+    }),
+  );
+  assert.match(markup, /\/assets\/ranks\/diamond\.png/);
+  assert.match(markup, />4<\/small>/);
+}
+
+const quickRankedMarkup = renderToStaticMarkup(
+  createElement(CompactMatchDetail, {
+    detail: { ...normalDetail, teammates: [rankedPlayer] },
     loading: false,
     error: null,
     matchId: normalDetail.matchId,
-    favoriteController,
+    ...navigationProps,
   }),
 );
-assert.match(standaloneNormalMarkup, /<strong>胜利<\/strong>/);
-assert.match(standaloneNormalMarkup, />VICTORY</, "standalone win detail should render the shared English result label");
-assert.doesNotMatch(standaloneNormalMarkup, />对局表现</, "standalone normal detail should remove the personal summary eyebrow");
-assert.doesNotMatch(standaloneNormalMarkup, />评分与同队奖牌</, "standalone normal detail should remove the personal summary title");
-assert.doesNotMatch(standaloneNormalMarkup, /phase6PerformanceBadges/, "standalone normal detail should not render performance badges");
-assert.ok(
-  standaloneNormalMarkup.indexOf("detailContent") < standaloneNormalMarkup.indexOf("matchFavoriteEditor"),
-  "standalone normal favorite editor should render after detail content",
-);
-
-for (const [result, resultLabel, englishLabel] of [
-  ["loss", "失败", "DEFEAT"],
-  ["draw", "平局", "DRAW"],
-] as const) {
-  const standaloneMarkup = renderToStaticMarkup(
-    createElement(MatchDetailReport, {
-      detail: { ...normalDetail, matchId: `anonymous-${result}`, result, resultLabel },
-      loading: false,
-      error: null,
-      matchId: `anonymous-${result}`,
-      favoriteController,
-    }),
-  );
-  assert.match(standaloneMarkup, new RegExp(`>${englishLabel}<`), `standalone ${result} detail should render ${englishLabel}`);
-}
-
-const standaloneUnknownMarkup = renderToStaticMarkup(
-  createElement(MatchDetailReport, {
-    detail: { ...normalDetail, matchId: "anonymous-unknown", result: null, resultLabel: "未知结果" },
-    loading: false,
-    error: null,
-    matchId: "anonymous-unknown",
-    favoriteController,
-  }),
-);
-assert.match(standaloneUnknownMarkup, />UNKNOWN</, "unknown result should not be announced as a draw");
+assert.doesNotMatch(normalMarkup, /\/assets\/ranks\/unranked\.png/);
+assert.doesNotMatch(quickRankedMarkup, /\/assets\/ranks\//);
+assert.doesNotMatch(quickRankedMarkup, /\/assets\/stadium\//);
 
 const arenaDetail: MatchDetailView = {
   ...normalDetail,
@@ -840,20 +830,6 @@ assert.match(arenaMarkup, />对手数据</, "arena detail should keep the enemy 
 assert.ok(
   arenaMarkup.indexOf("matchDetailTeamComparison") < arenaMarkup.indexOf("matchFavoriteEditor"),
   "compact arena summary favorite editor should render after team content",
-);
-
-const standaloneArenaMarkup = renderToStaticMarkup(
-  createElement(MatchDetailReport, {
-    detail: arenaDetail,
-    loading: false,
-    error: null,
-    matchId: arenaDetail.matchId,
-    favoriteController,
-  }),
-);
-assert.ok(
-  standaloneArenaMarkup.indexOf("detailContent") < standaloneArenaMarkup.indexOf("matchFavoriteEditor"),
-  "standalone arena summary favorite editor should render after selected summary content",
 );
 
 type TestElement = React.ReactElement<Record<string, unknown>>;
@@ -957,68 +933,4 @@ assert.equal(
   (selectedRoundTeamTable.props.players as PlayerRow[])[0]?.name,
   "第 1 回合队友",
   "round selection should switch the displayed player data",
-);
-
-let allowStandaloneDiscard = false;
-let standaloneConfirmCount = 0;
-const standaloneArenaController: MatchFavoriteController = {
-  ...favoriteController,
-  dirty: true,
-  confirmDiscard: () => {
-    standaloneConfirmCount += 1;
-    return allowStandaloneDiscard;
-  },
-};
-
-function renderStandaloneArenaWithTestHooks(): React.ReactElement {
-  const previousDispatcher = dispatcherRef.current;
-  dispatcherRef.current = arenaHookDispatcher;
-  arenaHookIndex = 0;
-  try {
-    return MatchDetailReport({
-      detail: arenaDetail,
-      loading: false,
-      error: null,
-      matchId: arenaDetail.matchId,
-      favoriteController: standaloneArenaController,
-    });
-  } finally {
-    dispatcherRef.current = previousDispatcher;
-  }
-}
-
-arenaStateSlots.length = 0;
-const initialStandaloneArenaTree = renderStandaloneArenaWithTestHooks();
-findReactElement(
-  initialStandaloneArenaTree,
-  (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
-  "standalone arena summary should render the favorite editor",
-);
-const standaloneArenaSelector = findReactElement(
-  initialStandaloneArenaTree,
-  (element) =>
-    typeof element.type === "function" &&
-    element.type.name === "ArenaSelector" &&
-    typeof element.props.onSelect === "function",
-  "standalone arena detail should expose its real slice selection handler",
-);
-(standaloneArenaSelector.props.onSelect as (key: string) => void)("round-1");
-assert.equal(standaloneConfirmCount, 1, "leaving standalone arena summary should confirm once");
-const rejectedStandaloneArenaTree = renderStandaloneArenaWithTestHooks();
-findReactElement(
-  rejectedStandaloneArenaTree,
-  (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
-  "rejected standalone arena navigation should remain on summary",
-);
-
-allowStandaloneDiscard = true;
-(standaloneArenaSelector.props.onSelect as (key: string) => void)("round-1");
-const selectedStandaloneRoundTree = renderStandaloneArenaWithTestHooks();
-assert.throws(
-  () => findReactElement(
-    selectedStandaloneRoundTree,
-    (element) => typeof element.type === "function" && element.type.name === "MatchFavoriteEditor",
-    "standalone arena round must not render the favorite editor",
-  ),
-  /standalone arena round must not render the favorite editor/,
 );

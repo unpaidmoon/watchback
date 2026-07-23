@@ -183,6 +183,7 @@ pub(super) fn team_awards_from_match_players(
             resist_damage_max: false,
             perks: Vec::new(),
             hero_stats: Vec::new(),
+            party_group: None,
         })
     })?;
     let players = rows.collect::<rusqlite::Result<Vec<_>>>()?;

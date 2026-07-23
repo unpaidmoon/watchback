@@ -328,6 +328,13 @@ export function rankAssetUrl(rankKey: string | null | undefined): string {
   return `${rankAssetRoot}/${file}`;
 }
 
+export function competitiveRankAssetUrl(rankKey: string | null | undefined): string | null {
+  const key = normalizeAssetKey(rankKey);
+  if (!key) return null;
+  const file = rankFiles.get(key);
+  return file ? `${rankAssetRoot}/${file}` : null;
+}
+
 export function arenaRankAssetUrl(rankKey: string | null | undefined): string | null {
   const key = normalizeAssetKey(rankKey);
   if (!key) return null;

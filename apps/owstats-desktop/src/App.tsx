@@ -2,7 +2,6 @@ import { CircleDot, Sparkles } from "lucide-react";
 import { Navigate, NavLink, Route, Routes, useSearchParams } from "react-router-dom";
 import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
-import { MatchDetailPage } from "./pages/MatchDetailPage";
 import { MatchesPage } from "./pages/MatchesPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { Phase6StyleBoardPage } from "./pages/Phase6StyleBoardPage";
@@ -68,7 +67,6 @@ export function App() {
             <Route path="/onboarding" element={<OnboardingPage />} />
             <Route path="/phase6-style-board" element={<Phase6StyleBoardPage />} />
             <Route path="/matches" element={<MatchesPage />} />
-            <Route path="/matches/:matchId" element={<MatchDetailPage />} />
             <Route path="/review" element={<PersonalReviewRoute />} />
             <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/career-mmr" element={<CareerMmrPage />} />

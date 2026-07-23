@@ -31,6 +31,10 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, f
   if (detail.arenaDetail) return <CompactArenaDetail detail={detail} loading={loading} favoriteController={favoriteController} />;
 
   const mapName = detail.mapName ?? "未知地图";
+  const rankVariant =
+    detail.gameMode === "SportPreset" || detail.gameMode === "SportOpen"
+      ? "competitive"
+      : undefined;
   return (
     <section className={`phase6CompactDetail ${detail.result ?? "pending"}`} aria-label="普通对局详情">
       <MatchDetailHeader
@@ -48,8 +52,8 @@ export function CompactMatchDetail({ detail, loading, error, matchId, onRetry, f
         <section className="matchDetailTeamComparison" aria-labelledby="team-comparison-title">
           <h2 id="team-comparison-title">队伍对比</h2>
           <div className="matchDetailTeamTables">
-            <MatchTeamTable title="队友数据" tone="team" players={detail.teammates.slice(0, 6)} showPerks />
-            <MatchTeamTable title="对手数据" tone="enemy" players={detail.enemies.slice(0, 6)} showPerks />
+            <MatchTeamTable title="队友数据" tone="team" players={detail.teammates.slice(0, 6)} showPerks rankVariant={rankVariant} />
+            <MatchTeamTable title="对手数据" tone="enemy" players={detail.enemies.slice(0, 6)} showPerks rankVariant={rankVariant} />
           </div>
         </section>
         <AiMatchRoast
@@ -167,6 +171,7 @@ function CompactArenaDetail({
           <h2 id="arena-team-comparison-title">队伍对比</h2>
           <div className="matchDetailTeamTables">
             <MatchTeamTable
+              rankVariant="arena"
               title="队友数据"
               tone="team"
               players={selected.teammates}
@@ -182,6 +187,7 @@ function CompactArenaDetail({
               )}
             />
             <MatchTeamTable
+              rankVariant="arena"
               title="对手数据"
               tone="enemy"
               players={selected.enemies}

@@ -17,11 +17,13 @@ mod arena_detail;
 mod lookups;
 mod match_list;
 mod normal_detail;
+mod party_groups;
 
 use arena_detail::*;
 use lookups::*;
 use match_list::*;
 use normal_detail::*;
+use party_groups::*;
 
 pub fn list_matches(db: &OwDatabase, filters: MatchFilters) -> Result<Vec<MatchSummary>> {
     list_matches_impl(db, filters)

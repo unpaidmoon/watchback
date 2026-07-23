@@ -93,6 +93,7 @@ fn player(side: &str, id: &str, hero: &str, damage: i64, deaths: i64) -> PlayerR
         resist_damage_max: false,
         perks: Vec::new(),
         hero_stats: Vec::new(),
+        party_group: None,
     }
 }
 

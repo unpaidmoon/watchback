@@ -15,7 +15,7 @@ assert.equal(preserveQaParam(new URLSearchParams("qa=1&season=22"), new URLSearc
 assert.equal(preserveQaParam(new URLSearchParams("qa=0"), new URLSearchParams("hero=ana")).toString(), "hero=ana");
 
 assert.equal(qaPageForPath("/review").label, "复盘");
-assert.equal(qaPageForPath("/matches/demo-match").label, "对局详情");
+assert.notEqual(qaPageForPath("/matches/demo-match").label, "对局详情");
 assert.equal(qaPageForPath("/analytics/friends/123").label, "队友详情");
 
 assert.deepEqual(

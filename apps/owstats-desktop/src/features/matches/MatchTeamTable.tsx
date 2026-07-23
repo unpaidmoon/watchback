@@ -1,15 +1,17 @@
 import type { ReactNode } from "react";
 import { formatArenaRankTierLabel } from "../../shared/arenaDetailFormat";
-import { arenaRankAssetUrl, resolvePerkInfo } from "../../shared/assets";
+import { arenaRankAssetUrl, competitiveRankAssetUrl, resolvePerkInfo } from "../../shared/assets";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../../shared/playerHighlights";
 import { HeroAvatar } from "../../shared/phase6Components";
 import type { PlayerRow } from "../../shared/types";
+import { playerPartyBlocks } from "./partyGroups";
 
 export type MatchTeamTableProps = {
   title: string;
   tone: "team" | "enemy";
   players: PlayerRow[];
   showPerks?: boolean;
+  rankVariant?: "competitive" | "arena";
   expandedPlayerKeys?: ReadonlySet<string>;
   onTogglePlayer?: (playerKey: string) => void;
   onSelectPlayerSummary?: (player: PlayerRow, trigger: HTMLButtonElement) => void;
@@ -21,6 +23,7 @@ export function MatchTeamTable({
   players,
   tone,
   showPerks = true,
+  rankVariant,
   expandedPlayerKeys,
   onTogglePlayer,
   onSelectPlayerSummary,
@@ -29,23 +32,43 @@ export function MatchTeamTable({
   const highlights = playerHighlightMap(players);
   return (
     <section className={`matchTeamTable phase6CompactTeam ${tone}`}>
-      <span className={`matchTeamTableMarker ${tone}`} aria-hidden="true" />
       <h3>{title}</h3>
       <div className="phase6CompactPlayerRows">
-        {players.map((player, index) => {
-          const key = compactPlayerKey(player, index);
-          const expanded = expandedPlayerKeys?.has(key) ?? false;
+        {playerPartyBlocks(players).map((block, blockIndex) => {
+          const rows = block.players.map((player) => {
+            const index = players.indexOf(player);
+            const key = compactPlayerKey(player, index);
+            const expanded = expandedPlayerKeys?.has(key) ?? false;
+            return (
+              <div className="phase6CompactPlayerBlock" key={key}>
+                <MatchTeamPlayerRow
+                  player={player}
+                  showPerks={showPerks}
+                  rankVariant={rankVariant}
+                  highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()}
+                  expanded={expanded}
+                  onToggle={onTogglePlayer ? () => onTogglePlayer(key) : undefined}
+                  onSelectPlayerSummary={onSelectPlayerSummary}
+                />
+                {expanded && renderExpansion ? renderExpansion(player) : null}
+              </div>
+            );
+          });
+          if (block.partyGroup !== null) {
+            return (
+              <div
+                className="matchTeamPartyGroup"
+                aria-label={`${block.players.length} 人小队`}
+                key={`party-${block.partyGroup}`}
+              >
+                <span className="matchTeamPartyRail" aria-hidden="true" />
+                {rows}
+              </div>
+            );
+          }
           return (
-            <div className="phase6CompactPlayerBlock" key={key}>
-              <MatchTeamPlayerRow
-                player={player}
-                showPerks={showPerks}
-                highlights={highlights.get(playerKeyFor(player, index)) ?? new Set()}
-                expanded={expanded}
-                onToggle={onTogglePlayer ? () => onTogglePlayer(key) : undefined}
-                onSelectPlayerSummary={onSelectPlayerSummary}
-              />
-              {expanded && renderExpansion ? renderExpansion(player) : null}
+            <div className="matchTeamSoloPlayer" key={`solo-${blockIndex}`}>
+              {rows}
             </div>
           );
         })}
@@ -58,6 +81,7 @@ export function MatchTeamTable({
 function MatchTeamPlayerRow({
   player,
   showPerks = true,
+  rankVariant,
   highlights,
   expanded = false,
   onToggle,
@@ -65,12 +89,18 @@ function MatchTeamPlayerRow({
 }: {
   player: PlayerRow;
   showPerks?: boolean;
+  rankVariant?: "competitive" | "arena";
   highlights: Set<HighlightMetric>;
   expanded?: boolean;
   onToggle?: () => void;
   onSelectPlayerSummary?: (player: PlayerRow, trigger: HTMLButtonElement) => void;
 }) {
-  const rankIcon = arenaRankAssetUrl(player.rankKey);
+  const rankIcon =
+    rankVariant === "arena"
+      ? arenaRankAssetUrl(player.rankKey)
+      : rankVariant === "competitive"
+        ? competitiveRankAssetUrl(player.rankKey)
+        : null;
   const rankTierLabel = formatArenaRankTierLabel(player.rankLabel);
   const perks = showPerks
     ? player.perks.flatMap((perk) => {

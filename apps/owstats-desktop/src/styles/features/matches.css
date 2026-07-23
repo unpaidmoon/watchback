@@ -176,20 +176,6 @@
   background: var(--surface-primary);
 }
 
-.matchTeamTableMarker {
-  position: absolute;
-  left: -1px;
-  top: var(--space-3);
-  bottom: var(--space-3);
-  width: 4px;
-  border-radius: 0 999px 999px 0;
-  background: var(--data-secondary);
-}
-
-.matchTeamTableMarker.enemy {
-  background: var(--status-danger);
-}
-
 .matchTeamTable h3 {
   margin: 0 0 var(--space-2);
   color: var(--text-primary);
@@ -201,15 +187,30 @@
   min-height: 68px;
   padding-right: var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--data-secondary);
   border-radius: var(--radius-control);
   background: var(--surface-secondary);
   color: var(--text-primary);
   box-shadow: none;
 }
 
-.matchTeamTable.enemy .phase6CompactPlayerRow {
-  border-left-color: var(--status-danger);
+.matchTeamPartyGroup {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+
+.matchTeamPartyRail {
+  position: absolute;
+  left: calc(var(--space-2) * -1);
+  top: 1px;
+  bottom: 1px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--data-secondary);
+}
+
+.matchTeamTable.enemy .matchTeamPartyRail {
+  background: var(--status-danger);
 }
 
 .matchTeamTable .phase6CompactAvatarPlate {

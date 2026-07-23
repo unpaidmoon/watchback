@@ -21,11 +21,9 @@ import {
   guardMatchesPageNavigation,
   hasExplicitMatchFilterParams,
   isLatestMatchRequest,
-  invalidateStandaloneMatchFavoritePersistence,
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
-  shouldInvalidateStandaloneFavoriteCache,
   shouldLoadMatchesForFilter,
   updateMatchesPageCache,
 } from "../src/shared/matchesPageCache.ts";
@@ -683,43 +681,6 @@ assert.deepEqual(
 );
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
-const matchDetailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
-
-assert.equal(shouldInvalidateStandaloneFavoriteCache(null, { note: "" }), true);
-assert.equal(shouldInvalidateStandaloneFavoriteCache({ note: "old" }, null), true);
-assert.equal(
-  shouldInvalidateStandaloneFavoriteCache({ note: "old" }, { note: "new" }),
-  false,
-  "a note-only update keeps the timeline favorite presence unchanged",
-);
-assert.equal(
-  shouldInvalidateStandaloneFavoriteCache(undefined, { note: "" }),
-  false,
-  "favorite presence is not invalidated before standalone detail has loaded",
-);
-
-updateMatchesPageCache({
-  filters: { favoriteOnly: true },
-  loadedFilterKey: matchFiltersKey({ favoriteOnly: true }),
-  hasLoaded: true,
-});
-invalidateStandaloneMatchFavoritePersistence();
-assert.equal(
-  getMatchesPageCache(),
-  null,
-  "standalone favorite persistence invalidates the hydrated timeline, including favorite-only results",
-);
-assert.match(
-  matchDetailPageSource,
-  /const favoriteRef = useRef<MatchDetailView\["favorite"\] \| undefined>\(undefined\);[\s\S]*const handleFavoritePersisted[\s\S]*shouldInvalidateStandaloneFavoriteCache\(favoriteRef\.current, favorite\)[\s\S]*invalidateStandaloneMatchFavoritePersistence\(\);[\s\S]*favoriteRef\.current = favorite;[\s\S]*setDetail/,
-  "standalone persistence compares and updates a stable favorite ref before updating detail state",
-);
-assert.match(
-  matchDetailPageSource,
-  /const nextDetail = await getMatchDetails\(nextMatchId\);\s*favoriteRef\.current = nextDetail\.favorite;\s*setDetail\(nextDetail\);/,
-  "loading standalone detail synchronizes the favorite-presence ref",
-);
-
 let sameFilterConfirmCount = 0;
 assert.equal(
   guardMatchFilterChange(

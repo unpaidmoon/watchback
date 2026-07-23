@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { arenaHeaderMapKey, arenaHeaderTitle, formatArenaRankTierLabel, formatArenaScore, formatArenaTabLabel } from "../src/shared/arenaDetailFormat";
+import { competitiveRankAssetUrl } from "../src/shared/assets";
 import type { ArenaDetailSlice } from "../src/shared/types";
 
 const summary = slice({ key: "summary", label: "角斗汇总", teamScore: 4, opponentScore: 3, mapGuid: "kings-row", mapName: "国王大道" });
@@ -13,17 +14,18 @@ assert.equal(arenaHeaderMapKey(summary), "kings-row");
 assert.equal(formatArenaRankTierLabel("大师 2"), "2");
 assert.equal(formatArenaRankTierLabel("钻石 5"), "5");
 assert.equal(formatArenaRankTierLabel("大师"), "");
+assert.equal(competitiveRankAssetUrl("Diamond"), "/assets/ranks/diamond.png");
+assert.equal(competitiveRankAssetUrl(null), null);
+assert.equal(competitiveRankAssetUrl("UnknownTier"), null);
 assert.equal(arenaHeaderTitle(summary), "国王大道");
 assert.equal(arenaHeaderTitle(round), "地图：阿努比斯王座");
 
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
-const detailSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const compactSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
 const teamTableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 
 assert.equal(styleSource.includes(".phase7ArenaTab + .phase7ArenaTab"), true, "arena tabs should overlap adjacent slants");
 assert.equal(styleSource.includes("gap: 0"), true, "arena selector should not leave gaps between tabs");
-assert.equal(detailSource.includes("phase7PlayerNameLine"), true, "rank should sit in the player id line");
 assert.match(
   styleSource,
   /\.phase7CompactArenaDetail\s*\{[^}]*grid-template-rows:\s*auto\s+124px\s+minmax\(0,\s*1fr\)/s,
@@ -35,15 +37,11 @@ assert.equal(compactSource.includes("const [expandedCompactArenaPlayerKeys"), tr
 assert.equal(compactSource.includes("setExpandedCompactArenaPlayerKeys(new Set())"), true, "compact arena expansion state should reset when match or slice changes");
 assert.equal(compactSource.includes("function selectCompactArenaSlice"), true, "compact arena slice changes should synchronously clear expansion state");
 assert.equal(compactSource.includes("function toggleCompactArenaPlayer"), true, "compact arena rows should have a local expansion toggle");
-assert.equal(detailSource.includes("const [expandedArenaPlayerKeys"), false, "full detail should not own arena expansion state for this compact-only slice");
-assert.equal(detailSource.includes('allowExpansion={true}'), false, "full arena detail should not enable expansion in this compact-only slice");
-assert.equal(detailSource.includes("const [expanded, setExpanded] = useState(false)"), false, "player rows should not keep isolated local expansion state");
 assert.equal(compactSource.includes("phase7CompactExpandButton"), false, "compact detail should not show a separate expansion button");
 assert.equal(teamTableSource.includes("phase7CompactPlayerExpandable"), true, "compact arena player rows should be directly clickable for expansion");
 assert.equal(teamTableSource.includes("phase7CompactPlayerRowToggle"), true, "compact arena rows should keep a dedicated expansion control");
 assert.equal(teamTableSource.includes("phase7CompactAvatarSummaryButton"), true, "compact arena summary rows should expose a dedicated avatar control");
 assert.equal(teamTableSource.includes("onSelectPlayerSummary"), true, "compact arena tables should accept the summary-card avatar action");
-assert.equal(detailSource.includes('className="phase7ExpandButton"'), false, "full detail should not keep the mistaken expansion button");
 assert.match(styleSource, /\.phase7PlayerCardMain\s*\{[^}]*grid-template-columns:\s*168px\s+minmax\(0,\s*1fr\)/s, "expanded arena rows should reserve stable portrait and content columns");
 assert.match(styleSource, /\.phase6PlayerStats header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s, "expand control should stay in a dedicated header column");
 assert.match(styleSource, /\.phase7PlayerNameLine\s*\{[^}]*flex-wrap:\s*wrap/s, "arena player name and rank should wrap before crowding metrics");

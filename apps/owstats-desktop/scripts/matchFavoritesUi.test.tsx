@@ -21,7 +21,6 @@ const guardSource = readFileSync(guardUrl, "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
-const detailPageSource = readFileSync(new URL("../src/pages/MatchDetailPage.tsx", import.meta.url), "utf8");
 const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
 const favoriteEditorHookSource = readFileSync(new URL("../src/features/matches/useMatchFavoriteEditor.ts", import.meta.url), "utf8");
@@ -40,10 +39,6 @@ assert.match(matchesPageSource, /useMatchFavoriteEditor/);
 assert.match(matchesPageSource, /register\(favoriteController\.dirty\s*\|\|\s*favoriteController\.busy\s*\?\s*\{/);
 assert.match(matchesPageSource, /isBusy:\s*favoriteController\.busy/);
 assert.match(matchesPageSource, /favoriteController\.confirmDiscard\(\)/);
-assert.match(detailPageSource, /useMatchFavoriteEditor/);
-assert.match(detailPageSource, /register\(favoriteController\.dirty\s*\|\|\s*favoriteController\.busy\s*\?\s*\{/);
-assert.match(detailPageSource, /isBusy:\s*favoriteController\.busy/);
-assert.match(detailPageSource, /favoriteController\.confirmDiscard\(\)/);
 assert.match(
   favoriteEditorHookSource,
   /const confirmDiscard = useCallback\(\(\) => \{\s*if \(!canDiscardMatchFavoriteChanges\(\s*\{ busy: state\.busy, dirty \},[\s\S]*?\)\) return false;\s*if \(!dirty\) return true;/,
@@ -56,10 +51,6 @@ assert.doesNotMatch(detailPaneSource, /useMatchFavoriteEditor\s*\(/);
 assert.match(
   compactDetailSource,
   /function selectCompactArenaSlice[\s\S]*favoriteController\.confirmDiscard\(\)[\s\S]*selected\.key === "summary"[\s\S]*<MatchFavoriteEditor/,
-);
-assert.match(
-  detailPageSource,
-  /function selectArenaSlice[\s\S]*favoriteController\.confirmDiscard\(\)[\s\S]*selectedArena\.key === "summary"[\s\S]*<MatchFavoriteEditor/,
 );
 
 let cleanConfirmCount = 0;

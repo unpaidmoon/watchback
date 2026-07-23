@@ -34,10 +34,6 @@ const commandCenterCssSource = readFileSync(
   new URL('../src/styles/features/command-center.css', import.meta.url),
   'utf8',
 );
-const matchDetailPageSource = readFileSync(
-  new URL('../src/pages/MatchDetailPage.tsx', import.meta.url),
-  'utf8',
-);
 const compactMatchDetailSource = readFileSync(
   new URL('../src/features/matches/CompactMatchDetail.tsx', import.meta.url),
   'utf8',
@@ -248,18 +244,7 @@ assert.match(componentSource, /recoverable\s*&&[\s\S]*?>重试<\/button>/);
 assert.match(componentSource, /generateMatchAiRoast\(requestMatchId, regenerate\)/);
 assert.match(componentSource, /generateRoast\(true\)/);
 
-assert.match(matchDetailPageSource, /import \{ AiMatchRoast \} from "\.\.\/features\/matches\/AiMatchRoast"/);
 assert.match(compactMatchDetailSource, /import \{ AiMatchRoast \} from "\.\/AiMatchRoast"/);
-assert.match(
-  matchDetailPageSource,
-  /selectedArena\.key === "summary"[\s\S]*?<AiMatchRoast[\s\S]*?matchId=\{detail\.matchId\}[\s\S]*?initialRoast=\{detail\.aiRoast\}[\s\S]*?detailReady=\{true\}[\s\S]*?<MatchFavoriteEditor/,
-  'full arena summary must place the roast immediately before the favorite editor',
-);
-assert.match(
-  matchDetailPageSource,
-  /\{detail && \([\s\S]*?<AiMatchRoast[\s\S]*?matchId=\{detail\.matchId\}[\s\S]*?initialRoast=\{detail\.aiRoast\}[\s\S]*?detailReady=\{true\}[\s\S]*?<MatchFavoriteEditor/,
-  'full ordinary detail must place the roast before the favorite editor',
-);
 assert.match(
   compactMatchDetailSource,
   /<AiMatchRoast[\s\S]*?matchId=\{detail\.matchId\}[\s\S]*?initialRoast=\{detail\.aiRoast\}[\s\S]*?detailReady=\{true\}[\s\S]*?<MatchFavoriteEditor/,

@@ -547,7 +547,7 @@ pub(super) fn match_evidence(row: &ReviewMatch) -> EvidenceLink {
     EvidenceLink {
         kind: "match".to_string(),
         label: "查看比赛".to_string(),
-        route: format!("/matches/{}", row.match_id),
+        route: format!("/matches?matchId={}", row.match_id),
         match_id: Some(row.match_id.clone()),
         hero: Some(row.hero_name.clone()),
         map: Some(row.map_name.clone()),
@@ -598,6 +598,33 @@ pub(super) fn ratio(value: i64, total: i64) -> f64 {
         0.0
     } else {
         value as f64 / total as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn match_evidence_targets_the_match_workbench() {
+        let row = ReviewMatch {
+            match_id: "synthetic-match".to_string(),
+            result: "win".to_string(),
+            map_name: "测试地图".to_string(),
+            hero_guid: "synthetic-hero".to_string(),
+            hero_name: "测试英雄".to_string(),
+            kills: 0,
+            deaths: 0,
+            damage: 0,
+            healing: 0,
+            mitigation: 0,
+            duration_sec: 60,
+        };
+
+        assert_eq!(
+            match_evidence(&row).route,
+            "/matches?matchId=synthetic-match"
+        );
     }
 }
 
