@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ArenaPlayerRoundSummaryDialog } from "../src/features/matches/ArenaPlayerRoundSummaryDialog";
 import type { ArenaDetailSlice, PlayerRow } from "../src/shared/types";
 import { buildArenaPlayerRoundSummary } from "../src/features/matches/arenaPlayerRoundSummary";
 
@@ -91,3 +94,19 @@ const enemyRows = buildArenaPlayerRoundSummary(enemyTarget, [
 ]);
 assert.deepEqual(enemyRows.map((row) => row.startWorth), [3000, 5100]);
 assert.deepEqual(enemyRows[0]?.traitGuids, ["trait-enemy"]);
+
+const dialogMarkup = renderToStaticMarkup(createElement(ArenaPlayerRoundSummaryDialog, {
+  player: target,
+  rows,
+  onClose: () => undefined,
+}));
+
+assert.match(dialogMarkup, /role="dialog"/);
+assert.match(dialogMarkup, /aria-modal="true"/);
+assert.match(dialogMarkup, />汇总卡片</);
+assert.match(dialogMarkup, />测试玩家</);
+assert.match(dialogMarkup, />R1</);
+assert.match(dialogMarkup, />3000</);
+assert.equal((dialogMarkup.match(/phase7SummaryTraitSlot/g) ?? []).length, rows.length * 4);
+assert.equal((dialogMarkup.match(/phase7SummaryModSlot/g) ?? []).length, rows.length * 6);
+assert.doesNotMatch(dialogMarkup, /phase6PerkTooltipPanel/);
