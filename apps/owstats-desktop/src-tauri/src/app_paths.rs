@@ -1,9 +1,17 @@
 use anyhow::{anyhow, Result};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::account_store::AccountId;
 
 pub fn data_root_from_executable(executable: &Path) -> Result<PathBuf> {
+    if !executable.is_absolute()
+        || executable
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(anyhow!("无法定位安装目录"));
+    }
+
     let install = executable
         .parent()
         .filter(|value| !value.as_os_str().is_empty())
@@ -224,9 +232,31 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn unc_executable_parent_owns_data() {
+        assert_eq!(
+            data_root_from_executable(Path::new(r"\\server\share\Watchback.exe")).unwrap(),
+            PathBuf::from(r"\\server\share\data"),
+        );
+    }
+
     #[test]
     fn empty_executable_path_is_rejected() {
         assert!(data_root_from_executable(Path::new("")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_executable_path_must_be_absolute_without_dot_components() {
+        for executable in [
+            r"relative\Watchback.exe",
+            r"D:Watchback.exe",
+            r"\Watchback.exe",
+            r"D:\apps\..\Watchback.exe",
+        ] {
+            assert!(data_root_from_executable(Path::new(executable)).is_err());
+        }
     }
 
     #[test]
