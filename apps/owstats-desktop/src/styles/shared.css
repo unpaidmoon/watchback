@@ -5802,8 +5802,13 @@ select {
 }
 
 .phase6ChoiceRankingIcon--perk {
-  background: #fff;
+  background: var(--surface-primary);
   border: 1px solid var(--glass-border);
+}
+
+.phase6ChoiceRankingIcon--perk img {
+  filter: brightness(0);
+  opacity: 0.46;
 }
 
 .phase6ChoiceRankingIcon img {

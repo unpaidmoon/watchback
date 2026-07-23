@@ -28,6 +28,10 @@ assert.match(styles, /\.phase6ChoiceRankingColumn \+ \.phase6ChoiceRankingColumn
 assert.match(styles, /\.phase6ChoiceRankingIcon[\s\S]*32px/);
 assert.match(
   styles,
-  /\.phase6ChoiceRankingIcon--perk\s*\{[\s\S]*background:\s*#fff;[\s\S]*border:\s*1px solid var\(--glass-border\);/,
+  /\.phase6ChoiceRankingIcon--perk\s*\{[\s\S]*background:\s*var\(--surface-primary\);[\s\S]*border:\s*1px solid var\(--glass-border\);/,
+);
+assert.match(
+  styles,
+  /\.phase6ChoiceRankingIcon--perk img\s*\{[\s\S]*filter:\s*brightness\(0\);[\s\S]*opacity:\s*0\.46;/,
 );
 assert.match(styles, /@media \(max-width:\s*900px\)[\s\S]*\.phase6ChoiceRankingsGrid/);
