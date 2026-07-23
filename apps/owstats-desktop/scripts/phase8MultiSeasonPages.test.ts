@@ -80,7 +80,7 @@ assert.equal(latestFallbackReviewParams.get("season"), "23", "async review fallb
 assert.equal(latestFallbackReviewParams.get("keep"), "1", "async review fallback should read the latest unrelated URL state");
 assert.equal(latestReviewParams.current.toString(), "season=999&keep=1", "async review fallback should not mutate the latest URL params");
 
-assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements?season=23");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements");
 for (const view of ["overview", "roles", "maps", "unknown"]) {
   assert.equal(legacyReviewRedirectHref(new URLSearchParams(`season=23&view=${view}`)), "/review?season=23");
 }

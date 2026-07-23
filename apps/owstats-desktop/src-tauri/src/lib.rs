@@ -45,7 +45,7 @@ pub use match_evaluation::{refresh_match_evaluations, PHASE5_SCORING_RULE_VERSIO
 pub use match_favorites::{delete_match_favorite, get_match_favorite, save_match_favorite};
 pub use models::*;
 pub use queries::{get_match_detail, list_filter_options, list_matches, search_match_players};
-pub use review::{get_onboarding_status, get_personal_season_review};
+pub use review::{get_career_achievements, get_onboarding_status, get_personal_season_review};
 #[doc(hidden)]
 pub use sync::write_season_payload;
 #[doc(hidden)]
@@ -130,6 +130,7 @@ pub fn run() {
             commands::get_friend_details,
             commands::get_onboarding_status,
             commands::get_personal_season_review,
+            commands::get_career_achievements,
             commands::get_credential_status,
             commands::get_deepseek_key_status,
             commands::save_deepseek_key,

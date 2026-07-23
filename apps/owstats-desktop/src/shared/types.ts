@@ -648,6 +648,20 @@ export type PersonalSeasonReview = {
   maps: MapAdaptability;
 };
 
+export type CareerAchievementTier = {
+  level: number;
+  requirement: string;
+  unlockedAt: number | null;
+};
+
+export type CareerAchievement = {
+  key: string;
+  title: string;
+  detail: string;
+  currentLevel: number;
+  tiers: CareerAchievementTier[];
+};
+
 export type RoleRankSummary = {
   roleType: string;
   roleLabel: string;

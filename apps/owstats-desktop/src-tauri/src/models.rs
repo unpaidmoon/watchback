@@ -653,6 +653,24 @@ pub struct PersonalReviewRequest {
     pub season: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerAchievementTier {
+    pub level: i64,
+    pub requirement: String,
+    pub unlocked_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CareerAchievement {
+    pub key: String,
+    pub title: String,
+    pub detail: String,
+    pub current_level: i64,
+    pub tiers: Vec<CareerAchievementTier>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingStatusRequest {

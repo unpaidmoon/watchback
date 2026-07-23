@@ -15,8 +15,8 @@ const reviewPageSource = readFileSync(new URL("../src/pages/PersonalReviewPage.t
 assert.match(reviewPageSource, /if \(!Number\.isFinite\(scrollY\)\) \{ sessionStorage\.removeItem\(reviewScrollKey\(href\)\); return; \}/, "invalid persisted review scroll values must be cleared");
 
 assert.equal(buildReviewHref(23), "/review?season=23");
-assert.equal(buildAchievementsHref(23), "/achievements?season=23");
-assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements?season=23");
+assert.equal(buildAchievementsHref(23), "/achievements");
+assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=achievements")), "/achievements");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=friends")), "/review?season=23");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=23&view=unknown")), "/review?season=23");
 assert.equal(legacyReviewRedirectHref(new URLSearchParams("season=abc&view=achievements")), "/achievements");

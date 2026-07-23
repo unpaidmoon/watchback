@@ -50,8 +50,8 @@ assert.deepEqual(
 );
 assert.equal(
   fixtureShell.navigation.find((item) => item.label === "成就")?.route,
-  "/achievements?season=23",
-  "shell fixture routes achievements to the anonymous S23 visual state",
+  "/achievements",
+  "shell fixture routes achievements to the career-scoped visual state",
 );
 assert.equal(fixtureMatches.length, 2, "match fixture contains one normal row and one arena row");
 assert.equal(fixtureNormalDetail.arenaDetail, null, "normal detail exercises the non-arena workbench branch");
@@ -96,6 +96,7 @@ assert.deepEqual(
   {
     matches: "list_match_timeline",
     review: "get_personal_season_review",
+    achievements: "get_career_achievements",
     mmr: "get_career_mmr_overview",
     ranking: "get_rankings",
     commandCenter: "get_onboarding_status",

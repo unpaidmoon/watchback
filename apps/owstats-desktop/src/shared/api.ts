@@ -11,6 +11,7 @@ import type {
   CareerMmrRecentExplanations,
   CareerMmrSeasonBreakdown,
   CareerRole,
+  CareerAchievement,
   FilterOptions,
   CredentialStatus,
   DeepSeekKeyStatus,
@@ -127,6 +128,10 @@ export function getOnboardingStatus(season?: number) {
 
 export function getPersonalSeasonReview(season?: number) {
   return invoke<PersonalSeasonReview>("get_personal_season_review", { request: { season } });
+}
+
+export function getCareerAchievements() {
+  return invoke<CareerAchievement[]>("get_career_achievements");
 }
 
 export function getCredentialStatus() {

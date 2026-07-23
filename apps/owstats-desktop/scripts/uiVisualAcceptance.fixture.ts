@@ -1,4 +1,5 @@
 import type {
+  CareerAchievement,
   CareerMmrBuildStatus,
   CareerMmrHistory,
   CareerMmrModeBreakdown,
@@ -23,7 +24,7 @@ export const fixtureShell = {
   navigation: [
     { label: "对局", route: "/matches" },
     { label: "战报", route: "/review?season=23&view=overview" },
-    { label: "成就", route: "/achievements?season=23" },
+    { label: "成就", route: "/achievements" },
     { label: "排行", route: "/ranking?season=23&tab=heroes" },
     { label: "生涯 MMR", route: "/career-mmr" },
     { label: "指挥台", route: "/onboarding" },
@@ -626,9 +627,26 @@ export const fixtureEmptyOnboarding = {
   health: { readable: true, warnings: ["当前没有可展示的合成赛季数据"] },
 } satisfies OnboardingStatus;
 
+const fixtureAchievementKeys = ["win-streak", "s-grade", "carry", "signature", "hero-focus", "switching", "glass-cannon", "damage-machine", "bloodbath", "comeback", "godlike-run", "iron-wall", "rank-proof", "battle-hardened", "brothers-in-arms", "best-teammate", "unwavering", "wealth-tycoon", "stadium-ascendant"];
+export const fixtureCareerAchievements = fixtureAchievementKeys.map((key, index) => {
+  const currentLevel = index % 4;
+  return {
+    key,
+    title: `合成成就 ${index + 1}`,
+    detail: "匿名合成成就说明",
+    currentLevel,
+    tiers: [1, 2, 3].map((level) => ({
+      level,
+      requirement: `合成等级 ${level} 达成条件`,
+      unlockedAt: level <= currentLevel ? 1783733400 + index * 86400 + level * 3600 : null,
+    })),
+  };
+}) satisfies CareerAchievement[];
+
 export const visualPrimaryRequests = {
   matches: "list_match_timeline",
   review: "get_personal_season_review",
+  achievements: "get_career_achievements",
   mmr: "get_career_mmr_overview",
   ranking: "get_rankings",
   commandCenter: "get_onboarding_status",
@@ -653,6 +671,7 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
     commands: {
       list_match_timeline: {},
       get_personal_season_review: {},
+      get_career_achievements: {},
       get_career_mmr_overview: {},
       get_rankings: {},
       get_onboarding_status: {},
@@ -663,6 +682,7 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
     commands: {
       list_match_timeline: { delayMs: 450 },
       get_personal_season_review: { delayMs: 450 },
+      get_career_achievements: { delayMs: 450 },
       get_career_mmr_overview: { delayMs: 450 },
       get_rankings: { delayMs: 450 },
       get_onboarding_status: { delayMs: 450 },
@@ -673,6 +693,7 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
     commands: {
       list_match_timeline: { response: [] },
       get_personal_season_review: { response: fixtureEmptyReview },
+      get_career_achievements: { response: [] },
       get_career_mmr_overview: { response: fixtureEmptyCareerOverview },
       get_rankings: { response: fixtureEmptyRanking },
       get_onboarding_status: { response: fixtureEmptyOnboarding },
@@ -683,6 +704,7 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
     commands: {
       list_match_timeline: { errorMessage: "合成视觉验收错误：对局请求失败，请重新加载。" },
       get_personal_season_review: { errorMessage: "合成视觉验收错误：战报请求失败，请重新加载。" },
+      get_career_achievements: { errorMessage: "合成视觉验收错误：成就请求失败，请重新加载。" },
       get_career_mmr_overview: { errorMessage: "合成视觉验收错误：生涯 MMR 请求失败，请重新加载。" },
       get_rankings: { errorMessage: "合成视觉验收错误：排行请求失败，请重新加载。" },
       get_onboarding_status: { errorMessage: "合成视觉验收错误：指挥台请求失败，请重新加载。" },
@@ -698,6 +720,7 @@ export const visualInvokeResponses: Record<string, unknown> = {
   get_match_details: fixtureMatchDetailsById,
   refresh_match_evaluations: null,
   get_personal_season_review: fixtureReview,
+  get_career_achievements: fixtureCareerAchievements,
   get_season_analysis: fixtureAnalysis,
   get_career_mmr_overview: fixtureCareerOverview,
   get_role_mmr_history: fixtureCareerHistory,

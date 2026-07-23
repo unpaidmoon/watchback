@@ -19,6 +19,13 @@ assertEqual(viteConfig.includes("server.fs"), false, "Vite does not allow machin
 assertEqual(viteConfig.includes("assets/stadium/manifest.json"), true, "build removes the non-runtime stadium source manifest from dist");
 assertEqual(assetsInventory.includes("achievements/achievement-glow-tier-2.webp"), true, "tier II achievement glow is packaged");
 assertEqual(assetsInventory.includes("achievements/achievement-glow-tier-3.webp"), true, "tier III achievement glow is packaged");
+const careerAchievementKeys = ["win-streak", "s-grade", "carry", "signature", "hero-focus", "switching", "glass-cannon", "damage-machine", "bloodbath", "comeback", "godlike-run", "iron-wall", "rank-proof", "battle-hardened", "brothers-in-arms", "best-teammate", "unwavering", "wealth-tycoon", "stadium-ascendant"];
+for (const key of careerAchievementKeys) {
+  for (const tier of [1, 2, 3]) {
+    assertEqual(assetsInventory.includes(`achievements/token-style/${key}-token-tier-${tier}.png`), true, `${key} tier ${tier} is packaged`);
+  }
+}
+assertEqual(assetsInventory.includes("achievements/token-style/peak-token"), false, "removed peak achievement is not packaged");
 
 assertEqual(shion?.cn_name, "死怨", "Shion uses the localized Chinese hero name");
 

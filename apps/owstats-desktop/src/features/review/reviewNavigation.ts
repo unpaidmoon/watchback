@@ -15,8 +15,8 @@ export function buildReviewHref(season: number) {
   return `/review?${params.toString()}`;
 }
 
-export function buildAchievementsHref(season: number) {
-  return `/achievements?season=${season}`;
+export function buildAchievementsHref(_season?: number) {
+  return "/achievements";
 }
 
 export function parsePositiveSeasonParam(value: string | null) {
@@ -30,7 +30,7 @@ export function legacyReviewRedirectHref(params: URLSearchParams) {
   if (view === null) return null;
   const season = parsePositiveSeasonParam(params.get("season"));
   const suffix = season === undefined ? "" : `?season=${season}`;
-  return view === "achievements" ? `/achievements${suffix}` : `/review${suffix}`;
+  return view === "achievements" ? "/achievements" : `/review${suffix}`;
 }
 
 export function buildReviewRankingHref(season: number) {

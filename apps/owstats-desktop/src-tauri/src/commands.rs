@@ -11,12 +11,13 @@ use crate::{
     quick_list_update_with_credentials_and_target_paths_base_url,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
-    AccountLoginResult, ClearPlayerTargetResult, CredentialLoginCancelResult, CredentialStatus,
-    DeepSeekKeyStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters, FriendDetail,
-    ImportSummary, LoginTargetStatus, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView,
-    MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest,
-    PersonalSeasonReview, PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse,
-    SeasonAnalysis, SeasonSyncResult, SyncRequest, UpdateCheckResult, UserSettings,
+    AccountLoginResult, CareerAchievement, ClearPlayerTargetResult, CredentialLoginCancelResult,
+    CredentialStatus, DeepSeekKeyStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters,
+    FriendDetail, ImportSummary, LoginTargetStatus, MatchDetailView, MatchFavoriteRequest,
+    MatchFavoriteView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
+    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
+    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SeasonSyncResult, SyncRequest,
+    UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -147,6 +148,14 @@ pub fn get_personal_season_review(
 ) -> Result<PersonalSeasonReview, String> {
     let account = active_account(&accounts)?;
     crate::get_personal_season_review(&account.database(), request).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_career_achievements(
+    accounts: State<'_, AccountContextManager>,
+) -> Result<Vec<CareerAchievement>, String> {
+    let account = active_account(&accounts)?;
+    crate::get_career_achievements(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]
