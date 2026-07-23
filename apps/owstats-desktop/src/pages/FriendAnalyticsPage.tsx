@@ -1,4 +1,4 @@
-import { AlertCircle, Map } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -246,13 +246,6 @@ export function MapAnalysisModules({
 
   return (
     <>
-      <header className="sectionHeader phase6InlineHeader">
-        <div>
-          <span className="phase6Eyebrow">地图分析</span>
-          <h2>地图表现概览</h2>
-        </div>
-        <Map size={22} />
-      </header>
       {analysis ? <MapCardGrid analysis={analysis} season={season} /> : <div className="emptyState compact">暂无可用地图数据。</div>}
     </>
   );

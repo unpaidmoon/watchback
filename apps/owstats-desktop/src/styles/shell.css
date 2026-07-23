@@ -123,29 +123,6 @@
   gap: var(--space-2);
 }
 
-.appDataEntry {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  color: var(--text-secondary);
-  background: var(--surface-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: none;
-  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
-}
-
-.appDataEntry:hover {
-  color: var(--text-primary);
-  background: var(--surface-control);
-  transform: translateY(-1px);
-}
-
 .appCanvas {
   min-height: 0;
   padding: clamp(24px, 2vw, 32px);

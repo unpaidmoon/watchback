@@ -560,7 +560,7 @@ export const fixtureCommandCenter = {
   seasonLabel: "S23",
   syncState: "可同步",
   dataHealth: "合成数据健康",
-  tools: ["检查更新", "退出登录"],
+  tools: ["退出登录"],
 } as const;
 
 export const fixtureEmptyReview = {

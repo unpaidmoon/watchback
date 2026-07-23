@@ -3,7 +3,6 @@ import {
   AlertCircle,
   BadgeInfo,
   CheckCircle2,
-  Download,
   FileText,
   FolderOpen,
   Github,
@@ -14,7 +13,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   addAccount,
   cancelDashenLogin,
-  checkAppUpdate,
   confirmLoginTargetSwitch,
   getOnboardingStatus,
   getSeasonSyncStatus,
@@ -81,7 +79,6 @@ export function OnboardingPage() {
   const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(false);
@@ -582,20 +579,6 @@ export function OnboardingPage() {
     }
   }
 
-  async function runUpdateCheck() {
-    setCheckingUpdate(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await checkAppUpdate();
-      setNotice(result.message);
-    } catch (err) {
-      setError(productErrorMessage(err));
-    } finally {
-      setCheckingUpdate(false);
-    }
-  }
-
   const credentialReady = status?.credentialStatus.state === "ready";
   const accountOperationBusy = busyAccountAction !== null || targetAction !== null;
   const activeAccount = accountStatus?.accounts.find((account) => account.isActive) ?? null;
@@ -641,14 +624,6 @@ export function OnboardingPage() {
       <PageHeader
         title="指挥台"
         description="管理当前登录账号、赛季同步与本地数据状态"
-        actions={(
-          <>
-            <button className="ghostButton" type="button" onClick={runUpdateCheck} disabled={checkingUpdate}>
-              <Download size={18} />
-              {checkingUpdate ? "检查中" : "检查更新"}
-            </button>
-          </>
-        )}
       />
       {(error || notice) && (
         <div

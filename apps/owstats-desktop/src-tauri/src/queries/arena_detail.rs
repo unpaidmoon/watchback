@@ -18,13 +18,22 @@ pub(super) struct FightListProjection {
     pub(super) duration_sec: Option<i64>,
 }
 
-pub(super) fn fight_list_projection(raw_detail_json: Option<&str>) -> Option<FightListProjection> {
+pub(super) fn fight_list_projection(
+    raw_detail_json: Option<&str>,
+    current_bnet: Option<&str>,
+) -> Option<FightListProjection> {
     let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
     let last_round = final_valid_arena_round(&detail)?;
-    let player = last_round
-        .get("teammateList")
-        .and_then(Value::as_array)
-        .and_then(|players| players.first());
+    let player = current_bnet.and_then(|current_bnet| {
+        last_round
+            .get("teammateList")
+            .and_then(Value::as_array)
+            .and_then(|players| {
+                players
+                    .iter()
+                    .find(|player| string_field(player, "bnetId").as_deref() == Some(current_bnet))
+            })
+    });
     Some(FightListProjection {
         team_score: optional_i64(last_round, "teamScore"),
         opponent_score: optional_i64(last_round, "opponentScore"),
@@ -38,7 +47,10 @@ pub(super) fn fight_list_projection(raw_detail_json: Option<&str>) -> Option<Fig
     })
 }
 
-pub(super) fn stadium_team_awards(raw_detail_json: Option<&str>) -> Vec<MatchPerformanceAward> {
+pub(super) fn stadium_team_awards(
+    raw_detail_json: Option<&str>,
+    current_bnet: Option<&str>,
+) -> Vec<MatchPerformanceAward> {
     let Some(detail) = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())
     else {
         return Vec::new();
@@ -46,7 +58,15 @@ pub(super) fn stadium_team_awards(raw_detail_json: Option<&str>) -> Vec<MatchPer
     let Some(round) = final_valid_arena_round(&detail) else {
         return Vec::new();
     };
-    let players = player_rows(round.get("teammateList"), "teammate", &HashMap::new());
+    let mut players = player_rows(round.get("teammateList"), "teammate", &HashMap::new());
+    let Some(current_index) = current_bnet.and_then(|current_bnet| {
+        players
+            .iter()
+            .position(|player| player.bnet_id == current_bnet)
+    }) else {
+        return Vec::new();
+    };
+    players.swap(0, current_index);
     team_awards_from_players(&players)
 }
 

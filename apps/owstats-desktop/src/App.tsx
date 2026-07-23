@@ -1,4 +1,4 @@
-import { CircleDot, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Navigate, NavLink, Route, Routes, useSearchParams } from "react-router-dom";
 import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
@@ -52,13 +52,6 @@ export function App() {
               ))}
             </nav>
           </QaRegion>
-
-          <div className="appShellStatus phase6ShellStatus" aria-label="全局状态">
-            <NavLink className="appDataEntry" to="/onboarding#local-data" aria-label="查看本地数据" aria-current={false} onClick={guardNavigation}>
-              <CircleDot size={14} aria-hidden="true" />
-              本地数据
-            </NavLink>
-          </div>
         </header>
 
         <div className="appCanvas phase6ProductSurface">

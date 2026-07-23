@@ -27,6 +27,13 @@ pub(super) fn list_matches_impl(
     sql.push_str(" ORDER BY m.begin_ts DESC, m.match_id");
 
     let map_names = map_lookup(&conn)?;
+    let current_bnet = conn
+        .query_row(
+            "SELECT bnet_id FROM players WHERE TRIM(COALESCE(bnet_id, '')) <> '' ORDER BY updated_at DESC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
     let params: Vec<&dyn ToSql> = owned
         .iter()
         .map(|item| item.as_ref() as &dyn ToSql)
@@ -44,7 +51,7 @@ pub(super) fn list_matches_impl(
         let match_kind: String = row.get(23)?;
         let raw_detail_json: Option<String> = row.get(24)?;
         let fight_projection = if match_kind == "fight" {
-            fight_list_projection(raw_detail_json.as_deref())
+            fight_list_projection(raw_detail_json.as_deref(), current_bnet.as_deref())
         } else {
             None
         };
@@ -119,7 +126,7 @@ pub(super) fn list_matches_impl(
             is_favorite: row.get(25)?,
             evaluation: evaluation_from_row(row, 19)?,
             team_awards: if match_kind == "fight" {
-                stadium_team_awards(raw_detail_json.as_deref())
+                stadium_team_awards(raw_detail_json.as_deref(), current_bnet.as_deref())
             } else {
                 Vec::new()
             },

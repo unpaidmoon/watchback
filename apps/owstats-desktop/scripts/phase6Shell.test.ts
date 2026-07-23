@@ -34,6 +34,7 @@ assertEqual(typeof listAccounts, "function", "account manager API wrapper exists
 
 const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const friendAnalyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.tsx", import.meta.url), "utf8");
 const seasonHealthSource = readFileSync(new URL("../src/features/command-center/SeasonHealthPanel.tsx", import.meta.url), "utf8");
 const seasonWorkbenchSource = readFileSync(new URL("../src/features/command-center/SeasonSyncWorkbench.tsx", import.meta.url), "utf8");
 const accountIsolationSource = readFileSync(new URL("../src/features/command-center/accountOperationIsolation.ts", import.meta.url), "utf8");
@@ -145,9 +146,10 @@ assertEqual(/\.phase6CommandCenter \.syncTargetStrip\s*\{[\s\S]*?background:\s*r
 assertEqual(/\.phase6CommandCenter \.phase6DataCoverageCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "coverage card is flattened into the account surface");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--glass-border\);/.test(commandCenterStyles), true, "season ledger rows use dividers instead of floating cards");
 assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
-assertEqual(appSource.includes('to="/onboarding#local-data"'), true, "local data entry targets the command center data section");
-assertEqual(appSource.includes('aria-label="查看本地数据"'), true, "local data entry has an accessible name");
-assertEqual(appSource.includes("aria-current={false}"), true, "local data entry does not duplicate the current page announcement");
+assertEqual(appSource.includes('to="/onboarding#local-data"'), false, "global shell removes the local data entry");
+assertEqual(appSource.includes('aria-label="查看本地数据"'), false, "global shell removes the local data entry accessible node");
+assertEqual(friendAnalyticsSource.includes('<span className="phase6Eyebrow">地图分析</span>'), false, "map analysis removes its redundant eyebrow");
+assertEqual(friendAnalyticsSource.includes("地图表现概览"), false, "map analysis removes its redundant title");
 assertEqual(appSource.includes("Bell"), false, "global shell removes the non-functional notification bell");
 assertEqual(appSource.includes("preloadDefaultMatchesPage"), false, "global shell no longer preloads matches");
 assertEqual(appSource.includes("<RouteFocusManager />"), true, "global shell manages route hash focus");
@@ -328,7 +330,7 @@ assertEqual(onboardingSource.includes("applyDashboardSnapshot"), true, "command 
 assertEqual(onboardingSource.includes("phase6ThemeSelector"), false, "command center settings removes theme selector controls");
 assertEqual(onboardingSource.includes("phase6CompactSettingsActions"), false, "settings account actions move into the launcher grid");
 assertEqual(onboardingSource.includes("StatusBadge tone={credentialTone(status?.credentialStatus.state)}"), false, "profile card removes the right-side login status capsule");
-assertEqual(onboardingSource.indexOf("onClick={runUpdateCheck}") < onboardingSource.lastIndexOf("<AccountManager"), true, "header update action appears before account management");
+assertEqual(onboardingSource.includes("onClick={runUpdateCheck}"), false, "command center removes the header update action");
 assertEqual(onboardingSource.lastIndexOf("<AccountManager") < onboardingSource.indexOf("commandCenterTools"), true, "account management appears before the secondary command-center tools");
 assertEqual(onboardingSource.includes("phase6NextActions"), false, "command center does not duplicate capsule navigation with next-step entries");
 assertEqual(onboardingSource.includes("CommandEntry"), false, "command center removes duplicated next-step entry component");

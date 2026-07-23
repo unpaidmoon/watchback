@@ -69,6 +69,11 @@ cargo fmt --check
 cargo test --tests
 ```
 
+- 开发过程中优先运行受影响的精准测试，例如 `cargo test --test <test_target>`；需要进一步缩小时，使用 `cargo test --test <test_target> <test_name> -- --exact`。不得为了省事跳过与改动直接相关的回归测试。
+- `cargo test --tests` 会为大量独立集成测试目标执行编译与链接，只在最终交付、发布验证或变更影响确实覆盖全局时运行；单次运行应预留至少 15–20 分钟，且不得与其他共享同一 `target` 目录的 Cargo 构建并发执行。
+- Cargo 命令超时时，不得立即重复启动同一构建。先运行 `Get-Process cargo,rustc -ErrorAction SilentlyContinue` 检查残留进程，并区分“测试失败”“构建或链接仍在进行”“等待构建目录锁”和“外层工具超时”。
+- 若超时后的 Cargo/rustc 仍在推进且无需中止，继续等待该次运行完成；若确认要终止，只能结束由当前 agent 启动且已核实进程树的构建进程。终止或异常退出后，应预期下一次全量运行可能继续或重新链接，交付报告不得将超时写成测试失败或测试通过。
+
 前端：
 
 ```powershell

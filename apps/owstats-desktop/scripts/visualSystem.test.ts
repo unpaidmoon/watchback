@@ -259,8 +259,6 @@ for (const [property, value] of Object.entries({
 const semanticNavLink = declarationsForSelector(shell, ".appNavLink");
 assertDeclaration(semanticNavLink, "min-height", "44px", "semantic navigation keeps a 44px hit target");
 assert.doesNotMatch(semanticNavLink, /(?:^|;)\s*transition\s*:/i, "navigation does not declare a transition without an opacity or transform state change");
-const dataEntry = declarationsForSelector(shell, ".appDataEntry");
-assertDeclaration(dataEntry, "min-height", "44px", "local data entry keeps a 44px hit target");
 
 assertDeclaration(declarationsForSelector(shared, ".phase6ProductNav a"), "min-height", "36px", "the test tracks the legacy nav height override");
 

@@ -159,6 +159,16 @@ assert.equal(teamTableSource.includes("<small>K/D/A</small>"), true, "detail tab
 assert.match(teamTableSource, /value=\{player\.kills\}[\s\S]*\/>\/\{player\.deaths\}\/\{player\.assists\}/);
 assert.match(matchStyleSource, /\.matchTeamPartyRail\s*\{[\s\S]*background:\s*var\(--data-secondary\)/);
 assert.match(matchStyleSource, /\.matchTeamTable\.enemy \.matchTeamPartyRail\s*\{[\s\S]*background:\s*var\(--status-danger\)/);
+assert.match(
+  matchStyleSource,
+  /\.phase7CompactPlayerRowToggle\s*\{[^}]*width:\s*100%/s,
+  "expandable arena player rows should fill the available team-table width",
+);
+assert.match(
+  matchStyleSource,
+  /\.matchTeamTable\s+\.phase6CompactPlayerRow\.phase7CompactPlayerExpandable,\s*\.matchTeamTable\.enemy\s+\.phase6CompactPlayerRow\.phase7CompactPlayerExpandable\s*\{[^}]*grid-template-columns:\s*86px\s+minmax\(0,\s*1fr\)/s,
+  "enemy arena player rows should retain the expandable two-column outer grid",
+);
 assert.doesNotMatch(matchStyleSource, /border-left-color:\s*var\(--status-danger\)/);
 assert.doesNotMatch(matchStyleSource, /#1e8ee7|#dc304f/i, "feature styles should not restore saturated team-row fills");
 assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), false, "MatchListPane should no longer own the scroll ref");

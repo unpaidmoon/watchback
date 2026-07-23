@@ -275,6 +275,17 @@ fn list_matches_includes_fight_rows_and_uses_last_round_map_preview() {
                                     "gameTimeSec": 222,
                                     "teammateList": [
                                         {
+                                            "bnetId": 2000,
+                                            "name": "Teammate#2000",
+                                            "heroGuid": "hero-other",
+                                            "kill": 70,
+                                            "assist": 60,
+                                            "death": 50,
+                                            "heroDamage": 70000,
+                                            "cure": 60000,
+                                            "resistDamage": 50000
+                                        },
+                                        {
                                             "bnetId": 1000,
                                             "name": "Current#1000",
                                             "heroGuid": "hero-current",
@@ -320,6 +331,10 @@ fn list_matches_includes_fight_rows_and_uses_last_round_map_preview() {
     assert_eq!(arena.healing, 6000);
     assert_eq!(arena.mitigation, 5000);
     assert_eq!(arena.duration_sec, 222);
+    assert!(
+        arena.team_awards.is_empty(),
+        "current player must not inherit the first teammate's performance awards"
+    );
 
     let filtered = list_matches(
         &db,
