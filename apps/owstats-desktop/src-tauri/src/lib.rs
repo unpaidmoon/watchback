@@ -18,6 +18,7 @@ mod database;
 mod db;
 pub mod deepseek_key;
 mod importer;
+pub mod install_data_migration;
 pub mod login_flow;
 pub mod login_target;
 mod match_evaluation;
