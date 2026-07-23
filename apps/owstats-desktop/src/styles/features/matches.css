@@ -306,6 +306,11 @@
   text-align: center;
 }
 
+html:has(.matchesPage),
+body:has(.matchesPage) {
+  overflow: hidden;
+}
+
 .appFrame:has(.matchesPage) {
   height: calc(100dvh - 16px);
   min-height: 0;
@@ -315,7 +320,9 @@
 
 .appCanvas:has(> .matchesPage) {
   flex: 1;
+  height: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .matchesPage {
@@ -342,7 +349,7 @@
 .matchesWorkbench.phase6MatchWorkbench {
   width: 100%;
   max-width: none;
-  height: auto;
+  height: 100%;
   min-height: 0;
   margin: 0;
   display: grid;

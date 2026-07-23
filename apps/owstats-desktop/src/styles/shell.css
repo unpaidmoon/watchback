@@ -45,9 +45,17 @@
 }
 
 .appBrand > .phase6ProductLogo {
-  background: var(--action-primary);
-  color: var(--action-on-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: #F4F6F0;
+  color: var(--text-primary);
   box-shadow: none;
+}
+
+.appBrand > .phase6ProductLogo img {
+  display: block;
+  width: 32px;
+  height: 32px;
 }
 
 .appBrandName {

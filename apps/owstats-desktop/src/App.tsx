@@ -1,4 +1,3 @@
-import { Sparkles } from "lucide-react";
 import { Navigate, NavLink, Route, Routes, useSearchParams } from "react-router-dom";
 import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
@@ -13,6 +12,8 @@ import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
 import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
 import { buildReviewHref, legacyReviewRedirectHref, parsePositiveSeasonParam } from "./features/review/reviewNavigation";
+
+const watchbackMarkUrl = new URL("../assets/brand/watchback/watchback-mark.svg", import.meta.url).href;
 
 function PersonalReviewRoute() {
   const [params] = useSearchParams();
@@ -34,12 +35,12 @@ export function App() {
       <main className="appFrame appShell phase6ProductShell">
         <header className="appTopBar phase6ProductTopBar">
           <div className="appBrand phase6ProductBrand">
-            <span className="phase6ProductLogo">
-              <Sparkles size={18} />
+            <span className="phase6ProductLogo" aria-hidden="true">
+              <img src={watchbackMarkUrl} alt="" />
             </span>
             <div>
-              <strong className="appBrandName">OWStatsLocal</strong>
-              <p>本地优先的守望先锋战绩工作台</p>
+              <strong className="appBrandName">Watchback</strong>
+              <p>守望战绩工具</p>
             </div>
           </div>
 

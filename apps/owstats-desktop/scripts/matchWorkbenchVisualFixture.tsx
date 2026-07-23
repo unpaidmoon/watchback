@@ -89,10 +89,10 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
     <main className="appFrame appShell phase6ProductShell" data-fixture-app={state}>
       <header className="appTopBar phase6ProductTopBar">
         <div className="appBrand phase6ProductBrand">
-          <span className="fixtureBrandMark" aria-hidden="true">OW</span>
+          <span className="fixtureBrandMark" aria-hidden="true">WB</span>
           <div>
-            <strong className="appBrandName">OWStatsLocal</strong>
-            <p>本地对局分析</p>
+            <strong className="appBrandName">Watchback</strong>
+            <p>守望战绩工具</p>
           </div>
         </div>
         <nav className="appNav phase6ProductNav" aria-label="一级导航">

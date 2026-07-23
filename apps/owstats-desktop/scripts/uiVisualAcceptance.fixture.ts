@@ -19,7 +19,7 @@ import type {
 } from "../src/shared/types.ts";
 
 export const fixtureShell = {
-  productName: "OWStatsLocal",
+  productName: "Watchback",
   statusLabel: "本地合成数据",
   navigation: [
     { label: "对局", route: "/matches" },
