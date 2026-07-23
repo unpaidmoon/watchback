@@ -26,7 +26,7 @@ export function buildArenaPlayerRoundSummary(
 }
 
 function findPlayer(round: ArenaDetailSlice, target: PlayerRow): PlayerRow | null {
-  const players = [...round.teammates, ...round.enemies];
+  const players = [...round.teammates, ...round.enemies].filter((candidate) => candidate.side === target.side);
   if (target.bnetId) {
     const byId = players.find((candidate) => candidate.bnetId === target.bnetId);
     if (byId) return byId;

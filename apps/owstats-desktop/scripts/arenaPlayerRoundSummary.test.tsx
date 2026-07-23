@@ -96,6 +96,16 @@ const enemyRows = buildArenaPlayerRoundSummary(enemyTarget, [
 assert.deepEqual(enemyRows.map((row) => row.startWorth), [3000, 5100]);
 assert.deepEqual(enemyRows[0]?.traitGuids, ["trait-enemy"]);
 
+const sameNameEnemy = player({ side: "enemy", bnetId: "", name: "同名玩家" });
+const sameNameRows = buildArenaPlayerRoundSummary(sameNameEnemy, [
+  round(
+    "round-1",
+    [player({ bnetId: "", name: "同名玩家", traitGuids: ["trait-team"] })],
+    [player({ ...sameNameEnemy, traitGuids: ["trait-enemy"] })],
+  ),
+]);
+assert.deepEqual(sameNameRows[0]?.traitGuids, ["trait-enemy"]);
+
 const dialogMarkup = renderToStaticMarkup(createElement(ArenaPlayerRoundSummaryDialog, {
   player: target,
   rows,
@@ -121,3 +131,12 @@ assert.match(tableSource, /onSelectPlayerSummary\?: \(player: PlayerRow, trigger
 assert.match(tableSource, /aria-label=\{`查看\$\{player\.name\}的汇总卡片`\}/);
 assert.match(tableSource, /className="phase7CompactPlayerRowToggle"/);
 assert.match(tableSource, /className="phase6CompactAvatarPlate phase7CompactAvatarSummaryButton"/);
+
+const styles = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
+assert.match(styles, /\.phase7SummaryDialogBackdrop\s*\{[^}]*position:\s*fixed/s);
+assert.match(styles, /\.phase7SummaryDialog\s*\{[^}]*max-height:\s*min\(760px,\s*calc\(100dvh - 48px\)\)/s);
+assert.match(styles, /\.phase7SummaryRound\s*\{[^}]*grid-template-columns:/s);
+assert.match(styles, /\.phase7SummarySlots\.trait\s*\{[^}]*grid-template-columns:\s*repeat\(4,/s);
+assert.match(styles, /\.phase7SummarySlots\.mod\s*\{[^}]*grid-template-columns:\s*repeat\(6,/s);
+assert.match(styles, /@media\s*\(max-width:\s*900px\)/s);
+assert.doesNotMatch(styles, /\.phase7SummaryDialog[\s\S]*overflow-x:\s*(auto|scroll)/s);

@@ -787,6 +787,249 @@
   }
 }
 
+.matchTeamTable .phase6CompactPlayerRow.phase7CompactPlayerExpandable {
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+.phase7CompactAvatarSummaryButton {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.phase7CompactAvatarSummaryButton:hover {
+  filter: brightness(0.98);
+}
+
+.phase7CompactAvatarSummaryButton:focus-visible,
+.phase7CompactPlayerRowToggle:focus-visible,
+.phase7SummaryCloseButton:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
+}
+
+.phase7CompactPlayerRowToggle {
+  min-width: 0;
+  min-height: 66px;
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1fr) minmax(72px, 0.3fr) minmax(170px, 0.64fr)
+    minmax(122px, 0.45fr) minmax(96px, 0.34fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phase7SummaryDialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(32 34 32 / 0.36);
+}
+
+.phase7SummaryDialog {
+  width: min(1040px, calc(100vw - 48px));
+  max-height: min(760px, calc(100dvh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-primary);
+  background: var(--glass-primary);
+  box-shadow: 0 10px 28px rgba(45, 54, 48, 0.045);
+}
+
+.phase7SummaryDialog > header {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.phase7SummaryDialog h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.phase7SummaryDialog header .phase6HeroAvatarShared {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+}
+
+.phase7SummaryPlayerName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase7SummaryCloseButton {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.phase7SummaryCloseButton:hover {
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--surface-control));
+}
+
+.phase7SummaryDialogBody {
+  min-height: 0;
+  padding: 8px 24px 24px;
+  overflow-y: auto;
+}
+
+.phase7SummaryRound {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 44px 92px minmax(220px, 0.8fr) minmax(300px, 1.2fr);
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.phase7SummaryRound:last-child {
+  border-bottom: 0;
+}
+
+.phase7SummaryRoundLabel {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.phase7SummaryWorth {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase7SummarySlots {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.phase7SummarySlots.trait {
+  grid-template-columns: repeat(4, minmax(40px, 1fr));
+}
+
+.phase7SummarySlots.mod {
+  grid-template-columns: repeat(6, 44px);
+}
+
+.phase7SummaryTraitSlot,
+.phase7SummaryModSlot {
+  min-width: 0;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--glass-border);
+  background: rgba(250, 251, 247, 0.38);
+  overflow: hidden;
+}
+
+.phase7SummaryTraitSlot {
+  border-radius: var(--radius-control);
+}
+
+.phase7SummaryModSlot {
+  border-radius: 999px;
+}
+
+.phase7SummaryTraitSlot img,
+.phase7SummaryModSlot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.phase7SummaryTraitSlot > span,
+.phase7SummaryModSlot > span {
+  max-width: 100%;
+  padding: 2px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .phase7SummaryDialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .phase7SummaryDialogBackdrop {
+    padding: 12px;
+  }
+
+  .phase7SummaryDialog > header,
+  .phase7SummaryDialogBody {
+    padding-inline: 16px;
+  }
+
+  .phase7SummaryRound {
+    grid-template-columns: 40px 72px minmax(160px, 0.8fr) minmax(240px, 1.2fr);
+    gap: 8px;
+  }
+
+  .phase7SummarySlots.mod {
+    grid-template-columns: repeat(6, minmax(36px, 44px));
+  }
+}
+
+@media (max-width: 700px) {
+  .phase7SummaryRound {
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding-block: 12px;
+  }
+
+  .phase7SummarySlots {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase7CompactAvatarSummaryButton,
+  .phase7SummaryCloseButton {
+    transition: none;
+  }
+}
+
 @media (max-width: 400px) {
   .phase6WorkbenchList button.matchListCard {
     height: auto;
