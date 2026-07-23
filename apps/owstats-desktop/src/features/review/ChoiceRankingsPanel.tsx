@@ -69,7 +69,10 @@ function RankingRow({ entry, rank, kind }: { entry: ChoiceRankingEntry; rank: nu
   return (
     <li className="phase6ChoiceRankingRow">
       <span className="phase6ChoiceRankingRank">{rank}</span>
-      <span className="phase6ChoiceRankingIcon" aria-hidden="true">
+      <span
+        className={`phase6ChoiceRankingIcon${kind === "perk" ? " phase6ChoiceRankingIcon--perk" : ""}`}
+        aria-hidden="true"
+      >
         {info?.iconUrl ? <img src={info.iconUrl} alt="" /> : null}
       </span>
       <span className="phase6ChoiceRankingName" title={name}>{name}</span>

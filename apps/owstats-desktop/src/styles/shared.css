@@ -5801,6 +5801,11 @@ select {
   background: var(--surface-control);
 }
 
+.phase6ChoiceRankingIcon--perk {
+  background: #fff;
+  border: 1px solid var(--glass-border);
+}
+
 .phase6ChoiceRankingIcon img {
   width: 28px;
   height: 28px;
