@@ -1,248 +1,33 @@
-# Watchback Brand Icon Implementation Plan
+# Watchback Geometric Brand Icon Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Produce an approved Watchback mascot logo and a Windows-ready application icon based on the anthropomorphic battle-journal design.
+**Goal:** Build the approved B2 “progressive time slices” Watchback mark as deterministic SVG assets, export Windows icon sizes, and verify geometry, colors, portability, and small-size legibility.
 
-**Architecture:** Treat the full logo and the application icon as two related assets, not one image at different scales. Use image generation for visual exploration and character refinement, require user approval at each visual checkpoint, then create a clean transparent master, a simplified icon master, and verified Windows-size exports. This plan produces brand assets only; application renaming and product integration remain a separate change.
+**Architecture:** Generate every final vector from one project-local Node script so the standard, monochrome, inverse, small-size, wordmark, and descriptor variants cannot drift. Use a `96 × 96` logical grid, shared geometry constants, and Tauri’s icon generator for platform exports. This asset-only plan does not rename the application or change product metadata.
 
-**Tech Stack:** OpenAI image generation, SVG, PNG, ICO, Tauri CLI icon generator, TypeScript resource tests
+**Tech Stack:** SVG, Node.js, TypeScript resource tests, Tauri 2 icon generator, `opentype.js`
 
 ---
 
 ## File Structure
 
-- `docs/brand/watchback/concepts/`: selected concept sheets retained as design history.
-- `docs/brand/watchback/watchback-logo-master.png`: approved transparent full-logo raster master.
-- `docs/brand/watchback/watchback-logo-master.svg`: cleaned editable vector master.
-- `docs/brand/watchback/watchback-logo-with-descriptor.svg`: standard lockup with the Chinese descriptor `守望战绩工具`.
-- `docs/brand/watchback/watchback-logo-with-descriptor.png`: transparent raster export of the standard lockup.
-- `docs/brand/watchback/watchback-logo-light.png`: full logo preview for light surfaces.
-- `docs/brand/watchback/watchback-logo-dark.png`: full logo preview for dark surfaces.
-- `apps/owstats-desktop/src-tauri/icons/watchback-icon-source.png`: approved square 1024px application-icon source.
-- `apps/owstats-desktop/src-tauri/icons/`: Tauri-generated platform icon files.
-- `apps/owstats-desktop/scripts/brandAssets.test.ts`: deterministic checks for required files, dimensions, and prohibited machine paths.
-- `apps/owstats-desktop/package.json`: adds the brand asset test to `test:resources`.
+- `apps/owstats-desktop/scripts/buildWatchbackBrand.mjs`: single source of truth for SVG geometry and generated variants.
+- `apps/owstats-desktop/scripts/watchbackBrandAssets.test.ts`: deterministic geometry, color, portability, and file-contract checks.
+- `apps/owstats-desktop/package.json`: brand build command, development dependency, and resource-test registration.
+- `apps/owstats-desktop/assets/brand/watchback/`: generated editable brand SVG files and review sheet.
+- `apps/owstats-desktop/src-tauri/icons/watchback-icon-source.svg`: standard square icon source consumed by Tauri.
+- `apps/owstats-desktop/src-tauri/icons/`: generated PNG, ICO, and ICNS platform assets.
 
-### Task 1: Generate the Character Direction Sheet
+### Task 1: Add Failing Brand Asset Contracts
 
 **Files:**
-- Create: `docs/brand/watchback/concepts/watchback-character-directions.png`
-
-- [ ] **Step 1: Read the image-generation instructions**
-
-Read the complete `imagegen` skill before making any image-generation call. Use the supplied reference image only for the general method of “character + memorable action + hand-drawn wordmark”; do not copy its bear, food, pose, colors, lettering, or composition.
-
-- [ ] **Step 2: Generate one three-panel character direction sheet**
-
-Use the image-generation tool with the approved design reference and this prompt:
-
-```text
-Create a clean three-panel logo concept sheet on a neutral warm-white background for a desktop application named “Watchback”.
-
-Show three distinct interpretations of the same original mascot: an anthropomorphic battle journal / match record book. The journal has a charcoal-gray soft cover, warm-white page edges, tiny focused eyes, short arms and legs, and carries a recording pen. It is running toward the right while deliberately turning its gaze back toward a trail made from short lines, dots, and restrained data marks representing past matches. Its personality is attentive, dependable, and quietly warm—not frantic, childish, triumphant, or aggressive.
-
-Style: original flat vector-like hand-drawn logo art, large simple color shapes, slightly irregular human-made contours, clear silhouette, minimal detail, no texture, no 3D rendering, no photorealism. Use only charcoal #303030, warm white #F4F6F0, muted teal #86B8B4, tiny optional purple data points #4B22D1, and gray-green background #E3E8E2.
-
-Each panel must explore a meaningfully different character proportion and running pose while preserving the same action. Do not include Overwatch logos, OW letters, heroes, weapons, armor, game UI, flames, neon colors, yellow explosion shapes, or copyrighted character designs. Do not include any text in this direction sheet.
-```
-
-- [ ] **Step 3: Inspect the generated sheet at original resolution**
-
-Check all three panels for:
-
-- a readable journal silhouette;
-- a forward-running body with an unmistakable backward gaze;
-- a clearly held pen;
-- a restrained, reliable expression;
-- no accidental `OW` monogram;
-- no official game imagery;
-- no extra limbs, broken page geometry, illegible marks, or unapproved colors.
-
-- [ ] **Step 4: Present the sheet for user selection**
-
-Show the image and ask the user to choose one panel, reject all panels, or combine explicitly named traits from no more than two panels. Do not proceed to Task 2 without a recorded choice.
-
-### Task 2: Refine the Approved Mascot
-
-**Files:**
-- Create: `docs/brand/watchback/concepts/watchback-mascot-refinement-v1.png`
-- Create if needed: `docs/brand/watchback/concepts/watchback-mascot-refinement-v2.png`
-
-- [ ] **Step 1: Generate a focused refinement sheet**
-
-Use the selected panel as the image reference. Preserve the chosen body proportion, cover shape, facial placement, and running direction. Generate three close variations that change only:
-
-- backward head/gaze clarity;
-- page flutter amount;
-- pen angle and arm silhouette;
-- match-trail rhythm.
-
-Require the approved five-color palette and a plain warm-white background. Do not introduce text, new props, clothing, weapons, official game elements, gradients, shadows, or textures.
-
-- [ ] **Step 2: Inspect visual consistency**
-
-Compare the three variations against the approved panel. Reject any variation that changes the mascot species/object, personality, running direction, core palette, or book-cover proportion.
-
-- [ ] **Step 3: Present the refinement sheet for approval**
-
-Ask the user to approve one variation. If the user requests a bounded correction, generate `watchback-mascot-refinement-v2.png` with only that correction. Stop after two refinement sheets and discuss the design premise again if no option is acceptable.
-
-### Task 3: Produce the Full Watchback Logo
-
-**Files:**
-- Create: `docs/brand/watchback/watchback-logo-master.png`
-- Create: `docs/brand/watchback/watchback-logo-light.png`
-- Create: `docs/brand/watchback/watchback-logo-dark.png`
-
-- [ ] **Step 1: Generate the transparent full-logo master**
-
-Use the approved mascot as the image reference and request:
-
-```text
-Create the final horizontal Watchback brand logo on a transparent background.
-
-Preserve the approved anthropomorphic battle-journal mascot exactly: it runs right while looking back at a restrained trail of past-match data marks. Keep the mascot centered slightly above the wordmark and leave comfortable clear space around the full mark.
-
-Add the English word “Watchback” below the illustration in a legible, slightly irregular hand-drawn black wordmark. The lettering should feel warm and human but mature, stable, and suitable for a desktop data product. Do not imitate the typography of the supplied reference image or any game logo. Do not add the Chinese descriptor to the generated artwork.
-
-Use only #303030, #F4F6F0, #86B8B4, and a very small amount of #4B22D1. Flat colors, no gradients, texture, shadow, glow, mockup, border, or background.
-```
-
-- [ ] **Step 2: Inspect text and transparency**
-
-At original resolution, verify:
-
-- `Watchback` is spelled exactly once and every letter is legible;
-- no pseudo-text or stray glyphs appear;
-- the background is transparent;
-- the mascot matches the approved refinement;
-- the logo has sufficient clear space and no clipped trail.
-
-If generated lettering is malformed, retain the approved mascot art and replace the wordmark during vector cleanup rather than repeatedly regenerating the mascot.
-
-- [ ] **Step 3: Create light and dark previews**
-
-Place the same transparent master on:
-
-- light preview background `#E3E8E2`;
-- dark preview background `#303030`.
-
-The preview images are review artifacts, not alternate logo masters.
-
-- [ ] **Step 4: Obtain final user approval**
-
-Show the transparent logo plus both background previews together. Require explicit approval before generating the application icon.
-
-### Task 4: Produce the Simplified Application Icon
-
-**Files:**
-- Create: `apps/owstats-desktop/src-tauri/icons/watchback-icon-source.png`
-- Modify: `apps/owstats-desktop/src-tauri/icons/icon.ico`
-- Create: `apps/owstats-desktop/src-tauri/icons/32x32.png`
-- Create: `apps/owstats-desktop/src-tauri/icons/128x128.png`
-- Create: `apps/owstats-desktop/src-tauri/icons/128x128@2x.png`
-- Create: `apps/owstats-desktop/src-tauri/icons/icon.icns`
-
-- [ ] **Step 1: Generate a square transparent icon master**
-
-Use the approved mascot reference and request a 1024×1024 icon source with:
-
-- the mascot occupying approximately 70% of the canvas;
-- a three-quarter close view of the journal cover;
-- focused eyes looking backward;
-- one visible pen;
-- one short muted-teal curved trail;
-- no wordmark, Chinese text, long trail, full running scene, tiny data labels, border, shadow, or background.
-
-Keep generous transparent padding so Windows icon masks do not clip the character.
-
-- [ ] **Step 2: Inspect the 1024px source**
-
-Verify square dimensions, transparency, approved palette, intact anatomy, clean book edges, and recognizable backward gaze.
-
-- [ ] **Step 3: Generate Tauri icon variants**
-
-Run:
-
-```powershell
-cd apps\owstats-desktop
-npx tauri icon src-tauri/icons/watchback-icon-source.png
-```
-
-Expected: Tauri writes the standard PNG, ICO, and ICNS variants under `src-tauri/icons/` without reporting an invalid source image.
-
-- [ ] **Step 4: Inspect the Windows sizes**
-
-Open the generated `icon.ico` and inspect its 16, 24, 32, 48, 64, 128, and 256px frames. At 16px, require only the dark journal body, backward-facing eyes, and muted-teal trail to remain distinct. If the pen or page flutter becomes noise, remove those details from the icon source and regenerate all variants.
-
-- [ ] **Step 5: Present the icon-size comparison for approval**
-
-Show the icon at 16, 24, 32, 48, 64, 128, and 256px on both `#E3E8E2` and `#303030` backgrounds. Require explicit approval before treating the icon as final.
-
-### Task 5: Create the Editable Vector Master
-
-**Files:**
-- Create: `docs/brand/watchback/watchback-logo-master.svg`
-- Create: `docs/brand/watchback/watchback-logo-with-descriptor.svg`
-- Create: `docs/brand/watchback/watchback-logo-with-descriptor.png`
-
-- [ ] **Step 1: Rebuild the approved logo as clean vector shapes**
-
-Trace the approved silhouette manually into grouped SVG paths with these stable group IDs:
-
-```xml
-<g id="match-trail">...</g>
-<g id="journal-pages">...</g>
-<g id="journal-cover">...</g>
-<g id="mascot-face">...</g>
-<g id="mascot-limbs">...</g>
-<g id="recording-pen">...</g>
-<g id="watchback-wordmark">...</g>
-```
-
-Use explicit hexadecimal fills from the approved palette. Do not embed the raster image, external fonts, linked files, scripts, metadata containing local paths, or base64 payloads.
-
-- [ ] **Step 2: Create the standard Chinese descriptor lockup**
-
-Duplicate the approved logo composition into `watchback-logo-with-descriptor.svg` and add one centered line beneath the English wordmark:
-
-```xml
-<text id="chinese-descriptor"
-      text-anchor="middle"
-      fill="#60645F"
-      font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Segoe UI, sans-serif"
-      font-size="14"
-      font-weight="400"
-      letter-spacing="1">守望战绩工具</text>
-```
-
-Export the same composition to `watchback-logo-with-descriptor.png` on a transparent background. The English-only master remains the source for the application icon and compact placements.
-
-- [ ] **Step 3: Validate the SVG structure**
-
-Run:
-
-```powershell
-rg -n "image href|data:image|script|C:\\|D:\\|/@fs/|url\\(" docs/brand/watchback/watchback-logo-master.svg
-rg -n "守望战绩工具" docs/brand/watchback/watchback-logo-with-descriptor.svg
-```
-
-Expected: the prohibited-content scan returns no matches, and the descriptor scan returns exactly the `chinese-descriptor` text line.
-
-- [ ] **Step 4: Compare vector and approved raster**
-
-Render both SVG files on transparent, light `#E3E8E2`, and dark `#303030` backgrounds. Confirm that pose, expression, proportions, palette, spacing, English wordmark spelling, and the Chinese descriptor match the approved design.
-
-### Task 6: Add Deterministic Brand Asset Checks
-
-**Files:**
-- Create: `apps/owstats-desktop/scripts/brandAssets.test.ts`
+- Create: `apps/owstats-desktop/scripts/watchbackBrandAssets.test.ts`
 - Modify: `apps/owstats-desktop/package.json`
 
-- [ ] **Step 1: Write the failing asset test**
+- [ ] **Step 1: Create the failing asset test**
 
-Create `apps/owstats-desktop/scripts/brandAssets.test.ts`:
+Create `apps/owstats-desktop/scripts/watchbackBrandAssets.test.ts`:
 
 ```ts
 import assert from "node:assert/strict";
@@ -250,76 +35,334 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const desktopRoot = resolve(import.meta.dirname, "..");
-const repoRoot = resolve(desktopRoot, "../..");
+const brandRoot = resolve(desktopRoot, "assets/brand/watchback");
+const iconRoot = resolve(desktopRoot, "src-tauri/icons");
 
-const requiredFiles = [
-  resolve(repoRoot, "docs/brand/watchback/watchback-logo-master.png"),
-  resolve(repoRoot, "docs/brand/watchback/watchback-logo-master.svg"),
-  resolve(repoRoot, "docs/brand/watchback/watchback-logo-with-descriptor.svg"),
-  resolve(repoRoot, "docs/brand/watchback/watchback-logo-with-descriptor.png"),
-  resolve(desktopRoot, "src-tauri/icons/watchback-icon-source.png"),
-  resolve(desktopRoot, "src-tauri/icons/icon.ico"),
+const required = [
+  resolve(brandRoot, "watchback-mark.svg"),
+  resolve(brandRoot, "watchback-mark-monochrome.svg"),
+  resolve(brandRoot, "watchback-mark-inverse.svg"),
+  resolve(brandRoot, "watchback-mark-16.svg"),
+  resolve(brandRoot, "watchback-mark-24.svg"),
+  resolve(brandRoot, "watchback-logo.svg"),
+  resolve(brandRoot, "watchback-logo-with-descriptor.svg"),
+  resolve(brandRoot, "watchback-review-sheet.svg"),
+  resolve(iconRoot, "watchback-icon-source.svg"),
+  resolve(iconRoot, "icon.ico"),
 ];
 
-for (const file of requiredFiles) {
-  assert.equal(existsSync(file), true, `missing Watchback brand asset: ${file}`);
+for (const file of required) {
+  assert.equal(existsSync(file), true, `missing Watchback asset: ${file}`);
 }
 
-const svg = readFileSync(requiredFiles[1], "utf8");
-assert.match(svg, /id="match-trail"/);
-assert.match(svg, /id="journal-cover"/);
-assert.match(svg, /id="watchback-wordmark"/);
-assert.doesNotMatch(svg, /(?:data:image|<script|C:\\|D:\\|\/@fs\/|https?:\/\/)/i);
+const standard = readFileSync(required[0], "utf8");
+assert.match(standard, /viewBox="0 0 96 96"/);
+assert.equal((standard.match(/<path\b/g) ?? []).length, 3);
+assert.equal((standard.match(/<circle\b/g) ?? []).length, 1);
+assert.equal((standard.match(/stroke="#202220"/g) ?? []).length, 3);
+assert.match(standard, /fill="#4B22D1"/);
+assert.match(standard, /stroke-width="10"/);
+assert.match(standard, /stroke-linecap="round"/);
 
-const descriptorSvg = readFileSync(requiredFiles[2], "utf8");
-assert.match(descriptorSvg, /id="chinese-descriptor"[\s\S]*守望战绩工具/);
-assert.doesNotMatch(descriptorSvg, /(?:data:image|<script|C:\\|D:\\|\/@fs\/|https?:\/\/)/i);
+const mono = readFileSync(required[1], "utf8");
+assert.doesNotMatch(mono, /#4B22D1/i);
+assert.match(mono, /fill="#202220"/);
 
-const sourcePng = readFileSync(requiredFiles[4]);
-assert.equal(sourcePng.subarray(1, 4).toString("ascii"), "PNG");
-assert.equal(sourcePng.readUInt32BE(16), 1024);
-assert.equal(sourcePng.readUInt32BE(20), 1024);
+const inverse = readFileSync(required[2], "utf8");
+assert.doesNotMatch(inverse, /#4B22D1/i);
+assert.match(inverse, /stroke="#F4F6F0"/);
+assert.match(inverse, /fill="#F4F6F0"/);
 
-console.log("Watchback brand asset checks passed");
+for (const file of required.slice(0, 9)) {
+  const source = readFileSync(file, "utf8");
+  assert.doesNotMatch(source, /(?:data:image|<script|(?:href|src)="https?:\/\/|C:\\|D:\\|\/@fs\/)/i);
+  assert.doesNotMatch(source, /(?:filter=|linearGradient|radialGradient|<image\b)/i);
+}
+
+const descriptor = readFileSync(required[6], "utf8");
+assert.match(descriptor, />守望战绩工具<\/text>/);
+
+const small16 = readFileSync(required[3], "utf8");
+assert.match(small16, /stroke-width="11\.5"/);
+
+const iconSource = readFileSync(required[8], "utf8");
+assert.match(iconSource, /<rect width="96" height="96" rx="22" fill="#F4F6F0"\/>/);
+
+console.log("Watchback brand asset contracts passed");
 ```
 
-- [ ] **Step 2: Run the test to verify it fails before all assets exist**
+- [ ] **Step 2: Register the test**
+
+Add `tsx scripts/watchbackBrandAssets.test.ts` to the end of `test:resources` in `apps/owstats-desktop/package.json`.
+
+- [ ] **Step 3: Run the test and verify the expected failure**
 
 Run:
 
 ```powershell
 cd apps\owstats-desktop
-npx tsx scripts/brandAssets.test.ts
+npx tsx scripts/watchbackBrandAssets.test.ts
 ```
 
-Expected before Tasks 3–5 are complete: failure naming the first missing brand asset.
+Expected: failure naming `watchback-mark.svg` as the first missing asset.
 
-- [ ] **Step 3: Add the test to resource verification**
-
-In `apps/owstats-desktop/package.json`, append the command to `test:resources`:
-
-```json
-"test:resources": "tsx scripts/runtimeConfig.test.ts && tsx scripts/prepareAssets.test.ts && tsx scripts/verifyDistPaths.test.ts && tsx scripts/phase6Assets.test.ts && tsx scripts/verifyResources.test.ts && tsx scripts/brandAssets.test.ts"
-```
-
-- [ ] **Step 4: Run brand and resource tests**
-
-Run:
-
-```powershell
-cd apps\owstats-desktop
-npx tsx scripts/brandAssets.test.ts
-npm run test:resources
-```
-
-Expected: both commands exit 0 and print `Watchback brand asset checks passed`.
-
-### Task 7: Final Verification
+### Task 2: Create the Deterministic SVG Generator
 
 **Files:**
-- Verify only; no new files.
+- Create: `apps/owstats-desktop/scripts/buildWatchbackBrand.mjs`
+- Modify: `apps/owstats-desktop/package.json`
 
-- [ ] **Step 1: Run frontend verification**
+- [ ] **Step 1: Add the development dependency**
+
+Run:
+
+```powershell
+cd apps\owstats-desktop
+npm install --save-dev opentype.js
+```
+
+Expected: `package.json` and `package-lock.json` record `opentype.js`.
+
+- [ ] **Step 2: Add the brand build command**
+
+Add this script to `apps/owstats-desktop/package.json`:
+
+```json
+"brand:build": "node scripts/buildWatchbackBrand.mjs"
+```
+
+- [ ] **Step 3: Implement the shared geometry and SVG writer**
+
+Create `apps/owstats-desktop/scripts/buildWatchbackBrand.mjs` with:
+
+```js
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import opentype from "opentype.js";
+
+const desktopRoot = resolve(import.meta.dirname, "..");
+const brandRoot = resolve(desktopRoot, "assets/brand/watchback");
+const iconRoot = resolve(desktopRoot, "src-tauri/icons");
+const fontPath = "C:\\Windows\\Fonts\\segoeui.ttf";
+
+const COLORS = {
+  ink: "#202220",
+  purple: "#4B22D1",
+  warmWhite: "#F4F6F0",
+  canvas: "#E3E8E2",
+  secondary: "#60645F",
+};
+
+const STANDARD_PATHS = [
+  "M77 25C64 13 43 14 29 27C15 40 14 61 27 75C38 87 57 89 71 79",
+  "M69 39C60 31 47 32 39 40C31 48 31 61 39 69C47 77 59 77 67 70",
+  "M61 53C57 49 51 49 47 53C43 57 44 63 48 66",
+];
+
+const SMALL_PATHS = [
+  "M77 25C64 13 43 14 29 27C15 40 14 61 27 75C38 87 57 89 71 79",
+  "M69 39C60 31 47 32 39 40C31 48 31 61 39 69C47 77 59 77 67 70",
+  "M60 53C56 50 51 50 48 54C45 58 46 63 50 66",
+];
+
+function mark({ ink, node, strokeWidth = 10, paths = STANDARD_PATHS }) {
+  return [
+    ...paths.map((d) => `<path d="${d}" fill="none" stroke="${ink}" stroke-width="${strokeWidth}" stroke-linecap="round"/>`),
+    `<circle cx="77" cy="25" r="${strokeWidth / 2}" fill="${node}"/>`,
+  ].join("");
+}
+
+function svg({ body, viewBox = "0 0 96 96", width = 96, height = 96, label = "Watchback" }) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox}" role="img" aria-label="${label}">${body}</svg>\n`;
+}
+
+function pathData(font, text, x, y, size) {
+  return font.getPath(text, x, y, size).toPathData(2);
+}
+
+async function main() {
+  await mkdir(brandRoot, { recursive: true });
+  await mkdir(iconRoot, { recursive: true });
+  const font = await new Promise((resolveFont, reject) => {
+    opentype.load(fontPath, (error, loaded) => error ? reject(error) : resolveFont(loaded));
+  });
+
+  const standard = mark({ ink: COLORS.ink, node: COLORS.purple });
+  const mono = mark({ ink: COLORS.ink, node: COLORS.ink });
+  const inverse = mark({ ink: COLORS.warmWhite, node: COLORS.warmWhite });
+  const small16 = mark({ ink: COLORS.ink, node: COLORS.purple, strokeWidth: 11.5, paths: SMALL_PATHS });
+  const small24 = mark({ ink: COLORS.ink, node: COLORS.purple, strokeWidth: 11, paths: SMALL_PATHS });
+
+  const wordmark = pathData(font, "Watchback", 118, 64, 34);
+  const logo = `<g transform="translate(8 8)">${standard}</g><path id="watchback-wordmark" d="${wordmark}" fill="${COLORS.ink}"/>`;
+  const descriptor = `<text x="118" y="88" fill="${COLORS.secondary}" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Segoe UI, sans-serif" font-size="13" font-weight="400" letter-spacing="1">守望战绩工具</text>`;
+
+  const files = new Map([
+    [resolve(brandRoot, "watchback-mark.svg"), svg({ body: standard })],
+    [resolve(brandRoot, "watchback-mark-monochrome.svg"), svg({ body: mono })],
+    [resolve(brandRoot, "watchback-mark-inverse.svg"), svg({ body: inverse })],
+    [resolve(brandRoot, "watchback-mark-16.svg"), svg({ body: small16 })],
+    [resolve(brandRoot, "watchback-mark-24.svg"), svg({ body: small24 })],
+    [resolve(brandRoot, "watchback-logo.svg"), svg({ body: logo, viewBox: "0 0 320 112", width: 320, height: 112 })],
+    [resolve(brandRoot, "watchback-logo-with-descriptor.svg"), svg({ body: `${logo}${descriptor}`, viewBox: "0 0 320 112", width: 320, height: 112, label: "Watchback 守望战绩工具" })],
+    [
+      resolve(iconRoot, "watchback-icon-source.svg"),
+      svg({
+        body: `<rect width="96" height="96" rx="22" fill="${COLORS.warmWhite}"/>${standard}`,
+        width: 1024,
+        height: 1024,
+      }),
+    ],
+  ]);
+
+  for (const [file, contents] of files) await writeFile(file, contents, "utf8");
+}
+
+await main();
+```
+
+- [ ] **Step 4: Run the generator**
+
+Run:
+
+```powershell
+cd apps\owstats-desktop
+npm run brand:build
+```
+
+Expected: seven files under `assets/brand/watchback/` and `watchback-icon-source.svg` under `src-tauri/icons/`.
+
+### Task 3: Add the Review Sheet and Verify the Vector Assets
+
+**Files:**
+- Modify: `apps/owstats-desktop/scripts/buildWatchbackBrand.mjs`
+- Create by generator: `apps/owstats-desktop/assets/brand/watchback/watchback-review-sheet.svg`
+
+- [ ] **Step 1: Add a deterministic review-sheet composition**
+
+Add these helpers above `main()`:
+
+```js
+function placed(contents, x, y, size) {
+  const scale = size / 96;
+  return `<g transform="translate(${x} ${y}) scale(${scale})">${contents}</g>`;
+}
+
+function label(text, x, y, fill = COLORS.secondary) {
+  return `<text x="${x}" y="${y}" fill="${fill}" font-family="Segoe UI, sans-serif" font-size="12" font-weight="400">${text}</text>`;
+}
+```
+
+Inside `main()`, after creating `logo` and `descriptor`, add:
+
+```js
+const smallSizes = [16, 24, 32, 48, 64, 128];
+let smallX = 32;
+const smallPreview = smallSizes.map((size) => {
+  const item = `${placed(size <= 24 ? (size === 16 ? small16 : small24) : standard, smallX, 214 - size, size)}${label(`${size}px`, smallX, 232)}`;
+  smallX += Math.max(size, 38) + 18;
+  return item;
+}).join("");
+
+const reviewSheet = [
+  `<rect width="640" height="400" fill="#FFFFFF"/>`,
+  `<rect x="20" y="20" width="180" height="170" rx="20" fill="${COLORS.warmWhite}"/>`,
+  placed(standard, 46, 40, 128),
+  label("standard C2", 64, 176),
+  `<rect x="230" y="20" width="180" height="170" rx="20" fill="#FFFFFF" stroke="#D7DAD5"/>`,
+  placed(mono, 256, 40, 128),
+  label("monochrome", 276, 176),
+  `<rect x="440" y="20" width="180" height="170" rx="20" fill="${COLORS.ink}"/>`,
+  placed(inverse, 466, 40, 128),
+  label("inverse", 504, 176, COLORS.warmWhite),
+  smallPreview,
+  `<g transform="translate(20 258) scale(0.72)">${logo}</g>`,
+  `<g transform="translate(20 324) scale(0.72)">${logo}${descriptor}</g>`,
+].join("");
+```
+
+Add this entry to `files`:
+
+```js
+[resolve(brandRoot, "watchback-review-sheet.svg"), svg({
+  body: reviewSheet,
+  viewBox: "0 0 640 400",
+  width: 640,
+  height: 400,
+  label: "Watchback brand review sheet",
+})],
+```
+
+- [ ] **Step 2: Regenerate all vectors**
+
+Run:
+
+```powershell
+cd apps\owstats-desktop
+npm run brand:build
+```
+
+Expected: `watchback-review-sheet.svg` is created or replaced deterministically.
+
+- [ ] **Step 3: Run the asset contracts**
+
+Run:
+
+```powershell
+npx tsx scripts/watchbackBrandAssets.test.ts
+```
+
+Expected: `Watchback brand asset contracts passed`.
+
+- [ ] **Step 4: Present the review sheet**
+
+Open the review sheet at original resolution and ask the user to inspect:
+
+- whether the three time slices remain distinct at `16px`;
+- whether the purple node remains separate from the outer slice;
+- whether the mark is optically centered;
+- whether the English wordmark feels neutral and professional;
+- whether the Chinese descriptor remains subordinate.
+
+Do not generate platform icons until the user approves this sheet.
+
+### Task 4: Generate and Inspect Platform Icons
+
+**Files:**
+- Modify: `apps/owstats-desktop/src-tauri/icons/icon.ico`
+- Create or modify: Tauri-generated files under `apps/owstats-desktop/src-tauri/icons/`
+
+- [ ] **Step 1: Generate the platform icon set**
+
+Run:
+
+```powershell
+cd apps\owstats-desktop
+npx tauri icon src-tauri/icons/watchback-icon-source.svg
+```
+
+Expected: Tauri exits 0 and produces standard PNG, ICO, and ICNS files under `src-tauri/icons/`.
+
+- [ ] **Step 2: Verify resource presence**
+
+Run:
+
+```powershell
+Get-Item src-tauri/icons/icon.ico,src-tauri/icons/32x32.png,src-tauri/icons/128x128.png,src-tauri/icons/128x128@2x.png,src-tauri/icons/icon.icns
+```
+
+Expected: every file exists and has non-zero size.
+
+- [ ] **Step 3: Inspect Windows small sizes**
+
+Render or extract `16`, `24`, `32`, `48`, `64`, `128`, and `256px` previews on warm-white and deep-charcoal backgrounds. If any adjacent slices merge, adjust only `SMALL_PATHS`, stroke width, or node radius in the generator, then regenerate and rerun Task 3 tests.
+
+### Task 5: Final Verification
+
+**Files:**
+- Verify only.
+
+- [ ] **Step 1: Run frontend tests and build**
 
 ```powershell
 cd apps\owstats-desktop
@@ -329,7 +372,7 @@ npm run build
 
 Expected: both commands exit 0.
 
-- [ ] **Step 2: Run repository checks**
+- [ ] **Step 2: Check diffs and scope**
 
 ```powershell
 cd D:\Codex\OW_data\owstats-local
@@ -337,17 +380,17 @@ git diff --check
 git status --short
 ```
 
-Expected: `git diff --check` exits 0. Review `git status --short` and confirm the Watchback files are the only changes made by this plan; preserve all pre-existing user changes.
+Expected: `git diff --check` exits 0. Confirm that this implementation changed only the approved design/plan, brand generator, brand tests, package metadata, generated brand SVG files, and Tauri icon assets. Preserve unrelated user changes.
 
-- [ ] **Step 3: Report privacy and release scope**
+- [ ] **Step 3: Report privacy and integration boundaries**
 
-Report that no real credentials, browser profiles, local SQLite databases, private player dumps, or real user data were read or copied. State explicitly that Tauri `productName`, window title, application identifier, frontend brand text, and installer metadata were not changed by this asset-only plan.
+Report that no real credentials, browser profiles, local SQLite databases, private player dumps, or real user data were read or copied. State explicitly that Tauri `productName`, application identifier, window title, frontend brand text, and installer metadata were not changed.
 
-- [ ] **Step 4: Commit only if explicitly authorized**
+- [ ] **Step 4: Commit only with explicit authorization**
 
-The project instructions prohibit staging or committing without explicit user authorization. If authorization is provided, stage only the Watchback plan files and brand assets, then commit with:
+If the user explicitly authorizes a commit:
 
 ```powershell
-git add docs/brand/watchback apps/owstats-desktop/src-tauri/icons apps/owstats-desktop/scripts/brandAssets.test.ts apps/owstats-desktop/package.json
-git commit -m "feat: add Watchback brand assets"
+git add docs/superpowers/specs/2026-07-24-watchback-brand-icon-design.md docs/superpowers/plans/2026-07-24-watchback-brand-icon.md apps/owstats-desktop/scripts/buildWatchbackBrand.mjs apps/owstats-desktop/scripts/watchbackBrandAssets.test.ts apps/owstats-desktop/package.json apps/owstats-desktop/package-lock.json apps/owstats-desktop/assets/brand/watchback apps/owstats-desktop/src-tauri/icons
+git commit -m "feat: add Watchback brand icon"
 ```
