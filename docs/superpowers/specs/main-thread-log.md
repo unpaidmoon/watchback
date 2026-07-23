@@ -1,6 +1,6 @@
-# OWStatsLocal Main Thread Log
+# Watchback Main Thread Log
 
-This document is the durable ledger for the OWStatsLocal main-thread workflow.
+This document is the durable ledger for the Watchback main-thread workflow.
 Use it to recover decisions when a Codex session is compacted, restarted, or
 split into execution and verification threads.
 
@@ -62,7 +62,7 @@ fields.
 ## Execution Thread Prompt Template
 
 ```text
-You are an OWStatsLocal execution thread.
+You are a Watchback execution thread.
 
 Project root:
 D:\Codex\OW_data\owstats-local
@@ -111,7 +111,7 @@ Deliver an evidence report with:
 ## Verification Thread Prompt Template
 
 ```text
-You are an OWStatsLocal verification thread. Review only; do not continue
+You are a Watchback verification thread. Review only; do not continue
 development.
 
 Project root:
@@ -168,7 +168,7 @@ Next step:
 ## 2026-07-02 Main Thread Established
 
 Goal:
-Establish the current Codex conversation as the OWStatsLocal main thread and
+Establish the current Codex conversation as the Watchback main thread and
 create durable recovery notes for future sessions.
 
 Decision:
@@ -205,7 +205,7 @@ This is a process document; it does not enforce behavior automatically.
 
 Next step:
 Use the main thread to generate execution-thread prompts for the next nontrivial
-OWStatsLocal task.
+Watchback task.
 
 ## 2026-07-02 Phase 7 Arena Match Detail
 

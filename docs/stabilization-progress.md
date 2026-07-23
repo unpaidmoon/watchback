@@ -1,4 +1,4 @@
-# OWStatsLocal 稳定化进度
+# Watchback 稳定化进度
 
 > 总设计：`docs/superpowers/specs/2026-07-10-personal-stable-sustainable-development-design.md`
 >

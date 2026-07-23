@@ -1,8 +1,8 @@
 [package]
 name = "owstats-desktop"
 version = "0.1.0"
-description = "OWStatsLocal desktop app"
-authors = ["OWStatsLocal"]
+description = "Watchback desktop app"
+authors = ["Watchback"]
 edition = "2021"
 default-run = "owstats-desktop"
 

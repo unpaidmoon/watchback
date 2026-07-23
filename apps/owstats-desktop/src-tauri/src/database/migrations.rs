@@ -78,7 +78,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if current > CURRENT_SCHEMA_VERSION {
         return Err(anyhow!(
-            "数据库版本高于当前程序，请升级 OWStatsLocal 后再打开此数据"
+            "数据库版本高于当前程序，请升级 Watchback 后再打开此数据"
         ));
     }
     for migration in MIGRATIONS

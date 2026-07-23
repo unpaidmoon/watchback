@@ -166,5 +166,5 @@ pub fn run() {
             commands::sync_season,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run OWStatsLocal");
+        .expect("failed to run Watchback");
 }

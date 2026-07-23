@@ -146,7 +146,7 @@ pub fn get_career_mmr_overview(db: &OwDatabase) -> Result<CareerMmrOverview> {
         composite_mmr,
         roles,
         discovered_seasons: seasons,
-        disclaimer: "OWStatsLocal 本地模型推算，并非暴雪官方隐藏分。".into(),
+        disclaimer: "Watchback 本地模型推算，并非暴雪官方隐藏分。".into(),
     })
 }
 

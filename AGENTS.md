@@ -1,8 +1,9 @@
-# OWStatsLocal 协作说明
+# Watchback 协作说明
 
 ## 项目边界
 
 - 工作根目录：`D:\Codex\OW_data\owstats-local`。
+- 本项目的主分支为 `codex/code-review`。
 - 主产品：`apps/owstats-desktop`，技术栈为 Tauri 2、React、TypeScript、Rust、SQLite。
 - 开始工作前先执行 `git status --short`；工作树经常包含用户正在进行的改动，除非明确要求，不要清理、覆盖、暂存或提交它们。
 - 优先用 `rg` 定位代码。Tauri 问题从 `src-tauri/src/commands.rs` 进入，UI 问题从对应页面或组件进入。
