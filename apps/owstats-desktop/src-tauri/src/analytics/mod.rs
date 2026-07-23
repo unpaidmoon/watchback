@@ -12,8 +12,10 @@ use std::collections::HashMap;
 
 mod arena;
 mod boards;
+mod choice_rankings;
 use arena::{arena_analytics_rows, looks_like_private_id};
 use boards::build_boards;
+use choice_rankings::choice_rankings_for_season;
 
 const MIN_SAMPLE: i64 = 5;
 const PHASE5_MIN_SAMPLE: i64 = 3;
@@ -142,6 +144,7 @@ pub fn get_season_analysis(db: &OwDatabase, season: Option<i64>) -> Result<Seaso
         season: selected,
         friend,
         map_cards: map_analysis_cards(db, selected)?,
+        choice_rankings: choice_rankings_for_season(db, selected)?,
     })
 }
 
