@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createLatestRequestGuard, hasReviewSeasonData, usePersonalSeasonReview } from "../features/review/usePersonalSeasonReview";
+import { ChoiceRankingsPanel } from "../features/review/ChoiceRankingsPanel";
 import { FriendAnalysisModules, MapAnalysisModules } from "./FriendAnalyticsPage";
 import { buildReviewHref, parsePositiveSeasonParam, reviewScrollKey, scheduleReviewScrollRestore } from "../features/review/reviewNavigation";
 import { getSeasonAnalysis } from "../shared/api";
@@ -27,7 +28,7 @@ export function PersonalReviewPage() {
   if (!review) return <section className="workspace reviewWorkspace phase6ReviewWorkspace">{header(selectedSeason)}<PageLoadingState message="正在加载个人赛季战报..." /></section>;
   if (!hasReviewSeasonData(review)) return <section className="workspace reviewWorkspace phase6ReviewWorkspace">{header(selectedSeason)}<ReviewEmptyState onAction={() => navigate("/onboarding")} /></section>;
   const titleSeason = selectedSeason ?? review.summary.season;
-  return <section className="workspace reviewWorkspace phase6ReviewWorkspace">{header(titleSeason)}<ReviewScrollRestorer season={titleSeason} /><div className="reviewReportFlow"><RoleAndHeroView review={review} /><FriendAnalysisModules analytics={analysis?.friend ?? null} loading={analysisLoading} error={analysisError} season={titleSeason} /><MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} season={titleSeason} /></div></section>;
+  return <section className="workspace reviewWorkspace phase6ReviewWorkspace">{header(titleSeason)}<ReviewScrollRestorer season={titleSeason} /><div className="reviewReportFlow"><RoleAndHeroView review={review} /><FriendAnalysisModules analytics={analysis?.friend ?? null} loading={analysisLoading} error={analysisError} season={titleSeason} /><ChoiceRankingsPanel rankings={analysis?.choiceRankings ?? null} loading={analysisLoading} error={analysisError} /><MapAnalysisModules analysis={analysis} loading={analysisLoading} error={analysisError} season={titleSeason} /></div></section>;
 }
 
 function ReviewScrollRestorer({ season }: { season: number }) { useLayoutEffect(() => { const href = buildReviewHref(season); const stored = sessionStorage.getItem(reviewScrollKey(href)); if (stored === null) return; const scrollY = Number(stored); if (!Number.isFinite(scrollY)) { sessionStorage.removeItem(reviewScrollKey(href)); return; } return scheduleReviewScrollRestore(scrollY, { requestFrame: (callback) => requestAnimationFrame(callback), cancelFrame: (frame) => cancelAnimationFrame(frame), scrollTo: (top) => window.scrollTo({ top }), readScrollY: () => window.scrollY, readMaxScrollY: () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) - window.innerHeight, removeStored: () => sessionStorage.removeItem(reviewScrollKey(href)) }); }, [season]); return null; }

@@ -199,7 +199,6 @@ fn wilson_lower(wins: i64, matches: i64) -> f64 {
     let n = matches as f64;
     let rate = wins as f64 / n;
     let z2 = WILSON_Z * WILSON_Z;
-    (rate + z2 / (2.0 * n)
-        - WILSON_Z * ((rate * (1.0 - rate) + z2 / (4.0 * n)) / n).sqrt())
+    (rate + z2 / (2.0 * n) - WILSON_Z * ((rate * (1.0 - rate) + z2 / (4.0 * n)) / n).sqrt())
         / (1.0 + z2 / n)
 }

@@ -92,7 +92,13 @@ fn rankings_are_season_scoped_current_player_only_and_deduplicated() {
             &db,
             &format!("normal-{index}"),
             22,
-            if index < 3 { "win" } else if index == 3 { "loss" } else { "draw" },
+            if index < 3 {
+                "win"
+            } else if index == 3 {
+                "loss"
+            } else {
+                "draw"
+            },
             &["my-perk", "my-perk"],
             &["teammate-perk"],
         );
@@ -101,9 +107,20 @@ fn rankings_are_season_scoped_current_player_only_and_deduplicated() {
 
     let analysis = get_season_analysis(&db, Some(22)).unwrap();
     let entry = &analysis.choice_rankings.normal_perks[0];
-    assert_eq!((entry.key.as_str(), entry.matches, entry.wins), ("my-perk", 5, 3));
-    assert!(analysis.choice_rankings.normal_perks.iter().all(|item| item.key != "teammate-perk"));
-    assert!(analysis.choice_rankings.normal_perks.iter().all(|item| item.key != "old-perk"));
+    assert_eq!(
+        (entry.key.as_str(), entry.matches, entry.wins),
+        ("my-perk", 5, 3)
+    );
+    assert!(analysis
+        .choice_rankings
+        .normal_perks
+        .iter()
+        .all(|item| item.key != "teammate-perk"));
+    assert!(analysis
+        .choice_rankings
+        .normal_perks
+        .iter()
+        .all(|item| item.key != "old-perk"));
 }
 
 #[test]
@@ -134,7 +151,12 @@ fn wilson_sorting_penalizes_small_samples_and_uses_stable_ties() {
     }
 
     let analysis = get_season_analysis(&db, Some(22)).unwrap();
-    let keys = analysis.choice_rankings.normal_perks.iter().map(|item| item.key.as_str()).collect::<Vec<_>>();
+    let keys = analysis
+        .choice_rankings
+        .normal_perks
+        .iter()
+        .map(|item| item.key.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(keys, vec!["eight-of-ten", "alpha", "beta"]);
 }
 
@@ -157,6 +179,12 @@ fn stadium_uses_only_the_final_loadout_and_applies_minimum_sample() {
     assert_eq!(rankings.confidence_level, 0.95);
     assert_eq!(rankings.stadium_traits[0].matches, 5);
     assert_eq!(rankings.stadium_mods[0].matches, 5);
-    assert!(rankings.stadium_traits.iter().all(|item| item.key != "round-only-trait"));
-    assert!(rankings.stadium_mods.iter().all(|item| item.key != "round-only-mod"));
+    assert!(rankings
+        .stadium_traits
+        .iter()
+        .all(|item| item.key != "round-only-trait"));
+    assert!(rankings
+        .stadium_mods
+        .iter()
+        .all(|item| item.key != "round-only-mod"));
 }

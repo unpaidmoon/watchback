@@ -723,6 +723,22 @@ export type SeasonAnalysis = {
   season: number | null;
   friend: FriendAnalytics;
   mapCards: MapAnalysisCards;
+  choiceRankings: ChoiceRankings;
+};
+
+export type ChoiceRankingEntry = {
+  key: string;
+  matches: number;
+  wins: number;
+  winRate: number;
+};
+
+export type ChoiceRankings = {
+  minSample: number;
+  confidenceLevel: number;
+  normalPerks: ChoiceRankingEntry[];
+  stadiumTraits: ChoiceRankingEntry[];
+  stadiumMods: ChoiceRankingEntry[];
 };
 
 export type OnboardingStatus = {
