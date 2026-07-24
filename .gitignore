@@ -3,19 +3,9 @@ config.personal.py
 config.py
 .env
 
-# Local credential cache. Never commit role_id/token.
-data/.dashen_credentials.json
-
-# Local user data and generated artifacts
-data/chrome-dashen-profile/
-data/reports/
-data/playwright/
-data/assets/
-data/ow_config_cache.json
+# Local user data, credentials, browser profiles, and generated artifacts
+/data/
 output/
-
-# Keep local data folder documentation visible in Git.
-!data/README.md
 
 # Python
 __pycache__/
@@ -76,7 +66,6 @@ court_result.json
 /.github/workflows/
 
 # Local reference/data dumps
-data/players/
 docs/reference/
 
 # Docker local deployment files
