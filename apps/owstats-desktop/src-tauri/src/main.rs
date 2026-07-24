@@ -27,6 +27,16 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        Ok(owstats_desktop_lib::StartupMode::DeleteInstallData { destination }) => {
+            let executable = match std::env::current_exe() {
+                Ok(value) => value,
+                Err(_) => std::process::exit(2),
+            };
+            if owstats_desktop_lib::run_delete_install_data_mode(&executable, &destination).is_err()
+            {
+                std::process::exit(2);
+            }
+        }
         Err(_) => std::process::exit(2),
     }
 }

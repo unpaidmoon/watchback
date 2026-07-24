@@ -2036,6 +2036,34 @@ fn migration_cli_rejects_missing_or_unknown_arguments() {
 }
 
 #[test]
+fn delete_cli_accepts_exactly_one_destination() {
+    let destination = std::path::PathBuf::from(r"D:\Watchback\data");
+    let mode = owstats_desktop_lib::parse_startup_mode([
+        "Watchback.exe",
+        "--delete-install-data",
+        destination.as_os_str().to_str().unwrap(),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        mode,
+        owstats_desktop_lib::StartupMode::DeleteInstallData { destination }
+    );
+
+    for args in [
+        vec!["Watchback.exe", "--delete-install-data"],
+        vec![
+            "Watchback.exe",
+            "--delete-install-data",
+            r"D:\Watchback\data",
+            "extra",
+        ],
+    ] {
+        assert!(owstats_desktop_lib::parse_startup_mode(args).is_err());
+    }
+}
+
+#[test]
 fn migration_execution_accepts_only_the_executable_data_directory() {
     let temp = tempfile::tempdir().unwrap();
     let install = temp.path().join("install");
@@ -2128,6 +2156,17 @@ fn copied_migration_binary(temp: &tempfile::TempDir) -> PathBuf {
     fs::create_dir_all(&install).unwrap();
     fs::copy(env!("CARGO_BIN_EXE_owstats-desktop"), &executable).unwrap();
     executable
+}
+
+#[cfg(windows)]
+fn create_junction(target: &std::path::Path, junction: &std::path::Path) {
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(junction)
+        .arg(target)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
 }
 
 #[cfg(windows)]
@@ -2225,6 +2264,60 @@ fn migration_binary_preserves_existing_data_before_validating_the_source() {
         assert!(output.stdout.is_empty());
         assert!(output.stderr.is_empty());
         assert_eq!(fs::read(data.join("retained.txt")).unwrap(), b"retained");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn delete_binary_removes_only_an_ordinary_authorized_data_tree() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = copied_migration_binary(&temp);
+    let install = executable.parent().unwrap();
+    let data = install.join("data");
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(data.join("nested")).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(data.join("nested").join("local.txt"), b"local").unwrap();
+    fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+
+    let output = Command::new(&executable)
+        .arg("--delete-install-data")
+        .arg(&data)
+        .output_with_deadline();
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    assert!(!data.exists());
+    assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+}
+
+#[cfg(windows)]
+#[test]
+fn delete_binary_rejects_root_and_descendant_junctions_without_external_writes() {
+    for descendant in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = copied_migration_binary(&temp);
+        let install = executable.parent().unwrap();
+        let data = install.join("data");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        if descendant {
+            fs::create_dir_all(&data).unwrap();
+            create_junction(&outside, &data.join("linked"));
+        } else {
+            create_junction(&outside, &data);
+        }
+
+        let output = Command::new(&executable)
+            .arg("--delete-install-data")
+            .arg(&data)
+            .output_with_deadline();
+
+        assert_silent_exit_two(output);
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        assert!(data.symlink_metadata().is_ok());
     }
 }
 

@@ -72,6 +72,11 @@ pub(crate) fn prepare_install_data_in_install_parent(
     )
 }
 
+#[cfg(windows)]
+pub(crate) fn delete_install_data_in_install_parent(parent: &InstallParentGuard) -> Result<()> {
+    windows_secure::delete_install_data(parent)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MigrationMarker {
@@ -668,6 +673,18 @@ mod windows_secure {
                 hook(parent);
             }
         });
+    }
+
+    pub(super) fn delete_install_data(parent: &InstallParentGuard) -> Result<()> {
+        let Some(root) = open_optional_child_fixed(
+            &parent.entry.handle,
+            OsStr::new("data"),
+            FILE_GENERIC_READ | DELETE,
+        )?
+        else {
+            return Ok(());
+        };
+        delete_tree_entry(root, parent.pinned_path.join("data"))
     }
 
     fn invoke_copy_open_hook(path: &Path) {
@@ -1446,6 +1463,10 @@ mod windows_secure {
 
     fn delete_tree(path: &Path) -> Result<()> {
         let root = open_fixed(path, FILE_GENERIC_READ | DELETE)?;
+        delete_tree_entry(root, path.to_path_buf())
+    }
+
+    fn delete_tree_entry(root: FixedEntry, root_path: PathBuf) -> Result<()> {
         if is_reparse(&root.information) {
             return Err(anyhow!("迁移临时目录包含不受支持的链接"));
         }
@@ -1457,7 +1478,7 @@ mod windows_secure {
         let mut budget = CleanupBudget::default();
         let mut frames = vec![DeleteFrame {
             handle: root.handle,
-            entries: fs::read_dir(path).context("无法枚举迁移临时目录")?,
+            entries: fs::read_dir(root_path).context("无法枚举迁移临时目录")?,
             depth: 0,
         }];
 
@@ -1473,7 +1494,11 @@ mod windows_secure {
                     invoke_cleanup_enumeration_hook();
                     budget.record_entry(limits)?;
                     let child_path = child.path();
-                    let child = open_fixed(&child_path, FILE_GENERIC_READ | DELETE)?;
+                    let child = open_child_fixed(
+                        &frames.last().expect("清理栈已检查为非空").handle,
+                        &child.file_name(),
+                        FILE_GENERIC_READ | DELETE,
+                    )?;
                     if is_reparse(&child.information) {
                         return Err(anyhow!("迁移临时目录包含不受支持的链接"));
                     }

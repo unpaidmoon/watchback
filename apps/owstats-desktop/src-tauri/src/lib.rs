@@ -78,6 +78,9 @@ pub enum StartupMode {
         source: std::option::Option<std::path::PathBuf>,
         destination: std::path::PathBuf,
     },
+    DeleteInstallData {
+        destination: std::path::PathBuf,
+    },
 }
 
 pub fn parse_startup_mode<I, S>(args: I) -> anyhow::Result<StartupMode>
@@ -90,6 +93,17 @@ where
     let Some(mode) = args.next() else {
         return Ok(StartupMode::Desktop);
     };
+    if mode == "--delete-install-data" {
+        let destination = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少删除目标参数"))?;
+        if args.next().is_some() {
+            return Err(anyhow::anyhow!("删除参数过多"));
+        }
+        return Ok(StartupMode::DeleteInstallData {
+            destination: destination.into(),
+        });
+    }
     if mode != "--prepare-install-data" {
         return Err(anyhow::anyhow!("不支持的启动参数"));
     }
@@ -112,6 +126,32 @@ where
         },
         destination: destination.into(),
     })
+}
+
+pub fn run_delete_install_data_mode(
+    executable: &std::path::Path,
+    destination: &std::path::Path,
+) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        let install_parent = fixed_install_parent_from_executable(executable)?;
+        if !strict_absolute_path(destination)
+            || !is_data_directory_name(destination)
+            || !install_data_migration::destination_belongs_to_install_parent(
+                &install_parent,
+                destination,
+            )?
+        {
+            return Err(anyhow::anyhow!("删除目标不是当前安装目录的数据目录"));
+        }
+        return install_data_migration::delete_install_data_in_install_parent(&install_parent);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (executable, destination);
+        Err(anyhow::anyhow!("当前平台不支持安装数据删除命令"))
+    }
 }
 
 pub fn run_install_data_mode(

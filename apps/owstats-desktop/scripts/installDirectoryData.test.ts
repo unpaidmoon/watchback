@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const config = JSON.parse(
@@ -11,6 +12,7 @@ assert.equal(
   config.bundle.windows.nsis.installerHooks,
   "./windows/installer-hooks.nsh",
 );
+assert.equal(config.bundle.windows.nsis.template, "./windows/installer.nsi");
 
 const hooks = readFileSync(
   new URL("../src-tauri/windows/installer-hooks.nsh", import.meta.url),
@@ -42,7 +44,13 @@ assert.match(hooks, /WATCHBACK_DATA_PROBE/);
 assert.match(hooks, /\$INSTDIR\\data/);
 assert.match(hooks, /Delete "\$INSTDIR\\data\\\.write-test-\$/);
 assert.match(hooks, /\/SD IDNO/);
-assert.match(hooks, /RMDir \/r "\$INSTDIR\\data"/);
+assert.match(hooks, /--delete-install-data "\$INSTDIR\\data"/);
+assert.match(
+  hooks,
+  /--delete-install-data[^]*?Pop \$1\s+Pop \$2\s+StrCpy \$2 ""\s+\$\{If\} \$1 != 0[^]*?!insertmacro InstallDataAbort/,
+);
+assert.match(hooks, /本地数据将保留在原安装目录/);
+assert.match(hooks, /该目录可能不会被完全移除/);
 assert.match(hooks, /StrCpy \$DeleteAppDataCheckboxState 0/);
 assert.match(hooks, /GetFullPathName/);
 assert.match(
@@ -55,17 +63,59 @@ assert.doesNotMatch(hooks, /\$USERNAME/);
 assert.doesNotMatch(hooks, /Builtin\\Users|BUILTIN\\Users|S-1-5-32-545/i);
 assert.doesNotMatch(hooks, /grant[^\r\n]*"\$INSTDIR"(?:\s|$)/i);
 assert.doesNotMatch(hooks, /RMDir \/r "\$INSTDIR"(?:\s|$)/);
+assert.doesNotMatch(hooks, /RMDir \/r "\$INSTDIR\\data"/);
 assert.doesNotMatch(hooks, /MessageBox[^\r\n]*(?:\$INSTDIR|\$APPDATA)/);
 
 const preUninstall = hooks.indexOf("!macro NSIS_HOOK_PREUNINSTALL");
 const postUninstall = hooks.indexOf("!macro NSIS_HOOK_POSTUNINSTALL");
-const deleteData = hooks.indexOf('RMDir /r "$INSTDIR\\data"');
+const deleteData = hooks.indexOf("--delete-install-data");
 assert.ok(preUninstall >= 0);
 assert.ok(postUninstall > preUninstall);
 assert.ok(
   deleteData > postUninstall,
   "data deletion must run after Tauri's application-running check",
 );
+
+const templateUrl = new URL(
+  "../src-tauri/windows/installer.nsi",
+  import.meta.url,
+);
+const templateBytes = readFileSync(templateUrl);
+const template = templateBytes.toString("utf8");
+assert.equal(
+  createHash("sha256").update(template.replace(/\r\n/g, "\n")).digest("hex"),
+  "fe1d4643c2608f0674ac6cf1e29ced4b0216bb74f99ea20785e0479a04cc4b48",
+);
+assert.match(template, /Tauri CLI 2\.11\.3 tag tauri-cli-v2\.11\.3/);
+assert.match(template, /d372e3c391770cf231db974422a1e4f8adaac3a6/);
+assert.match(template, /Function PageLeaveReinstall/);
+assert.match(template, /WATCHBACK-UPGRADE-PARENT=\$R9/);
+assert.match(template, /GetCurrentProcessId/);
+assert.match(template, /ParentProcessId-eq\$R8/);
+assert.match(template, /VersionInfo\.ProductName-eq\$\\"Watchback\$\\"/);
+assert.match(template, /StrCpy \$WatchbackNestedUpgrade 1/);
+assert.match(
+  template,
+  /\$\{Else\}\s+; A claimed nested setup must not fall back to trusting \/UPDATE alone\.\s+StrCpy \$UpdateMode 0/,
+);
+const preInstallHook = template.indexOf("!insertmacro NSIS_HOOK_PREINSTALL");
+const runningCheck = template.indexOf(
+  '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
+);
+const preUninstallHook = template.indexOf("!insertmacro NSIS_HOOK_PREUNINSTALL");
+const uninstallRunningCheck = template.indexOf(
+  '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
+  runningCheck + 1,
+);
+const postUninstallHook = template.indexOf("!insertmacro NSIS_HOOK_POSTUNINSTALL");
+const delayedExeDelete = template.indexOf(
+  'Delete "$INSTDIR\\${MAINBINARYNAME}.exe"',
+  postUninstallHook,
+);
+assert.ok(preInstallHook >= 0 && runningCheck > preInstallHook);
+assert.ok(preUninstallHook >= 0 && uninstallRunningCheck > preUninstallHook);
+assert.ok(postUninstallHook > uninstallRunningCheck);
+assert.ok(delayedExeDelete > postUninstallHook);
 
 const oldInstallSource = hooks.indexOf(
   'StrCpy $0 "$InstallDataOldLocation\\data"',

@@ -154,7 +154,8 @@ Var InstallDataDeleteRequested
   StrCpy $DeleteAppDataCheckboxState 0
   StrCpy $InstallDataDeleteRequested 0
 
-  ${If} $UpdateMode == 1
+  ${If} $WatchbackNestedUpgrade == 1
+  ${OrIf} $UpdateMode == 1
   ${OrIf} $PassiveMode == 1
     Goto install_data_delete_choice_done
   ${EndIf}
@@ -172,9 +173,14 @@ Var InstallDataDeleteRequested
 
   MessageBox MB_YESNO|MB_DEFBUTTON2|MB_ICONEXCLAMATION \
     "是否同时删除本地数据？这将删除账号凭据、数据库、赛季数据、备份和浏览器登录状态。$\r$\n$\r$\n默认选择“否”以保留数据。" \
-    /SD IDNO IDYES install_data_delete_yes IDNO install_data_delete_choice_done
+    /SD IDNO IDYES install_data_delete_yes IDNO install_data_delete_keep
   install_data_delete_yes:
     StrCpy $InstallDataDeleteRequested 1
+    Goto install_data_delete_choice_done
+  install_data_delete_keep:
+    MessageBox MB_OK|MB_ICONINFORMATION \
+      "本地数据将保留在原安装目录；卸载后该目录可能不会被完全移除。" \
+      /SD IDOK
   install_data_delete_choice_done:
 !macroend
 
@@ -182,12 +188,13 @@ Var InstallDataDeleteRequested
   ; The resolved Tauri template performs its application-running check after
   ; PREUNINSTALL and before this hook, so destructive work belongs here.
   ${If} $InstallDataDeleteRequested == 1
-    ClearErrors
-    RMDir /r "$INSTDIR\data"
-    ${If} ${Errors}
+    nsExec::ExecToStack '"$INSTDIR\${MAINBINARYNAME}.exe" --delete-install-data "$INSTDIR\data"'
+    Pop $1
+    Pop $2
+    StrCpy $2 ""
+    ${If} $1 != 0
       !insertmacro InstallDataAbort "无法删除本地数据。卸载未完成。"
     ${EndIf}
-    RMDir "$INSTDIR"
     DeleteRegKey SHCTX "Software\${BUNDLEID}"
   ${EndIf}
 !macroend
