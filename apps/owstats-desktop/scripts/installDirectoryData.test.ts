@@ -97,7 +97,7 @@ const templateBytes = readFileSync(templateUrl);
 const template = templateBytes.toString("utf8");
 assert.equal(
   createHash("sha256").update(template.replace(/\r\n/g, "\n")).digest("hex"),
-  "caa038854c92fdf3102f2483398f02d6df2fa1d25d0826dbfd7c2f912bbcfec9",
+  "7e337dd5710edc5abc072c8ef1118cbcb0ae6929459ee4649591844ba328e4d2",
 );
 assert.match(template, /Tauri CLI 2\.11\.3 tag tauri-cli-v2\.11\.3/);
 assert.match(template, /d372e3c391770cf231db974422a1e4f8adaac3a6/);
@@ -202,6 +202,16 @@ assert.match(
   /\$\{Else\}\s+; A claimed nested setup must not fall back to trusting \/UPDATE alone\.\s+StrCpy \$UpdateMode 0/,
 );
 const preInstallHook = template.indexOf("!insertmacro NSIS_HOOK_PREINSTALL");
+const installSection = template.indexOf("Section Install");
+const trustedRootPreparation = template.indexOf(
+  '"$PLUGINSDIR\\watchback-trusted-helper.exe" --prepare-install-root "$INSTDIR"',
+  installSection,
+);
+assert.ok(trustedRootPreparation > preInstallHook);
+assert.doesNotMatch(
+  template.slice(installSection, trustedRootPreparation),
+  /CreateDirectory "\$INSTDIR|SetOutPath \$INSTDIR|SetOutPath "\$INSTDIR|File [^\r\n]*\$INSTDIR/,
+);
 const runningCheck = template.indexOf(
   '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
 );

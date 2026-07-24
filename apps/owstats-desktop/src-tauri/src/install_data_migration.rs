@@ -1042,7 +1042,33 @@ mod windows_secure {
     }
 
     pub(super) fn prepare_install_root(path: &Path, user_sid: &OsStr) -> Result<()> {
-        let parent = open_install_parent(path)?;
+        let descriptor = install_root_security_descriptor(user_sid)?;
+        let parent = match open_install_parent(path) {
+            Ok(parent) => parent,
+            Err(_) => {
+                let parent_path = path
+                    .parent()
+                    .ok_or_else(|| anyhow!("无法定位安装目录的父目录"))?;
+                let name = child_name(path)?;
+                let parent = open_fixed(
+                    parent_path,
+                    FILE_GENERIC_READ | FILE_GENERIC_WRITE | READ_CONTROL,
+                )
+                .context("无法固定安装目录的父目录")?;
+                require_target_directory(&parent.information, "安装目录的父目录无效")?;
+                let pinned_parent = final_path(&parent.handle)?;
+                if !same_normalized_windows_path(parent_path, &pinned_parent) {
+                    return Err(anyhow!("安装目录祖先包含不受支持的链接"));
+                }
+                let entry =
+                    create_directory_relative_with_security(&parent.handle, name, descriptor.0)?;
+                let pinned_path = final_path(&entry.handle)?;
+                if !same_normalized_windows_path(path, &pinned_path) {
+                    return Err(anyhow!("新安装目录解析到意外位置"));
+                }
+                InstallParentGuard { entry, pinned_path }
+            }
+        };
         let mut has_marker = false;
         let mut has_main = false;
         let mut has_uninstaller = false;
@@ -1060,10 +1086,7 @@ mod windows_secure {
         if entry_count != 0 && !has_marker && !(has_main && has_uninstaller) {
             return Err(anyhow!("安装目标不是空目录或已知 Watchback 目录"));
         }
-        protect_handle_with_descriptor(
-            &parent.entry.handle,
-            install_root_security_descriptor(user_sid)?,
-        )?;
+        protect_handle_with_descriptor(&parent.entry.handle, descriptor)?;
         if !has_marker {
             let marker = create_file(&parent.pinned_path().join(".watchback-install-root-v1"))?;
             drop(marker);

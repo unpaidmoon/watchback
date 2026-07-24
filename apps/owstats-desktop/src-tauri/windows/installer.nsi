@@ -653,7 +653,6 @@ Section Install
   !endif
 
   ${If} $MultiUser.InstallMode == "AllUsers"
-    CreateDirectory "$INSTDIR"
     nsExec::ExecToStack '"$PLUGINSDIR\watchback-trusted-helper.exe" --prepare-install-root "$INSTDIR" "$InstallDataUserSid"'
     Pop $1
     Pop $2

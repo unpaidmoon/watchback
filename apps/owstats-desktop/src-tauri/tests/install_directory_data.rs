@@ -2356,6 +2356,17 @@ fn install_root_preparation_rejects_ancestor_junctions_and_unrelated_directories
     );
     assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
 
+    let missing_outside = temp.path().join("missing-outside");
+    let missing_through_junction = temp.path().join("missing-linked").join("Watchback");
+    fs::create_dir_all(&missing_outside).unwrap();
+    create_junction(&missing_outside, &temp.path().join("missing-linked"));
+    assert!(owstats_desktop_lib::run_prepare_install_root_mode(
+        &missing_through_junction,
+        user_sid
+    )
+    .is_err());
+    assert!(!missing_outside.join("Watchback").exists());
+
     let unrelated = temp.path().join("unrelated");
     fs::create_dir_all(&unrelated).unwrap();
     fs::write(unrelated.join("unrelated.txt"), b"keep").unwrap();
