@@ -298,6 +298,72 @@ fn copies_source_atomically_and_retains_source() {
 }
 
 #[test]
+fn invalid_registry_is_not_published_and_source_is_retained() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("accounts.json"), b"{invalid").unwrap();
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+
+    assert!(!data.exists());
+    assert!(source.join("accounts.json").is_file());
+}
+
+#[test]
+fn empty_valid_registry_does_not_require_an_accounts_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        br#"{"version":1,"activeAccountId":null,"accounts":[]}"#,
+    )
+    .unwrap();
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(data.join("accounts.json").is_file());
+}
+
+#[test]
+fn invalid_sqlite_is_not_published_and_source_is_retained() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let account_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let account = source.join("accounts").join(account_id);
+    fs::create_dir_all(&account).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        format!(
+            r#"{{"version":1,"activeAccountId":"{account_id}","accounts":[{{"accountId":"{account_id}","battleTag":"合成账号#0000","createdAt":"2026-01-01T00:00:00Z","lastUsedAt":"2026-01-01T00:00:00Z","credentialState":"ready"}}]}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        account.join("account.json"),
+        format!(
+            r#"{{"version":1,"accountId":"{account_id}","roleId":1,"battleTag":"合成账号#0000","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(account.join("owstats.sqlite3"), b"not sqlite").unwrap();
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+
+    assert!(!data.exists());
+    assert_eq!(
+        fs::read(account.join("owstats.sqlite3")).unwrap(),
+        b"not sqlite"
+    );
+}
+
+#[test]
 fn existing_data_is_never_overwritten() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("legacy");

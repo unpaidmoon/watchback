@@ -5,9 +5,13 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
-use crate::app_paths::SharedAppPaths;
+use crate::{
+    account_store::{read_manifest, read_registry},
+    app_paths::SharedAppPaths,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallDataMigrationOutcome {
@@ -275,13 +279,61 @@ fn remove_tree_without_links(path: &Path) -> Result<()> {
     fs::remove_dir(path).context("无法删除迁移临时目录")
 }
 
-#[cfg(not(windows))]
 fn validate_staged_data(staging: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(staging).context("无法读取迁移临时目录")?;
+    if !is_supported_directory(&metadata) {
+        Err(anyhow!("迁移临时目录无效"))
+    } else {
+        let registry_path = staging.join("accounts.json");
+        let registry = match fs::symlink_metadata(&registry_path) {
+            Ok(_) => read_registry(&registry_path).context("旧账户索引校验失败")?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error).context("无法读取旧账户索引"),
+        };
+        let accounts_root = staging.join("accounts");
+        if !registry.accounts.is_empty() {
+            require_supported_directory(&accounts_root, "旧账户目录校验失败")?;
+        }
+
+        for entry in registry.accounts {
+            let account = accounts_root.join(entry.account_id.as_str());
+            require_supported_directory(&account, "旧账户目录校验失败")?;
+            read_manifest(&account.join("account.json"), &entry.account_id)
+                .context("旧账户清单校验失败")?;
+
+            let database = account.join("owstats.sqlite3");
+            match fs::symlink_metadata(&database) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink()
+                        || is_unsupported_link_or_reparse_point(&metadata)
+                        || !metadata.is_file()
+                    {
+                        return Err(anyhow!("旧账户数据库校验失败"));
+                    }
+                    let connection =
+                        Connection::open_with_flags(&database, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                            .context("旧账户数据库校验失败")?;
+                    let result: String = connection
+                        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+                        .context("旧账户数据库完整性校验失败")?;
+                    if result != "ok" {
+                        return Err(anyhow!("旧账户数据库完整性校验失败"));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error).context("无法读取旧账户数据库"),
+            }
+        }
+        Ok(())
+    }
+}
+
+fn require_supported_directory(path: &Path, context: &str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).with_context(|| context.to_owned())?;
     if is_supported_directory(&metadata) {
         Ok(())
     } else {
-        Err(anyhow!("迁移临时目录无效"))
+        Err(anyhow!(context.to_owned()))
     }
 }
 
@@ -688,6 +740,7 @@ mod windows_secure {
         );
 
         copy_tree(source, &pinned_staging, &staging_entry.handle)?;
+        super::validate_staged_data(&pinned_staging)?;
         write_marker(
             &pinned_staging.join(".install-data-migration-v1.json"),
             marker,
