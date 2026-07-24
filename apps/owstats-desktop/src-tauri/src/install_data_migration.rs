@@ -1731,6 +1731,14 @@ mod windows_secure {
         {
             return Err(anyhow!("无法读取安装目录身份"));
         }
+        validate_file_id(identity)
+    }
+
+    fn validate_file_id(identity: FILE_ID_INFO) -> Result<FILE_ID_INFO> {
+        let identifier = identity.FileId.Identifier;
+        if identifier == [0; 16] || identifier == [0xff; 16] {
+            return Err(anyhow!("安装目录身份不可用"));
+        }
         Ok(identity)
     }
 
@@ -1815,6 +1823,32 @@ mod windows_secure {
                 buffer[..chunk.len()].copy_from_slice(&chunk);
                 Ok(chunk.len())
             }
+        }
+
+        #[test]
+        fn file_id_validation_rejects_unavailable_sentinels_and_accepts_a_normal_id() {
+            let zero = FILE_ID_INFO {
+                VolumeSerialNumber: 1,
+                FileId: windows_sys::Win32::Storage::FileSystem::FILE_ID_128 {
+                    Identifier: [0; 16],
+                },
+            };
+            let all_ff = FILE_ID_INFO {
+                VolumeSerialNumber: 1,
+                FileId: windows_sys::Win32::Storage::FileSystem::FILE_ID_128 {
+                    Identifier: [0xff; 16],
+                },
+            };
+            let normal = FILE_ID_INFO {
+                VolumeSerialNumber: 1,
+                FileId: windows_sys::Win32::Storage::FileSystem::FILE_ID_128 {
+                    Identifier: [1; 16],
+                },
+            };
+
+            assert!(validate_file_id(zero).is_err());
+            assert!(validate_file_id(all_ff).is_err());
+            assert_eq!(validate_file_id(normal).unwrap().FileId.Identifier, [1; 16]);
         }
 
         #[test]
