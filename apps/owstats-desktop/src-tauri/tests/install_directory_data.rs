@@ -5,6 +5,35 @@ use owstats_desktop_lib::install_data_migration::{
     prepare_install_data, InstallDataMigrationOutcome,
 };
 
+#[cfg(windows)]
+use std::{
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+};
+
+#[cfg(windows)]
+static COPY_OPEN_RACE: OnceLock<Mutex<Option<(PathBuf, PathBuf)>>> = OnceLock::new();
+
+#[cfg(windows)]
+fn replace_selected_source_with_junction(path: &Path) {
+    let race = COPY_OPEN_RACE.get_or_init(|| Mutex::new(None));
+    let guard = race.lock().unwrap();
+    let Some((_selected, external)) = guard.as_ref() else {
+        return;
+    };
+    if path.file_name().and_then(|name| name.to_str()) != Some("z-raced") {
+        return;
+    }
+    fs::remove_file(path).unwrap();
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(path)
+        .arg(external)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "无法创建合成 TOCTOU junction 输入");
+}
+
 #[test]
 fn copies_source_atomically_and_retains_source() {
     let temp = tempfile::tempdir().unwrap();
@@ -110,9 +139,7 @@ fn existing_data_wins_when_the_source_is_a_symlink() {
     let data = temp.path().join("install").join("data");
     let staging = data.with_file_name("data.migrating");
     fs::write(&external, b"external").unwrap();
-    if symlink_file(&external, &source).is_err() {
-        return;
-    }
+    symlink_file(&external, &source).expect("当前 Windows 环境必须允许合成 symlink 测试输入");
     fs::create_dir_all(&data).unwrap();
     fs::create_dir_all(&staging).unwrap();
     fs::write(data.join("existing.txt"), b"existing").unwrap();
@@ -254,15 +281,13 @@ fn rejects_a_windows_junction_without_mutating_its_target_or_publishing_data() {
     fs::create_dir_all(&external).unwrap();
     fs::write(external.join("external.txt"), b"external").unwrap();
 
-    let status = std::process::Command::new("cmd")
+    let output = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
         .arg(&junction)
         .arg(&external)
-        .status()
+        .output()
         .unwrap();
-    if !status.success() {
-        return;
-    }
+    assert!(output.status.success(), "无法创建合成 junction 测试输入");
 
     assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
 
@@ -286,14 +311,84 @@ fn rejects_a_windows_symlink_without_mutating_its_target_or_publishing_data() {
     let linked = source.join("linked.txt");
     fs::create_dir_all(&source).unwrap();
     fs::write(&external, b"external").unwrap();
-    if symlink_file(&external, &linked).is_err() {
-        return;
-    }
+    symlink_file(&external, &linked).expect("当前 Windows 环境必须允许合成 symlink 测试输入");
 
     assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
 
     assert_eq!(fs::read(&external).unwrap(), b"external");
     assert!(linked.symlink_metadata().is_ok());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_reparse_point_created_between_enumeration_and_handle_open() {
+    use owstats_desktop_lib::install_data_migration::set_windows_copy_open_hook;
+
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let raced = source.join("z-raced");
+    let external = temp.path().join("external");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&external).unwrap();
+    fs::write(source.join("a-copied.txt"), b"copied").unwrap();
+    fs::write(&raced, b"replace me").unwrap();
+    fs::write(external.join("external.txt"), b"external").unwrap();
+    *COPY_OPEN_RACE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap() = Some((raced.clone(), external.clone()));
+    set_windows_copy_open_hook(Some(replace_selected_source_with_junction));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    set_windows_copy_open_hook(None);
+    *COPY_OPEN_RACE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap() = None;
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read(external.join("external.txt")).unwrap(),
+        b"external"
+    );
+    assert!(!data.exists());
+    assert_eq!(fs::read(source.join("a-copied.txt")).unwrap(), b"copied");
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_reparse_point_in_existing_staging_without_touching_its_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let external = temp.path().join("external");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&external).unwrap();
+    fs::write(source.join("source.txt"), b"source").unwrap();
+    fs::write(external.join("external.txt"), b"external").unwrap();
+    fs::create_dir_all(staging.parent().unwrap()).unwrap();
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&staging)
+        .arg(&external)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "无法创建合成 staging junction 输入"
+    );
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+
+    assert_eq!(
+        fs::read(external.join("external.txt")).unwrap(),
+        b"external"
+    );
+    assert!(staging.symlink_metadata().is_ok());
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
     assert!(!data.exists());
 }
 
