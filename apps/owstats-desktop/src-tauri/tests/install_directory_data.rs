@@ -61,6 +61,91 @@ fn no_source_creates_an_empty_data_directory() {
 }
 
 #[test]
+fn existing_data_wins_when_the_source_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("missing");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(data.join("existing.txt"), b"existing").unwrap();
+    fs::write(staging.join("stale.txt"), b"stale").unwrap();
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert_eq!(fs::read(data.join("existing.txt")).unwrap(), b"existing");
+    assert_eq!(fs::read(staging.join("stale.txt")).unwrap(), b"stale");
+}
+
+#[test]
+fn existing_data_wins_when_the_source_is_an_unsupported_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("unsupported.txt");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    fs::write(&source, b"unsupported").unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(data.join("existing.txt"), b"existing").unwrap();
+    fs::write(staging.join("stale.txt"), b"stale").unwrap();
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert_eq!(fs::read(data.join("existing.txt")).unwrap(), b"existing");
+    assert_eq!(fs::read(staging.join("stale.txt")).unwrap(), b"stale");
+}
+
+#[cfg(windows)]
+#[test]
+fn existing_data_wins_when_the_source_is_a_symlink() {
+    use std::os::windows::fs::symlink_file;
+
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("linked.txt");
+    let external = temp.path().join("external.txt");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    fs::write(&external, b"external").unwrap();
+    if symlink_file(&external, &source).is_err() {
+        return;
+    }
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(data.join("existing.txt"), b"existing").unwrap();
+    fs::write(staging.join("stale.txt"), b"stale").unwrap();
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert_eq!(fs::read(data.join("existing.txt")).unwrap(), b"existing");
+    assert_eq!(fs::read(staging.join("stale.txt")).unwrap(), b"stale");
+    assert_eq!(fs::read(&external).unwrap(), b"external");
+}
+
+#[test]
+fn existing_data_wins_when_the_source_overlaps_staging() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(data.join("existing.txt"), b"existing").unwrap();
+    fs::write(staging.join("stale.txt"), b"stale").unwrap();
+
+    let outcome =
+        prepare_install_data(Some(&staging), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert_eq!(fs::read(data.join("existing.txt")).unwrap(), b"existing");
+    assert_eq!(fs::read(staging.join("stale.txt")).unwrap(), b"stale");
+}
+
+#[test]
 fn rejects_a_source_that_is_the_staging_directory_without_mutating_it() {
     let temp = tempfile::tempdir().unwrap();
     let data = temp.path().join("install").join("data");

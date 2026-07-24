@@ -27,15 +27,6 @@ pub fn prepare_install_data(
     source: Option<&Path>,
     destination: &SharedAppPaths,
 ) -> Result<InstallDataMigrationOutcome> {
-    let staging = destination.install_migration_staging();
-    let source = match source {
-        Some(source) => Some(validate_source_and_staging(source, &staging)?),
-        None => None,
-    };
-    if source.is_none() {
-        canonicalize_future_path(&staging)?;
-    }
-
     match fs::symlink_metadata(destination.root()) {
         Ok(metadata) if is_supported_directory(&metadata) => {
             return Ok(InstallDataMigrationOutcome::ExistingData);
@@ -43,6 +34,15 @@ pub fn prepare_install_data(
         Ok(_) => return Err(anyhow!("安装目录中的数据路径不是目录")),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("无法读取安装数据目录"),
+    }
+
+    let staging = destination.install_migration_staging();
+    let source = match source {
+        Some(source) => Some(validate_source_and_staging(source, &staging)?),
+        None => None,
+    };
+    if source.is_none() {
+        canonicalize_future_path(&staging)?;
     }
 
     let Some(source) = source else {
