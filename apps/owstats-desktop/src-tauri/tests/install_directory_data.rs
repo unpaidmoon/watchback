@@ -562,6 +562,22 @@ fn create_valid_sqlite(path: &Path) {
         .unwrap();
 }
 
+fn assert_no_validation_artifacts(root: &Path) {
+    for entry in fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        assert!(
+            !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".install-data-validation-"),
+            "发布树中残留数据库验证目录"
+        );
+        if entry.file_type().unwrap().is_dir() {
+            assert_no_validation_artifacts(&entry.path());
+        }
+    }
+}
+
 #[test]
 fn valid_account_metadata_and_sqlite_are_published() {
     let temp = tempfile::tempdir().unwrap();
@@ -585,6 +601,89 @@ fn valid_account_metadata_and_sqlite_are_published() {
         .join("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         .join("owstats.sqlite3")
         .is_file());
+}
+
+#[test]
+fn two_accounts_with_independent_manifests_are_published() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let first_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let second_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "activeAccountId": first_id,
+            "accounts": [
+                {
+                    "accountId": first_id,
+                    "battleTag": "合成账号甲#0000",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "lastUsedAt": "2026-01-02T00:00:00Z",
+                    "credentialState": "ready"
+                },
+                {
+                    "accountId": second_id,
+                    "battleTag": "合成账号乙#0000",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "lastUsedAt": "2026-01-01T00:00:00Z",
+                    "credentialState": "ready"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    for (account_id, role_id, battle_tag) in [
+        (first_id, 1_u64, "合成账号甲#0000"),
+        (second_id, 2_u64, "合成账号乙#0000"),
+    ] {
+        let account = source.join("accounts").join(account_id);
+        fs::create_dir_all(&account).unwrap();
+        fs::write(
+            account.join("account.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "version": 1,
+                "accountId": account_id,
+                "roleId": role_id,
+                "battleTag": battle_tag,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-02T00:00:00Z"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    create_valid_sqlite(
+        &source
+            .join("accounts")
+            .join(first_id)
+            .join("owstats.sqlite3"),
+    );
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    for account_id in [first_id, second_id] {
+        assert!(data
+            .join("accounts")
+            .join(account_id)
+            .join("account.json")
+            .is_file());
+    }
+    assert!(data
+        .join("accounts")
+        .join(first_id)
+        .join("owstats.sqlite3")
+        .is_file());
+    assert!(!data
+        .join("accounts")
+        .join(second_id)
+        .join("owstats.sqlite3")
+        .exists());
 }
 
 #[test]
@@ -623,11 +722,7 @@ fn valid_wal_database_is_published_without_validation_artifacts() {
         .join(account_id)
         .join("owstats.sqlite3-wal")
         .is_file());
-    assert!(!data.read_dir().unwrap().any(|entry| entry
-        .unwrap()
-        .file_name()
-        .to_string_lossy()
-        .starts_with(".install-data-validation-")));
+    assert_no_validation_artifacts(&data);
 }
 
 #[test]

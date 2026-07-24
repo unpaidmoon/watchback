@@ -5,13 +5,13 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+#[cfg(not(windows))]
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
-use crate::{
-    account_store::{read_manifest, read_registry},
-    app_paths::SharedAppPaths,
-};
+#[cfg(not(windows))]
+use crate::account_store::{read_manifest, read_registry};
+use crate::app_paths::SharedAppPaths;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallDataMigrationOutcome {
@@ -279,6 +279,7 @@ fn remove_tree_without_links(path: &Path) -> Result<()> {
     fs::remove_dir(path).context("无法删除迁移临时目录")
 }
 
+#[cfg(not(windows))]
 fn validate_staged_data(staging: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(staging).context("无法读取迁移临时目录")?;
     if !is_supported_directory(&metadata) {
@@ -328,6 +329,7 @@ fn validate_staged_data(staging: &Path) -> Result<()> {
     }
 }
 
+#[cfg(not(windows))]
 fn require_supported_directory(path: &Path, context: &str) -> Result<()> {
     let metadata = fs::symlink_metadata(path).with_context(|| context.to_owned())?;
     if is_supported_directory(&metadata) {
@@ -898,12 +900,10 @@ mod windows_secure {
         )
         .context("旧账户目录校验失败")?;
         require_target_directory(&accounts.information, "旧账户目录校验失败")?;
-        guards.directories.push(accounts.handle);
 
         for entry in registry.accounts {
-            let accounts = guards.directories.last().expect("账户目录句柄已固定");
             let account = open_child_fixed(
-                accounts,
+                &accounts.handle,
                 OsStr::new(entry.account_id.as_str()),
                 FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
             )
@@ -921,6 +921,7 @@ mod windows_secure {
             validate_database_snapshot(&account.handle, &mut guards)?;
             guards.directories.push(account.handle);
         }
+        guards.directories.push(accounts.handle);
         Ok(guards)
     }
 
