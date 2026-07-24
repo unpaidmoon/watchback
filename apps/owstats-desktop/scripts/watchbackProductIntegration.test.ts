@@ -23,6 +23,7 @@ const credentialStore = source("src-tauri/src/deepseek_key.rs");
 const careerMmrQuery = source("src-tauri/src/career_mmr/query.rs");
 const databaseMigrations = source("src-tauri/src/database/migrations.rs");
 const tauriLibrary = source("src-tauri/src/lib.rs");
+const tauriMain = source("src-tauri/src/main.rs");
 const agents = repositorySource("AGENTS.md");
 const readme = repositorySource("README.md");
 const design = repositorySource("design.md");
@@ -68,7 +69,16 @@ assert.match(cargoManifest, /description = "Watchback desktop app"/);
 assert.match(cargoManifest, /authors = \["Watchback"\]/);
 assert.match(careerMmrQuery, /Watchback 本地模型推算，并非暴雪官方隐藏分。/);
 assert.match(databaseMigrations, /请升级 Watchback 后再打开此数据/);
-assert.match(tauriLibrary, /failed to run Watchback/);
+assert.match(
+  tauriMain,
+  /owstats_desktop_lib::handle_desktop_startup_result\(\s*owstats_desktop_lib::run\(\),\s*show_desktop_startup_failure,\s*\)/s,
+);
+assert.match(tauriMain, /if exit != 0 \{\s*std::process::exit\(exit\);\s*\}/s);
+assert.doesNotMatch(tauriMain, /owstats_desktop_lib::run\(\)\s*\.expect\(/);
+assert.match(
+  tauriLibrary,
+  /present\(startup_failure_message\(&error\)\);\s*1/s,
+);
 
 assert.match(credentialStore, /OWStatsLocal\/DeepSeekApiKey/);
 assert.match(credentialStore, /wide\("OWStatsLocal"\)/);
