@@ -7,13 +7,14 @@ use owstats_desktop_lib::install_data_migration::{
 
 #[cfg(windows)]
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::{Path, PathBuf},
 };
 
 #[cfg(windows)]
 use owstats_desktop_lib::install_data_migration::{
-    set_windows_migration_hook, WindowsMigrationHookPoint,
+    set_windows_copy_enumeration_hook, set_windows_copy_limits_for_test,
+    set_windows_migration_hook, WindowsCopyLimits, WindowsMigrationHookPoint,
 };
 
 #[cfg(not(windows))]
@@ -46,6 +47,7 @@ enum MigrationRace {
 #[cfg(windows)]
 thread_local! {
     static COPY_OPEN_RACE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static ENUMERATED_SOURCE_ENTRIES: Cell<usize> = const { Cell::new(0) };
     static MIGRATION_RACE: RefCell<Option<MigrationRace>> = const { RefCell::new(None) };
 }
 
@@ -60,6 +62,45 @@ impl Drop for CopyOpenHookReset {
             race.borrow_mut().take();
         });
     }
+}
+
+#[cfg(windows)]
+struct CopyLimitsReset;
+
+#[cfg(windows)]
+impl Drop for CopyLimitsReset {
+    fn drop(&mut self) {
+        set_windows_copy_limits_for_test(None);
+    }
+}
+
+#[cfg(windows)]
+fn install_copy_limits(limits: WindowsCopyLimits) -> CopyLimitsReset {
+    set_windows_copy_limits_for_test(Some(limits));
+    CopyLimitsReset
+}
+
+#[cfg(windows)]
+struct EnumerationHookReset;
+
+#[cfg(windows)]
+impl Drop for EnumerationHookReset {
+    fn drop(&mut self) {
+        set_windows_copy_enumeration_hook(None);
+        ENUMERATED_SOURCE_ENTRIES.with(|count| count.set(0));
+    }
+}
+
+#[cfg(windows)]
+fn count_enumerated_source_entry() {
+    ENUMERATED_SOURCE_ENTRIES.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(windows)]
+fn install_enumeration_counter() -> EnumerationHookReset {
+    ENUMERATED_SOURCE_ENTRIES.with(|count| count.set(0));
+    set_windows_copy_enumeration_hook(Some(count_enumerated_source_entry));
+    EnumerationHookReset
 }
 
 #[cfg(windows)]
@@ -510,6 +551,138 @@ fn rejects_a_reparse_point_created_between_enumeration_and_handle_open() {
     );
     assert!(!data.exists());
     assert_eq!(fs::read(source.join("a-copied.txt")).unwrap(), b"copied");
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_empty_directories_after_the_global_entry_budget_and_retries_safely() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let deepest = source.join("first").join("second").join("third");
+    fs::create_dir_all(&deepest).unwrap();
+    let limits = install_copy_limits(WindowsCopyLimits::new(64, 2, 1024));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    drop(limits);
+    assert!(result.is_err());
+    assert!(!data.exists());
+    assert!(deepest.is_dir());
+    assert!(staging.is_dir());
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(data.join("first").join("second").join("third").is_dir());
+    assert!(!staging.exists());
+    assert!(deepest.is_dir());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_flat_directory_when_enumerated_entries_exceed_the_budget() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let names = [
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+    ];
+    for name in names {
+        fs::create_dir_all(source.join(name)).unwrap();
+    }
+    let enumeration = install_enumeration_counter();
+    let limits = install_copy_limits(WindowsCopyLimits::new(64, 2, 1024));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    drop(limits);
+    set_windows_copy_enumeration_hook(None);
+    let enumerated = ENUMERATED_SOURCE_ENTRIES.with(Cell::get);
+    drop(enumeration);
+    assert!(result.is_err());
+    assert_eq!(enumerated, 3);
+    assert!(!data.exists());
+    assert!(staging.is_dir());
+    for name in names {
+        assert!(source.join(name).is_dir());
+    }
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    for name in names {
+        assert!(data.join(name).is_dir());
+        assert!(source.join(name).is_dir());
+    }
+    assert!(!staging.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_actual_read_bytes_over_the_budget_before_writing_them_and_retries_safely() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let payload = b"12345";
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("payload.bin"), payload).unwrap();
+    let limits = install_copy_limits(WindowsCopyLimits::new(64, 8, 4));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    drop(limits);
+    assert!(result.is_err());
+    assert!(!data.exists());
+    assert_eq!(fs::read(source.join("payload.bin")).unwrap(), payload);
+    assert_eq!(fs::metadata(staging.join("payload.bin")).unwrap().len(), 0);
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert_eq!(fs::read(data.join("payload.bin")).unwrap(), payload);
+    assert_eq!(fs::read(source.join("payload.bin")).unwrap(), payload);
+    assert!(!staging.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_source_with_a_live_writer_and_retries_after_the_writer_closes() {
+    use std::io::Write;
+
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let payload_path = source.join("payload.bin");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(&payload_path, b"start").unwrap();
+    let mut writer = fs::OpenOptions::new()
+        .append(true)
+        .open(&payload_path)
+        .unwrap();
+    writer.write_all(b"-grown").unwrap();
+    writer.sync_all().unwrap();
+    let limits = install_copy_limits(WindowsCopyLimits::new(64, 8, 1024));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    drop(limits);
+    assert!(result.is_err());
+    assert!(!data.exists());
+    assert!(staging.is_dir());
+    drop(writer);
+    assert_eq!(fs::read(&payload_path).unwrap(), b"start-grown");
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert_eq!(fs::read(data.join("payload.bin")).unwrap(), b"start-grown");
+    assert_eq!(fs::read(&payload_path).unwrap(), b"start-grown");
+    assert!(!staging.exists());
 }
 
 #[cfg(all(

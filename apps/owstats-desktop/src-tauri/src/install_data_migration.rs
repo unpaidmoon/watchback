@@ -315,6 +315,38 @@ pub fn set_windows_copy_open_hook(hook: Option<fn(&Path)>) {
 
 #[cfg(windows)]
 #[doc(hidden)]
+pub fn set_windows_copy_enumeration_hook(hook: Option<fn()>) {
+    windows_secure::set_copy_enumeration_hook(hook);
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowsCopyLimits {
+    max_depth: usize,
+    max_entries: u64,
+    max_total_bytes: u64,
+}
+
+#[cfg(windows)]
+impl WindowsCopyLimits {
+    pub const fn new(max_depth: usize, max_entries: u64, max_total_bytes: u64) -> Self {
+        Self {
+            max_depth,
+            max_entries,
+            max_total_bytes,
+        }
+    }
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn set_windows_copy_limits_for_test(limits: Option<WindowsCopyLimits>) {
+    windows_secure::set_copy_limits(limits);
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsMigrationHookPoint {
     StagingCreated,
@@ -405,14 +437,15 @@ mod windows_secure {
         },
     };
 
-    use super::{InstallDataMigrationOutcome, WindowsMigrationHookPoint};
+    use super::{InstallDataMigrationOutcome, WindowsCopyLimits, WindowsMigrationHookPoint};
 
-    const MAX_DEPTH: usize = 64;
-    const MAX_FILES: u64 = 100_000;
-    const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+    const DEFAULT_COPY_LIMITS: WindowsCopyLimits =
+        WindowsCopyLimits::new(64, 100_000, 20 * 1024 * 1024 * 1024);
 
     thread_local! {
         static COPY_OPEN_HOOK: Cell<Option<fn(&Path)>> = const { Cell::new(None) };
+        static COPY_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
+        static COPY_LIMITS: Cell<Option<WindowsCopyLimits>> = const { Cell::new(None) };
         static MIGRATION_HOOK: Cell<
             Option<fn(WindowsMigrationHookPoint, &Path, &Path)>,
         > = const { Cell::new(None) };
@@ -420,6 +453,14 @@ mod windows_secure {
 
     pub(super) fn set_copy_open_hook(hook: Option<fn(&Path)>) {
         COPY_OPEN_HOOK.with(|value| value.set(hook));
+    }
+
+    pub(super) fn set_copy_enumeration_hook(hook: Option<fn()>) {
+        COPY_ENUMERATION_HOOK.with(|value| value.set(hook));
+    }
+
+    pub(super) fn set_copy_limits(limits: Option<WindowsCopyLimits>) {
+        COPY_LIMITS.with(|value| value.set(limits));
     }
 
     pub(super) fn set_migration_hook(hook: Option<fn(WindowsMigrationHookPoint, &Path, &Path)>) {
@@ -430,6 +471,14 @@ mod windows_secure {
         COPY_OPEN_HOOK.with(|value| {
             if let Some(hook) = value.get() {
                 hook(path);
+            }
+        });
+    }
+
+    fn invoke_copy_enumeration_hook() {
+        COPY_ENUMERATION_HOOK.with(|value| {
+            if let Some(hook) = value.get() {
+                hook();
             }
         });
     }
@@ -465,18 +514,39 @@ mod windows_secure {
         information: BY_HANDLE_FILE_INFORMATION,
     }
 
-    struct DirectoryJob {
-        source: PathBuf,
-        source_handle: FixedHandle,
-        target: PathBuf,
-        target_handle: Option<FixedHandle>,
-        depth: usize,
-    }
-
     #[derive(Default)]
     struct CopyBudget {
-        files: u64,
+        // Only untrusted source entries and source bytes are charged. The
+        // fixed-size marker is generated locally after the copy completes.
+        entries: u64,
         bytes: u64,
+    }
+
+    impl CopyBudget {
+        fn record_entry(&mut self, limits: WindowsCopyLimits) -> Result<()> {
+            let entries = self
+                .entries
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("迁移目录项数量超过安全限制"))?;
+            if entries > limits.max_entries {
+                return Err(anyhow!("迁移目录项数量超过安全限制"));
+            }
+            self.entries = entries;
+            Ok(())
+        }
+
+        fn record_bytes(&mut self, bytes: usize, limits: WindowsCopyLimits) -> Result<()> {
+            let bytes = u64::try_from(bytes).map_err(|_| anyhow!("迁移数据大小超过安全限制"))?;
+            let total = self
+                .bytes
+                .checked_add(bytes)
+                .ok_or_else(|| anyhow!("迁移数据大小超过安全限制"))?;
+            if total > limits.max_total_bytes {
+                return Err(anyhow!("迁移数据大小超过安全限制"));
+            }
+            self.bytes = total;
+            Ok(())
+        }
     }
 
     pub(super) fn prepare_install_data(
@@ -565,74 +635,76 @@ mod windows_secure {
     }
 
     fn copy_tree(source: &Path, target: &Path, target_root: &FixedHandle) -> Result<()> {
-        let _target_root_guard = target_root;
-        let source_entry = open_fixed(source, FILE_GENERIC_READ).context("无法固定迁移源根目录")?;
+        let source_entry =
+            open_source_fixed(source, FILE_GENERIC_READ).context("无法固定迁移源根目录")?;
         require_directory(&source_entry.information)?;
-
-        let mut jobs = vec![DirectoryJob {
-            source: source.to_path_buf(),
-            source_handle: source_entry.handle,
-            target: target.to_path_buf(),
-            target_handle: None,
-            depth: 0,
-        }];
+        let limits = COPY_LIMITS.with(|value| value.get().unwrap_or(DEFAULT_COPY_LIMITS));
         let mut budget = CopyBudget::default();
+        copy_directory(
+            source,
+            source_entry.handle,
+            target,
+            target_root,
+            0,
+            &mut budget,
+            limits,
+        )
+    }
 
-        while let Some(job) = jobs.pop() {
-            let _source_lock = job.source_handle;
-            let _target_lock = job.target_handle;
-            if job.depth >= MAX_DEPTH {
-                return Err(anyhow!("迁移目录层级超过安全限制"));
+    fn copy_directory(
+        source: &Path,
+        source_guard: FixedHandle,
+        target: &Path,
+        _target_guard: &FixedHandle,
+        depth: usize,
+        budget: &mut CopyBudget,
+        limits: WindowsCopyLimits,
+    ) -> Result<()> {
+        let _source_guard = source_guard;
+
+        for entry in fs::read_dir(source).context("无法枚举迁移源")? {
+            let entry = entry.context("无法读取迁移目录项")?;
+            invoke_copy_enumeration_hook();
+            budget.record_entry(limits)?;
+            let source_child = entry.path();
+            let target_child = target.join(entry.file_name());
+            invoke_copy_open_hook(&source_child);
+            let source_entry = open_source_fixed(&source_child, FILE_GENERIC_READ)?;
+            if is_reparse(&source_entry.information) {
+                return Err(anyhow!("迁移源包含不受支持的链接"));
             }
-
-            let mut entries = Vec::new();
-            for entry in fs::read_dir(&job.source).context("无法枚举迁移源")? {
-                entries.push(entry.context("无法读取迁移目录项")?);
-            }
-            entries.sort_by_key(|entry| entry.file_name());
-
-            for entry in entries {
-                let source_child = entry.path();
-                let target_child = job.target.join(entry.file_name());
-                invoke_copy_open_hook(&source_child);
-                let source_entry = open_fixed(&source_child, FILE_GENERIC_READ)?;
-                if is_reparse(&source_entry.information) {
-                    return Err(anyhow!("迁移源包含不受支持的链接"));
-                }
-                if is_directory(&source_entry.information) {
-                    create_directory(&target_child)?;
-                    let target_entry = open_fixed(&target_child, FILE_GENERIC_READ)?;
-                    require_directory(&target_entry.information)?;
-                    jobs.push(DirectoryJob {
-                        source: source_child,
-                        source_handle: source_entry.handle,
-                        target: target_child,
-                        target_handle: Some(target_entry.handle),
-                        depth: job.depth + 1,
-                    });
-                    continue;
-                }
-
-                require_regular_file(&source_entry.information)?;
-                budget.files = budget
-                    .files
+            if is_directory(&source_entry.information) {
+                let child_depth = depth
                     .checked_add(1)
-                    .ok_or_else(|| anyhow!("迁移文件数量超过安全限制"))?;
-                if budget.files > MAX_FILES {
-                    return Err(anyhow!("迁移文件数量超过安全限制"));
+                    .ok_or_else(|| anyhow!("迁移目录层级超过安全限制"))?;
+                if child_depth > limits.max_depth {
+                    return Err(anyhow!("迁移目录层级超过安全限制"));
                 }
-                let size = file_size(&source_entry.information);
-                budget.bytes = budget
-                    .bytes
-                    .checked_add(size)
-                    .ok_or_else(|| anyhow!("迁移数据大小超过安全限制"))?;
-                if budget.bytes > MAX_TOTAL_BYTES {
-                    return Err(anyhow!("迁移数据大小超过安全限制"));
-                }
-
-                let target_entry = create_file(&target_child)?;
-                copy_open_file(source_entry.handle, target_entry.handle)?;
+                create_directory(&target_child)?;
+                let target_entry = open_fixed(&target_child, FILE_GENERIC_READ)?;
+                require_directory(&target_entry.information)?;
+                copy_directory(
+                    &source_child,
+                    source_entry.handle,
+                    &target_child,
+                    &target_entry.handle,
+                    child_depth,
+                    budget,
+                    limits,
+                )?;
+                continue;
             }
+
+            require_regular_file(&source_entry.information)?;
+            let expected_size = file_size(&source_entry.information);
+            let target_entry = create_file(&target_child)?;
+            copy_open_file(
+                source_entry.handle,
+                target_entry.handle,
+                expected_size,
+                budget,
+                limits,
+            )?;
         }
         Ok(())
     }
@@ -852,12 +924,20 @@ mod windows_secure {
     }
 
     fn open_fixed(path: &Path, access: u32) -> Result<FixedEntry> {
+        open_fixed_with_share(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE)
+    }
+
+    fn open_source_fixed(path: &Path, access: u32) -> Result<FixedEntry> {
+        open_fixed_with_share(path, access, FILE_SHARE_READ)
+    }
+
+    fn open_fixed_with_share(path: &Path, access: u32, share_mode: u32) -> Result<FixedEntry> {
         let wide = wide(path);
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
                 access,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                share_mode,
                 std::ptr::null(),
                 OPEN_EXISTING,
                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
@@ -907,20 +987,48 @@ mod windows_secure {
         })
     }
 
-    fn copy_open_file(source: FixedHandle, target: FixedHandle) -> Result<()> {
+    fn copy_open_file(
+        source: FixedHandle,
+        target: FixedHandle,
+        expected_size: u64,
+        budget: &mut CopyBudget,
+        limits: WindowsCopyLimits,
+    ) -> Result<()> {
         let mut source = source.into_file();
         let mut target = target.into_file();
+        copy_reader_to_writer(&mut source, &mut target, expected_size, budget, limits)?;
+        target.sync_all().context("无法写入迁移文件")
+    }
+
+    fn copy_reader_to_writer<R: Read, W: Write>(
+        source: &mut R,
+        target: &mut W,
+        expected_size: u64,
+        budget: &mut CopyBudget,
+        limits: WindowsCopyLimits,
+    ) -> Result<()> {
         let mut buffer = [0_u8; 64 * 1024];
+        let mut copied = 0_u64;
         loop {
             let read = source.read(&mut buffer).context("无法读取迁移文件")?;
             if read == 0 {
                 break;
             }
+            budget.record_bytes(read, limits)?;
+            copied = copied
+                .checked_add(u64::try_from(read).map_err(|_| anyhow!("迁移数据大小超过安全限制"))?)
+                .ok_or_else(|| anyhow!("迁移数据大小超过安全限制"))?;
+            if copied > expected_size {
+                return Err(anyhow!("迁移源在复制期间发生变化"));
+            }
             target
                 .write_all(&buffer[..read])
                 .context("无法写入迁移文件")?;
         }
-        target.sync_all().context("无法写入迁移文件")
+        if copied != expected_size {
+            return Err(anyhow!("迁移源在复制期间发生变化"));
+        }
+        Ok(())
     }
 
     fn mark_for_delete(handle: FixedHandle) -> Result<()> {
@@ -1000,5 +1108,46 @@ mod windows_secure {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::{
+            collections::VecDeque,
+            io::{self, Read},
+        };
+
+        use super::*;
+
+        struct ChunkedReader {
+            chunks: VecDeque<Vec<u8>>,
+        }
+
+        impl Read for ChunkedReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                let Some(chunk) = self.chunks.pop_front() else {
+                    return Ok(0);
+                };
+                assert!(chunk.len() <= buffer.len());
+                buffer[..chunk.len()].copy_from_slice(&chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        #[test]
+        fn rejects_growth_over_the_actual_byte_budget_before_writing_the_excess_chunk() {
+            let mut source = ChunkedReader {
+                chunks: VecDeque::from([b"12".to_vec(), b"345".to_vec()]),
+            };
+            let mut target = Vec::new();
+            let mut budget = CopyBudget::default();
+            let limits = WindowsCopyLimits::new(64, 8, 4);
+
+            let result = copy_reader_to_writer(&mut source, &mut target, 3, &mut budget, limits);
+
+            assert!(result.is_err());
+            assert_eq!(target, b"12");
+            assert_eq!(budget.bytes, 2);
+        }
     }
 }
