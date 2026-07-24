@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const config = JSON.parse(
   readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
@@ -84,16 +92,106 @@ const templateBytes = readFileSync(templateUrl);
 const template = templateBytes.toString("utf8");
 assert.equal(
   createHash("sha256").update(template.replace(/\r\n/g, "\n")).digest("hex"),
-  "fe1d4643c2608f0674ac6cf1e29ced4b0216bb74f99ea20785e0479a04cc4b48",
+  "934153506da4954298a76285e889fe71ca89f23b207e9db4679d488542ae5e62",
 );
 assert.match(template, /Tauri CLI 2\.11\.3 tag tauri-cli-v2\.11\.3/);
 assert.match(template, /d372e3c391770cf231db974422a1e4f8adaac3a6/);
 assert.match(template, /Function PageLeaveReinstall/);
 assert.match(template, /WATCHBACK-UPGRADE-PARENT=\$R9/);
 assert.match(template, /GetCurrentProcessId/);
-assert.match(template, /ParentProcessId-eq\$R8/);
-assert.match(template, /VersionInfo\.ProductName-eq\$\\"Watchback\$\\"/);
 assert.match(template, /StrCpy \$WatchbackNestedUpgrade 1/);
+assert.doesNotMatch(
+  template,
+  /-Command "[^"\r\n]*\$R8/,
+  "untrusted parent PID must never be interpolated into PowerShell source",
+);
+assert.doesNotMatch(template, /-Command "[^"\r\n]*WATCHBACK-UPGRADE/);
+assert.match(template, /-EncodedCommand \$\{WATCHBACK_UPGRADE_PARENT_PROOF\}/);
+assert.match(
+  template,
+  /SetEnvironmentVariableW\(w "WATCHBACK_UPGRADE_PARENT_PID", w "\$R8"\)/,
+);
+const encodedParentProof = template.match(
+  /!define WATCHBACK_UPGRADE_PARENT_PROOF "([A-Za-z0-9+/=]+)"/,
+)?.[1];
+assert.ok(encodedParentProof);
+const parentProof = Buffer.from(encodedParentProof, "base64").toString(
+  "utf16le",
+);
+assert.match(parentProof, /WATCHBACK_UPGRADE_PARENT_PID/);
+assert.match(parentProof, /WATCHBACK_UNINSTALLER_PID/);
+assert.match(parentProof, /\[uint32\]::TryParse/);
+assert.match(parentProof, /\^\[0-9\]\{1,10\}\$/);
+assert.match(parentProof, /ParentProcessId-ne\$p/);
+assert.match(parentProof, /VersionInfo\.ProductName-ne'Watchback'/);
+assert.doesNotMatch(parentProof, /Invoke-Expression|iex|ScriptBlock/i);
+
+const canonicalUint32 = (value: string): boolean =>
+  /^[0-9]{1,10}$/.test(value) &&
+  BigInt(value) <= 4_294_967_295n &&
+  BigInt(value).toString() === value;
+for (const invalid of [
+  "",
+  "+1",
+  "(1)",
+  "$(Write-Output injected)",
+  "1;Write-Output injected",
+  "1#comment",
+  " 1",
+  "1 ",
+  "-1",
+  "4294967296",
+  "01",
+]) {
+  assert.equal(canonicalUint32(invalid), false, invalid);
+}
+for (const valid of ["1", "4294967295"]) {
+  assert.equal(canonicalUint32(valid), true, valid);
+}
+
+if (process.platform === "win32") {
+  const proofTemp = mkdtempSync(join(tmpdir(), "watchback-parent-proof-"));
+  try {
+    for (const [index, invalid] of [
+      "",
+      "+1",
+      "(1)",
+      "$(Write-Output injected)",
+      "1;[IO.File]::WriteAllText($env:WATCHBACK_PROOF_SENTINEL,'pwned')",
+      "1#comment",
+      " 1",
+      "1 ",
+      "-1",
+      "4294967296",
+      "01",
+    ].entries()) {
+      const sentinel = join(proofTemp, `sentinel-${index}`);
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-EncodedCommand",
+          encodedParentProof,
+        ],
+        {
+          env: {
+            ...process.env,
+            WATCHBACK_UPGRADE_PARENT_PID: invalid,
+            WATCHBACK_UNINSTALLER_PID: process.pid.toString(),
+            WATCHBACK_PROOF_SENTINEL: sentinel,
+          },
+          encoding: "utf8",
+        },
+      );
+      assert.equal(result.status, 1, invalid);
+      assert.equal(existsSync(sentinel), false, invalid);
+    }
+  } finally {
+    rmSync(proofTemp, { recursive: true, force: true });
+  }
+}
 assert.match(
   template,
   /\$\{Else\}\s+; A claimed nested setup must not fall back to trusting \/UPDATE alone\.\s+StrCpy \$UpdateMode 0/,
