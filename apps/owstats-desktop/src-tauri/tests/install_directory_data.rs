@@ -1,5 +1,11 @@
 use std::fs;
 
+#[cfg(windows)]
+use std::{
+    process::Command,
+    time::{Duration, Instant},
+};
+
 use rusqlite::Connection;
 
 use owstats_desktop_lib::app_paths::SharedAppPaths;
@@ -23,7 +29,8 @@ use std::{
 use owstats_desktop_lib::install_data_migration::{
     set_windows_cleanup_enumeration_hook, set_windows_cleanup_limits_for_test,
     set_windows_copy_enumeration_hook, set_windows_copy_limits_for_test,
-    set_windows_migration_hook, WindowsCleanupLimits, WindowsCopyLimits, WindowsMigrationHookPoint,
+    set_windows_migration_hook, set_windows_parent_guard_hook, WindowsCleanupLimits,
+    WindowsCopyLimits, WindowsMigrationHookPoint,
 };
 
 #[cfg(windows)]
@@ -85,6 +92,19 @@ enum MigrationRace {
         relative: PathBuf,
         write_succeeded: Option<bool>,
     },
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct InstallParentGuardRace {
+    install: PathBuf,
+    displaced: PathBuf,
+    rename_succeeded: Option<bool>,
+}
+
+#[cfg(windows)]
+thread_local! {
+    static INSTALL_PARENT_GUARD_RACE: RefCell<Option<InstallParentGuardRace>> = const { RefCell::new(None) };
 }
 
 #[cfg(windows)]
@@ -452,6 +472,17 @@ fn trigger_selected_migration_race(
             }
             _ => {}
         }
+    });
+}
+
+#[cfg(windows)]
+fn replace_install_parent_after_authorization(_parent: &Path) {
+    INSTALL_PARENT_GUARD_RACE.with(|race| {
+        let mut race = race.borrow_mut();
+        let Some(race) = race.as_mut() else {
+            return;
+        };
+        race.rename_succeeded = Some(fs::rename(&race.install, &race.displaced).is_ok());
     });
 }
 
@@ -1860,18 +1891,18 @@ fn migration_cli_accepts_source_and_destination() {
     let mode = owstats_desktop_lib::parse_startup_mode([
         "Watchback.exe",
         "--prepare-install-data",
-        r"D:\\old\\data",
-        r"D:\\new\\data",
+        r"D:\\旧 数据",
+        r"D:\\新 数据",
     ])
     .unwrap();
 
-    assert!(matches!(
+    assert_eq!(
         mode,
         owstats_desktop_lib::StartupMode::PrepareInstallData {
-            source: Some(_),
-            ..
+            source: Some(std::path::PathBuf::from(r"D:\\旧 数据")),
+            destination: std::path::PathBuf::from(r"D:\\新 数据"),
         }
-    ));
+    );
 }
 
 #[test]
@@ -1942,4 +1973,114 @@ fn migration_execution_rejects_outside_relative_and_dot_destinations_without_cre
     assert!(!outside.exists());
     assert!(!install.join("data").exists());
     assert!(!install.join("nested").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn migration_execution_keeps_the_authorized_install_parent_fixed_until_publish() {
+    let temp = tempfile::tempdir().unwrap();
+    let install = temp.path().join("install");
+    let executable = install.join("Watchback.exe");
+    let source = temp.path().join("legacy");
+    let data = install.join("data");
+    let displaced = temp.path().join("displaced-install");
+    fs::create_dir_all(&install).unwrap();
+    fs::create_dir_all(&source).unwrap();
+    fs::write(&executable, b"synthetic executable").unwrap();
+    fs::write(source.join("source.txt"), b"source").unwrap();
+    INSTALL_PARENT_GUARD_RACE.with(|race| {
+        *race.borrow_mut() = Some(InstallParentGuardRace {
+            install: install.clone(),
+            displaced: displaced.clone(),
+            rename_succeeded: None,
+        });
+    });
+    set_windows_parent_guard_hook(Some(replace_install_parent_after_authorization));
+
+    let result = owstats_desktop_lib::run_install_data_mode(&executable, Some(&source), &data);
+
+    set_windows_parent_guard_hook(None);
+    let race = INSTALL_PARENT_GUARD_RACE.with(|race| race.borrow_mut().take().unwrap());
+    assert!(result.is_ok());
+    assert_eq!(race.rename_succeeded, Some(false));
+    assert_eq!(fs::read(data.join("source.txt")).unwrap(), b"source");
+    assert!(!displaced.exists());
+}
+
+#[cfg(windows)]
+fn copied_migration_binary(temp: &tempfile::TempDir) -> PathBuf {
+    let install = temp.path().join("安装 空格");
+    let executable = install.join("Watchback.exe");
+    fs::create_dir_all(&install).unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_owstats-desktop"), &executable).unwrap();
+    executable
+}
+
+#[cfg(windows)]
+fn assert_silent_exit_two(output: std::process::Output) {
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn migration_binary_exits_without_starting_tauri_and_enforces_the_cli_contract() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = copied_migration_binary(&temp);
+    let install = executable.parent().unwrap();
+    let data = install.join("data");
+    let uppercase_data = install.join("DATA");
+    let started = Instant::now();
+    let success = Command::new(&executable)
+        .arg("--prepare-install-data")
+        .arg("-")
+        .arg(&uppercase_data)
+        .output()
+        .unwrap();
+    assert!(success.status.success());
+    assert!(success.stdout.is_empty());
+    assert!(success.stderr.is_empty());
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(data.is_dir());
+
+    let unknown = Command::new(&executable).arg("--unknown").output().unwrap();
+    assert_silent_exit_two(unknown);
+    let missing = Command::new(&executable)
+        .args(["--prepare-install-data", "-"])
+        .output()
+        .unwrap();
+    assert_silent_exit_two(missing);
+    let outside = temp.path().join("outside").join("data");
+    let outside_output = Command::new(&executable)
+        .arg("--prepare-install-data")
+        .arg("-")
+        .arg(&outside)
+        .output()
+        .unwrap();
+    assert_silent_exit_two(outside_output);
+    assert!(!outside.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn migration_execution_rejects_an_ill_formed_utf16_data_name() {
+    use std::os::windows::ffi::OsStringExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let install = temp.path().join("install");
+    let executable = install.join("Watchback.exe");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(&executable, b"synthetic executable").unwrap();
+    let malformed = std::ffi::OsString::from_wide(&[
+        b'd' as u16,
+        b'a' as u16,
+        b't' as u16,
+        b'a' as u16,
+        0xd800,
+    ]);
+    let destination = install.join(malformed);
+
+    assert!(owstats_desktop_lib::run_install_data_mode(&executable, None, &destination).is_err());
+    assert!(!install.join("data").exists());
 }

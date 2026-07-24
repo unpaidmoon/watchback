@@ -20,6 +20,55 @@ pub enum InstallDataMigrationOutcome {
     Migrated,
 }
 
+#[cfg(windows)]
+pub use windows_secure::InstallParentGuard;
+
+#[cfg(windows)]
+pub fn open_install_parent(path: &Path) -> Result<InstallParentGuard> {
+    windows_secure::open_install_parent(path)
+}
+
+#[cfg(windows)]
+pub fn destination_belongs_to_install_parent(
+    parent: &InstallParentGuard,
+    destination: &Path,
+) -> Result<bool> {
+    parent.matches_destination_parent(destination)
+}
+
+#[cfg(windows)]
+pub fn prepare_install_data_in_install_parent(
+    source: Option<&Path>,
+    parent: &InstallParentGuard,
+) -> Result<InstallDataMigrationOutcome> {
+    let staging = parent.staging_path();
+    let source = match source {
+        Some(source) => Some(validate_source_and_staging(source, &staging)?),
+        None => {
+            canonicalize_future_path(&staging)?;
+            None
+        }
+    };
+    let marker = source
+        .as_ref()
+        .map(|_| {
+            serde_json::to_vec_pretty(&MigrationMarker {
+                version: 1,
+                source_retained: true,
+            })
+        })
+        .transpose()?;
+    windows_secure::invoke_parent_guard_hook(parent.pinned_path());
+    let data = parent.pinned_path().join("data");
+    windows_secure::prepare_install_data_with_parent(
+        source.as_deref(),
+        parent,
+        marker.as_deref(),
+        &staging,
+        &data,
+    )
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MigrationMarker {
@@ -60,7 +109,7 @@ pub fn prepare_install_data(
                 })
             })
             .transpose()?;
-        return windows_secure::prepare_install_data(
+        return windows_secure::prepare_install_data_from_path(
             source.as_deref(),
             &staging,
             destination.root(),
@@ -444,6 +493,12 @@ pub fn set_windows_migration_hook(hook: Option<fn(WindowsMigrationHookPoint, &Pa
     windows_secure::set_migration_hook(hook);
 }
 
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn set_windows_parent_guard_hook(hook: Option<fn(&Path)>) {
+    windows_secure::set_parent_guard_hook(hook);
+}
+
 #[cfg(not(windows))]
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -559,6 +614,7 @@ mod windows_secure {
         static MIGRATION_HOOK: Cell<
             Option<fn(WindowsMigrationHookPoint, &Path, &Path)>,
         > = const { Cell::new(None) };
+        static PARENT_GUARD_HOOK: Cell<Option<fn(&Path)>> = const { Cell::new(None) };
     }
 
     pub(super) fn set_cleanup_enumeration_hook(hook: Option<fn()>) {
@@ -583,6 +639,18 @@ mod windows_secure {
 
     pub(super) fn set_migration_hook(hook: Option<fn(WindowsMigrationHookPoint, &Path, &Path)>) {
         MIGRATION_HOOK.with(|value| value.set(hook));
+    }
+
+    pub(super) fn set_parent_guard_hook(hook: Option<fn(&Path)>) {
+        PARENT_GUARD_HOOK.with(|value| value.set(hook));
+    }
+
+    pub(super) fn invoke_parent_guard_hook(parent: &Path) {
+        PARENT_GUARD_HOOK.with(|value| {
+            if let Some(hook) = value.get() {
+                hook(parent);
+            }
+        });
     }
 
     fn invoke_copy_open_hook(path: &Path) {
@@ -638,6 +706,36 @@ mod windows_secure {
     struct FixedEntry {
         handle: FixedHandle,
         information: BY_HANDLE_FILE_INFORMATION,
+    }
+
+    pub struct InstallParentGuard {
+        entry: FixedEntry,
+        pinned_path: PathBuf,
+    }
+
+    impl InstallParentGuard {
+        pub(super) fn staging_path(&self) -> PathBuf {
+            self.pinned_path.join("data.migrating")
+        }
+
+        pub(super) fn pinned_path(&self) -> &Path {
+            &self.pinned_path
+        }
+
+        pub(super) fn matches_destination_parent(&self, destination: &Path) -> Result<bool> {
+            let Some(candidate) = destination.parent() else {
+                return Ok(false);
+            };
+            let candidate = open_fixed(
+                candidate,
+                FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+            )?;
+            require_target_directory(&candidate.information, "安装数据目录的父目录无效")?;
+            Ok(same_directory_object(
+                &self.entry.information,
+                &candidate.information,
+            ))
+        }
     }
 
     struct LocalSecurityDescriptor(PSECURITY_DESCRIPTOR);
@@ -716,7 +814,18 @@ mod windows_secure {
         }
     }
 
-    pub(super) fn prepare_install_data(
+    pub(super) fn open_install_parent(path: &Path) -> Result<InstallParentGuard> {
+        let entry = open_fixed(
+            path,
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+        )
+        .context("无法固定安装目录")?;
+        require_target_directory(&entry.information, "安装目录无效")?;
+        let pinned_path = final_path(&entry.handle)?;
+        Ok(InstallParentGuard { entry, pinned_path })
+    }
+
+    pub(super) fn prepare_install_data_from_path(
         source: Option<&Path>,
         staging: &Path,
         destination: &Path,
@@ -735,17 +844,26 @@ mod windows_secure {
         }
 
         fs::create_dir_all(parent).context("无法创建迁移临时目录的父目录")?;
-        let parent_entry = open_fixed(
-            parent,
-            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
-        )
-        .context("无法固定迁移临时目录的父目录")?;
-        require_target_directory(&parent_entry.information, "迁移临时目录的父目录无效")?;
-        // open_fixed omits FILE_SHARE_DELETE. Derive the publish path from that
-        // fixed object's canonical name instead of reusing the caller's path.
-        let pinned_parent = final_path(&parent_entry.handle)?;
-        let pinned_staging = pinned_parent.join(staging_name);
-        let pinned_destination = pinned_parent.join(destination_name);
+        let parent = open_install_parent(parent).context("无法固定迁移临时目录的父目录")?;
+        prepare_install_data_with_parent(source, &parent, marker, staging, destination)
+    }
+
+    pub(super) fn prepare_install_data_with_parent(
+        source: Option<&Path>,
+        parent: &InstallParentGuard,
+        marker: Option<&[u8]>,
+        hook_staging: &Path,
+        hook_destination: &Path,
+    ) -> Result<InstallDataMigrationOutcome> {
+        // The guard is opened with no FILE_SHARE_DELETE and rejects reparse
+        // points. All publication paths below are derived from this exact
+        // directory object, never re-opened from the caller's text path.
+        let pinned_parent = parent.pinned_path();
+        let parent_entry = &parent.entry;
+        let staging_name = OsStr::new("data.migrating");
+        let destination_name = OsStr::new("data");
+        let pinned_staging = parent.staging_path();
+        let pinned_destination = pinned_parent.join("data");
 
         match fs::symlink_metadata(&pinned_destination) {
             Ok(metadata) if super::is_supported_directory(&metadata) => {
@@ -759,8 +877,8 @@ mod windows_secure {
         let Some(source) = source else {
             invoke_migration_hook(
                 WindowsMigrationHookPoint::BeforePublish,
-                staging,
-                destination,
+                hook_staging,
+                hook_destination,
             );
             let data_entry = create_directory_relative(&parent_entry.handle, destination_name)?;
             require_target_directory(&data_entry.information, "安装数据目录无效")?;
@@ -776,8 +894,8 @@ mod windows_secure {
         // create-time descriptor must already exclude ordinary users here.
         invoke_migration_hook(
             WindowsMigrationHookPoint::StagingCreated,
-            staging,
-            destination,
+            hook_staging,
+            hook_destination,
         );
         // Reapply through the fixed handle as an explicit fail-closed check
         // before production code writes any descendants.
@@ -786,8 +904,8 @@ mod windows_secure {
         copy_tree(source, &pinned_staging, &staging_entry.handle)?;
         invoke_migration_hook(
             WindowsMigrationHookPoint::BeforeValidation,
-            staging,
-            destination,
+            hook_staging,
+            hook_destination,
         );
         let validation_guards = validate_staged_data(&staging_entry.handle)?;
         write_marker(
@@ -806,8 +924,8 @@ mod windows_secure {
         drop(validation_guards);
         invoke_migration_hook(
             WindowsMigrationHookPoint::BeforePublish,
-            staging,
-            destination,
+            hook_staging,
+            hook_destination,
         );
         rename_without_replace(
             &staging_entry.handle,
@@ -1594,6 +1712,15 @@ mod windows_secure {
             return Err(anyhow!(message));
         }
         Ok(())
+    }
+
+    fn same_directory_object(
+        left: &BY_HANDLE_FILE_INFORMATION,
+        right: &BY_HANDLE_FILE_INFORMATION,
+    ) -> bool {
+        left.dwVolumeSerialNumber == right.dwVolumeSerialNumber
+            && left.nFileIndexHigh == right.nFileIndexHigh
+            && left.nFileIndexLow == right.nFileIndexLow
     }
 
     fn require_regular_file(information: &BY_HANDLE_FILE_INFORMATION) -> Result<()> {

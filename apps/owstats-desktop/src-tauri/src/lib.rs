@@ -119,17 +119,48 @@ pub fn run_install_data_mode(
     source: Option<&std::path::Path>,
     destination: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let expected = normalized_install_data_root(executable)?;
-    let destination = normalized_destination(destination, expected.parent())?;
-    if destination != expected {
-        return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
+    #[cfg(windows)]
+    {
+        let install_parent = fixed_install_parent_from_executable(executable)?;
+        if !strict_absolute_path(destination)
+            || !is_data_directory_name(destination)
+            || !install_data_migration::destination_belongs_to_install_parent(
+                &install_parent,
+                destination,
+            )?
+        {
+            return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
+        }
+        install_data_migration::prepare_install_data_in_install_parent(source, &install_parent)?;
+        return Ok(());
     }
 
-    let paths = app_paths::SharedAppPaths::from_data_root(destination);
-    install_data_migration::prepare_install_data(source, &paths)?;
-    Ok(())
+    #[cfg(not(windows))]
+    {
+        let expected = normalized_install_data_root(executable)?;
+        let destination = normalized_destination(destination, expected.parent())?;
+        if destination != expected {
+            return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
+        }
+
+        let paths = app_paths::SharedAppPaths::from_data_root(destination);
+        install_data_migration::prepare_install_data(source, &paths)?;
+        Ok(())
+    }
 }
 
+#[cfg(windows)]
+fn fixed_install_parent_from_executable(
+    executable: &std::path::Path,
+) -> anyhow::Result<install_data_migration::InstallParentGuard> {
+    let data_root = app_paths::data_root_from_executable(executable)?;
+    let install_parent = data_root
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("无法定位安装目录"))?;
+    install_data_migration::open_install_parent(install_parent)
+}
+
+#[cfg(not(windows))]
 fn normalized_install_data_root(
     executable: &std::path::Path,
 ) -> anyhow::Result<std::path::PathBuf> {
@@ -145,6 +176,7 @@ fn normalized_install_data_root(
     Ok(install_directory.join("data"))
 }
 
+#[cfg(not(windows))]
 fn normalized_destination(
     destination: &std::path::Path,
     expected_parent: Option<&std::path::Path>,
@@ -171,11 +203,21 @@ fn normalized_destination(
     Ok(parent.join("data"))
 }
 
+fn strict_absolute_path(path: &std::path::Path) -> bool {
+    path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+}
+
 #[cfg(windows)]
 fn is_data_directory_name(destination: &std::path::Path) -> bool {
     destination
         .file_name()
-        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("data"))
+        .is_some_and(|name| name.eq_ignore_ascii_case("data"))
 }
 
 #[cfg(not(windows))]
