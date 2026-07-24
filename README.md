@@ -65,13 +65,3 @@ Watchback 会先更新对局列表，再在后台补全详情。请保持应用�
 ### 卸载应用会删除本地数据吗
 
 安装程序和本地数据的删除行为可能不同。卸载或清理前，请先确认是否需要保留 Windows 应用数据目录中的 Watchback 数据。
-
-## 开发者入口
-
-Watchback 的桌面端位于 `apps/owstats-desktop`，使用 Tauri 2、React、TypeScript、Rust 和 SQLite 构建。
-
-构建、测试、资源管理和发布要求请参阅：
-
-- [维护指南](docs/maintenance.md)
-- [Windows 发布检查清单](docs/windows-release.md)
-- [当前开发状态](docs/current-development-status.md)
