@@ -513,7 +513,7 @@ fn open_windows_published_install_data(
     use std::{
         ffi::{OsStr, OsString},
         fs::OpenOptions,
-        io::Write,
+        io::{Read, Seek, SeekFrom, Write},
         os::windows::{
             ffi::{OsStrExt, OsStringExt},
             fs::{MetadataExt, OpenOptionsExt},
@@ -602,6 +602,7 @@ fn open_windows_published_install_data(
         parent: &std::fs::File,
         name: &OsStr,
         access: u32,
+        share_access: u32,
         disposition: u32,
         failure: StartupFailure,
     ) -> anyhow::Result<RelativeFile> {
@@ -638,7 +639,7 @@ fn open_windows_published_install_data(
                 &mut status,
                 std::ptr::null(),
                 FILE_ATTRIBUTE_NORMAL,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                share_access,
                 disposition,
                 FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
                 std::ptr::null(),
@@ -789,7 +790,8 @@ fn open_windows_published_install_data(
     let marker = open_relative_file(
         &data_directory,
         OsStr::new(install_data_migration::INSTALL_DATA_ROOT_MARKER),
-        FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES | DELETE,
+        FILE_GENERIC_READ | FILE_READ_ATTRIBUTES | DELETE,
+        FILE_SHARE_READ,
         FILE_OPEN_IF,
         StartupFailure::DataDirectoryPermissions,
     )?;
@@ -801,25 +803,54 @@ fn open_windows_published_install_data(
         marker.file.as_ref().expect("写入测试句柄存在"),
         StartupFailure::CorruptInstallDataMarker,
     ) {
+        if marker_created {
+            return match marker.cleanup() {
+                Ok(()) => Err(error),
+                Err(error) => Err(error),
+            };
+        }
+        drop(marker.disarm());
+        return Err(error);
+    }
+    let marker_contents = (|| -> anyhow::Result<Vec<u8>> {
+        let file = marker.file.as_mut().expect("写入测试句柄存在");
+        file.seek(SeekFrom::Start(0))
+            .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
+        let limit = u64::try_from(install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS.len())
+            .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?
+            .checked_add(1)
+            .ok_or_else(|| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
+        let mut contents = Vec::new();
+        file.take(limit)
+            .read_to_end(&mut contents)
+            .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
+        Ok(contents)
+    })();
+    let marker_contents = match marker_contents {
+        Ok(contents) => contents,
+        Err(error) => {
+            if !marker_created {
+                drop(marker.disarm());
+                return Err(error);
+            }
+            return match marker.cleanup() {
+                Ok(()) => Err(error),
+                Err(error) => Err(error),
+            };
+        }
+    };
+    if !marker_contents.is_empty()
+        && marker_contents != install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS
+    {
+        let error = anyhow::Error::new(StartupFailure::CorruptInstallDataMarker);
+        if !marker_created {
+            drop(marker.disarm());
+            return Err(error);
+        }
         return match marker.cleanup() {
             Ok(()) => Err(error),
             Err(error) => Err(error),
         };
-    }
-    if marker_created {
-        if marker
-            .file
-            .as_mut()
-            .expect("写入测试句柄存在")
-            .write_all(install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS)
-            .and_then(|_| marker.file.as_ref().expect("写入测试句柄存在").sync_all())
-            .is_err()
-        {
-            return match marker.cleanup() {
-                Ok(()) => Err(anyhow::Error::new(StartupFailure::DataDirectoryPermissions)),
-                Err(error) => Err(error),
-            };
-        }
     }
     let marker = marker.disarm();
 
@@ -828,6 +859,7 @@ fn open_windows_published_install_data(
         &data_directory,
         OsStr::new(&probe_name),
         FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES | DELETE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
         FILE_CREATE,
         StartupFailure::DataDirectoryPermissions,
     )?;

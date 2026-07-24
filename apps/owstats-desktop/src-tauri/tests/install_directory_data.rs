@@ -2656,6 +2656,7 @@ fn normal_startup_resolves_writable_published_install_data_with_chinese_and_spac
     let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
 
     assert_eq!(startup.paths().root(), data);
+    assert_eq!(fs::read(data.join(".watchback-data-root-v1")).unwrap(), b"");
 }
 
 #[cfg(windows)]
@@ -2694,6 +2695,40 @@ fn normal_startup_accepts_an_empty_install_data_marker_left_by_an_interrupted_st
     let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
 
     assert_eq!(startup.paths().root(), data);
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_accepts_the_legacy_v1_install_data_marker() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join(".watchback-data-root-v1"), b"v1").unwrap();
+
+    let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
+
+    assert_eq!(startup.paths().root(), data);
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_rejects_partial_garbage_and_oversized_install_data_markers() {
+    for contents in [
+        b"v".as_slice(),
+        b"garbage".as_slice(),
+        b"v1extra".as_slice(),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("Watchback.exe");
+        let data = executable.parent().unwrap().join("data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join(".watchback-data-root-v1"), contents).unwrap();
+
+        let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+        assert_eq!(error.to_string(), "安装数据标记损坏，请重新安装 Watchback");
+    }
 }
 
 #[cfg(windows)]
