@@ -2064,6 +2064,64 @@ fn delete_cli_accepts_exactly_one_destination() {
 }
 
 #[test]
+fn trusted_installer_cli_contracts_are_explicit_and_bounded() {
+    assert!(matches!(
+        owstats_desktop_lib::parse_startup_mode([
+            "Watchback.exe",
+            "--prepare-install-root",
+            r"D:\Watchback",
+            "S-1-5-21-1-2-3-1001"
+        ])
+        .unwrap(),
+        owstats_desktop_lib::StartupMode::PrepareInstallRoot { .. }
+    ));
+    assert!(matches!(
+        owstats_desktop_lib::parse_startup_mode([
+            "Watchback.exe",
+            "--secure-install-data",
+            "-",
+            r"D:\Watchback\data",
+            "S-1-5-21-1-2-3-1001"
+        ])
+        .unwrap(),
+        owstats_desktop_lib::StartupMode::SecureInstallData { source: None, .. }
+    ));
+    assert!(matches!(
+        owstats_desktop_lib::parse_startup_mode([
+            "Watchback.exe",
+            "--trusted-delete-install-data",
+            r"D:\Watchback",
+            r"D:\Watchback\data"
+        ])
+        .unwrap(),
+        owstats_desktop_lib::StartupMode::TrustedDeleteInstallData { .. }
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn install_root_preparation_rejects_ancestor_junctions_and_unrelated_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = temp.path().join("outside");
+    let through_junction = temp.path().join("linked").join("Watchback");
+    fs::create_dir_all(outside.join("Watchback")).unwrap();
+    fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+    create_junction(&outside, &temp.path().join("linked"));
+
+    let user_sid = std::ffi::OsStr::new("S-1-5-21-1-2-3-1001");
+    assert!(
+        owstats_desktop_lib::run_prepare_install_root_mode(&through_junction, user_sid).is_err()
+    );
+    assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+
+    let unrelated = temp.path().join("unrelated");
+    fs::create_dir_all(&unrelated).unwrap();
+    fs::write(unrelated.join("unrelated.txt"), b"keep").unwrap();
+    assert!(owstats_desktop_lib::run_prepare_install_root_mode(&unrelated, user_sid).is_err());
+    assert_eq!(fs::read(unrelated.join("unrelated.txt")).unwrap(), b"keep");
+}
+
+#[test]
 fn migration_execution_accepts_only_the_executable_data_directory() {
     let temp = tempfile::tempdir().unwrap();
     let install = temp.path().join("install");

@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const config = JSON.parse(
   readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
@@ -36,7 +37,7 @@ for (const macro of [
 }
 
 assert.match(hooks, /\$\{MAINBINARYNAME\}\.exe/);
-assert.match(hooks, /--prepare-install-data/);
+assert.match(hooks, /--secure-install-data/);
 assert.match(hooks, /InstallLocation/);
 assert.match(hooks, /Software\\\$\{BUNDLEID\}/);
 assert.match(hooks, /nsExec::ExecToStack/);
@@ -46,16 +47,15 @@ assert.match(hooks, /explorer\.exe/i);
 assert.match(hooks, /ProfileList/);
 assert.match(hooks, /User Shell Folders/);
 assert.match(hooks, /S-1-5-18/);
-assert.match(hooks, /\/grant:r\s+"\*\$/i);
 assert.match(hooks, /nsis_tauri_utils::RunAsUser/);
 assert.match(hooks, /WATCHBACK_DATA_PROBE/);
 assert.match(hooks, /\$INSTDIR\\data/);
 assert.match(hooks, /Delete "\$INSTDIR\\data\\\.write-test-\$/);
 assert.match(hooks, /\/SD IDNO/);
-assert.match(hooks, /--delete-install-data "\$INSTDIR\\data"/);
+assert.match(hooks, /--trusted-delete-install-data "\$INSTDIR" "\$INSTDIR\\data"/);
 assert.match(
   hooks,
-  /--delete-install-data[^]*?Pop \$1\s+Pop \$2\s+StrCpy \$2 ""\s+\$\{If\} \$1 != 0[^]*?!insertmacro InstallDataAbort/,
+  /--trusted-delete-install-data[^]*?Pop \$1\s+Pop \$2\s+StrCpy \$2 ""\s+\$\{If\} \$1 != 0[^]*?!insertmacro InstallDataAbort/,
 );
 assert.match(hooks, /本地数据将保留在原安装目录/);
 assert.match(hooks, /该目录可能不会被完全移除/);
@@ -72,11 +72,16 @@ assert.doesNotMatch(hooks, /Builtin\\Users|BUILTIN\\Users|S-1-5-32-545/i);
 assert.doesNotMatch(hooks, /grant[^\r\n]*"\$INSTDIR"(?:\s|$)/i);
 assert.doesNotMatch(hooks, /RMDir \/r "\$INSTDIR"(?:\s|$)/);
 assert.doesNotMatch(hooks, /RMDir \/r "\$INSTDIR\\data"/);
+assert.doesNotMatch(hooks, /icacls/i);
+assert.doesNotMatch(
+  hooks,
+  /"\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe" --(?:prepare|delete|secure)-install-data/,
+);
 assert.doesNotMatch(hooks, /MessageBox[^\r\n]*(?:\$INSTDIR|\$APPDATA)/);
 
 const preUninstall = hooks.indexOf("!macro NSIS_HOOK_PREUNINSTALL");
 const postUninstall = hooks.indexOf("!macro NSIS_HOOK_POSTUNINSTALL");
-const deleteData = hooks.indexOf("--delete-install-data");
+const deleteData = hooks.indexOf("--trusted-delete-install-data");
 assert.ok(preUninstall >= 0);
 assert.ok(postUninstall > preUninstall);
 assert.ok(
@@ -92,12 +97,12 @@ const templateBytes = readFileSync(templateUrl);
 const template = templateBytes.toString("utf8");
 assert.equal(
   createHash("sha256").update(template.replace(/\r\n/g, "\n")).digest("hex"),
-  "934153506da4954298a76285e889fe71ca89f23b207e9db4679d488542ae5e62",
+  "caa038854c92fdf3102f2483398f02d6df2fa1d25d0826dbfd7c2f912bbcfec9",
 );
 assert.match(template, /Tauri CLI 2\.11\.3 tag tauri-cli-v2\.11\.3/);
 assert.match(template, /d372e3c391770cf231db974422a1e4f8adaac3a6/);
 assert.match(template, /Function PageLeaveReinstall/);
-assert.match(template, /WATCHBACK-UPGRADE-PARENT=\$R9/);
+assert.match(template, /WATCHBACK-UPGRADE-PARENT=\$9/);
 assert.match(template, /GetCurrentProcessId/);
 assert.match(template, /StrCpy \$WatchbackNestedUpgrade 1/);
 assert.doesNotMatch(
@@ -214,6 +219,41 @@ assert.ok(preInstallHook >= 0 && runningCheck > preInstallHook);
 assert.ok(preUninstallHook >= 0 && uninstallRunningCheck > preUninstallHook);
 assert.ok(postUninstallHook > uninstallRunningCheck);
 assert.ok(delayedExeDelete > postUninstallHook);
+const uninstallSection = template.indexOf("Section Uninstall");
+const trustedUninstallHelper = template.indexOf(
+  'File "/oname=watchback-trusted-helper.exe" "${MAINBINARYSRCPATH}"',
+  uninstallSection,
+);
+assert.ok(trustedUninstallHelper > uninstallRunningCheck);
+assert.ok(trustedUninstallHelper < postUninstallHook);
+assert.match(
+  template,
+  /SetOutPath "\$PLUGINSDIR"[^]*?File "\/oname=watchback-trusted-helper\.exe" "\$\{MAINBINARYSRCPATH\}"/,
+);
+assert.doesNotMatch(
+  template.slice(uninstallRunningCheck, postUninstallHook),
+  /Delete |RMDir |DeleteReg|APP_UNASSOCIATE|UnpinShortcut/,
+);
+assert.doesNotMatch(template, /GetCurrentProcessId\(\) i\.r9[^]*?\$R9/);
+assert.match(template, /GetCurrentProcessId\(\) i\.r9[^]*?\$9/);
+const migrationSource = readFileSync(
+  new URL("../src-tauri/src/install_data_migration.rs", import.meta.url),
+  "utf8",
+);
+assert.match(
+  migrationSource,
+  /D:P\(A;OICI;FA;;;SY\)\(A;OICI;FA;;;BA\)\(A;OICI;0x1301bf;;;\{sid\}\)/,
+);
+assert.match(
+  migrationSource,
+  /D:P\(A;OICI;FA;;;SY\)\(A;OICI;FA;;;BA\)\(A;OICI;0x1200a9;;;\{sid\}\)/,
+);
+assert.match(
+  migrationSource,
+  /DACL_SECURITY_INFORMATION \| PROTECTED_DACL_SECURITY_INFORMATION/,
+);
+assert.match(migrationSource, /same_normalized_windows_path/);
+assert.match(migrationSource, /安装目录祖先包含不受支持的链接/);
 
 const oldInstallSource = hooks.indexOf(
   'StrCpy $0 "$InstallDataOldLocation\\data"',
@@ -240,6 +280,25 @@ assert.doesNotMatch(probe, /Users|Everyone|S-1-5-32-545/i);
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
+assert.equal(packageJson.devDependencies["@tauri-apps/cli"], "2.11.3");
+const packageLock = JSON.parse(
+  readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
+);
+assert.equal(
+  packageLock.packages["node_modules/@tauri-apps/cli"].version,
+  "2.11.3",
+);
+assert.equal(
+  packageLock.packages[""].devDependencies["@tauri-apps/cli"],
+  "2.11.3",
+);
+const installedTauri = spawnSync(
+  process.execPath,
+  ["node_modules/@tauri-apps/cli/tauri.js", "--version"],
+  { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" },
+);
+assert.equal(installedTauri.status, 0);
+assert.match(installedTauri.stdout, /tauri-cli 2\.11\.3/);
 assert.match(
   packageJson.scripts["test:resources"],
   /tsx scripts\/installDirectoryData\.test\.ts$/,

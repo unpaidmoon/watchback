@@ -20,9 +20,7 @@ Var InstallDataDeleteRequested
   ${If} $InstallDataOldLocation == ""
     ReadRegStr $InstallDataOldLocation SHCTX "${MANUPRODUCTKEY}" ""
   ${EndIf}
-!macroend
 
-!macro NSIS_HOOK_POSTINSTALL
   ; Resolve the owner of the Explorer shell in this interactive session. This
   ; remains the original user when UAC credentials belong to another account.
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$s=[Diagnostics.Process]::GetCurrentProcess().SessionId;$$p=Get-CimInstance Win32_Process|Where-Object{$$_.Name-eq$\"explorer.exe$\"-and$$_.SessionId-eq$$s}|Select-Object -First 1;if($$null-eq$$p){exit 2};$$r=Invoke-CimMethod -InputObject $$p -MethodName GetOwnerSid;if($$r.ReturnValue-ne 0){exit 3};[Console]::Out.Write($$r.Sid)"'
@@ -39,6 +37,9 @@ Var InstallDataDeleteRequested
   ${OrIf} $InstallDataUserSid == "S-1-5-20"
     !insertmacro InstallDataAbort "无法确认当前交互用户。安装将停止。"
   ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
 
   ; Resolve the same user's roaming AppData from that user's loaded registry
   ; hive. Do not use the elevated process's shell variables.
@@ -81,21 +82,12 @@ Var InstallDataDeleteRequested
   ${EndIf}
 
   install_data_source_selected:
-  nsExec::ExecToStack '"$INSTDIR\${MAINBINARYNAME}.exe" --prepare-install-data "$0" "$INSTDIR\data"'
+  nsExec::ExecToStack '"$PLUGINSDIR\watchback-trusted-helper.exe" --secure-install-data "$0" "$INSTDIR\data" "$InstallDataUserSid"'
   Pop $1
   Pop $2
   StrCpy $2 ""
   ${If} $1 != 0
     !insertmacro InstallDataAbort "无法迁移或创建安装目录数据。安装将停止。"
-  ${EndIf}
-
-  ; Grant modify only to the original interactive user's SID and only on data.
-  nsExec::ExecToStack '"$SYSDIR\icacls.exe" "$INSTDIR\data" /inheritance:e /grant:r "*$InstallDataUserSid:(OI)(CI)M" /Q'
-  Pop $1
-  Pop $2
-  StrCpy $2 ""
-  ${If} $1 != 0
-    !insertmacro InstallDataAbort "无法配置数据目录写权限。安装将停止。"
   ${EndIf}
 
   ; Verify the ACL with a process launched from Tauri's original shell token,
@@ -188,7 +180,7 @@ Var InstallDataDeleteRequested
   ; The resolved Tauri template performs its application-running check after
   ; PREUNINSTALL and before this hook, so destructive work belongs here.
   ${If} $InstallDataDeleteRequested == 1
-    nsExec::ExecToStack '"$INSTDIR\${MAINBINARYNAME}.exe" --delete-install-data "$INSTDIR\data"'
+    nsExec::ExecToStack '"$PLUGINSDIR\watchback-trusted-helper.exe" --trusted-delete-install-data "$INSTDIR" "$INSTDIR\data"'
     Pop $1
     Pop $2
     StrCpy $2 ""

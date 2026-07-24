@@ -363,7 +363,7 @@ Function PageLeaveReinstall
       System::Call 'kernel32::GetCurrentProcessId() i.r9'
       ; /UPDATE preserves compatibility with older Watchback uninstallers.
       ; New uninstallers additionally require the live-parent proof below.
-      StrCpy $R1 "$R1 /UPDATE /WATCHBACK-UPGRADE-PARENT=$R9"
+      StrCpy $R1 "$R1 /UPDATE /WATCHBACK-UPGRADE-PARENT=$9"
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
       ExecWait '$R1' $0
@@ -645,11 +645,24 @@ Section WebView2
 SectionEnd
 
 Section Install
-  SetOutPath $INSTDIR
+  SetOutPath "$PLUGINSDIR"
+  File "/oname=watchback-trusted-helper.exe" "${MAINBINARYSRCPATH}"
 
   !ifmacrodef NSIS_HOOK_PREINSTALL
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
+
+  ${If} $MultiUser.InstallMode == "AllUsers"
+    CreateDirectory "$INSTDIR"
+    nsExec::ExecToStack '"$PLUGINSDIR\watchback-trusted-helper.exe" --prepare-install-root "$INSTDIR" "$InstallDataUserSid"'
+    Pop $1
+    Pop $2
+    StrCpy $2 ""
+    ${If} $1 != 0
+      !insertmacro InstallDataAbort "无法安全准备安装目录。安装将停止。"
+    ${EndIf}
+  ${EndIf}
+  SetOutPath $INSTDIR
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
@@ -790,7 +803,7 @@ Function un.onInit
       StrCpy $UpdateMode 0
       Goto watchback_parent_proof_done
     ${EndIf}
-    System::Call 'kernel32::SetEnvironmentVariableW(w "WATCHBACK_UNINSTALLER_PID", w "$R9") i.r7'
+    System::Call 'kernel32::SetEnvironmentVariableW(w "WATCHBACK_UNINSTALLER_PID", w "$9") i.r7'
     ${If} $7 == 0
       System::Call 'kernel32::SetEnvironmentVariableW(w "WATCHBACK_UPGRADE_PARENT_PID", p 0)'
       StrCpy $UpdateMode 0
@@ -820,8 +833,13 @@ Section Uninstall
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
-  ; Keep the main executable until POSTUNINSTALL so Watchback's fixed-handle
-  ; deletion helper remains available after the application-running check.
+  ; Extract the build-time helper into NSIS's random administrator-controlled
+  ; plugin directory. Destructive data work occurs before any install mutation.
+  SetOutPath "$PLUGINSDIR"
+  File "/oname=watchback-trusted-helper.exe" "${MAINBINARYSRCPATH}"
+  !ifmacrodef NSIS_HOOK_POSTUNINSTALL
+    !insertmacro NSIS_HOOK_POSTUNINSTALL
+  !endif
 
   ; Delete resources
   {{#each resources}}
@@ -919,10 +937,6 @@ Section Uninstall
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}
-
-  !ifmacrodef NSIS_HOOK_POSTUNINSTALL
-    !insertmacro NSIS_HOOK_POSTUNINSTALL
-  !endif
 
   Delete "$INSTDIR\${MAINBINARYNAME}.exe"
   RMDir "$INSTDIR"

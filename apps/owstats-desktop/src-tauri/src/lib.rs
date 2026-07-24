@@ -81,6 +81,19 @@ pub enum StartupMode {
     DeleteInstallData {
         destination: std::path::PathBuf,
     },
+    PrepareInstallRoot {
+        install_root: std::path::PathBuf,
+        user_sid: std::ffi::OsString,
+    },
+    SecureInstallData {
+        source: std::option::Option<std::path::PathBuf>,
+        destination: std::path::PathBuf,
+        user_sid: std::ffi::OsString,
+    },
+    TrustedDeleteInstallData {
+        install_root: std::path::PathBuf,
+        destination: std::path::PathBuf,
+    },
 }
 
 pub fn parse_startup_mode<I, S>(args: I) -> anyhow::Result<StartupMode>
@@ -93,6 +106,59 @@ where
     let Some(mode) = args.next() else {
         return Ok(StartupMode::Desktop);
     };
+    if mode == "--prepare-install-root" {
+        let install_root = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少安装根目录参数"))?;
+        let user_sid = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少用户 SID 参数"))?;
+        if args.next().is_some() {
+            return Err(anyhow::anyhow!("安装根目录参数过多"));
+        }
+        return Ok(StartupMode::PrepareInstallRoot {
+            install_root: install_root.into(),
+            user_sid,
+        });
+    }
+    if mode == "--secure-install-data" {
+        let source = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少迁移源参数"))?;
+        let destination = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少迁移目标参数"))?;
+        let user_sid = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少用户 SID 参数"))?;
+        if args.next().is_some() {
+            return Err(anyhow::anyhow!("安全迁移参数过多"));
+        }
+        return Ok(StartupMode::SecureInstallData {
+            source: if source == "-" {
+                None
+            } else {
+                Some(source.into())
+            },
+            destination: destination.into(),
+            user_sid,
+        });
+    }
+    if mode == "--trusted-delete-install-data" {
+        let install_root = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少安装根目录参数"))?;
+        let destination = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少删除目标参数"))?;
+        if args.next().is_some() {
+            return Err(anyhow::anyhow!("安全删除参数过多"));
+        }
+        return Ok(StartupMode::TrustedDeleteInstallData {
+            install_root: install_root.into(),
+            destination: destination.into(),
+        });
+    }
     if mode == "--delete-install-data" {
         let destination = args
             .next()
@@ -126,6 +192,83 @@ where
         },
         destination: destination.into(),
     })
+}
+
+pub fn run_prepare_install_root_mode(
+    install_root: &std::path::Path,
+    user_sid: &std::ffi::OsStr,
+) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        if !strict_absolute_path(install_root) {
+            return Err(anyhow::anyhow!("安装根目录无效"));
+        }
+        return install_data_migration::prepare_install_root(install_root, user_sid);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (install_root, user_sid);
+        Err(anyhow::anyhow!("当前平台不支持安装根目录准备命令"))
+    }
+}
+
+pub fn run_secure_install_data_mode(
+    source: Option<&std::path::Path>,
+    destination: &std::path::Path,
+    user_sid: &std::ffi::OsStr,
+) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        if !strict_absolute_path(destination) || !is_data_directory_name(destination) {
+            return Err(anyhow::anyhow!("安全迁移目标无效"));
+        }
+        let parent = destination
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("安全迁移目标无效"))?;
+        let install_parent = install_data_migration::open_install_parent(parent)?;
+        if !install_data_migration::destination_belongs_to_install_parent(
+            &install_parent,
+            destination,
+        )? {
+            return Err(anyhow::anyhow!("安全迁移目标无效"));
+        }
+        install_data_migration::prepare_install_data_in_install_parent(source, &install_parent)?;
+        install_data_migration::protect_install_data_for_user(&install_parent, user_sid)?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (source, destination, user_sid);
+        Err(anyhow::anyhow!("当前平台不支持安全安装数据命令"))
+    }
+}
+
+pub fn run_trusted_delete_install_data_mode(
+    install_root: &std::path::Path,
+    destination: &std::path::Path,
+) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        if !strict_absolute_path(install_root)
+            || !strict_absolute_path(destination)
+            || !is_data_directory_name(destination)
+        {
+            return Err(anyhow::anyhow!("安全删除目标无效"));
+        }
+        let install_parent = install_data_migration::open_install_parent(install_root)?;
+        if !install_data_migration::destination_belongs_to_install_parent(
+            &install_parent,
+            destination,
+        )? {
+            return Err(anyhow::anyhow!("安全删除目标无效"));
+        }
+        return install_data_migration::delete_install_data_in_install_parent(&install_parent);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (install_root, destination);
+        Err(anyhow::anyhow!("当前平台不支持安全删除命令"))
+    }
 }
 
 pub fn run_delete_install_data_mode(

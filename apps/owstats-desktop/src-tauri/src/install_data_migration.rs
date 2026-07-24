@@ -77,6 +77,19 @@ pub(crate) fn delete_install_data_in_install_parent(parent: &InstallParentGuard)
     windows_secure::delete_install_data(parent)
 }
 
+#[cfg(windows)]
+pub(crate) fn prepare_install_root(path: &Path, user_sid: &std::ffi::OsStr) -> Result<()> {
+    windows_secure::prepare_install_root(path, user_sid)
+}
+
+#[cfg(windows)]
+pub(crate) fn protect_install_data_for_user(
+    parent: &InstallParentGuard,
+    user_sid: &std::ffi::OsStr,
+) -> Result<()> {
+    windows_secure::protect_install_data_for_user(parent, user_sid)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MigrationMarker {
@@ -862,12 +875,58 @@ mod windows_secure {
     pub(super) fn open_install_parent(path: &Path) -> Result<InstallParentGuard> {
         let entry = open_fixed(
             path,
-            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
         )
         .context("无法固定安装目录")?;
         require_target_directory(&entry.information, "安装目录无效")?;
         let pinned_path = final_path(&entry.handle)?;
+        if !same_normalized_windows_path(path, &pinned_path) {
+            return Err(anyhow!("安装目录祖先包含不受支持的链接"));
+        }
         Ok(InstallParentGuard { entry, pinned_path })
+    }
+
+    pub(super) fn prepare_install_root(path: &Path, user_sid: &OsStr) -> Result<()> {
+        let parent = open_install_parent(path)?;
+        let mut has_marker = false;
+        let mut has_main = false;
+        let mut has_uninstaller = false;
+        let mut entry_count = 0_u32;
+        for entry in fs::read_dir(parent.pinned_path()).context("无法枚举安装目录")? {
+            let entry = entry.context("无法读取安装目录项")?;
+            entry_count = entry_count
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("安装目录项过多"))?;
+            let name = entry.file_name();
+            has_marker |= name == OsStr::new(".watchback-install-root-v1");
+            has_main |= name.eq_ignore_ascii_case("owstats-desktop.exe");
+            has_uninstaller |= name.eq_ignore_ascii_case("uninstall.exe");
+        }
+        if entry_count != 0 && !has_marker && !(has_main && has_uninstaller) {
+            return Err(anyhow!("安装目标不是空目录或已知 Watchback 目录"));
+        }
+        protect_handle_with_descriptor(
+            &parent.entry.handle,
+            install_root_security_descriptor(user_sid)?,
+        )?;
+        if !has_marker {
+            let marker = create_file(&parent.pinned_path().join(".watchback-install-root-v1"))?;
+            drop(marker);
+        }
+        Ok(())
+    }
+
+    pub(super) fn protect_install_data_for_user(
+        parent: &InstallParentGuard,
+        user_sid: &OsStr,
+    ) -> Result<()> {
+        let data = open_child_fixed(
+            &parent.entry.handle,
+            OsStr::new("data"),
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
+        )?;
+        require_target_directory(&data.information, "安装数据目录无效")?;
+        protect_handle_with_descriptor(&data.handle, install_data_security_descriptor(user_sid)?)
     }
 
     pub(super) fn prepare_install_data_from_path(
@@ -984,7 +1043,41 @@ mod windows_secure {
     }
 
     fn protected_staging_security_descriptor() -> Result<LocalSecurityDescriptor> {
-        let sddl = OsStr::new("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+        security_descriptor_from_sddl(OsStr::new("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"))
+    }
+
+    fn install_root_security_descriptor(user_sid: &OsStr) -> Result<LocalSecurityDescriptor> {
+        let sid = user_sid
+            .to_str()
+            .filter(|sid| {
+                sid.starts_with("S-1-")
+                    && sid.len() <= 184
+                    && sid
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || byte == b'S' || byte == b'-')
+            })
+            .ok_or_else(|| anyhow!("交互用户 SID 无效"))?;
+        let sddl = format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;{sid})");
+        security_descriptor_from_sddl(OsStr::new(&sddl))
+    }
+
+    fn install_data_security_descriptor(user_sid: &OsStr) -> Result<LocalSecurityDescriptor> {
+        let sid = user_sid
+            .to_str()
+            .filter(|sid| {
+                sid.starts_with("S-1-")
+                    && sid.len() <= 184
+                    && sid
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || byte == b'S' || byte == b'-')
+            })
+            .ok_or_else(|| anyhow!("交互用户 SID 无效"))?;
+        let sddl = format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301bf;;;{sid})");
+        security_descriptor_from_sddl(OsStr::new(&sddl))
+    }
+
+    fn security_descriptor_from_sddl(sddl: &OsStr) -> Result<LocalSecurityDescriptor> {
+        let sddl = sddl
             .encode_wide()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
@@ -1005,6 +1098,13 @@ mod windows_secure {
 
     fn protect_staging(staging: &FixedHandle) -> Result<()> {
         let descriptor = protected_staging_security_descriptor()?;
+        protect_handle_with_descriptor(staging, descriptor)
+    }
+
+    fn protect_handle_with_descriptor(
+        handle: &FixedHandle,
+        descriptor: LocalSecurityDescriptor,
+    ) -> Result<()> {
         let mut dacl_present = 0;
         let mut dacl_defaulted = 0;
         let mut dacl: *mut ACL = std::ptr::null_mut();
@@ -1021,7 +1121,7 @@ mod windows_secure {
         }
         let status = unsafe {
             SetSecurityInfo(
-                staging.0,
+                handle.0,
                 SE_FILE_OBJECT,
                 DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
                 std::ptr::null_mut(),
@@ -1407,6 +1507,18 @@ mod windows_secure {
         }
         buffer.truncate(length as usize);
         Ok(PathBuf::from(OsString::from_wide(&buffer)))
+    }
+
+    fn same_normalized_windows_path(requested: &Path, final_path: &Path) -> bool {
+        fn without_extended_prefix(path: &Path) -> String {
+            let path = path.to_string_lossy();
+            path.strip_prefix(r"\\?\")
+                .unwrap_or(&path)
+                .trim_end_matches(['\\', '/'])
+                .to_owned()
+        }
+        without_extended_prefix(requested)
+            .eq_ignore_ascii_case(&without_extended_prefix(final_path))
     }
 
     fn rename_without_replace(

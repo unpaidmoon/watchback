@@ -37,6 +37,43 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        Ok(owstats_desktop_lib::StartupMode::PrepareInstallRoot {
+            install_root,
+            user_sid,
+        }) => {
+            if owstats_desktop_lib::run_prepare_install_root_mode(&install_root, &user_sid).is_err()
+            {
+                std::process::exit(2);
+            }
+        }
+        Ok(owstats_desktop_lib::StartupMode::SecureInstallData {
+            source,
+            destination,
+            user_sid,
+        }) => {
+            if owstats_desktop_lib::run_secure_install_data_mode(
+                source.as_deref(),
+                &destination,
+                &user_sid,
+            )
+            .is_err()
+            {
+                std::process::exit(2);
+            }
+        }
+        Ok(owstats_desktop_lib::StartupMode::TrustedDeleteInstallData {
+            install_root,
+            destination,
+        }) => {
+            if owstats_desktop_lib::run_trusted_delete_install_data_mode(
+                &install_root,
+                &destination,
+            )
+            .is_err()
+            {
+                std::process::exit(2);
+            }
+        }
         Err(_) => std::process::exit(2),
     }
 }
