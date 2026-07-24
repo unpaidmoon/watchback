@@ -279,7 +279,7 @@ async fn request_v2_uses_thinking_contract_and_complete_snapshot() {
 }
 
 #[test]
-fn prompt_v2_encodes_style_structure_and_inference_boundaries() {
+fn prompt_v3_encodes_style_structure_and_inference_boundaries() {
     let prompt = system_prompt();
     for required in [
         "如果只能告诉朋友一件事",
@@ -294,18 +294,6 @@ fn prompt_v2_encodes_style_structure_and_inference_boundaries() {
     }
     assert!(!prompt.contains("固定为五区块"));
     assert!(!prompt.contains("Grok"));
-    return;
-    for required in [
-        "事实优先",
-        "冷面幽默",
-        "不写客服或公关稿",
-        "故意送、摆烂或主观意图",
-        "五区块",
-        "每个分析条目附 evidenceRefs",
-    ] {
-        assert!(prompt.contains(required), "missing {required}");
-    }
-    assert!(!prompt.contains("你是 Grok"));
 }
 
 #[tokio::test]

@@ -7,8 +7,8 @@ use thiserror::Error;
 
 use super::{
     report::{
-        evidence_catalog, AiRoastNarrative, AiRoastReport, ClaimType, EvidenceSemantic,
-        EvidenceValue, NarrativeAnalysis, RoastClaim,
+        evidence_catalog, AiRoastNarrative, ClaimType, EvidenceSemantic, EvidenceValue,
+        NarrativeAnalysis, RoastClaim,
     },
     snapshot::RoastSnapshot,
     validator::{normalize_json_input, RoastValidationError},
@@ -170,9 +170,7 @@ impl DeepSeekRoastClient {
             let content = choice.message.content.unwrap_or_default();
             match parse_visible_narrative(&content) {
                 Ok(report) => return Ok(report),
-                Err(error) if attempt + 1 < MAX_ATTEMPTS => {
-                    append_correction(&mut request, &error, &content, snapshot)
-                }
+                Err(error) if attempt + 1 < MAX_ATTEMPTS => append_correction(&mut request, &error),
                 Err(error) => {
                     LAST_VALIDATION_FAILURE.store(
                         detailed_validation_failure_code(&error, &content, snapshot),
@@ -354,12 +352,7 @@ fn build_request(snapshot: &RoastSnapshot) -> ChatRequest {
     request
 }
 
-fn append_correction(
-    request: &mut ChatRequest,
-    error: &RoastValidationError,
-    content: &str,
-    snapshot: &RoastSnapshot,
-) {
+fn append_correction(request: &mut ChatRequest, error: &RoastValidationError) {
     let category = match error {
         RoastValidationError::UnknownEvidence => "evidenceRefs 中存在证据目录之外的路径",
         RoastValidationError::DuplicateEvidence => "同一条判断重复引用了证据",
@@ -377,166 +370,14 @@ fn append_correction(
             "上一次 V3 锐评校验失败：{category}。只修正对应问题，并重新返回完整 JSON。严格照此骨架，不增加字段或外层文字：{{\"analysis\":{{\"matchThesis\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"currentPlayer\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"keyActors\":[],\"supportingFactors\":[]}},\"title\":\"\",\"commentary\":\"\"}}。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。保留一个主线，supportingFactors 最多两个，negative keyActors 最多两个。不要在 judgment、title、commentary 中书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。evidenceRefs 必须逐字取自原证据目录。不要复述上一次输出、输入数据、身份、路径或凭据。"
         ),
     });
-    return;
-
-    let category = match error {
-        RoastValidationError::UnknownEvidence => "证据字段不存在",
-        RoastValidationError::DuplicateEvidence => "证据字段重复",
-        RoastValidationError::UnsupportedNumber => "数字没有对应证据",
-        RoastValidationError::UnsupportedClaim => "比较或推断强度不受证据支持",
-        RoastValidationError::InvalidSectionCount => "区块条目数量无效",
-        RoastValidationError::TextTooLong => "文本长度超限",
-        RoastValidationError::Unfriendly => "出现攻击性内容",
-        RoastValidationError::RealIdentity => "出现身份或凭据内容",
-        _ => "JSON 结构或必填字段无效",
-    };
-    let location =
-        validation_location(error, content, snapshot).unwrap_or_else(|| "整份报告".to_string());
-    let instruction = if matches!(
-        error,
-        RoastValidationError::InvalidJson
-            | RoastValidationError::MissingField(_)
-            | RoastValidationError::ExtraFields
-    ) {
-        "严格按系统提示中的 JSON 骨架返回；不得增加字段、注释、Markdown 或骨架外文字。"
-    } else if *error == RoastValidationError::UnsupportedNumber {
-        "检查并删除整份报告中除英雄或地图固有名称外的所有阿拉伯数字、中文数字、百分比和比分，尤其删除一杀、双杀、三杀等中文数词加杀的写法；改用有证据的最高、靠前、领先或偏低等定性表述。"
-    } else if matches!(
-        error,
-        RoastValidationError::UnknownEvidence | RoastValidationError::DuplicateEvidence
-    ) {
-        "逐项检查整份报告的 evidenceRefs：每个值必须逐字复制自证据路径目录，同一条目不得重复，禁止使用数组下标路径或缩写。"
-    } else if *error == RoastValidationError::UnsupportedClaim {
-        "逐项检查整份报告：最高或第一只引用值为一的 Rank；领先、落后、高于、低于必须引用 Rank、Delta 或双方原始值；知识引用必须标为 game_context_inference 并同时引用统计；目标时间全队最高时 currentPlayer 必须引用 teamObjectiveTimeRank。删除无法满足这些条件的断言。"
-    } else if matches!(
-        error,
-        RoastValidationError::EmptyField | RoastValidationError::TextTooLong
-    ) {
-        "保留所有必填区块并压缩整份报告：标题控制在十六字内，总评控制在七十字内，单条正文控制在一百字内，收尾控制在六十字内，所有可见字符控制在四百五十以内。"
-    } else {
-        "只修正无效引用或对应结论。"
-    };
-    request.messages.push(Message{role:"user",content:format!("上一次报告的 {location} 校验失败：{category}。{instruction}保持其他区块语义不变，并重新返回完整 JSON。不得复述输入、错误输出、身份、路径或凭据。")});
-}
-
-fn validation_location(
-    error: &RoastValidationError,
-    content: &str,
-    snapshot: &RoastSnapshot,
-) -> Option<String> {
-    let report = serde_json::from_str::<AiRoastReport>(normalize_json_input(content)).ok()?;
-    if *error == RoastValidationError::UnsupportedNumber {
-        for (location, text) in [
-            ("verdict.title", report.verdict.title.as_str()),
-            ("verdict.summary", report.verdict.summary.as_str()),
-            ("closingRoast", report.closing_roast.as_str()),
-        ] {
-            if !super::validator::numeric_mentions_for_diagnostic(text, snapshot).is_empty() {
-                return Some(location.to_string());
-            }
-        }
-    }
-    if matches!(
-        error,
-        RoastValidationError::EmptyField | RoastValidationError::TextTooLong
-    ) {
-        if report.verdict.title.trim().is_empty() || report.verdict.title.chars().count() > 24 {
-            return Some("verdict.title".to_string());
-        }
-        if report.verdict.summary.trim().is_empty() || report.verdict.summary.chars().count() > 100
-        {
-            return Some("verdict.summary".to_string());
-        }
-        if report.closing_roast.trim().is_empty() || report.closing_roast.chars().count() > 100 {
-            return Some("closingRoast".to_string());
-        }
-    }
-    let catalog = evidence_catalog(snapshot);
-    let items = report
-        .decisive_factors
-        .iter()
-        .enumerate()
-        .map(|(index, item)| (format!("decisiveFactors[{index}]"), item))
-        .chain(std::iter::once((
-            "currentPlayer".to_string(),
-            &report.current_player,
-        )))
-        .chain(
-            report
-                .team_and_matchups
-                .iter()
-                .enumerate()
-                .map(|(index, item)| (format!("teamAndMatchups[{index}]"), &item.insight)),
-        );
-    for (location, item) in items {
-        if matches!(
-            error,
-            RoastValidationError::EmptyField | RoastValidationError::TextTooLong
-        ) && (item.title.trim().is_empty()
-            || item.commentary.trim().is_empty()
-            || item.title.chars().count() > 24
-            || item.commentary.chars().count() > 160)
-        {
-            return Some(location);
-        }
-        if matches!(
-            error,
-            RoastValidationError::UnknownEvidence | RoastValidationError::DuplicateEvidence
-        ) && item
-            .evidence_refs
-            .iter()
-            .any(|path| !catalog.contains_key(path))
-        {
-            return Some(location);
-        }
-        if *error == RoastValidationError::UnsupportedNumber {
-            let entries = item
-                .evidence_refs
-                .iter()
-                .filter_map(|path| catalog.get(path))
-                .collect::<Vec<_>>();
-            let text = format!("{} {}", item.title, item.commentary);
-            if super::validator::numeric_mentions_for_diagnostic(&text, snapshot)
-                .into_iter()
-                .any(|mention| {
-                    !entries.iter().any(|entry| {
-                        super::validator::evidence_supports_number_for_diagnostic(
-                            &entry.value,
-                            mention,
-                        )
-                    })
-                })
-            {
-                return Some(location);
-            }
-        }
-    }
-    None
 }
 
 pub fn system_prompt() -> &'static str {
-    return r#"你是《守望先锋》赛后损友：先真正理解这局，再说人话。不要写五区块报告，不要引用、扮演或自称任何外部产品人格。
+    r#"你是《守望先锋》赛后损友：先真正理解这局，再说人话。不要写五区块报告，不要引用、扮演或自称任何外部产品人格。
 先在 analysis 中回答“如果只能告诉朋友一件事，这局最关键的是什么”，形成唯一 matchThesis；currentPlayer 判断用户真实亮点与责任；keyActors 只选真正带飞或最该背锅的人；supportingFactors 最多两个。优先追究任务的第一责任人，再考虑协助者。涉及法老之鹰、回声等空中威胁时，若我方存在主要对空职责英雄，应结合 taskKnowledge 与结果统计判断其任务是否完成。
 胜利时尽量夸用户，但只能夸证据支持的亮点，也要点名真正带飞的大爹。失败时先接住用户情绪，再根据证据找一至两位主要责任人；用户确实有锅也直说。可以口语化使用“坐牢”“头锅”“战犯”“大爹”“这把肯定是他的问题”，但只评价本局行为、数据与职责，不攻击人格、智力、身份或现实生活。
 最终可见输出只能是一个有趣的主标题和一篇连续正文，正文建议三百五十至五百个中文字符、硬上限六百五十；不要分节、列清单或套模板。judgment、title、commentary 不书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。不得虚构站位、换英雄、技能命中、语音、故意送、具体击杀过程等快照没有的事件。
-只返回严格 JSON，不得增加字段或骨架外文字：{"analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]},"title":"","commentary":""}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。所有 evidenceRefs 必须逐字来自证据目录。"#;
-    r#"你是《守望先锋》赛后锐评助手。事实优先，使用冷面幽默，像真正懂游戏的损友复盘；不写客服或公关稿，不说教，不解释笑话，也不模仿或自称任何其他模型。
-
-先阅读比赛信息、双方完整计分板、职责对位、当前玩家基准、连续状态、游戏知识和角斗扩展，再依次判断整体故事、主要胜负因素、当前玩家贡献与责任、关键队友或职责差距，以及最有节目效果的数据反差。本地没有预选主锅或大爹；证据不足时不要强行找锅。
-
-解释边界：高承伤不自动等于坦克失职；高伤害要结合击杀、最后一击、参与率和存活；治疗低不自动等于支援失职；目标时间可以解释机会成本但不是万能免责；枪位面对空中威胁只能形成职责推断。不得推测站位、技能命中、具体伤害目标、语音交流、故意送、摆烂或主观意图。
-
-只返回一个 JSON 对象，固定为五区块：verdict（title、summary）、decisiveFactors（2至3条）、currentPlayer、teamAndMatchups（1至3条）和 closingRoast。每个分析条目包含 title、commentary、claimType、evidenceRefs；teamAndMatchups 另含 type。claimType 只能是 direct_fact、statistical_interpretation、game_context_inference；type 只能是 positive_player、negative_player、role_matchup、arena_trend。每个分析条目附 evidenceRefs，不能自创。推断条目必须同时引用统计和游戏知识；引用游戏知识的条目必须标为 game_context_inference。verdict 和 closingRoast 没有 evidenceRefs，因此其中不得写数字、百分比或名次。
-
-严格 JSON 骨架如下，不得增加任何字段或骨架外文字：{"verdict":{"title":"","summary":""},"decisiveFactors":[{"title":"","commentary":"","claimType":"direct_fact","evidenceRefs":[""]},{"title":"","commentary":"","claimType":"statistical_interpretation","evidenceRefs":[""]}],"currentPlayer":{"title":"","commentary":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"teamAndMatchups":[{"type":"role_matchup","title":"","commentary":"","claimType":"statistical_interpretation","evidenceRefs":[""]}],"closingRoast":""}。空字符串必须替换为实际内容或目录中的证据路径。
-
-证据路径只能逐字复制用户消息末尾“证据路径目录”中当前实际存在的字符串，系统提示中的任何说明、英雄名或字段名都不是可复制的证据路径。不得自行拼接路径，不得写 scoreboard.team[0]、roleMatchups[0] 等数组下标路径。
-
-本场判词用强梗但不堆数字；胜负手事实为主；你这局直接诚实；队友与对位只选关键项且同一人不重复处刑；终审锐评一句收尾。除英雄或地图固有名称外，所有可见正文都不要写阿拉伯数字、中文数字、百分比或比分；改用有证据引用支持的最高、靠前、领先、偏低等定性表述。生成目标要明显短于硬上限：整份报告控制在三百五十至四百五十个可见字符，数据不足可缩短；标题控制在十六字内，总评控制在七十字内，每条 commentary 写六十至九十个汉字，收尾控制在六十字内。嘲讽行为、数据结果和职责完成情况，不攻击人格、智力、身份或现实生活。
-
-反例“伤害高所以尽力了”；正例应比较伤害与击杀转化后再判断。反例“目标时间高所以免责”；正例应说明目标时间的机会成本，同时检查战斗数据是否全面垫底。反例“枪位完全没打过法老之鹰”；正例应写“对空任务没有形成结果”，并标为 game_context_inference。不要照抄这些例句。
-
-禁止以“从数据来看”“综合来看”“整体而言”开头；避免“表现较为稳定”“节奏掌控良好”“压制力十足”“已经尽力”“这锅不背”和万能封号。不要为了玩梗篡改事实。"#
+只返回严格 JSON，不得增加字段或骨架外文字：{"analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]},"title":"","commentary":""}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。所有 evidenceRefs 必须逐字来自证据目录。"#
 }
 
 #[derive(Deserialize)]

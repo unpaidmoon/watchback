@@ -527,12 +527,6 @@ pub(crate) fn numeric_mentions_for_diagnostic(
 ) -> Vec<Mention> {
     numeric_mentions_for_snapshot(text, snapshot)
 }
-pub(crate) fn evidence_supports_number_for_diagnostic(
-    value: &EvidenceValue,
-    mention: Mention,
-) -> bool {
-    supports_number(value, mention)
-}
 fn numeric_mentions(text: &str) -> Vec<Mention> {
     let chars = text.chars().collect::<Vec<_>>();
     let mut out = Vec::new();
