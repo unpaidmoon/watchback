@@ -222,7 +222,7 @@ pub fn run_prepare_install_root_mode(
         if !strict_absolute_path(install_root) {
             return Err(anyhow::anyhow!("安装根目录无效"));
         }
-        return install_data_migration::prepare_install_root(install_root, user_sid);
+        install_data_migration::prepare_install_root(install_root, user_sid)
     }
     #[cfg(not(windows))]
     {
@@ -240,7 +240,7 @@ pub fn run_verify_upgrade_root_mode(
         if !strict_absolute_path(install_root) {
             return Err(anyhow::anyhow!("旧安装根目录无效"));
         }
-        return install_data_migration::verify_upgrade_root(install_root, user_sid);
+        install_data_migration::verify_upgrade_root(install_root, user_sid)
     }
     #[cfg(not(windows))]
     {
@@ -271,7 +271,7 @@ pub fn run_secure_install_data_mode(
         }
         install_data_migration::prepare_install_data_in_install_parent(source, &install_parent)?;
         install_data_migration::protect_install_data_for_user(&install_parent, user_sid)?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(windows))]
     {
@@ -299,7 +299,7 @@ pub fn run_trusted_delete_install_data_mode(
         )? {
             return Err(anyhow::anyhow!("安全删除目标无效"));
         }
-        return install_data_migration::delete_install_data_in_install_parent(&install_parent);
+        install_data_migration::delete_install_data_in_install_parent(&install_parent)
     }
     #[cfg(not(windows))]
     {
@@ -324,7 +324,7 @@ pub fn run_delete_install_data_mode(
         {
             return Err(anyhow::anyhow!("删除目标不是当前安装目录的数据目录"));
         }
-        return install_data_migration::delete_install_data_in_install_parent(&install_parent);
+        install_data_migration::delete_install_data_in_install_parent(&install_parent)
     }
 
     #[cfg(not(windows))]
@@ -352,7 +352,7 @@ pub fn run_install_data_mode(
             return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
         }
         install_data_migration::prepare_install_data_in_install_parent(source, &install_parent)?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(windows))]
@@ -530,10 +530,10 @@ pub fn open_published_install_data(
         let root = app_paths::data_root_from_executable(executable)
             .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
         let (root, guard) = open_windows_published_install_data(&root)?;
-        return Ok(PublishedInstallData {
+        Ok(PublishedInstallData {
             paths: app_paths::SharedAppPaths::from_data_root(root),
             _guard: guard,
-        });
+        })
     }
 
     #[cfg(not(windows))]

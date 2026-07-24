@@ -118,11 +118,11 @@ pub fn prepare_install_data(
 
     #[cfg(windows)]
     {
-        return windows_secure::prepare_install_data_from_path(
+        windows_secure::prepare_install_data_from_path(
             source,
             &destination.install_migration_staging(),
             destination.root(),
-        );
+        )
     }
 
     #[cfg(not(windows))]
@@ -754,6 +754,8 @@ mod windows_secure {
     );
     const MAX_QUICK_CHECK_DURATION: Duration = Duration::from_secs(30);
 
+    type MigrationHook = fn(WindowsMigrationHookPoint, &Path, &Path);
+
     thread_local! {
         static CLEANUP_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
         static CLEANUP_LIMITS: Cell<Option<WindowsCleanupLimits>> = const { Cell::new(None) };
@@ -761,9 +763,7 @@ mod windows_secure {
         static COPY_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
         static COPY_LIMITS: Cell<Option<WindowsCopyLimits>> = const { Cell::new(None) };
         static VALIDATION_LIMITS: Cell<Option<WindowsValidationLimits>> = const { Cell::new(None) };
-        static MIGRATION_HOOK: Cell<
-            Option<fn(WindowsMigrationHookPoint, &Path, &Path)>,
-        > = const { Cell::new(None) };
+        static MIGRATION_HOOK: Cell<Option<MigrationHook>> = const { Cell::new(None) };
         static PARENT_GUARD_HOOK: Cell<Option<fn(&Path)>> = const { Cell::new(None) };
     }
 
@@ -1716,6 +1716,9 @@ mod windows_secure {
         result
     }
 
+    // The explicit handles, budgets, and limits are security invariants at this
+    // boundary; grouping them would hide which resources each copy must retain.
+    #[allow(clippy::too_many_arguments)]
     fn copy_optional_validation_file(
         source_parent: &FixedHandle,
         source_name: &OsStr,
@@ -1744,6 +1747,9 @@ mod windows_secure {
         )
     }
 
+    // Keep the security-critical validation resources explicit for the same
+    // reason as `copy_optional_validation_file`.
+    #[allow(clippy::too_many_arguments)]
     fn copy_validation_entry(
         source: FixedEntry,
         target_parent: &FixedHandle,
