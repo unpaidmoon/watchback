@@ -14,13 +14,7 @@ Var InstallDataDeleteRequested
   Abort
 !macroend
 
-!macro NSIS_HOOK_PREINSTALL
-  ; Capture the previous location before Tauri overwrites its own location keys.
-  ReadRegStr $InstallDataOldLocation SHCTX "Software\${BUNDLEID}" "InstallLocation"
-  ${If} $InstallDataOldLocation == ""
-    ReadRegStr $InstallDataOldLocation SHCTX "${MANUPRODUCTKEY}" ""
-  ${EndIf}
-
+!macro ResolveInstallDataUserSid
   ; Resolve the owner of the Explorer shell in this interactive session. This
   ; remains the original user when UAC credentials belong to another account.
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$s=[Diagnostics.Process]::GetCurrentProcess().SessionId;$$p=Get-CimInstance Win32_Process|Where-Object{$$_.Name-eq$\"explorer.exe$\"-and$$_.SessionId-eq$$s}|Select-Object -First 1;if($$null-eq$$p){exit 2};$$r=Invoke-CimMethod -InputObject $$p -MethodName GetOwnerSid;if($$r.ReturnValue-ne 0){exit 3};[Console]::Out.Write($$r.Sid)"'
@@ -37,6 +31,16 @@ Var InstallDataDeleteRequested
   ${OrIf} $InstallDataUserSid == "S-1-5-20"
     !insertmacro InstallDataAbort "无法确认当前交互用户。安装将停止。"
   ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  ; Capture the previous location before Tauri overwrites its own location keys.
+  ReadRegStr $InstallDataOldLocation SHCTX "Software\${BUNDLEID}" "InstallLocation"
+  ${If} $InstallDataOldLocation == ""
+    ReadRegStr $InstallDataOldLocation SHCTX "${MANUPRODUCTKEY}" ""
+  ${EndIf}
+
+  !insertmacro ResolveInstallDataUserSid
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL

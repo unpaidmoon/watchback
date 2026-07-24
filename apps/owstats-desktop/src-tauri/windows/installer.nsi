@@ -355,11 +355,22 @@ Function PageLeaveReinstall
     ClearErrors
 
     ${If} $WixMode = 1
-      ReadRegStr $R1 HKLM "$R6" "UninstallString"
-      ExecWait '$R1' $0
+      MessageBox MB_OK|MB_ICONSTOP "无法安全自动升级，请选择新的空安装目录；旧数据稍后迁移且旧目录保留" /SD IDOK
+      Abort
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-      ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+      SetOutPath "$PLUGINSDIR"
+      File "/oname=watchback-upgrade-verifier.exe" "${MAINBINARYSRCPATH}"
+      !insertmacro ResolveInstallDataUserSid
+      nsExec::ExecToStack '"$PLUGINSDIR\watchback-upgrade-verifier.exe" --verify-upgrade-root "$4" "$InstallDataUserSid"'
+      Pop $0
+      Pop $R1
+      StrCpy $R1 ""
+      ${If} $0 != 0
+        MessageBox MB_OK|MB_ICONSTOP "无法安全自动升级，请选择新的空安装目录；旧数据稍后迁移且旧目录保留" /SD IDOK
+        Abort
+      ${EndIf}
+      StrCpy $R1 '"$4\uninstall.exe"'
       System::Call 'kernel32::GetCurrentProcessId() i.r9'
       ; /UPDATE preserves compatibility with older Watchback uninstallers.
       ; New uninstallers additionally require the live-parent proof below.

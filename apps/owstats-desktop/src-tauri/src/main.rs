@@ -46,6 +46,15 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        Ok(owstats_desktop_lib::StartupMode::VerifyUpgradeRoot {
+            install_root,
+            user_sid,
+        }) => {
+            if owstats_desktop_lib::run_verify_upgrade_root_mode(&install_root, &user_sid).is_err()
+            {
+                std::process::exit(2);
+            }
+        }
         Ok(owstats_desktop_lib::StartupMode::SecureInstallData {
             source,
             destination,

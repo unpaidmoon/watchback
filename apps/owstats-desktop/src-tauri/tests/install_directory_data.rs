@@ -2310,6 +2310,16 @@ fn trusted_installer_cli_contracts_are_explicit_and_bounded() {
     assert!(matches!(
         owstats_desktop_lib::parse_startup_mode([
             "Watchback.exe",
+            "--verify-upgrade-root",
+            r"D:\Watchback",
+            "S-1-5-21-1-2-3-1001"
+        ])
+        .unwrap(),
+        owstats_desktop_lib::StartupMode::VerifyUpgradeRoot { .. }
+    ));
+    assert!(matches!(
+        owstats_desktop_lib::parse_startup_mode([
+            "Watchback.exe",
             "--prepare-install-root",
             r"D:\Watchback",
             "S-1-5-21-1-2-3-1001"
@@ -2366,6 +2376,24 @@ fn install_root_preparation_rejects_ancestor_junctions_and_unrelated_directories
     )
     .is_err());
     assert!(!missing_outside.join("Watchback").exists());
+
+    let preplanted = temp.path().join("preplanted");
+    fs::create_dir_all(&preplanted).unwrap();
+    fs::write(
+        preplanted.join(".watchback-install-root-v2"),
+        b"watchback-secure-root-v2",
+    )
+    .unwrap();
+    fs::write(preplanted.join("payload.dll"), b"untrusted payload").unwrap();
+    assert!(owstats_desktop_lib::run_prepare_install_root_mode(&preplanted, user_sid).is_err());
+    assert_eq!(
+        fs::read(preplanted.join("payload.dll")).unwrap(),
+        b"untrusted payload"
+    );
+    assert_eq!(
+        fs::read(preplanted.join(".watchback-install-root-v2")).unwrap(),
+        b"watchback-secure-root-v2"
+    );
 
     let unrelated = temp.path().join("unrelated");
     fs::create_dir_all(&unrelated).unwrap();

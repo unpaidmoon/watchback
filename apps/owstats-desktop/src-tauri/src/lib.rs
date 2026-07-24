@@ -94,6 +94,10 @@ pub enum StartupMode {
         install_root: std::path::PathBuf,
         destination: std::path::PathBuf,
     },
+    VerifyUpgradeRoot {
+        install_root: std::path::PathBuf,
+        user_sid: std::ffi::OsString,
+    },
 }
 
 pub fn parse_startup_mode<I, S>(args: I) -> anyhow::Result<StartupMode>
@@ -117,6 +121,21 @@ where
             return Err(anyhow::anyhow!("安装根目录参数过多"));
         }
         return Ok(StartupMode::PrepareInstallRoot {
+            install_root: install_root.into(),
+            user_sid,
+        });
+    }
+    if mode == "--verify-upgrade-root" {
+        let install_root = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少旧安装根目录参数"))?;
+        let user_sid = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少用户 SID 参数"))?;
+        if args.next().is_some() {
+            return Err(anyhow::anyhow!("旧安装根目录校验参数过多"));
+        }
+        return Ok(StartupMode::VerifyUpgradeRoot {
             install_root: install_root.into(),
             user_sid,
         });
@@ -209,6 +228,24 @@ pub fn run_prepare_install_root_mode(
     {
         let _ = (install_root, user_sid);
         Err(anyhow::anyhow!("当前平台不支持安装根目录准备命令"))
+    }
+}
+
+pub fn run_verify_upgrade_root_mode(
+    install_root: &std::path::Path,
+    user_sid: &std::ffi::OsStr,
+) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        if !strict_absolute_path(install_root) {
+            return Err(anyhow::anyhow!("旧安装根目录无效"));
+        }
+        return install_data_migration::verify_upgrade_root(install_root, user_sid);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (install_root, user_sid);
+        Err(anyhow::anyhow!("当前平台不支持旧安装根目录校验"))
     }
 }
 

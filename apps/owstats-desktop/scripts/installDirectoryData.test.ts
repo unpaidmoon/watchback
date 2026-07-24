@@ -97,7 +97,7 @@ const templateBytes = readFileSync(templateUrl);
 const template = templateBytes.toString("utf8");
 assert.equal(
   createHash("sha256").update(template.replace(/\r\n/g, "\n")).digest("hex"),
-  "7e337dd5710edc5abc072c8ef1118cbcb0ae6929459ee4649591844ba328e4d2",
+  "58f8f455f4e26258601efc3e6c106595c391b41d6f7aaab0a27fbc2ba86dca83",
 );
 assert.match(template, /Tauri CLI 2\.11\.3 tag tauri-cli-v2\.11\.3/);
 assert.match(template, /d372e3c391770cf231db974422a1e4f8adaac3a6/);
@@ -202,6 +202,25 @@ assert.match(
   /\$\{Else\}\s+; A claimed nested setup must not fall back to trusting \/UPDATE alone\.\s+StrCpy \$UpdateMode 0/,
 );
 const preInstallHook = template.indexOf("!insertmacro NSIS_HOOK_PREINSTALL");
+const reinstallFunction = template.slice(
+  template.indexOf("Function PageLeaveReinstall"),
+  template.indexOf("FunctionEnd", template.indexOf("Function PageLeaveReinstall")),
+);
+const upgradeVerifier = reinstallFunction.indexOf("--verify-upgrade-root");
+const oldUninstallerExec = reinstallFunction.indexOf("ExecWait '$R1'");
+assert.ok(upgradeVerifier >= 0 && oldUninstallerExec > upgradeVerifier);
+assert.match(
+  reinstallFunction.slice(0, upgradeVerifier),
+  /File "\/oname=watchback-upgrade-verifier\.exe" "\$\{MAINBINARYSRCPATH\}"/,
+);
+assert.match(
+  reinstallFunction,
+  /无法安全自动升级，请选择新的空安装目录；旧数据稍后迁移且旧目录保留/,
+);
+assert.doesNotMatch(
+  reinstallFunction.slice(0, upgradeVerifier),
+  /\$INSTDIR\\uninstall\.exe/,
+);
 const installSection = template.indexOf("Section Install");
 const trustedRootPreparation = template.indexOf(
   '"$PLUGINSDIR\\watchback-trusted-helper.exe" --prepare-install-root "$INSTDIR"',
@@ -256,8 +275,11 @@ assert.match(
 );
 assert.match(
   migrationSource,
-  /D:P\(A;OICI;FA;;;SY\)\(A;OICI;FA;;;BA\)\(A;OICI;0x1200a9;;;\{sid\}\)/,
+  /O:BAD:P\(A;OICI;FA;;;SY\)\(A;OICI;FA;;;BA\)\(A;OICI;0x1200a9;;;\{sid\}\)/,
 );
+assert.match(migrationSource, /nNumberOfLinks != 1/);
+assert.match(migrationSource, /\.watchback-install-root-v2/);
+assert.match(migrationSource, /watchback-secure-root-v2/);
 assert.match(
   migrationSource,
   /DACL_SECURITY_INFORMATION \| PROTECTED_DACL_SECURITY_INFORMATION/,

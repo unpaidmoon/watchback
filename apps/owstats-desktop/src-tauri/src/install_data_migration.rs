@@ -88,6 +88,11 @@ pub(crate) fn prepare_install_root(path: &Path, user_sid: &std::ffi::OsStr) -> R
 }
 
 #[cfg(windows)]
+pub(crate) fn verify_upgrade_root(path: &Path, user_sid: &std::ffi::OsStr) -> Result<()> {
+    windows_secure::verify_upgrade_root(path, user_sid)
+}
+
+#[cfg(windows)]
 pub(crate) fn protect_install_data_for_user(
     parent: &InstallParentGuard,
     user_sid: &std::ffi::OsStr,
@@ -701,10 +706,12 @@ mod windows_secure {
             },
             Security::{
                 Authorization::{
-                    ConvertStringSecurityDescriptorToSecurityDescriptorW, SetSecurityInfo,
-                    SDDL_REVISION_1, SE_FILE_OBJECT,
+                    ConvertSecurityDescriptorToStringSecurityDescriptorW,
+                    ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
+                    SetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
                 },
-                GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
+                GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, ACL,
+                DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
                 PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
             },
             Storage::FileSystem::{
@@ -716,7 +723,7 @@ mod windows_secure {
                 FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_ID_INFO,
                 FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
                 FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_TYPE_DISK, OPEN_EXISTING,
-                READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS, WRITE_DAC,
+                READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
             },
             System::{
                 Kernel::{OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE},
@@ -1030,7 +1037,12 @@ mod windows_secure {
     pub(super) fn open_install_parent(path: &Path) -> Result<InstallParentGuard> {
         let entry = open_fixed(
             path,
-            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
+            FILE_LIST_DIRECTORY
+                | FILE_TRAVERSE
+                | FILE_READ_ATTRIBUTES
+                | READ_CONTROL
+                | WRITE_DAC
+                | WRITE_OWNER,
         )
         .context("无法固定安装目录")?;
         require_target_directory(&entry.information, "安装目录无效")?;
@@ -1069,27 +1081,55 @@ mod windows_secure {
                 InstallParentGuard { entry, pinned_path }
             }
         };
-        let mut has_marker = false;
-        let mut has_main = false;
-        let mut has_uninstaller = false;
         let mut entry_count = 0_u32;
         for entry in fs::read_dir(parent.pinned_path()).context("无法枚举安装目录")? {
-            let entry = entry.context("无法读取安装目录项")?;
+            entry.context("无法读取安装目录项")?;
             entry_count = entry_count
                 .checked_add(1)
                 .ok_or_else(|| anyhow!("安装目录项过多"))?;
-            let name = entry.file_name();
-            has_marker |= name == OsStr::new(".watchback-install-root-v1");
-            has_main |= name.eq_ignore_ascii_case("owstats-desktop.exe");
-            has_uninstaller |= name.eq_ignore_ascii_case("uninstall.exe");
         }
-        if entry_count != 0 && !has_marker && !(has_main && has_uninstaller) {
-            return Err(anyhow!("安装目标不是空目录或已知 Watchback 目录"));
+        if entry_count != 0 {
+            verify_secure_install_root(&parent, user_sid)?;
+            return Ok(());
         }
-        protect_handle_with_descriptor(&parent.entry.handle, descriptor)?;
-        if !has_marker {
-            let marker = create_file(&parent.pinned_path().join(".watchback-install-root-v1"))?;
-            drop(marker);
+        protect_root_handle_with_descriptor(&parent.entry.handle, descriptor)?;
+        let marker = create_file(&parent.pinned_path().join(".watchback-install-root-v2"))?;
+        let mut marker = marker.handle.into_file();
+        marker.write_all(b"watchback-secure-root-v2")?;
+        Ok(())
+    }
+
+    pub(super) fn verify_upgrade_root(path: &Path, user_sid: &OsStr) -> Result<()> {
+        let parent = open_install_parent(path)?;
+        verify_secure_install_root(&parent, user_sid)
+    }
+
+    fn verify_secure_install_root(parent: &InstallParentGuard, user_sid: &OsStr) -> Result<()> {
+        let expected = install_root_security_descriptor(user_sid)?;
+        let information = DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION;
+        let actual = security_descriptor_string_for_handle(&parent.entry.handle, information)?;
+        let expected = security_descriptor_string(expected.0, information)?;
+        if actual != expected {
+            return Err(anyhow!("安装根目录所有者或权限不符合安全版本"));
+        }
+
+        let marker = open_child_fixed(
+            &parent.entry.handle,
+            OsStr::new(".watchback-install-root-v2"),
+            FILE_GENERIC_READ,
+        )?;
+        require_regular_file(&marker.information)?;
+        let mut marker = marker.handle.into_file();
+        let mut contents = Vec::new();
+        marker.read_to_end(&mut contents)?;
+        if contents != b"watchback-secure-root-v2" {
+            return Err(anyhow!("安装根目录安全标记无效"));
+        }
+
+        for name in ["owstats-desktop.exe", "uninstall.exe"] {
+            let executable =
+                open_child_fixed(&parent.entry.handle, OsStr::new(name), FILE_GENERIC_READ)?;
+            require_regular_file(&executable.information)?;
         }
         Ok(())
     }
@@ -1337,8 +1377,58 @@ mod windows_secure {
                         .all(|byte| byte.is_ascii_digit() || byte == b'S' || byte == b'-')
             })
             .ok_or_else(|| anyhow!("交互用户 SID 无效"))?;
-        let sddl = format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;{sid})");
+        let sddl = format!("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;{sid})");
         security_descriptor_from_sddl(OsStr::new(&sddl))
+    }
+
+    fn security_descriptor_string_for_handle(
+        handle: &FixedHandle,
+        information: u32,
+    ) -> Result<OsString> {
+        let mut descriptor = std::ptr::null_mut();
+        let status = unsafe {
+            GetSecurityInfo(
+                handle.0,
+                SE_FILE_OBJECT,
+                information,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != ERROR_SUCCESS || descriptor.is_null() {
+            return Err(anyhow!("无法读取安装根目录权限"));
+        }
+        let descriptor = LocalSecurityDescriptor(descriptor);
+        security_descriptor_string(descriptor.0, information)
+    }
+
+    fn security_descriptor_string(
+        descriptor: PSECURITY_DESCRIPTOR,
+        information: u32,
+    ) -> Result<OsString> {
+        let mut output = std::ptr::null_mut();
+        let mut length = 0_u32;
+        let converted = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                information,
+                &mut output,
+                &mut length,
+            )
+        };
+        if converted == 0 || output.is_null() {
+            return Err(anyhow!("无法规范化安装根目录权限"));
+        }
+        let output_guard = LocalSecurityDescriptor(output.cast());
+        let value = OsString::from_wide(unsafe {
+            std::slice::from_raw_parts(output, length.saturating_sub(1) as usize)
+        });
+        drop(output_guard);
+        Ok(value)
     }
 
     fn install_data_security_descriptor(user_sid: &OsStr) -> Result<LocalSecurityDescriptor> {
@@ -1418,6 +1508,50 @@ mod windows_secure {
                 _ => "无法设置迁移临时目录权限",
             };
             return Err(anyhow!(message));
+        }
+        Ok(())
+    }
+
+    fn protect_root_handle_with_descriptor(
+        handle: &FixedHandle,
+        descriptor: LocalSecurityDescriptor,
+    ) -> Result<()> {
+        let mut owner = std::ptr::null_mut();
+        let mut owner_defaulted = 0;
+        let owner_status =
+            unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut owner_defaulted) };
+        if owner_status == 0 || owner.is_null() {
+            return Err(anyhow!("无法读取安装根目录所有者"));
+        }
+        let mut dacl = std::ptr::null_mut();
+        let mut dacl_present = 0;
+        let mut dacl_defaulted = 0;
+        let dacl_status = unsafe {
+            GetSecurityDescriptorDacl(
+                descriptor.0,
+                &mut dacl_present,
+                &mut dacl,
+                &mut dacl_defaulted,
+            )
+        };
+        if dacl_status == 0 || dacl_present == 0 || dacl.is_null() {
+            return Err(anyhow!("无法读取安装根目录权限"));
+        }
+        let status = unsafe {
+            SetSecurityInfo(
+                handle.0,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                owner,
+                std::ptr::null_mut(),
+                dacl,
+                std::ptr::null(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(anyhow!("无法保护安装根目录"));
         }
         Ok(())
     }
@@ -1807,7 +1941,8 @@ mod windows_secure {
                     | SYNCHRONIZE
                     | DELETE
                     | READ_CONTROL
-                    | WRITE_DAC,
+                    | WRITE_DAC
+                    | WRITE_OWNER,
                 &attributes,
                 &mut io_status,
                 std::ptr::null(),
