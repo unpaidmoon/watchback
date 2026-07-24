@@ -492,11 +492,14 @@ mod windows_secure {
     };
 
     use anyhow::{anyhow, Context, Result};
+    use rusqlite::{Connection, OpenFlags};
+    use serde_json::from_slice;
+    use uuid::Uuid;
     use windows_sys::{
         Wdk::{
             Foundation::OBJECT_ATTRIBUTES,
             Storage::FileSystem::{
-                NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT,
+                NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
                 FILE_SYNCHRONOUS_IO_NONALERT,
             },
         },
@@ -522,6 +525,9 @@ mod windows_secure {
     use super::{
         InstallDataMigrationOutcome, WindowsCleanupLimits, WindowsCopyLimits,
         WindowsMigrationHookPoint,
+    };
+    use crate::account_store::{
+        validate_manifest, validate_registry, AccountManifest, AccountRegistry,
     };
 
     const DEFAULT_CLEANUP_LIMITS: WindowsCleanupLimits = WindowsCleanupLimits::new(64, 100_000);
@@ -616,6 +622,12 @@ mod windows_secure {
     struct FixedEntry {
         handle: FixedHandle,
         information: BY_HANDLE_FILE_INFORMATION,
+    }
+
+    #[derive(Default)]
+    struct ValidationGuards {
+        directories: Vec<FixedHandle>,
+        files: Vec<File>,
     }
 
     struct DeleteFrame {
@@ -740,7 +752,7 @@ mod windows_secure {
         );
 
         copy_tree(source, &pinned_staging, &staging_entry.handle)?;
-        super::validate_staged_data(&pinned_staging)?;
+        validate_staged_data(&staging_entry.handle)?;
         write_marker(
             &pinned_staging.join(".install-data-migration-v1.json"),
             marker,
@@ -762,6 +774,142 @@ mod windows_secure {
         let published_information = information(&staging_entry.handle)?;
         require_target_directory(&published_information, "安装数据目录无效")?;
         Ok(InstallDataMigrationOutcome::Migrated)
+    }
+
+    fn validate_staged_data(staging: &FixedHandle) -> Result<ValidationGuards> {
+        let mut guards = ValidationGuards::default();
+        let registry =
+            match open_child_fixed(staging, OsStr::new("accounts.json"), FILE_GENERIC_READ) {
+                Ok(entry) => {
+                    let bytes = read_and_hold(entry, &mut guards, "旧账户索引校验失败")?;
+                    let registry: AccountRegistry =
+                        from_slice(&bytes).context("旧账户索引校验失败")?;
+                    validate_registry(&registry).context("旧账户索引校验失败")?;
+                    registry
+                }
+                Err(_) => return Ok(guards),
+            };
+        if registry.accounts.is_empty() {
+            return Ok(guards);
+        }
+        let accounts = open_child_fixed(
+            staging,
+            OsStr::new("accounts"),
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+        )
+        .context("旧账户目录校验失败")?;
+        require_target_directory(&accounts.information, "旧账户目录校验失败")?;
+        guards.directories.push(accounts.handle);
+
+        for entry in registry.accounts {
+            let accounts = guards.directories.last().expect("账户目录句柄已固定");
+            let account = open_child_fixed(
+                accounts,
+                OsStr::new(entry.account_id.as_str()),
+                FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+            )
+            .context("旧账户目录校验失败")?;
+            require_target_directory(&account.information, "旧账户目录校验失败")?;
+            let manifest = open_child_fixed(
+                &account.handle,
+                OsStr::new("account.json"),
+                FILE_GENERIC_READ,
+            )
+            .context("旧账户清单校验失败")?;
+            let bytes = read_and_hold(manifest, &mut guards, "旧账户清单校验失败")?;
+            let manifest: AccountManifest = from_slice(&bytes).context("旧账户清单校验失败")?;
+            validate_manifest(&manifest, &entry.account_id).context("旧账户清单校验失败")?;
+            validate_database_snapshot(&account.handle, &mut guards)?;
+            guards.directories.push(account.handle);
+        }
+        Ok(guards)
+    }
+
+    fn validate_database_snapshot(
+        account: &FixedHandle,
+        guards: &mut ValidationGuards,
+    ) -> Result<()> {
+        let snapshot_name = OsString::from(format!(".install-data-validation-{}", Uuid::new_v4()));
+        let snapshot =
+            create_directory_relative(account, &snapshot_name).context("旧账户数据库校验失败")?;
+        let snapshot_path = final_path(&snapshot.handle)?.join("owstats.sqlite3");
+        let mut snapshot_files = Vec::new();
+        let result = (|| -> Result<()> {
+            copy_validation_file(
+                account,
+                OsStr::new("owstats.sqlite3"),
+                &snapshot.handle,
+                OsStr::new("owstats.sqlite3"),
+                guards,
+                &mut snapshot_files,
+                true,
+            )?;
+            for sidecar in ["owstats.sqlite3-wal", "owstats.sqlite3-shm"] {
+                copy_validation_file(
+                    account,
+                    OsStr::new(sidecar),
+                    &snapshot.handle,
+                    OsStr::new(sidecar),
+                    guards,
+                    &mut snapshot_files,
+                    false,
+                )?;
+            }
+            let connection =
+                Connection::open_with_flags(&snapshot_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .context("旧账户数据库校验失败")?;
+            let value: String = connection
+                .query_row("PRAGMA quick_check", [], |row| row.get(0))
+                .context("旧账户数据库完整性校验失败")?;
+            if value != "ok" {
+                return Err(anyhow!("旧账户数据库完整性校验失败"));
+            }
+            Ok(())
+        })();
+        drop(snapshot_files);
+        drop(snapshot.handle);
+        delete_tree(snapshot_path.parent().expect("验证目录存在"))
+            .context("无法清理数据库验证目录")?;
+        result
+    }
+
+    fn copy_validation_file(
+        source_parent: &FixedHandle,
+        source_name: &OsStr,
+        target_parent: &FixedHandle,
+        target_name: &OsStr,
+        guards: &mut ValidationGuards,
+        snapshot_files: &mut Vec<File>,
+        required: bool,
+    ) -> Result<()> {
+        let source = match open_child_fixed(source_parent, source_name, FILE_GENERIC_READ) {
+            Ok(entry) => entry,
+            Err(_) if !required => return Ok(()),
+            Err(error) => return Err(error).context("旧账户数据库校验失败"),
+        };
+        require_regular_file(&source.information).context("旧账户数据库校验失败")?;
+        let mut source = source.handle.into_file();
+        let target_path = final_path(target_parent)?.join(target_name);
+        let target = create_file(&target_path).context("旧账户数据库校验失败")?;
+        let mut target = target.handle.into_file();
+        std::io::copy(&mut source, &mut target).context("旧账户数据库校验失败")?;
+        target.sync_all().context("旧账户数据库校验失败")?;
+        guards.files.push(source);
+        snapshot_files.push(target);
+        Ok(())
+    }
+
+    fn read_and_hold(
+        entry: FixedEntry,
+        guards: &mut ValidationGuards,
+        message: &'static str,
+    ) -> Result<Vec<u8>> {
+        require_regular_file(&entry.information).context(message)?;
+        let mut file = entry.handle.into_file();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).context(message)?;
+        guards.files.push(file);
+        Ok(bytes)
     }
 
     fn copy_tree(source: &Path, target: &Path, target_root: &FixedHandle) -> Result<()> {
@@ -1084,6 +1232,59 @@ mod windows_secure {
 
     fn open_source_fixed(path: &Path, access: u32) -> Result<FixedEntry> {
         open_fixed_with_share(path, access, FILE_SHARE_READ)
+    }
+
+    fn open_child_fixed(parent: &FixedHandle, name: &OsStr, access: u32) -> Result<FixedEntry> {
+        let mut encoded = encode_child_name(name)?;
+        let byte_len = u16::try_from(
+            encoded
+                .len()
+                .checked_mul(size_of::<u16>())
+                .ok_or_else(|| anyhow!("账户文件名无效"))?,
+        )
+        .map_err(|_| anyhow!("账户文件名无效"))?;
+        let unicode_name = UNICODE_STRING {
+            Length: byte_len,
+            MaximumLength: byte_len,
+            Buffer: encoded.as_mut_ptr(),
+        };
+        let attributes = OBJECT_ATTRIBUTES {
+            Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+            RootDirectory: parent.0,
+            ObjectName: &unicode_name,
+            Attributes: (OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE) as u32,
+            SecurityDescriptor: std::ptr::null(),
+            SecurityQualityOfService: std::ptr::null(),
+        };
+        let mut status = unsafe { std::mem::zeroed::<IO_STATUS_BLOCK>() };
+        let mut raw: HANDLE = std::ptr::null_mut();
+        let result = unsafe {
+            NtCreateFile(
+                &mut raw,
+                access | SYNCHRONIZE,
+                &attributes,
+                &mut status,
+                std::ptr::null(),
+                FILE_ATTRIBUTE_NORMAL,
+                FILE_SHARE_READ,
+                FILE_OPEN,
+                FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if result < 0 || raw.is_null() || raw == INVALID_HANDLE_VALUE {
+            return Err(anyhow!("无法安全打开迁移文件"));
+        }
+        let handle = FixedHandle(raw);
+        let information = information(&handle)?;
+        if get_file_type_safe(&handle)? != FILE_TYPE_DISK {
+            return Err(anyhow!("账户文件类型无效"));
+        }
+        Ok(FixedEntry {
+            handle,
+            information,
+        })
     }
 
     fn open_fixed_with_share(path: &Path, access: u32, share_mode: u32) -> Result<FixedEntry> {

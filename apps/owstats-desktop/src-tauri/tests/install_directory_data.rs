@@ -1,5 +1,7 @@
 use std::fs;
 
+use rusqlite::Connection;
+
 use owstats_desktop_lib::app_paths::SharedAppPaths;
 use owstats_desktop_lib::install_data_migration::{
     prepare_install_data, InstallDataMigrationOutcome,
@@ -295,6 +297,132 @@ fn copies_source_atomically_and_retains_source() {
     assert_eq!(marker.len(), 2);
     assert_eq!(marker.get("version").unwrap(), 1);
     assert_eq!(marker.get("sourceRetained").unwrap(), true);
+}
+
+fn write_valid_account_metadata(source: &Path) -> (String, PathBuf) {
+    let account_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned();
+    let account = source.join("accounts").join(&account_id);
+    fs::create_dir_all(&account).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        format!(
+            r#"{{"version":1,"activeAccountId":"{account_id}","accounts":[{{"accountId":"{account_id}","battleTag":"合成账号#0000","createdAt":"2026-01-01T00:00:00Z","lastUsedAt":"2026-01-01T00:00:00Z","credentialState":"ready"}}]}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        account.join("account.json"),
+        format!(
+            r#"{{"version":1,"accountId":"{account_id}","roleId":1,"battleTag":"合成账号#0000","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}"#
+        ),
+    )
+    .unwrap();
+    (account_id, account)
+}
+
+fn create_valid_sqlite(path: &Path) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute_batch("CREATE TABLE synthetic_records (value INTEGER); INSERT INTO synthetic_records VALUES (1);")
+        .unwrap();
+}
+
+#[test]
+fn valid_account_metadata_and_sqlite_are_published() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    let (account_id, account) = write_valid_account_metadata(&source);
+    create_valid_sqlite(&account.join("owstats.sqlite3"));
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(data
+        .join("accounts")
+        .join(account_id)
+        .join("account.json")
+        .is_file());
+    assert!(data
+        .join("accounts")
+        .join("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        .join("owstats.sqlite3")
+        .is_file());
+}
+
+#[test]
+fn valid_wal_database_is_published_without_validation_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    let (account_id, account) = write_valid_account_metadata(&source);
+    let database = account.join("owstats.sqlite3");
+    let writer = Connection::open(&database).unwrap();
+    writer
+        .execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE synthetic_wal (value INTEGER); INSERT INTO synthetic_wal VALUES (1);",
+        )
+        .unwrap();
+    let mut persist_wal = 1;
+    let result = unsafe {
+        rusqlite::ffi::sqlite3_file_control(
+            writer.handle(),
+            b"main\0".as_ptr().cast(),
+            rusqlite::ffi::SQLITE_FCNTL_PERSIST_WAL,
+            (&mut persist_wal as *mut i32).cast(),
+        )
+    };
+    assert_eq!(result, rusqlite::ffi::SQLITE_OK);
+    drop(writer);
+    assert!(database.with_file_name("owstats.sqlite3-wal").is_file());
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(data
+        .join("accounts")
+        .join(account_id)
+        .join("owstats.sqlite3-wal")
+        .is_file());
+    assert!(!data.read_dir().unwrap().any(|entry| entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".install-data-validation-")));
+}
+
+#[test]
+fn quick_check_corruption_is_not_published_and_retains_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    fs::create_dir_all(&source).unwrap();
+    let (_, account) = write_valid_account_metadata(&source);
+    let database = account.join("owstats.sqlite3");
+    let connection = Connection::open(&database).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA page_size=512; VACUUM; CREATE TABLE synthetic_corruption (value BLOB); INSERT INTO synthetic_corruption VALUES (zeroblob(4096));",
+        )
+        .unwrap();
+    drop(connection);
+    let mut bytes = fs::read(&database).unwrap();
+    bytes[512] = 0;
+    fs::write(&database, bytes).unwrap();
+
+    let error = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("旧账户数据库完整性校验失败"));
+    assert!(!data.exists());
+    assert!(database.is_file());
+    assert!(!staging.join(".install-data-migration-v1.json").exists());
 }
 
 #[test]
