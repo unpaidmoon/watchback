@@ -43,8 +43,8 @@
 ## 资源与安装版要求
 
 - 不得新增 `D:\Codex\...`、`/@fs/` 或其他开发机绝对路径依赖。
-- 构建或运行时必需的 JSON、图片、字典必须被跟踪并由 Vite/Tauri 正式打包，或通过 Tauri 的资源目录与 app data 目录解析；不得依赖被 `.gitignore` 忽略的本机文件。
-- 同步、导入与设置必须使用 Tauri `app_data_dir`/资源目录，不得用 `CARGO_MANIFEST_DIR` 推导安装版数据路径。
+- 构建或运行时必需的 JSON、图片、字典必须被跟踪并由 Vite/Tauri 正式打包，或通过 Tauri 资源目录解析；不得依赖被 `.gitignore` 忽略的本机文件。
+- 同步、导入与设置必须使用 `SharedAppPaths` 从当前可执行文件同级 `data` 派生的安装目录数据根；不得用 `CARGO_MANIFEST_DIR`、当前工作目录或 Tauri `app_data_dir` 推导安装版数据路径。旧 AppData 仅允许 NSIS 提升迁移作为只读源，正常桌面运行不得读写或回退。
 
 ## 角斗映射协作
 

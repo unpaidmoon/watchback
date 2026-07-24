@@ -46,7 +46,10 @@ npm run tauri build
 - `apps/owstats-desktop/runtime-config/ow-lookups.json` 是前后端共用的正式最小字典；桌面运行和构建不得读取被忽略的 `docs/reference/`。
 - `apps/owstats-desktop/runtime-config/assets-inventory.json` 是资源构建白名单。资源变更后显式运行 `node scripts/prepareAssets.mjs --refresh-inventory` 并审查差异；普通 test/build 不调用 Git。
 - `npm test`、`npm run build` 和 `npm run dev` 会先确定性重建 `public/assets`。生成目录不提交，资源 URL 固定为 `/assets/...`。
-- Tauri 桌面运行路径统一由 `AppPaths` 从 `app_data_dir` 派生。数据库、设置、凭据、浏览器 profile、赛季 JSON、诊断和备份不得从仓库根推导。
+- Tauri 桌面运行路径统一由 `SharedAppPaths` 从当前可执行文件同级的 `data` 派生。数据库、设置、凭据、浏览器 profile、赛季 JSON、诊断和备份都必须位于该数据根，且不得从仓库根推导。
+- 旧 `%APPDATA%\local.owstats.desktop` 只允许由 NSIS 提升安装流程的专用迁移入口作为只读迁移源；正常桌面运行不得读写 AppData，也不得静默回退。
+- NSIS 通过受信任 helper 在安装阶段完成数据根创建、迁移、边界校验与权限设置。旧根、迁移源或目标存在重解析点、类型错误、路径冲突或校验失败时必须 fail closed 并停止安装；不得尝试读取内容后再回退或覆盖已发布的 `data`。
+- `data` 使用仅作用于该精确目录的受保护 DACL，供当前交互用户写入；安装根和程序文件继续保持不可由普通用户修改。安装后还必须以原始交互用户令牌验证该目录可写。
 - `CARGO_MANIFEST_DIR` 只允许显式开发 CLI 和测试使用；桌面 commands 不得依赖仓库布局。
 - `npm run build` 的 postbuild 会扫描 `dist`，发现 `/@fs/`、开发机盘符路径或 `docs/reference` 时失败。
 
@@ -72,7 +75,7 @@ npm run tauri build
 
 - 根目录的 `accounts.json` 只保存安全账号索引和当前账号指针；不得在其中加入角色私密标识、登录凭据或任何 token-like 字段。
 - `accounts/<account_id>/` 保存单个账号的凭据、玩家目标、玩家资料、SQLite 数据库、赛季文件、诊断和备份。切换账号时，这些账号所属路径必须作为一个完整快照同时切换，不能混用其他账号文件。
-- 用户设置和浏览器登录 profile 是共享运行资源，保留在 app data 根目录。它们不随账号切换，也不能被“退出账号”误删。
+- 用户设置和浏览器登录 profile 是共享运行资源，保留在安装目录 `data` 根目录。它们不随账号切换，也不能被“退出账号”误删。
 - 首次升级旧版单账号数据时，后端先复制到临时目录并校验内容，再发布到已确认账号目录，最后清理旧文件。迁移 journal 用于断电恢复；不要手工移动、修改或删除未完成 journal。
 - “退出账号”会永久删除该账号目录中的凭据与本地数据库等全部账号数据。删除失败时保留恢复 journal，重启应用后应先完成恢复；恢复完成前不得继续添加、切换、重新登录或删除账号。
 - 凭据过期只影响需要上游登录的操作，不应阻止用户读取该账号已保存的本地数据；使用“重新登录”刷新当前账号凭据。
@@ -82,10 +85,10 @@ npm run tauri build
 ## Database Migrations and Sync Stability
 
 - 数据库版本由 `src-tauri/src/database/migrations.rs` 的注册表管理。每一步必须在独立事务中完成变更、更新 `user_version` 并提交；不得修改已经发布的迁移版本。
-- 已存在且需要升级的 SQLite 文件会在 schema 变更前使用 SQLite 一致性备份写入 `app_data/backups/`。空库不生成备份；备份失败会阻止迁移，源库保持原样。
+- 已存在且需要升级的 SQLite 文件会在 schema 变更前使用 SQLite 一致性备份写入当前账号的 `backups/`。空库不生成备份；备份失败会阻止迁移，源库保持原样。
 - 所有文件数据库连接使用 WAL、`synchronous=NORMAL` 和 5 秒 `busy_timeout`。不要绕过 `OwDatabase::connect` 直接打开产品数据库。
 - `sync_errors` 表示某赛季最近一次同步未完成详情的快照，而不是无限历史。导入目标赛季时先清旧错误，成功重试会清零该赛季错误；其他赛季必须保持不变。
-- 桌面同步由全局 `SyncCoordinator` 串行化。不要在 command、后台任务或新 UI 入口绕过该 guard 并行写同一个 SQLite/app-data 目录。
+- 桌面同步由全局 `SyncCoordinator` 串行化。不要在 command、后台任务或新 UI 入口绕过该 guard 并行写同一个 SQLite/安装目录数据目录。
 - 赛季行的“更新”是列表优先路径：前台严格并发请求 `sport`、`leisure`、`QuickFight`、`LeisureFight`、`SportFight` 五个模式的第一页，并在一个短事务内提交新列表、游标和后台任务后立即返回。前台不得请求详情、继续分页、重建快照或全量刷新指挥台。
 - `season_sync_jobs` 是可恢复后台账本。后台按账号和赛季去重，继续第 2～5 页、以并发 2 补详情并更新投影，最后在 `season_revision` 稳定时重建快照；详情失败必须保留 `pending_detail_count` 并进入 `retryable`，不能伪装成完成。
 - 无新增的“更新”只写检查时间和可靠游标，不清比赛缓存、不重建快照。新增列表只失效当前账号和赛季的列表缓存；SQLite 始终是查询事实来源，快照落后不得阻止用户查询。

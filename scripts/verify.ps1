@@ -63,6 +63,25 @@ function Invoke-TrackedCheckout {
 }
 
 Invoke-VerifyStep '敏感信息与绝对路径扫描' { node (Join-Path $repoRoot 'scripts\verify-sensitive-paths.mjs') --root $repoRoot }
+Write-Host '[验证] 开始：安装目录数据发布边界'
+try {
+  $runtimeSource = Join-Path $tauriRoot 'src'
+  $runtimeAppData = @(rg -n '\bapp_data_dir\s*\(' $runtimeSource -g '!bin/**')
+  $runtimeSearchExitCode = $LASTEXITCODE
+  switch ($runtimeSearchExitCode) {
+    0 { throw '桌面业务路径不得从 app_data_dir 派生' }
+    1 { break }
+    default { throw "无法扫描桌面运行时路径（退出码 $runtimeSearchExitCode）" }
+  }
+
+  $tauriConfig = Get-Content -Raw (Join-Path $tauriRoot 'tauri.conf.json') | ConvertFrom-Json
+  if ($tauriConfig.bundle.targets -ne 'nsis') {
+    throw 'Windows 发布目标必须仅为 NSIS'
+  }
+} catch {
+  throw "验证失败：安装目录数据发布边界（$($_.Exception.Message)）"
+}
+Write-Host '[验证] 通过：安装目录数据发布边界'
 
 Push-Location $desktopRoot
 try {
