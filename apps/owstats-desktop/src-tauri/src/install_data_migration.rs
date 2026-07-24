@@ -41,6 +41,9 @@ pub fn prepare_install_data_in_install_parent(
     source: Option<&Path>,
     parent: &InstallParentGuard,
 ) -> Result<InstallDataMigrationOutcome> {
+    if parent.has_existing_data()? {
+        return Ok(InstallDataMigrationOutcome::ExistingData);
+    }
     let staging = parent.staging_path();
     let source = match source {
         Some(source) => Some(validate_source_and_staging(source, &staging)?),
@@ -80,6 +83,9 @@ pub fn prepare_install_data(
     source: Option<&Path>,
     destination: &SharedAppPaths,
 ) -> Result<InstallDataMigrationOutcome> {
+    if !is_install_data_root(destination.root()) {
+        return Err(anyhow!("安装数据目录名称无效"));
+    }
     match fs::symlink_metadata(destination.root()) {
         Ok(metadata) if is_supported_directory(&metadata) => {
             return Ok(InstallDataMigrationOutcome::ExistingData);
@@ -146,6 +152,17 @@ pub fn prepare_install_data(
         publish_staged_data(&staging, destination.root())?;
         Ok(InstallDataMigrationOutcome::Migrated)
     }
+}
+
+#[cfg(windows)]
+fn is_install_data_root(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("data"))
+}
+
+#[cfg(not(windows))]
+fn is_install_data_root(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "data")
 }
 
 fn validate_source_and_staging(source: &Path, staging: &Path) -> Result<PathBuf> {
@@ -714,6 +731,16 @@ mod windows_secure {
     }
 
     impl InstallParentGuard {
+        pub(super) fn has_existing_data(&self) -> Result<bool> {
+            let destination = self.pinned_path.join("data");
+            match fs::symlink_metadata(destination) {
+                Ok(metadata) if super::is_supported_directory(&metadata) => Ok(true),
+                Ok(_) => Err(anyhow!("安装目录中的数据路径不是目录")),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(error).context("无法读取安装数据目录"),
+            }
+        }
+
         pub(super) fn staging_path(&self) -> PathBuf {
             self.pinned_path.join("data.migrating")
         }

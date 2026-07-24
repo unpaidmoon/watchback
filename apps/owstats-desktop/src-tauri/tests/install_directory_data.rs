@@ -1975,6 +1975,24 @@ fn migration_execution_rejects_outside_relative_and_dot_destinations_without_cre
     assert!(!install.join("nested").exists());
 }
 
+#[test]
+fn migration_api_rejects_a_non_data_destination_before_creating_anything() {
+    let temp = tempfile::tempdir().unwrap();
+    let install = temp.path().join("install");
+    let source = temp.path().join("legacy");
+    let destination = install.join("not-data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("source.txt"), b"source").unwrap();
+
+    assert!(
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&destination)).is_err()
+    );
+
+    assert!(!destination.exists());
+    assert!(!install.join("data").exists());
+    assert!(!install.join("data.migrating").exists());
+}
+
 #[cfg(windows)]
 #[test]
 fn migration_execution_keeps_the_authorized_install_parent_fixed_until_publish() {
@@ -2060,6 +2078,33 @@ fn migration_binary_exits_without_starting_tauri_and_enforces_the_cli_contract()
         .unwrap();
     assert_silent_exit_two(outside_output);
     assert!(!outside.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn migration_binary_preserves_existing_data_before_validating_the_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = copied_migration_binary(&temp);
+    let install = executable.parent().unwrap();
+    let data = install.join("data");
+    let missing = install.join("missing-source");
+    let unsupported = install.join("unsupported-source.txt");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join("retained.txt"), b"retained").unwrap();
+    fs::write(&unsupported, b"not a directory").unwrap();
+
+    for source in [&missing, &unsupported] {
+        let output = Command::new(&executable)
+            .arg("--prepare-install-data")
+            .arg(source)
+            .arg(&data)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+        assert_eq!(fs::read(data.join("retained.txt")).unwrap(), b"retained");
+    }
 }
 
 #[cfg(windows)]
