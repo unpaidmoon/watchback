@@ -45,27 +45,54 @@ pub fn prepare_install_data(
         canonicalize_future_path(&staging)?;
     }
 
-    let Some(source) = source else {
-        return create_empty_data_directory(destination);
-    };
+    #[cfg(windows)]
+    {
+        let marker = source
+            .as_ref()
+            .map(|_| {
+                serde_json::to_vec_pretty(&MigrationMarker {
+                    version: 1,
+                    source_retained: true,
+                })
+            })
+            .transpose()?;
+        return windows_secure::prepare_install_data(
+            source.as_deref(),
+            &staging,
+            destination.root(),
+            marker.as_deref(),
+        );
+    }
 
-    reset_staging(&staging)?;
-    fs::create_dir_all(
-        staging
-            .parent()
-            .ok_or_else(|| anyhow!("无法定位迁移临时目录"))?,
-    )
-    .context("无法创建迁移临时目录的父目录")?;
-    copy_tree(&source, &staging)?;
-    validate_staged_data(&staging)?;
-    let marker = serde_json::to_vec_pretty(&MigrationMarker {
-        version: 1,
-        source_retained: true,
-    })?;
-    fs::write(staging.join(".install-data-migration-v1.json"), marker)
-        .context("无法写入迁移完成标记")?;
-    fs::rename(&staging, destination.root()).context("无法发布安装数据目录")?;
-    Ok(InstallDataMigrationOutcome::Migrated)
+    #[cfg(not(windows))]
+    {
+        let Some(source) = source else {
+            return create_empty_data_directory(&staging, destination.root());
+        };
+
+        reset_staging_by_path(&staging)?;
+        fs::create_dir_all(
+            staging
+                .parent()
+                .ok_or_else(|| anyhow!("无法定位迁移临时目录"))?,
+        )
+        .context("无法创建迁移临时目录的父目录")?;
+        copy_tree_by_path(&source, &staging)?;
+        validate_staged_data(&staging)?;
+        let marker = serde_json::to_vec_pretty(&MigrationMarker {
+            version: 1,
+            source_retained: true,
+        })?;
+        fs::write(staging.join(".install-data-migration-v1.json"), marker)
+            .context("无法写入迁移完成标记")?;
+        invoke_non_windows_migration_hook(
+            NonWindowsMigrationHookPoint::BeforePublish,
+            &staging,
+            destination.root(),
+        );
+        publish_staged_data(&staging, destination.root())?;
+        Ok(InstallDataMigrationOutcome::Migrated)
+    }
 }
 
 fn validate_source_and_staging(source: &Path, staging: &Path) -> Result<PathBuf> {
@@ -125,21 +152,22 @@ fn canonicalize_future_path(path: &Path) -> Result<PathBuf> {
     }
 }
 
+#[cfg(not(windows))]
 fn create_empty_data_directory(
-    destination: &SharedAppPaths,
+    staging: &Path,
+    destination: &Path,
 ) -> Result<InstallDataMigrationOutcome> {
-    fs::create_dir_all(destination.root()).context("无法创建安装数据目录")?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow!("无法定位安装数据目录"))?;
+    fs::create_dir_all(parent).context("无法创建安装数据目录的父目录")?;
+    invoke_non_windows_migration_hook(
+        NonWindowsMigrationHookPoint::BeforePublish,
+        staging,
+        destination,
+    );
+    fs::create_dir(destination).context("无法排他创建安装数据目录")?;
     Ok(InstallDataMigrationOutcome::Created)
-}
-
-fn copy_tree(source: &Path, target: &Path) -> Result<()> {
-    #[cfg(windows)]
-    {
-        return windows_secure::copy_tree(source, target);
-    }
-
-    #[cfg(not(windows))]
-    copy_tree_by_path(source, target)
 }
 
 #[cfg(not(windows))]
@@ -163,19 +191,60 @@ fn copy_tree_by_path(source: &Path, target: &Path) -> Result<()> {
     }
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
-        copy_tree(&entry.path(), &target.join(entry.file_name()))?;
+        copy_tree_by_path(&entry.path(), &target.join(entry.file_name()))?;
     }
     Ok(())
 }
 
-fn reset_staging(staging: &Path) -> Result<()> {
-    #[cfg(windows)]
-    {
-        return windows_secure::reset_staging(staging);
-    }
+#[cfg(all(
+    not(windows),
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "redox"
+    )
+))]
+fn publish_staged_data(staging: &Path, destination: &Path) -> Result<()> {
+    use rustix::fs::{renameat_with, RenameFlags};
 
-    #[cfg(not(windows))]
-    reset_staging_by_path(staging)
+    let parent = staging
+        .parent()
+        .ok_or_else(|| anyhow!("无法定位迁移临时目录"))?;
+    if destination.parent() != Some(parent) {
+        return Err(anyhow!("迁移发布路径不在同一目录"));
+    }
+    let staging_name = staging
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| anyhow!("迁移临时目录名称无效"))?;
+    let destination_name = destination
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| anyhow!("安装数据目录名称无效"))?;
+    let parent = fs::File::open(parent).context("无法固定迁移临时目录的父目录")?;
+
+    renameat_with(
+        &parent,
+        staging_name,
+        &parent,
+        destination_name,
+        RenameFlags::NOREPLACE,
+    )
+    .context("无法排他发布安装数据目录")
+}
+
+#[cfg(all(
+    not(windows),
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "redox"
+    ))
+))]
+fn publish_staged_data(_staging: &Path, _destination: &Path) -> Result<()> {
+    Err(anyhow!("当前平台不支持安全发布安装数据目录"))
 }
 
 #[cfg(not(windows))]
@@ -206,6 +275,7 @@ fn remove_tree_without_links(path: &Path) -> Result<()> {
     fs::remove_dir(path).context("无法删除迁移临时目录")
 }
 
+#[cfg(not(windows))]
 fn validate_staged_data(staging: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(staging).context("无法读取迁移临时目录")?;
     if is_supported_directory(&metadata) {
@@ -244,51 +314,132 @@ pub fn set_windows_copy_open_hook(hook: Option<fn(&Path)>) {
 }
 
 #[cfg(windows)]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsMigrationHookPoint {
+    StagingCreated,
+    BeforePublish,
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn set_windows_migration_hook(hook: Option<fn(WindowsMigrationHookPoint, &Path, &Path)>) {
+    windows_secure::set_migration_hook(hook);
+}
+
+#[cfg(not(windows))]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonWindowsMigrationHookPoint {
+    BeforePublish,
+}
+
+#[cfg(not(windows))]
+std::thread_local! {
+    static NON_WINDOWS_MIGRATION_HOOK: std::cell::Cell<
+        Option<fn(NonWindowsMigrationHookPoint, &Path, &Path)>,
+    > = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(not(windows))]
+#[doc(hidden)]
+pub fn set_non_windows_migration_hook(
+    hook: Option<fn(NonWindowsMigrationHookPoint, &Path, &Path)>,
+) {
+    NON_WINDOWS_MIGRATION_HOOK.with(|value| value.set(hook));
+}
+
+#[cfg(not(windows))]
+fn invoke_non_windows_migration_hook(
+    point: NonWindowsMigrationHookPoint,
+    staging: &Path,
+    destination: &Path,
+) {
+    NON_WINDOWS_MIGRATION_HOOK.with(|value| {
+        if let Some(hook) = value.get() {
+            hook(point, staging, destination);
+        }
+    });
+}
+
+#[cfg(windows)]
 mod windows_secure {
     use std::{
-        ffi::OsStr,
+        cell::Cell,
+        ffi::{OsStr, OsString},
         fs::{self, File},
         io::{Read, Write},
-        mem::size_of,
-        os::windows::{ffi::OsStrExt, io::FromRawHandle},
+        mem::{offset_of, size_of},
+        os::windows::{
+            ffi::{OsStrExt, OsStringExt},
+            io::FromRawHandle,
+        },
         path::{Path, PathBuf},
-        sync::{Mutex, OnceLock},
     };
 
     use anyhow::{anyhow, Context, Result};
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
-        Storage::FileSystem::{
-            CreateFileW, FileDispositionInfo, GetFileInformationByHandle, GetFileType,
-            SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE,
-            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
-            FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-            FILE_TYPE_DISK, OPEN_EXISTING,
+    use windows_sys::{
+        Wdk::{
+            Foundation::OBJECT_ATTRIBUTES,
+            Storage::FileSystem::{
+                NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT,
+                FILE_SYNCHRONOUS_IO_NONALERT,
+            },
+        },
+        Win32::{
+            Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, UNICODE_STRING},
+            Storage::FileSystem::{
+                CreateFileW, FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle,
+                GetFileType, GetFinalPathNameByHandleW, SetFileInformationByHandle,
+                BY_HANDLE_FILE_INFORMATION, CREATE_NEW, DELETE, FILE_ATTRIBUTE_DIRECTORY,
+                FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
+                FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+                FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED,
+                FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                FILE_TRAVERSE, FILE_TYPE_DISK, OPEN_EXISTING, SYNCHRONIZE, VOLUME_NAME_DOS,
+            },
+            System::{
+                Kernel::{OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE},
+                IO::IO_STATUS_BLOCK,
+            },
         },
     };
+
+    use super::{InstallDataMigrationOutcome, WindowsMigrationHookPoint};
 
     const MAX_DEPTH: usize = 64;
     const MAX_FILES: u64 = 100_000;
     const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 
-    static COPY_OPEN_HOOK: OnceLock<Mutex<Option<fn(&Path)>>> = OnceLock::new();
+    thread_local! {
+        static COPY_OPEN_HOOK: Cell<Option<fn(&Path)>> = const { Cell::new(None) };
+        static MIGRATION_HOOK: Cell<
+            Option<fn(WindowsMigrationHookPoint, &Path, &Path)>,
+        > = const { Cell::new(None) };
+    }
 
     pub(super) fn set_copy_open_hook(hook: Option<fn(&Path)>) {
-        *COPY_OPEN_HOOK
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .expect("迁移测试钩子锁不可用") = hook;
+        COPY_OPEN_HOOK.with(|value| value.set(hook));
+    }
+
+    pub(super) fn set_migration_hook(hook: Option<fn(WindowsMigrationHookPoint, &Path, &Path)>) {
+        MIGRATION_HOOK.with(|value| value.set(hook));
     }
 
     fn invoke_copy_open_hook(path: &Path) {
-        let hook = *COPY_OPEN_HOOK
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .expect("迁移测试钩子锁不可用");
-        if let Some(hook) = hook {
-            hook(path);
-        }
+        COPY_OPEN_HOOK.with(|value| {
+            if let Some(hook) = value.get() {
+                hook(path);
+            }
+        });
+    }
+
+    fn invoke_migration_hook(point: WindowsMigrationHookPoint, staging: &Path, destination: &Path) {
+        MIGRATION_HOOK.with(|value| {
+            if let Some(hook) = value.get() {
+                hook(point, staging, destination);
+            }
+        });
     }
 
     struct FixedHandle(HANDLE);
@@ -318,7 +469,7 @@ mod windows_secure {
         source: PathBuf,
         source_handle: FixedHandle,
         target: PathBuf,
-        target_handle: FixedHandle,
+        target_handle: Option<FixedHandle>,
         depth: usize,
     }
 
@@ -328,18 +479,101 @@ mod windows_secure {
         bytes: u64,
     }
 
-    pub(super) fn copy_tree(source: &Path, target: &Path) -> Result<()> {
-        create_directory(target)?;
+    pub(super) fn prepare_install_data(
+        source: Option<&Path>,
+        staging: &Path,
+        destination: &Path,
+        marker: Option<&[u8]>,
+    ) -> Result<InstallDataMigrationOutcome> {
+        let parent = staging
+            .parent()
+            .ok_or_else(|| anyhow!("无法定位迁移临时目录"))?;
+        if destination.parent() != Some(parent) {
+            return Err(anyhow!("迁移发布路径不在同一目录"));
+        }
+        let staging_name = child_name(staging)?;
+        let destination_name = child_name(destination)?;
+        if staging_name == destination_name {
+            return Err(anyhow!("迁移临时目录与数据目录冲突"));
+        }
+
+        fs::create_dir_all(parent).context("无法创建迁移临时目录的父目录")?;
+        let parent_entry = open_fixed(
+            parent,
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+        )
+        .context("无法固定迁移临时目录的父目录")?;
+        require_target_directory(&parent_entry.information, "迁移临时目录的父目录无效")?;
+        // open_fixed omits FILE_SHARE_DELETE. Derive the publish path from that
+        // fixed object's canonical name instead of reusing the caller's path.
+        let pinned_parent = final_path(&parent_entry.handle)?;
+        let pinned_staging = pinned_parent.join(staging_name);
+        let pinned_destination = pinned_parent.join(destination_name);
+
+        match fs::symlink_metadata(&pinned_destination) {
+            Ok(metadata) if super::is_supported_directory(&metadata) => {
+                return Ok(InstallDataMigrationOutcome::ExistingData);
+            }
+            Ok(_) => return Err(anyhow!("安装目录中的数据路径不是目录")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("无法读取安装数据目录"),
+        }
+
+        let Some(source) = source else {
+            invoke_migration_hook(
+                WindowsMigrationHookPoint::BeforePublish,
+                staging,
+                destination,
+            );
+            let data_entry = create_directory_relative(&parent_entry.handle, destination_name)?;
+            require_target_directory(&data_entry.information, "安装数据目录无效")?;
+            return Ok(InstallDataMigrationOutcome::Created);
+        };
+        let marker = marker.ok_or_else(|| anyhow!("无法生成迁移完成标记"))?;
+
+        reset_staging(&pinned_staging)?;
+        let staging_entry = create_directory_relative(&parent_entry.handle, staging_name)?;
+        require_target_directory(&staging_entry.information, "迁移临时目录无效")?;
+        invoke_migration_hook(
+            WindowsMigrationHookPoint::StagingCreated,
+            staging,
+            destination,
+        );
+
+        copy_tree(source, &pinned_staging, &staging_entry.handle)?;
+        write_marker(
+            &pinned_staging.join(".install-data-migration-v1.json"),
+            marker,
+        )?;
+        let staged_information = information(&staging_entry.handle)?;
+        require_target_directory(&staged_information, "迁移临时目录无效")?;
+
+        invoke_migration_hook(
+            WindowsMigrationHookPoint::BeforePublish,
+            staging,
+            destination,
+        );
+        rename_without_replace(
+            &staging_entry.handle,
+            &parent_entry.handle,
+            &pinned_destination,
+        )?;
+
+        let published_information = information(&staging_entry.handle)?;
+        require_target_directory(&published_information, "安装数据目录无效")?;
+        Ok(InstallDataMigrationOutcome::Migrated)
+    }
+
+    fn copy_tree(source: &Path, target: &Path, target_root: &FixedHandle) -> Result<()> {
+        let _target_root_guard = target_root;
         let source_entry = open_fixed(source, FILE_GENERIC_READ).context("无法固定迁移源根目录")?;
         require_directory(&source_entry.information)?;
-        let target_entry = open_fixed(target, FILE_GENERIC_READ).context("无法固定迁移临时目录")?;
-        require_directory(&target_entry.information)?;
 
         let mut jobs = vec![DirectoryJob {
             source: source.to_path_buf(),
             source_handle: source_entry.handle,
             target: target.to_path_buf(),
-            target_handle: target_entry.handle,
+            target_handle: None,
             depth: 0,
         }];
         let mut budget = CopyBudget::default();
@@ -373,7 +607,7 @@ mod windows_secure {
                         source: source_child,
                         source_handle: source_entry.handle,
                         target: target_child,
-                        target_handle: target_entry.handle,
+                        target_handle: Some(target_entry.handle),
                         depth: job.depth + 1,
                     });
                     continue;
@@ -403,7 +637,173 @@ mod windows_secure {
         Ok(())
     }
 
-    pub(super) fn reset_staging(staging: &Path) -> Result<()> {
+    fn child_name(path: &Path) -> Result<&OsStr> {
+        path.file_name()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| anyhow!("迁移目录名称无效"))
+    }
+
+    fn encode_child_name(name: &OsStr) -> Result<Vec<u16>> {
+        let encoded = name.encode_wide().collect::<Vec<_>>();
+        if encoded.is_empty() || encoded.contains(&0) {
+            return Err(anyhow!("迁移目录名称无效"));
+        }
+        Ok(encoded)
+    }
+
+    fn create_directory_relative(parent: &FixedHandle, name: &OsStr) -> Result<FixedEntry> {
+        const FILE_CREATED_INFORMATION: usize = 2;
+
+        let mut encoded = encode_child_name(name)?;
+        let name_bytes = encoded
+            .len()
+            .checked_mul(size_of::<u16>())
+            .ok_or_else(|| anyhow!("迁移目录名称过长"))?;
+        let name_length = u16::try_from(name_bytes).map_err(|_| anyhow!("迁移目录名称过长"))?;
+        let unicode_name = UNICODE_STRING {
+            Length: name_length,
+            MaximumLength: name_length,
+            Buffer: encoded.as_mut_ptr(),
+        };
+        let attributes = OBJECT_ATTRIBUTES {
+            Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+            RootDirectory: parent.0,
+            ObjectName: &unicode_name,
+            Attributes: (OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE) as u32,
+            SecurityDescriptor: std::ptr::null(),
+            SecurityQualityOfService: std::ptr::null(),
+        };
+        let mut io_status = unsafe { std::mem::zeroed::<IO_STATUS_BLOCK>() };
+        let mut raw_handle: HANDLE = std::ptr::null_mut();
+        // FILE_CREATE makes creation and handle acquisition one kernel operation.
+        // A competing object at this basename causes failure instead of being opened.
+        let status = unsafe {
+            NtCreateFile(
+                &mut raw_handle,
+                FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE | DELETE,
+                &attributes,
+                &mut io_status,
+                std::ptr::null(),
+                FILE_ATTRIBUTE_NORMAL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                FILE_CREATE,
+                FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if status < 0 || raw_handle.is_null() || raw_handle == INVALID_HANDLE_VALUE {
+            return Err(anyhow!("无法安全创建迁移目录"));
+        }
+
+        let handle = FixedHandle(raw_handle);
+        if io_status.Information != FILE_CREATED_INFORMATION {
+            let _ = mark_for_delete(handle);
+            return Err(anyhow!("无法排他创建迁移目录"));
+        }
+        let entry_result = (|| {
+            let information = information(&handle)?;
+            if get_file_type_safe(&handle)? != FILE_TYPE_DISK {
+                return Err(anyhow!("迁移目录包含不受支持的文件类型"));
+            }
+            require_target_directory(&information, "迁移目录无效")?;
+            Ok(information)
+        })();
+        match entry_result {
+            Ok(information) => Ok(FixedEntry {
+                handle,
+                information,
+            }),
+            Err(error) => {
+                let _ = mark_for_delete(handle);
+                Err(error)
+            }
+        }
+    }
+
+    fn write_marker(path: &Path, contents: &[u8]) -> Result<()> {
+        match fs::symlink_metadata(path) {
+            Ok(_) => {
+                let entry = open_fixed(path, FILE_GENERIC_WRITE | DELETE)
+                    .context("无法安全打开迁移完成标记")?;
+                require_regular_file(&entry.information).context("迁移完成标记类型无效")?;
+                mark_for_delete(entry.handle).context("无法重置迁移完成标记")?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("无法读取迁移完成标记"),
+        }
+
+        let entry = create_file(path).context("无法创建迁移完成标记")?;
+        let mut file = entry.handle.into_file();
+        file.write_all(contents).context("无法写入迁移完成标记")?;
+        file.sync_all().context("无法写入迁移完成标记")
+    }
+
+    fn final_path(handle: &FixedHandle) -> Result<PathBuf> {
+        let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
+        let required =
+            unsafe { GetFinalPathNameByHandleW(handle.0, std::ptr::null_mut(), 0, flags) };
+        if required == 0 {
+            return Err(anyhow!("无法定位迁移临时目录的父目录"));
+        }
+        let capacity = required
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("迁移临时目录的父目录路径过长"))?;
+        let mut buffer = vec![0_u16; capacity as usize];
+        let length =
+            unsafe { GetFinalPathNameByHandleW(handle.0, buffer.as_mut_ptr(), capacity, flags) };
+        if length == 0 || length >= capacity {
+            return Err(anyhow!("无法定位迁移临时目录的父目录"));
+        }
+        buffer.truncate(length as usize);
+        Ok(PathBuf::from(OsString::from_wide(&buffer)))
+    }
+
+    fn rename_without_replace(
+        staging: &FixedHandle,
+        parent_guard: &FixedHandle,
+        destination: &Path,
+    ) -> Result<()> {
+        let _keep_parent_fixed = parent_guard;
+        let encoded = destination.as_os_str().encode_wide().collect::<Vec<_>>();
+        if encoded.is_empty() || encoded.contains(&0) {
+            return Err(anyhow!("安装数据目录名称无效"));
+        }
+        let name_bytes = encoded
+            .len()
+            .checked_mul(size_of::<u16>())
+            .ok_or_else(|| anyhow!("安装数据目录名称过长"))?;
+        let name_length = u32::try_from(name_bytes).map_err(|_| anyhow!("安装数据目录名称过长"))?;
+        let buffer_size = size_of::<FILE_RENAME_INFO>()
+            .checked_add(name_bytes)
+            .ok_or_else(|| anyhow!("安装数据目录名称过长"))?;
+        let storage_words = buffer_size.div_ceil(size_of::<usize>());
+        // FILE_RENAME_INFO requires native alignment and a trailing variable-size
+        // UTF-16 name. usize storage provides alignment on both Windows targets.
+        let mut storage = vec![0_usize; storage_words];
+        let information = storage.as_mut_ptr() as *mut FILE_RENAME_INFO;
+        unsafe {
+            (*information).Anonymous.ReplaceIfExists = 0;
+            (*information).RootDirectory = std::ptr::null_mut();
+            (*information).FileNameLength = name_length;
+            std::ptr::copy_nonoverlapping(
+                encoded.as_ptr(),
+                (information as *mut u8).add(offset_of!(FILE_RENAME_INFO, FileName)) as *mut u16,
+                encoded.len(),
+            );
+        }
+        let buffer_size =
+            u32::try_from(buffer_size).map_err(|_| anyhow!("安装数据目录名称过长"))?;
+        let renamed = unsafe {
+            SetFileInformationByHandle(staging.0, FileRenameInfo, information as _, buffer_size)
+        };
+        if renamed == 0 {
+            return Err(anyhow!("无法发布安装数据目录"));
+        }
+        Ok(())
+    }
+
+    fn reset_staging(staging: &Path) -> Result<()> {
         match fs::symlink_metadata(staging) {
             Ok(_) => delete_tree(staging).context("无法重置迁移临时目录"),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -490,7 +890,7 @@ mod windows_secure {
                 FILE_GENERIC_WRITE,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 std::ptr::null(),
-                1,
+                CREATE_NEW,
                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
                 std::ptr::null_mut(),
             )
@@ -562,6 +962,16 @@ mod windows_secure {
         }
         if !is_directory(information) {
             return Err(anyhow!("迁移源包含不受支持的文件类型"));
+        }
+        Ok(())
+    }
+
+    fn require_target_directory(
+        information: &BY_HANDLE_FILE_INFORMATION,
+        message: &'static str,
+    ) -> Result<()> {
+        if is_reparse(information) || !is_directory(information) {
+            return Err(anyhow!(message));
         }
         Ok(())
     }
