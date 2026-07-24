@@ -1,6 +1,14 @@
 fn main() {
     match owstats_desktop_lib::parse_startup_mode(std::env::args_os()) {
-        Ok(owstats_desktop_lib::StartupMode::Desktop) => owstats_desktop_lib::run(),
+        Ok(owstats_desktop_lib::StartupMode::Desktop) => {
+            let exit = owstats_desktop_lib::handle_desktop_startup_result(
+                owstats_desktop_lib::run(),
+                show_desktop_startup_failure,
+            );
+            if exit != 0 {
+                std::process::exit(exit);
+            }
+        }
         Ok(owstats_desktop_lib::StartupMode::PrepareInstallData {
             source,
             destination,
@@ -21,4 +29,31 @@ fn main() {
         }
         Err(_) => std::process::exit(2),
     }
+}
+
+#[cfg(windows)]
+fn show_desktop_startup_failure(message: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let message = message
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let title = "Watchback 启动失败"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    unsafe {
+        let _ = MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_desktop_startup_failure(message: &str) {
+    eprintln!("{message}");
 }

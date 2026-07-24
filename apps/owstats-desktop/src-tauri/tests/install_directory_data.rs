@@ -38,13 +38,14 @@ use windows_sys::Win32::{
     Foundation::{LocalFree, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE},
     Security::{
         Authorization::{
-            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
-            SE_FILE_OBJECT,
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
+            GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
         },
         CreateRestrictedToken, CreateWellKnownSid, GetSecurityDescriptorControl,
-        ImpersonateLoggedOnUser, RevertToSelf, WinBuiltinAdministratorsSid, WinLocalSystemSid,
-        DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, SECURITY_MAX_SID_SIZE, SE_DACL_PROTECTED,
-        SID_AND_ATTRIBUTES, TOKEN_DUPLICATE, TOKEN_QUERY, WELL_KNOWN_SID_TYPE,
+        GetTokenInformation, ImpersonateLoggedOnUser, RevertToSelf, TokenUser,
+        WinBuiltinAdministratorsSid, WinLocalSystemSid, DACL_SECURITY_INFORMATION,
+        DISABLE_MAX_PRIVILEGE, SECURITY_MAX_SID_SIZE, SE_DACL_PROTECTED, SID_AND_ATTRIBUTES,
+        TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER, WELL_KNOWN_SID_TYPE,
     },
     Storage::FileSystem::{
         CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
@@ -248,6 +249,101 @@ fn owned_handle(raw: HANDLE) -> OwnedHandle {
     assert!(!raw.is_null());
     assert_ne!(raw, INVALID_HANDLE_VALUE);
     unsafe { OwnedHandle::from_raw_handle(raw as _) }
+}
+
+#[cfg(windows)]
+fn current_token_sid() -> String {
+    let mut token = std::ptr::null_mut();
+    let opened = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    assert_ne!(opened, 0);
+    let token = owned_handle(token);
+    let mut required = 0_u32;
+    unsafe {
+        let _ = GetTokenInformation(
+            token.as_raw_handle() as _,
+            TokenUser,
+            std::ptr::null_mut(),
+            0,
+            &mut required,
+        );
+    }
+    assert_ne!(required, 0);
+    let mut buffer = vec![0_u8; required as usize];
+    let loaded = unsafe {
+        GetTokenInformation(
+            token.as_raw_handle() as _,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            required,
+            &mut required,
+        )
+    };
+    assert_ne!(loaded, 0);
+    let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
+    let mut text = std::ptr::null_mut();
+    let converted = unsafe { ConvertSidToStringSidW(user.User.Sid, &mut text) };
+    assert_ne!(converted, 0);
+    let allocation = LocalAllocation(text.cast());
+    let mut length = 0_usize;
+    while unsafe { *text.add(length) } != 0 {
+        length += 1;
+    }
+    let sid = String::from_utf16(unsafe { std::slice::from_raw_parts(text, length) }).unwrap();
+    drop(allocation);
+    format!("*{sid}")
+}
+
+#[cfg(windows)]
+struct WriteDenyAclReset {
+    path: PathBuf,
+    sid: String,
+    restored: bool,
+}
+
+#[cfg(windows)]
+impl Drop for WriteDenyAclReset {
+    fn drop(&mut self) {
+        if !self.restored {
+            let _ = self.restore();
+        }
+    }
+}
+
+#[cfg(windows)]
+impl WriteDenyAclReset {
+    fn restore(&mut self) -> std::io::Result<()> {
+        if self.restored {
+            return Ok(());
+        }
+        let output = Command::new("icacls")
+            .arg(&self.path)
+            .arg("/remove:d")
+            .arg(&self.sid)
+            .output()?;
+        if output.status.success() {
+            self.restored = true;
+            Ok(())
+        } else {
+            Err(std::io::Error::other("icacls 恢复失败"))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn deny_current_token_write(path: &Path) -> WriteDenyAclReset {
+    let sid = current_token_sid();
+    let denied = Command::new("icacls")
+        .arg(path)
+        .arg("/deny")
+        .arg(format!("{sid}:(W)"))
+        .output()
+        .unwrap();
+    assert!(denied.status.success());
+    WriteDenyAclReset {
+        path: path.to_path_buf(),
+        sid,
+        restored: false,
+    }
 }
 
 #[cfg(windows)]
@@ -2153,4 +2249,162 @@ fn migration_execution_rejects_an_ill_formed_utf16_data_name() {
 
     assert!(owstats_desktop_lib::run_install_data_mode(&executable, None, &destination).is_err());
     assert!(!install.join("data").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_resolves_writable_published_install_data_with_chinese_and_spaces() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("安装 目录").join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+
+    let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
+
+    assert_eq!(startup.paths().root(), data);
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_rejects_missing_published_install_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+
+    let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+    assert_eq!(error.to_string(), "安装数据目录缺失，请重新安装 Watchback");
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_rejects_a_file_named_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::write(data, b"not a directory").unwrap();
+
+    let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+    assert_eq!(error.to_string(), "安装数据目录无效，请重新安装 Watchback");
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_accepts_an_empty_install_data_marker_left_by_an_interrupted_start() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join(".watchback-data-root-v1"), b"").unwrap();
+
+    let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
+
+    assert_eq!(startup.paths().root(), data);
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_rejects_a_reparse_point_named_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    let external = temp.path().join("external");
+    fs::create_dir_all(&external).unwrap();
+
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&data)
+        .arg(&external)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+    assert_eq!(error.to_string(), "安装数据目录无效，请重新安装 Watchback");
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_guard_preserves_a_writable_ordinary_data_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    let external = temp.path().join("external");
+    fs::create_dir_all(&external).unwrap();
+
+    let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
+    let marker = data.join(".watchback-data-root-v1");
+    fs::write(data.join("ordinary-child.txt"), b"ordinary write").unwrap();
+    assert!(fs::remove_file(&marker).is_err());
+    assert!(fs::remove_dir(&data).is_err());
+    let blocked_reparse = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&data)
+        .arg(&external)
+        .output()
+        .unwrap();
+    assert!(!blocked_reparse.status.success());
+
+    drop(startup);
+    fs::remove_file(&marker).unwrap();
+    fs::remove_file(data.join("ordinary-child.txt")).unwrap();
+    fs::remove_dir(&data).unwrap();
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&data)
+        .arg(&external)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_rejects_an_unwritable_data_directory_without_leaving_a_probe() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    let mut restore_acl = deny_current_token_write(&data);
+
+    let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "安装数据目录权限不足，请修复数据目录权限或重新安装 Watchback"
+    );
+    restore_acl.restore().unwrap();
+    assert!(fs::read_dir(&data).unwrap().all(|entry| !entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".runtime-write-test-")));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn normal_startup_rejects_non_windows_platforms() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback");
+
+    let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+    assert_eq!(error.to_string(), "此平台不支持从安装目录启动");
+}
+
+#[test]
+fn startup_failure_message_and_exit_code_never_expose_the_underlying_error() {
+    let mut presented = None;
+    let exit = owstats_desktop_lib::handle_desktop_startup_result(
+        Err(anyhow::anyhow!("D:\\private\\data\\credentials.json")),
+        |message| presented = Some(message.to_owned()),
+    );
+
+    assert_eq!(exit, 1);
+    assert_eq!(
+        presented.as_deref(),
+        Some("启动失败，请重新安装 Watchback 或检查数据目录权限")
+    );
 }
