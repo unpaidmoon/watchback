@@ -480,6 +480,7 @@ impl PublishedInstallData {
 #[cfg(windows)]
 #[derive(Debug)]
 struct PublishedInstallDataGuard {
+    _install_directory: std::fs::File,
     _data_directory: std::fs::File,
     _root_marker: std::fs::File,
 }
@@ -491,7 +492,7 @@ pub fn open_published_install_data(
     {
         let root = app_paths::data_root_from_executable(executable)
             .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
-        let guard = open_windows_published_install_data(&root)?;
+        let (root, guard) = open_windows_published_install_data(&root)?;
         return Ok(PublishedInstallData {
             paths: app_paths::SharedAppPaths::from_data_root(root),
             _guard: guard,
@@ -508,13 +509,13 @@ pub fn open_published_install_data(
 #[cfg(windows)]
 fn open_windows_published_install_data(
     root: &std::path::Path,
-) -> anyhow::Result<PublishedInstallDataGuard> {
+) -> anyhow::Result<(std::path::PathBuf, PublishedInstallDataGuard)> {
     use std::{
-        ffi::OsStr,
+        ffi::{OsStr, OsString},
         fs::OpenOptions,
         io::Write,
         os::windows::{
-            ffi::OsStrExt,
+            ffi::{OsStrExt, OsStringExt},
             fs::{MetadataExt, OpenOptionsExt},
             io::{AsRawHandle, FromRawHandle},
         },
@@ -530,11 +531,11 @@ fn open_windows_published_install_data(
         Win32::{
             Foundation::{HANDLE, INVALID_HANDLE_VALUE, UNICODE_STRING},
             Storage::FileSystem::{
-                FileDispositionInfo, SetFileInformationByHandle, FILE_ATTRIBUTE_DIRECTORY,
-                FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
-                FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-                FILE_GENERIC_WRITE, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
-                SYNCHRONIZE,
+                FileDispositionInfo, GetFinalPathNameByHandleW, SetFileInformationByHandle,
+                FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+                FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+                FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE, VOLUME_NAME_DOS,
             },
             System::{
                 Kernel::{OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE},
@@ -665,7 +666,95 @@ fn open_windows_published_install_data(
         Ok(())
     }
 
-    match std::fs::symlink_metadata(root) {
+    fn final_dos_path(file: &std::fs::File) -> anyhow::Result<std::path::PathBuf> {
+        fn ascii_prefix(value: &[u16], prefix: &[u16]) -> bool {
+            fn ascii_lowercase(value: u16) -> u16 {
+                if (b'A' as u16..=b'Z' as u16).contains(&value) {
+                    value + (b'a' - b'A') as u16
+                } else {
+                    value
+                }
+            }
+
+            value.len() >= prefix.len()
+                && value[..prefix.len()]
+                    .iter()
+                    .zip(prefix)
+                    .all(|(left, right)| ascii_lowercase(*left) == ascii_lowercase(*right))
+        }
+
+        let mut buffer = vec![0_u16; 512];
+        let length = loop {
+            let length = unsafe {
+                GetFinalPathNameByHandleW(
+                    file.as_raw_handle() as _,
+                    buffer.as_mut_ptr(),
+                    u32::try_from(buffer.len())
+                        .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?,
+                    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+                )
+            };
+            if length == 0 {
+                return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
+            }
+            let length = usize::try_from(length)
+                .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
+            if length < buffer.len() {
+                break length;
+            }
+            let capacity = length
+                .checked_add(1)
+                .ok_or_else(|| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
+            buffer.resize(capacity, 0);
+        };
+        buffer.truncate(length);
+
+        let extended_unc = r"\\?\UNC\".encode_utf16().collect::<Vec<_>>();
+        let extended = r"\\?\".encode_utf16().collect::<Vec<_>>();
+        let path = if ascii_prefix(&buffer, &extended_unc) {
+            let mut normalized = r"\\".encode_utf16().collect::<Vec<_>>();
+            normalized.extend_from_slice(&buffer[extended_unc.len()..]);
+            normalized
+        } else if ascii_prefix(&buffer, &extended) {
+            buffer[extended.len()..].to_vec()
+        } else {
+            return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
+        };
+        let path = std::path::PathBuf::from(OsString::from_wide(&path));
+        if !path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+        {
+            return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
+        }
+        Ok(path)
+    }
+
+    let install_root = root
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .ok_or_else(|| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
+    let install_directory = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(install_root)
+        .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
+    let install_attributes = install_directory
+        .metadata()
+        .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?
+        .file_attributes();
+    if install_attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
+    }
+    let physical_install_root = final_dos_path(&install_directory)?;
+    let physical_root = physical_install_root.join("data");
+
+    match std::fs::symlink_metadata(&physical_root) {
         Ok(metadata) if !metadata.is_dir() => {
             return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
         }
@@ -680,7 +769,7 @@ fn open_windows_published_install_data(
         .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(root)
+        .open(&physical_root)
         .map_err(|_| anyhow::Error::new(StartupFailure::DataDirectoryPermissions))?;
     let attributes = data_directory
         .metadata()
@@ -690,6 +779,10 @@ fn open_windows_published_install_data(
         return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
     }
     if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
+    }
+    let physical_root = final_dos_path(&data_directory)?;
+    if physical_root.parent() != Some(physical_install_root.as_path()) {
         return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
     }
 
@@ -765,10 +858,14 @@ fn open_windows_published_install_data(
     }
     cleanup_result?;
 
-    Ok(PublishedInstallDataGuard {
-        _data_directory: data_directory,
-        _root_marker: marker,
-    })
+    Ok((
+        physical_root,
+        PublishedInstallDataGuard {
+            _install_directory: install_directory,
+            _data_directory: data_directory,
+            _root_marker: marker,
+        },
+    ))
 }
 
 pub fn run() -> anyhow::Result<()> {

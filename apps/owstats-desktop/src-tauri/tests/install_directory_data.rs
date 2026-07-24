@@ -2720,38 +2720,60 @@ fn normal_startup_rejects_a_reparse_point_named_data() {
 
 #[cfg(windows)]
 #[test]
-fn normal_startup_guard_preserves_a_writable_ordinary_data_directory() {
+fn normal_startup_paths_remain_bound_to_data_after_an_ancestor_junction_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let original_install = temp.path().join("original-install");
+    let original_data = original_install.join("data");
+    let replacement_install = temp.path().join("replacement-install");
+    let replacement_data = replacement_install.join("data");
+    let active_install = temp.path().join("active-install");
+    fs::create_dir_all(&original_data).unwrap();
+    fs::create_dir_all(&replacement_data).unwrap();
+
+    let linked = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&active_install)
+        .arg(&original_install)
+        .output()
+        .unwrap();
+    assert!(linked.status.success());
+
+    let executable = active_install.join("Watchback.exe");
+    let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
+
+    assert_eq!(startup.paths().root(), original_data);
+    fs::remove_dir(&active_install).unwrap();
+    let relinked = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&active_install)
+        .arg(&replacement_install)
+        .output()
+        .unwrap();
+    assert!(relinked.status.success());
+
+    fs::write(startup.paths().user_settings(), b"fixed physical data").unwrap();
+    assert_eq!(
+        fs::read(original_data.join("user_settings.json")).unwrap(),
+        b"fixed physical data"
+    );
+    assert!(!replacement_data.join("user_settings.json").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_guard_blocks_data_directory_rename_until_drop() {
     let temp = tempfile::tempdir().unwrap();
     let executable = temp.path().join("Watchback.exe");
     let data = executable.parent().unwrap().join("data");
+    let renamed_data = executable.parent().unwrap().join("data-renamed");
     fs::create_dir_all(&data).unwrap();
-    let external = temp.path().join("external");
-    fs::create_dir_all(&external).unwrap();
 
     let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
-    let marker = data.join(".watchback-data-root-v1");
     fs::write(data.join("ordinary-child.txt"), b"ordinary write").unwrap();
-    assert!(fs::remove_file(&marker).is_err());
-    assert!(fs::remove_dir(&data).is_err());
-    let blocked_reparse = Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&data)
-        .arg(&external)
-        .output()
-        .unwrap();
-    assert!(!blocked_reparse.status.success());
+    assert!(fs::rename(&data, &renamed_data).is_err());
 
     drop(startup);
-    fs::remove_file(&marker).unwrap();
-    fs::remove_file(data.join("ordinary-child.txt")).unwrap();
-    fs::remove_dir(&data).unwrap();
-    let output = Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&data)
-        .arg(&external)
-        .output()
-        .unwrap();
-    assert!(output.status.success());
+    fs::rename(&data, &renamed_data).unwrap();
 }
 
 #[cfg(windows)]
