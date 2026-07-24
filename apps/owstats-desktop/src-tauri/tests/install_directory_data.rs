@@ -10,6 +10,12 @@ use owstats_desktop_lib::install_data_migration::{
 #[cfg(windows)]
 use std::{
     cell::{Cell, RefCell},
+    ffi::c_void,
+    os::windows::{
+        ffi::OsStrExt,
+        fs::OpenOptionsExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    },
     path::{Path, PathBuf},
 };
 
@@ -18,6 +24,26 @@ use owstats_desktop_lib::install_data_migration::{
     set_windows_cleanup_enumeration_hook, set_windows_cleanup_limits_for_test,
     set_windows_copy_enumeration_hook, set_windows_copy_limits_for_test,
     set_windows_migration_hook, WindowsCleanupLimits, WindowsCopyLimits, WindowsMigrationHookPoint,
+};
+
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{LocalFree, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE},
+    Security::{
+        Authorization::{
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
+            SE_FILE_OBJECT,
+        },
+        CreateRestrictedToken, CreateWellKnownSid, GetSecurityDescriptorControl,
+        ImpersonateLoggedOnUser, RevertToSelf, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+        DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, SECURITY_MAX_SID_SIZE, SE_DACL_PROTECTED,
+        SID_AND_ATTRIBUTES, TOKEN_DUPLICATE, TOKEN_QUERY, WELL_KNOWN_SID_TYPE,
+    },
+    Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL,
+    },
+    System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
 
 #[cfg(not(windows))]
@@ -44,6 +70,20 @@ enum MigrationRace {
     CreateDestination {
         destination: PathBuf,
         invoked: bool,
+    },
+    LockStagedFile {
+        relative: PathBuf,
+        lock: Option<fs::File>,
+        invoked: bool,
+    },
+    ReplaceValidatedFile {
+        relative: PathBuf,
+        replacement: Vec<u8>,
+        write_succeeded: Option<bool>,
+    },
+    ProbeInitialStagingAccess {
+        relative: PathBuf,
+        write_succeeded: Option<bool>,
     },
 }
 
@@ -160,6 +200,169 @@ impl Drop for MigrationHookReset {
 }
 
 #[cfg(windows)]
+struct LocalAllocation(*mut c_void);
+
+#[cfg(windows)]
+impl Drop for LocalAllocation {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = LocalFree(self.0);
+        }
+    }
+}
+
+#[cfg(windows)]
+struct ImpersonationReset;
+
+#[cfg(windows)]
+impl Drop for ImpersonationReset {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = RevertToSelf();
+        }
+    }
+}
+
+#[cfg(windows)]
+fn owned_handle(raw: HANDLE) -> OwnedHandle {
+    assert!(!raw.is_null());
+    assert_ne!(raw, INVALID_HANDLE_VALUE);
+    unsafe { OwnedHandle::from_raw_handle(raw as _) }
+}
+
+#[cfg(windows)]
+fn well_known_sid(kind: WELL_KNOWN_SID_TYPE) -> Vec<u8> {
+    let mut sid = vec![0_u8; SECURITY_MAX_SID_SIZE as usize];
+    let mut length = SECURITY_MAX_SID_SIZE;
+    let created = unsafe {
+        CreateWellKnownSid(
+            kind,
+            std::ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut length,
+        )
+    };
+    assert_ne!(created, 0);
+    sid.truncate(length as usize);
+    sid
+}
+
+#[cfg(windows)]
+fn with_privileged_sids_disabled<T>(operation: impl FnOnce() -> T) -> T {
+    let mut process_token = std::ptr::null_mut();
+    let opened = unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_DUPLICATE | TOKEN_QUERY,
+            &mut process_token,
+        )
+    };
+    assert_ne!(opened, 0);
+    let process_token = owned_handle(process_token);
+
+    let mut administrators = well_known_sid(WinBuiltinAdministratorsSid);
+    let mut system = well_known_sid(WinLocalSystemSid);
+    let disabled = [
+        SID_AND_ATTRIBUTES {
+            Sid: administrators.as_mut_ptr().cast(),
+            Attributes: 0,
+        },
+        SID_AND_ATTRIBUTES {
+            Sid: system.as_mut_ptr().cast(),
+            Attributes: 0,
+        },
+    ];
+    let mut restricted_token = std::ptr::null_mut();
+    let restricted = unsafe {
+        CreateRestrictedToken(
+            process_token.as_raw_handle() as _,
+            DISABLE_MAX_PRIVILEGE,
+            disabled.len() as u32,
+            disabled.as_ptr(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            &mut restricted_token,
+        )
+    };
+    assert_ne!(restricted, 0);
+    let restricted_token = owned_handle(restricted_token);
+    let impersonated = unsafe { ImpersonateLoggedOnUser(restricted_token.as_raw_handle() as _) };
+    assert_ne!(impersonated, 0);
+    let reset = ImpersonationReset;
+
+    let result = operation();
+
+    let reverted = unsafe { RevertToSelf() };
+    assert_ne!(reverted, 0);
+    std::mem::forget(reset);
+    result
+}
+
+#[cfg(windows)]
+fn protected_dacl_sddl(path: &Path) -> (u16, String) {
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let raw = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            READ_CONTROL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        )
+    };
+    let handle = owned_handle(raw);
+    let mut descriptor = std::ptr::null_mut();
+    let status = unsafe {
+        GetSecurityInfo(
+            handle.as_raw_handle() as _,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    assert_eq!(status, ERROR_SUCCESS);
+    assert!(!descriptor.is_null());
+    let descriptor_guard = LocalAllocation(descriptor);
+    let mut control = 0_u16;
+    let mut revision = 0_u32;
+    let read_control =
+        unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) };
+    assert_ne!(read_control, 0);
+
+    let mut sddl = std::ptr::null_mut();
+    let mut length = 0_u32;
+    let converted = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut sddl,
+            &mut length,
+        )
+    };
+    assert_ne!(converted, 0);
+    assert!(!sddl.is_null());
+    let sddl_guard = LocalAllocation(sddl.cast());
+    let value =
+        String::from_utf16(unsafe { std::slice::from_raw_parts(sddl, length as usize) }).unwrap();
+    drop(sddl_guard);
+    drop(descriptor_guard);
+    (control, value)
+}
+
+#[cfg(windows)]
 fn replace_selected_source_with_junction(path: &Path) {
     let external = COPY_OPEN_RACE.with(|race| race.borrow().clone());
     let Some(external) = external else {
@@ -214,6 +417,38 @@ fn trigger_selected_migration_race(
             {
                 fs::create_dir(destination_path).unwrap();
                 *invoked = true;
+            }
+            Some(MigrationRace::LockStagedFile {
+                relative,
+                lock,
+                invoked,
+            }) if point == WindowsMigrationHookPoint::BeforeValidation => {
+                *lock = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(0)
+                        .open(staging_path.join(relative))
+                        .unwrap(),
+                );
+                *invoked = true;
+            }
+            Some(MigrationRace::ReplaceValidatedFile {
+                relative,
+                replacement,
+                write_succeeded,
+            }) if point == WindowsMigrationHookPoint::BeforePublish => {
+                let target = staging_path.join(relative);
+                let result = with_privileged_sids_disabled(|| fs::write(target, replacement));
+                *write_succeeded = Some(result.is_ok());
+            }
+            Some(MigrationRace::ProbeInitialStagingAccess {
+                relative,
+                write_succeeded,
+            }) if point == WindowsMigrationHookPoint::StagingCreated => {
+                let target = staging_path.join(relative);
+                let result =
+                    with_privileged_sids_disabled(|| fs::write(target, b"attacker controlled"));
+                *write_succeeded = Some(result.is_ok());
             }
             _ => {}
         }
@@ -489,6 +724,196 @@ fn invalid_sqlite_is_not_published_and_source_is_retained() {
         fs::read(account.join("owstats.sqlite3")).unwrap(),
         b"not sqlite"
     );
+}
+
+#[test]
+fn account_without_a_main_database_is_valid() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    let (account_id, _) = write_valid_account_metadata(&source);
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(data
+        .join("accounts")
+        .join(account_id)
+        .join("account.json")
+        .is_file());
+    assert!(!data
+        .join("accounts")
+        .join("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        .join("owstats.sqlite3")
+        .exists());
+}
+
+#[cfg(windows)]
+fn assert_locked_optional_validation_file_is_rejected(setup: impl FnOnce(&Path) -> PathBuf) {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    fs::create_dir_all(&source).unwrap();
+    let relative = setup(&source);
+    MIGRATION_RACE.with(|race| {
+        *race.borrow_mut() = Some(MigrationRace::LockStagedFile {
+            relative,
+            lock: None,
+            invoked: false,
+        });
+    });
+    set_windows_migration_hook(Some(trigger_selected_migration_race));
+    let hook_reset = MigrationHookReset;
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    set_windows_migration_hook(None);
+    let race = MIGRATION_RACE.with(|race| race.borrow_mut().take().unwrap());
+    drop(hook_reset);
+    let MigrationRace::LockStagedFile { lock, invoked, .. } = race else {
+        panic!("验证锁测试状态错误");
+    };
+    assert!(invoked);
+    assert!(lock.is_some());
+    assert!(result.is_err());
+    assert!(!data.exists());
+    assert!(!staging.join(".install-data-migration-v1.json").exists());
+    drop(lock);
+}
+
+#[cfg(windows)]
+#[test]
+fn locked_registry_is_not_treated_as_absent() {
+    assert_locked_optional_validation_file_is_rejected(|source| {
+        fs::write(
+            source.join("accounts.json"),
+            br#"{"version":1,"activeAccountId":null,"accounts":[]}"#,
+        )
+        .unwrap();
+        PathBuf::from("accounts.json")
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn locked_wal_is_not_treated_as_absent() {
+    assert_locked_optional_validation_file_is_rejected(|source| {
+        let (account_id, account) = write_valid_account_metadata(source);
+        create_valid_sqlite(&account.join("owstats.sqlite3"));
+        fs::write(account.join("owstats.sqlite3-wal"), b"synthetic wal").unwrap();
+        PathBuf::from("accounts")
+            .join(account_id)
+            .join("owstats.sqlite3-wal")
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn locked_shm_is_not_treated_as_absent() {
+    assert_locked_optional_validation_file_is_rejected(|source| {
+        let (account_id, account) = write_valid_account_metadata(source);
+        create_valid_sqlite(&account.join("owstats.sqlite3"));
+        fs::write(account.join("owstats.sqlite3-shm"), b"synthetic shm").unwrap();
+        PathBuf::from("accounts")
+            .join(account_id)
+            .join("owstats.sqlite3-shm")
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn migrated_data_keeps_a_protected_admin_only_staging_dacl() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("payload.bin"), b"synthetic").unwrap();
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    let (control, sddl) = protected_dacl_sddl(&data);
+    assert_ne!(control & SE_DACL_PROTECTED, 0);
+    assert!(sddl.contains("FA;;;SY)"));
+    assert!(sddl.contains("FA;;;BA)"));
+    assert!(!sddl.contains(";;;BU)"));
+    assert!(!sddl.contains(";;;AU)"));
+    assert_eq!(sddl.matches('(').count(), 2);
+}
+
+#[cfg(windows)]
+#[test]
+fn staging_is_protected_when_it_first_becomes_observable() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let injected = PathBuf::from("pre-protection-write.bin");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("payload.bin"), b"synthetic").unwrap();
+    MIGRATION_RACE.with(|race| {
+        *race.borrow_mut() = Some(MigrationRace::ProbeInitialStagingAccess {
+            relative: injected.clone(),
+            write_succeeded: None,
+        });
+    });
+    set_windows_migration_hook(Some(trigger_selected_migration_race));
+    let hook_reset = MigrationHookReset;
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    set_windows_migration_hook(None);
+    let race = MIGRATION_RACE.with(|race| race.borrow_mut().take().unwrap());
+    drop(hook_reset);
+    let MigrationRace::ProbeInitialStagingAccess {
+        write_succeeded, ..
+    } = race
+    else {
+        panic!("初始临时目录权限测试状态错误");
+    };
+    assert_eq!(write_succeeded, Some(false));
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(!data.join(injected).exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn ordinary_user_cannot_replace_validated_content_before_publish() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let original = br#"{"version":1,"activeAccountId":null,"accounts":[]}"#;
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("accounts.json"), original).unwrap();
+    MIGRATION_RACE.with(|race| {
+        *race.borrow_mut() = Some(MigrationRace::ReplaceValidatedFile {
+            relative: PathBuf::from("accounts.json"),
+            replacement: b"{attacker controlled".to_vec(),
+            write_succeeded: None,
+        });
+    });
+    set_windows_migration_hook(Some(trigger_selected_migration_race));
+    let hook_reset = MigrationHookReset;
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    set_windows_migration_hook(None);
+    let race = MIGRATION_RACE.with(|race| race.borrow_mut().take().unwrap());
+    drop(hook_reset);
+    let MigrationRace::ReplaceValidatedFile {
+        write_succeeded, ..
+    } = race
+    else {
+        panic!("发布替换测试状态错误");
+    };
+    assert_eq!(write_succeeded, Some(false));
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert_eq!(fs::read(data.join("accounts.json")).unwrap(), original);
 }
 
 #[test]

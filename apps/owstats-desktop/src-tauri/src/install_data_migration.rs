@@ -432,6 +432,7 @@ pub fn set_windows_cleanup_limits_for_test(limits: Option<WindowsCleanupLimits>)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsMigrationHookPoint {
     StagingCreated,
+    BeforeValidation,
     BeforePublish,
 }
 
@@ -504,7 +505,19 @@ mod windows_secure {
             },
         },
         Win32::{
-            Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, UNICODE_STRING},
+            Foundation::{
+                CloseHandle, LocalFree, ERROR_ACCESS_DENIED, ERROR_INVALID_HANDLE,
+                ERROR_INVALID_PARAMETER, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE,
+                STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND, UNICODE_STRING,
+            },
+            Security::{
+                Authorization::{
+                    ConvertStringSecurityDescriptorToSecurityDescriptorW, SetSecurityInfo,
+                    SDDL_REVISION_1, SE_FILE_OBJECT,
+                },
+                GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
+                PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+            },
             Storage::FileSystem::{
                 CreateFileW, FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle,
                 GetFileType, GetFinalPathNameByHandleW, SetFileInformationByHandle,
@@ -513,7 +526,8 @@ mod windows_secure {
                 FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
                 FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED,
                 FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE,
-                FILE_TRAVERSE, FILE_TYPE_DISK, OPEN_EXISTING, SYNCHRONIZE, VOLUME_NAME_DOS,
+                FILE_TRAVERSE, FILE_TYPE_DISK, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE,
+                VOLUME_NAME_DOS, WRITE_DAC,
             },
             System::{
                 Kernel::{OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE},
@@ -622,6 +636,16 @@ mod windows_secure {
     struct FixedEntry {
         handle: FixedHandle,
         information: BY_HANDLE_FILE_INFORMATION,
+    }
+
+    struct LocalSecurityDescriptor(PSECURITY_DESCRIPTOR);
+
+    impl Drop for LocalSecurityDescriptor {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = LocalFree(self.0);
+            }
+        }
     }
 
     #[derive(Default)]
@@ -743,16 +767,27 @@ mod windows_secure {
         let marker = marker.ok_or_else(|| anyhow!("无法生成迁移完成标记"))?;
 
         reset_staging(&pinned_staging)?;
-        let staging_entry = create_directory_relative(&parent_entry.handle, staging_name)?;
+        let staging_entry =
+            create_protected_directory_relative(&parent_entry.handle, staging_name)?;
         require_target_directory(&staging_entry.information, "迁移临时目录无效")?;
+        // Test seam at the first instant after the atomic create returns. The
+        // create-time descriptor must already exclude ordinary users here.
         invoke_migration_hook(
             WindowsMigrationHookPoint::StagingCreated,
             staging,
             destination,
         );
+        // Reapply through the fixed handle as an explicit fail-closed check
+        // before production code writes any descendants.
+        protect_staging(&staging_entry.handle)?;
 
         copy_tree(source, &pinned_staging, &staging_entry.handle)?;
-        validate_staged_data(&staging_entry.handle)?;
+        invoke_migration_hook(
+            WindowsMigrationHookPoint::BeforeValidation,
+            staging,
+            destination,
+        );
+        let validation_guards = validate_staged_data(&staging_entry.handle)?;
         write_marker(
             &pinned_staging.join(".install-data-migration-v1.json"),
             marker,
@@ -760,6 +795,13 @@ mod windows_secure {
         let staged_information = information(&staging_entry.handle)?;
         require_target_directory(&staged_information, "迁移临时目录无效")?;
 
+        // Registry, manifest, database, WAL, and SHM guards intentionally omit
+        // DELETE sharing so validation observes fixed objects. Windows cannot
+        // rename their parent while those handles remain open, so release them
+        // only after every staged write/check. The protected root DACL then
+        // excludes ordinary users during the short hook-to-FileRenameInfo
+        // window; the fixed root handle still prevents root replacement.
+        drop(validation_guards);
         invoke_migration_hook(
             WindowsMigrationHookPoint::BeforePublish,
             staging,
@@ -776,19 +818,76 @@ mod windows_secure {
         Ok(InstallDataMigrationOutcome::Migrated)
     }
 
+    fn protected_staging_security_descriptor() -> Result<LocalSecurityDescriptor> {
+        let sddl = OsStr::new("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut descriptor = std::ptr::null_mut();
+        let converted = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                std::ptr::null_mut(),
+            )
+        };
+        if converted == 0 || descriptor.is_null() {
+            return Err(anyhow!("无法构造迁移临时目录权限"));
+        }
+        Ok(LocalSecurityDescriptor(descriptor))
+    }
+
+    fn protect_staging(staging: &FixedHandle) -> Result<()> {
+        let descriptor = protected_staging_security_descriptor()?;
+        let mut dacl_present = 0;
+        let mut dacl_defaulted = 0;
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let read_dacl = unsafe {
+            GetSecurityDescriptorDacl(
+                descriptor.0,
+                &mut dacl_present,
+                &mut dacl,
+                &mut dacl_defaulted,
+            )
+        };
+        if read_dacl == 0 || dacl_present == 0 || dacl.is_null() {
+            return Err(anyhow!("无法读取迁移临时目录权限"));
+        }
+        let status = unsafe {
+            SetSecurityInfo(
+                staging.0,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                dacl,
+                std::ptr::null(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            let message = match status {
+                ERROR_ACCESS_DENIED => "设置迁移临时目录权限被拒绝",
+                ERROR_INVALID_HANDLE => "迁移临时目录权限句柄无效",
+                ERROR_INVALID_PARAMETER => "迁移临时目录权限参数无效",
+                _ => "无法设置迁移临时目录权限",
+            };
+            return Err(anyhow!(message));
+        }
+        Ok(())
+    }
+
     fn validate_staged_data(staging: &FixedHandle) -> Result<ValidationGuards> {
         let mut guards = ValidationGuards::default();
-        let registry =
-            match open_child_fixed(staging, OsStr::new("accounts.json"), FILE_GENERIC_READ) {
-                Ok(entry) => {
-                    let bytes = read_and_hold(entry, &mut guards, "旧账户索引校验失败")?;
-                    let registry: AccountRegistry =
-                        from_slice(&bytes).context("旧账户索引校验失败")?;
-                    validate_registry(&registry).context("旧账户索引校验失败")?;
-                    registry
-                }
-                Err(_) => return Ok(guards),
-            };
+        let Some(registry) =
+            open_optional_child_fixed(staging, OsStr::new("accounts.json"), FILE_GENERIC_READ)
+                .context("旧账户索引校验失败")?
+        else {
+            return Ok(guards);
+        };
+        let bytes = read_and_hold(registry, &mut guards, "旧账户索引校验失败")?;
+        let registry: AccountRegistry = from_slice(&bytes).context("旧账户索引校验失败")?;
+        validate_registry(&registry).context("旧账户索引校验失败")?;
         if registry.accounts.is_empty() {
             return Ok(guards);
         }
@@ -829,30 +928,35 @@ mod windows_secure {
         account: &FixedHandle,
         guards: &mut ValidationGuards,
     ) -> Result<()> {
+        let Some(database) =
+            open_optional_child_fixed(account, OsStr::new("owstats.sqlite3"), FILE_GENERIC_READ)
+                .context("旧账户数据库校验失败")?
+        else {
+            return Ok(());
+        };
+        require_regular_file(&database.information).context("旧账户数据库校验失败")?;
+
         let snapshot_name = OsString::from(format!(".install-data-validation-{}", Uuid::new_v4()));
         let snapshot =
             create_directory_relative(account, &snapshot_name).context("旧账户数据库校验失败")?;
         let snapshot_path = final_path(&snapshot.handle)?.join("owstats.sqlite3");
         let mut snapshot_files = Vec::new();
         let result = (|| -> Result<()> {
-            copy_validation_file(
-                account,
-                OsStr::new("owstats.sqlite3"),
+            copy_validation_entry(
+                database,
                 &snapshot.handle,
                 OsStr::new("owstats.sqlite3"),
                 guards,
                 &mut snapshot_files,
-                true,
             )?;
             for sidecar in ["owstats.sqlite3-wal", "owstats.sqlite3-shm"] {
-                copy_validation_file(
+                copy_optional_validation_file(
                     account,
                     OsStr::new(sidecar),
                     &snapshot.handle,
                     OsStr::new(sidecar),
                     guards,
                     &mut snapshot_files,
-                    false,
                 )?;
             }
             let connection =
@@ -873,20 +977,29 @@ mod windows_secure {
         result
     }
 
-    fn copy_validation_file(
+    fn copy_optional_validation_file(
         source_parent: &FixedHandle,
         source_name: &OsStr,
         target_parent: &FixedHandle,
         target_name: &OsStr,
         guards: &mut ValidationGuards,
         snapshot_files: &mut Vec<File>,
-        required: bool,
     ) -> Result<()> {
-        let source = match open_child_fixed(source_parent, source_name, FILE_GENERIC_READ) {
-            Ok(entry) => entry,
-            Err(_) if !required => return Ok(()),
-            Err(error) => return Err(error).context("旧账户数据库校验失败"),
+        let Some(source) = open_optional_child_fixed(source_parent, source_name, FILE_GENERIC_READ)
+            .context("旧账户数据库校验失败")?
+        else {
+            return Ok(());
         };
+        copy_validation_entry(source, target_parent, target_name, guards, snapshot_files)
+    }
+
+    fn copy_validation_entry(
+        source: FixedEntry,
+        target_parent: &FixedHandle,
+        target_name: &OsStr,
+        guards: &mut ValidationGuards,
+        snapshot_files: &mut Vec<File>,
+    ) -> Result<()> {
         require_regular_file(&source.information).context("旧账户数据库校验失败")?;
         let mut source = source.handle.into_file();
         let target_path = final_path(target_parent)?.join(target_name);
@@ -1001,7 +1114,23 @@ mod windows_secure {
         Ok(encoded)
     }
 
+    fn create_protected_directory_relative(
+        parent: &FixedHandle,
+        name: &OsStr,
+    ) -> Result<FixedEntry> {
+        let descriptor = protected_staging_security_descriptor()?;
+        create_directory_relative_with_security(parent, name, descriptor.0)
+    }
+
     fn create_directory_relative(parent: &FixedHandle, name: &OsStr) -> Result<FixedEntry> {
+        create_directory_relative_with_security(parent, name, std::ptr::null_mut())
+    }
+
+    fn create_directory_relative_with_security(
+        parent: &FixedHandle,
+        name: &OsStr,
+        security_descriptor: PSECURITY_DESCRIPTOR,
+    ) -> Result<FixedEntry> {
         const FILE_CREATED_INFORMATION: usize = 2;
 
         let mut encoded = encode_child_name(name)?;
@@ -1020,7 +1149,7 @@ mod windows_secure {
             RootDirectory: parent.0,
             ObjectName: &unicode_name,
             Attributes: (OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE) as u32,
-            SecurityDescriptor: std::ptr::null(),
+            SecurityDescriptor: security_descriptor,
             SecurityQualityOfService: std::ptr::null(),
         };
         let mut io_status = unsafe { std::mem::zeroed::<IO_STATUS_BLOCK>() };
@@ -1030,7 +1159,13 @@ mod windows_secure {
         let status = unsafe {
             NtCreateFile(
                 &mut raw_handle,
-                FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE | DELETE,
+                FILE_LIST_DIRECTORY
+                    | FILE_TRAVERSE
+                    | FILE_READ_ATTRIBUTES
+                    | SYNCHRONIZE
+                    | DELETE
+                    | READ_CONTROL
+                    | WRITE_DAC,
                 &attributes,
                 &mut io_status,
                 std::ptr::null(),
@@ -1235,6 +1370,15 @@ mod windows_secure {
     }
 
     fn open_child_fixed(parent: &FixedHandle, name: &OsStr, access: u32) -> Result<FixedEntry> {
+        open_optional_child_fixed(parent, name, access)?
+            .ok_or_else(|| anyhow!("无法安全打开迁移文件"))
+    }
+
+    fn open_optional_child_fixed(
+        parent: &FixedHandle,
+        name: &OsStr,
+        access: u32,
+    ) -> Result<Option<FixedEntry>> {
         let mut encoded = encode_child_name(name)?;
         let byte_len = u16::try_from(
             encoded
@@ -1273,7 +1417,18 @@ mod windows_secure {
                 0,
             )
         };
-        if result < 0 || raw.is_null() || raw == INVALID_HANDLE_VALUE {
+        if result < 0 {
+            if !raw.is_null() && raw != INVALID_HANDLE_VALUE {
+                unsafe {
+                    let _ = CloseHandle(raw);
+                }
+            }
+            if result == STATUS_OBJECT_NAME_NOT_FOUND || result == STATUS_OBJECT_PATH_NOT_FOUND {
+                return Ok(None);
+            }
+            return Err(anyhow!("无法安全打开迁移文件"));
+        }
+        if raw.is_null() || raw == INVALID_HANDLE_VALUE {
             return Err(anyhow!("无法安全打开迁移文件"));
         }
         let handle = FixedHandle(raw);
@@ -1281,10 +1436,10 @@ mod windows_secure {
         if get_file_type_safe(&handle)? != FILE_TYPE_DISK {
             return Err(anyhow!("账户文件类型无效"));
         }
-        Ok(FixedEntry {
+        Ok(Some(FixedEntry {
             handle,
             information,
-        })
+        }))
     }
 
     fn open_fixed_with_share(path: &Path, access: u32, share_mode: u32) -> Result<FixedEntry> {
