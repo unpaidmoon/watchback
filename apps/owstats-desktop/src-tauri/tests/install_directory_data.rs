@@ -2686,16 +2686,35 @@ fn migration_execution_rejects_an_ill_formed_utf16_data_name() {
 
 #[cfg(windows)]
 #[test]
-fn normal_startup_resolves_writable_published_install_data_with_chinese_and_spaces() {
+fn normal_startup_rejects_unproven_install_data_without_creating_a_marker() {
     let temp = tempfile::tempdir().unwrap();
     let executable = temp.path().join("安装 目录").join("Watchback.exe");
     let data = executable.parent().unwrap().join("data");
     fs::create_dir_all(&data).unwrap();
 
+    let error = owstats_desktop_lib::open_published_install_data(&executable).unwrap_err();
+
+    assert!(!error.to_string().is_empty());
+    assert!(!data.join(".watchback-data-root-v1").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn normal_startup_accepts_a_valid_migration_marker_without_a_root_marker() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("Watchback.exe");
+    let data = executable.parent().unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(
+        data.join(".install-data-migration-v1.json"),
+        br#"{"version":1,"sourceRetained":true}"#,
+    )
+    .unwrap();
+
     let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
 
     assert_eq!(startup.paths().root(), data);
-    assert_eq!(fs::read(data.join(".watchback-data-root-v1")).unwrap(), b"");
+    assert!(!data.join(".watchback-data-root-v1").exists());
 }
 
 #[cfg(windows)]
@@ -2803,6 +2822,7 @@ fn normal_startup_paths_remain_bound_to_data_after_an_ancestor_junction_changes(
     let active_install = temp.path().join("active-install");
     fs::create_dir_all(&original_data).unwrap();
     fs::create_dir_all(&replacement_data).unwrap();
+    mark_initialized_data(&original_data);
 
     let linked = Command::new("cmd")
         .args(["/C", "mklink", "/J"])
@@ -2841,6 +2861,7 @@ fn normal_startup_guard_blocks_data_directory_rename_until_drop() {
     let data = executable.parent().unwrap().join("data");
     let renamed_data = executable.parent().unwrap().join("data-renamed");
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
 
     let startup = owstats_desktop_lib::open_published_install_data(&executable).unwrap();
     fs::write(data.join("ordinary-child.txt"), b"ordinary write").unwrap();

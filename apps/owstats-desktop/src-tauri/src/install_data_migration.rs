@@ -22,7 +22,7 @@ pub enum InstallDataMigrationOutcome {
 
 pub(crate) const INSTALL_DATA_ROOT_MARKER: &str = ".watchback-data-root-v1";
 pub(crate) const INSTALL_DATA_ROOT_MARKER_CONTENTS: &[u8] = b"v1";
-const INSTALL_DATA_MIGRATION_MARKER: &str = ".install-data-migration-v1.json";
+pub(crate) const INSTALL_DATA_MIGRATION_MARKER: &str = ".install-data-migration-v1.json";
 const MAX_EXISTING_MARKER_BYTES: u64 = 4096;
 
 #[cfg(windows)]
@@ -1762,7 +1762,6 @@ mod windows_secure {
     ) -> Result<()> {
         require_regular_file(&source.information).context("旧账户数据库校验失败")?;
         let expected_bytes = file_size(&source.information);
-        budget.record_snapshot(expected_bytes, limits)?;
         require_handle_capacity(
             guards,
             base_handles
@@ -1774,13 +1773,42 @@ mod windows_secure {
         let target_path = final_path(target_parent)?.join(target_name);
         let target = create_file(&target_path).context("旧账户数据库校验失败")?;
         let mut target = target.handle.into_file();
-        let copied = std::io::copy(&mut source, &mut target).context("旧账户数据库校验失败")?;
-        if copied != expected_bytes {
-            return Err(anyhow!("旧账户数据库校验失败"));
-        }
+        copy_validation_reader_to_writer(&mut source, &mut target, expected_bytes, budget, limits)?;
         target.sync_all().context("旧账户数据库校验失败")?;
         guards.files.push(source);
         snapshot_files.push(target);
+        Ok(())
+    }
+
+    fn copy_validation_reader_to_writer<R: Read, W: Write>(
+        source: &mut R,
+        target: &mut W,
+        expected_bytes: u64,
+        budget: &mut ValidationBudget,
+        limits: WindowsValidationLimits,
+    ) -> Result<()> {
+        let mut copied = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = source.read(&mut buffer).context("旧账户数据库校验失败")?;
+            if read == 0 {
+                break;
+            }
+            let read = u64::try_from(read).context("旧账户数据库校验失败")?;
+            budget.record_snapshot(read, limits)?;
+            copied = copied
+                .checked_add(read)
+                .ok_or_else(|| anyhow!("旧账户数据库校验失败"))?;
+            if copied > expected_bytes {
+                return Err(anyhow!("旧账户数据库校验失败"));
+            }
+            target
+                .write_all(&buffer[..read as usize])
+                .context("旧账户数据库校验失败")?;
+        }
+        if copied != expected_bytes {
+            return Err(anyhow!("旧账户数据库校验失败"));
+        }
         Ok(())
     }
 
@@ -2521,6 +2549,23 @@ mod windows_secure {
             assert!(result.is_err());
             assert_eq!(target, b"12");
             assert_eq!(budget.bytes, 2);
+        }
+
+        #[test]
+        fn validation_snapshot_rejects_growth_before_writing_the_over_budget_chunk() {
+            let mut source = ChunkedReader {
+                chunks: VecDeque::from([b"12".to_vec(), b"345".to_vec()]),
+            };
+            let mut target = Vec::new();
+            let mut budget = ValidationBudget::default();
+            let limits = WindowsValidationLimits::new(1024, 8, 64, 4, 1, 10);
+
+            let result =
+                copy_validation_reader_to_writer(&mut source, &mut target, 2, &mut budget, limits);
+
+            assert!(result.is_err());
+            assert_eq!(target, b"12");
+            assert_eq!(budget.snapshot_bytes, 2);
         }
     }
 }

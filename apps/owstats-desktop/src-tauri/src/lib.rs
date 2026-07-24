@@ -561,7 +561,7 @@ fn open_windows_published_install_data(
         Wdk::{
             Foundation::OBJECT_ATTRIBUTES,
             Storage::FileSystem::{
-                NtCreateFile, FILE_CREATE, FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT,
+                NtCreateFile, FILE_CREATE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
                 FILE_SYNCHRONOUS_IO_NONALERT,
             },
         },
@@ -581,12 +581,12 @@ fn open_windows_published_install_data(
         },
     };
 
-    const FILE_CREATED_INFORMATION: usize = 2;
+    const STATUS_OBJECT_NAME_NOT_FOUND: i32 = 0xc000_0034_u32 as i32;
+    const STATUS_OBJECT_PATH_NOT_FOUND: i32 = 0xc000_003a_u32 as i32;
     const DELETE: u32 = 0x0001_0000;
 
     struct RelativeFile {
         file: std::fs::File,
-        created: bool,
     }
 
     struct Probe {
@@ -594,10 +594,6 @@ fn open_windows_published_install_data(
     }
 
     impl Probe {
-        fn disarm(mut self) -> std::fs::File {
-            self.file.take().expect("写入测试句柄存在")
-        }
-
         fn cleanup(mut self) -> anyhow::Result<()> {
             let Some(file) = self.file.take() else {
                 return Ok(());
@@ -635,14 +631,14 @@ fn open_windows_published_install_data(
         }
     }
 
-    fn open_relative_file(
+    fn open_optional_relative_file(
         parent: &std::fs::File,
         name: &OsStr,
         access: u32,
         share_access: u32,
         disposition: u32,
         failure: StartupFailure,
-    ) -> anyhow::Result<RelativeFile> {
+    ) -> anyhow::Result<Option<RelativeFile>> {
         let mut name = name.encode_wide().collect::<Vec<_>>();
         if name.is_empty() || name.contains(&0) {
             return Err(anyhow::Error::new(StartupFailure::CorruptInstallDataMarker));
@@ -683,14 +679,29 @@ fn open_windows_published_install_data(
                 0,
             )
         };
+        if matches!(
+            result,
+            STATUS_OBJECT_NAME_NOT_FOUND | STATUS_OBJECT_PATH_NOT_FOUND
+        ) {
+            return Ok(None);
+        }
         if result < 0 || raw.is_null() || raw == INVALID_HANDLE_VALUE {
             return Err(anyhow::Error::new(failure));
         }
         let file = unsafe { std::fs::File::from_raw_handle(raw as _) };
-        Ok(RelativeFile {
-            file,
-            created: status.Information == FILE_CREATED_INFORMATION,
-        })
+        Ok(Some(RelativeFile { file }))
+    }
+
+    fn open_relative_file(
+        parent: &std::fs::File,
+        name: &OsStr,
+        access: u32,
+        share_access: u32,
+        disposition: u32,
+        failure: StartupFailure,
+    ) -> anyhow::Result<RelativeFile> {
+        open_optional_relative_file(parent, name, access, share_access, disposition, failure)?
+            .ok_or_else(|| anyhow::Error::new(failure))
     }
 
     fn validate_regular_file(file: &std::fs::File, failure: StartupFailure) -> anyhow::Result<()> {
@@ -824,72 +835,68 @@ fn open_windows_published_install_data(
         return Err(anyhow::Error::new(StartupFailure::InvalidInstallData));
     }
 
-    let marker = open_relative_file(
+    let root_marker = open_optional_relative_file(
         &data_directory,
         OsStr::new(install_data_migration::INSTALL_DATA_ROOT_MARKER),
-        FILE_GENERIC_READ | FILE_READ_ATTRIBUTES | DELETE,
+        FILE_GENERIC_READ | FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ,
-        FILE_OPEN_IF,
+        FILE_OPEN,
         StartupFailure::DataDirectoryPermissions,
     )?;
-    let marker_created = marker.created;
-    let mut marker = Probe {
-        file: Some(marker.file),
+    let (marker, migration_marker) = match root_marker {
+        Some(marker) => (marker, false),
+        None => (
+            open_optional_relative_file(
+                &data_directory,
+                OsStr::new(install_data_migration::INSTALL_DATA_MIGRATION_MARKER),
+                FILE_GENERIC_READ | FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ,
+                FILE_OPEN,
+                StartupFailure::DataDirectoryPermissions,
+            )?
+            .ok_or_else(|| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?,
+            true,
+        ),
     };
-    if let Err(error) = validate_regular_file(
-        marker.file.as_ref().expect("写入测试句柄存在"),
-        StartupFailure::CorruptInstallDataMarker,
-    ) {
-        if marker_created {
-            return match marker.cleanup() {
-                Ok(()) => Err(error),
-                Err(error) => Err(error),
-            };
-        }
-        drop(marker.disarm());
-        return Err(error);
-    }
+    let mut marker = marker.file;
+    validate_regular_file(&marker, StartupFailure::CorruptInstallDataMarker)?;
     let marker_contents = (|| -> anyhow::Result<Vec<u8>> {
-        let file = marker.file.as_mut().expect("写入测试句柄存在");
-        file.seek(SeekFrom::Start(0))
+        marker
+            .seek(SeekFrom::Start(0))
             .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
-        let limit = u64::try_from(install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS.len())
-            .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?
-            .checked_add(1)
-            .ok_or_else(|| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
+        let limit = u64::try_from(if migration_marker {
+            256
+        } else {
+            install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS.len()
+        })
+        .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?
+        .checked_add(1)
+        .ok_or_else(|| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
         let mut contents = Vec::new();
-        file.take(limit)
+        (&mut marker)
+            .take(limit)
             .read_to_end(&mut contents)
             .map_err(|_| anyhow::Error::new(StartupFailure::CorruptInstallDataMarker))?;
         Ok(contents)
     })();
-    let marker_contents = match marker_contents {
-        Ok(contents) => contents,
-        Err(error) => {
-            if !marker_created {
-                drop(marker.disarm());
-                return Err(error);
-            }
-            return match marker.cleanup() {
-                Ok(()) => Err(error),
-                Err(error) => Err(error),
-            };
+    let marker_contents = marker_contents?;
+    let marker_valid = if migration_marker {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct MigrationProof {
+            version: u8,
+            source_retained: bool,
         }
+        serde_json::from_slice::<MigrationProof>(&marker_contents)
+            .map(|proof| proof.version == 1 && proof.source_retained)
+            .unwrap_or(false)
+    } else {
+        marker_contents.is_empty()
+            || marker_contents == install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS
     };
-    if !marker_contents.is_empty()
-        && marker_contents != install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS
-    {
-        let error = anyhow::Error::new(StartupFailure::CorruptInstallDataMarker);
-        if !marker_created {
-            drop(marker.disarm());
-            return Err(error);
-        }
-        return match marker.cleanup() {
-            Ok(()) => Err(error),
-            Err(error) => Err(error),
-        };
+    if !marker_valid {
+        return Err(anyhow::Error::new(StartupFailure::CorruptInstallDataMarker));
     }
-    let marker = marker.disarm();
 
     let probe_name = format!(".runtime-write-test-{}", uuid::Uuid::new_v4());
     let probe = open_relative_file(
