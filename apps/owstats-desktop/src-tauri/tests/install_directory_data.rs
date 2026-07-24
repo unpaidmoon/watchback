@@ -2042,6 +2042,33 @@ fn assert_silent_exit_two(output: std::process::Output) {
 }
 
 #[cfg(windows)]
+trait CommandDeadline {
+    fn output_with_deadline(&mut self) -> std::process::Output;
+}
+
+#[cfg(windows)]
+impl CommandDeadline for Command {
+    fn output_with_deadline(&mut self) -> std::process::Output {
+        use std::process::Stdio;
+
+        self.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = self.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                return child.wait_with_output().unwrap();
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let output = child.wait_with_output().unwrap();
+                panic!("迁移命令超时: {:?}", output.status);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+#[cfg(windows)]
 #[test]
 fn migration_binary_exits_without_starting_tauri_and_enforces_the_cli_contract() {
     let temp = tempfile::tempdir().unwrap();
@@ -2054,28 +2081,27 @@ fn migration_binary_exits_without_starting_tauri_and_enforces_the_cli_contract()
         .arg("--prepare-install-data")
         .arg("-")
         .arg(&uppercase_data)
-        .output()
-        .unwrap();
+        .output_with_deadline();
     assert!(success.status.success());
     assert!(success.stdout.is_empty());
     assert!(success.stderr.is_empty());
     assert!(started.elapsed() < Duration::from_secs(10));
     assert!(data.is_dir());
 
-    let unknown = Command::new(&executable).arg("--unknown").output().unwrap();
+    let unknown = Command::new(&executable)
+        .arg("--unknown")
+        .output_with_deadline();
     assert_silent_exit_two(unknown);
     let missing = Command::new(&executable)
         .args(["--prepare-install-data", "-"])
-        .output()
-        .unwrap();
+        .output_with_deadline();
     assert_silent_exit_two(missing);
     let outside = temp.path().join("outside").join("data");
     let outside_output = Command::new(&executable)
         .arg("--prepare-install-data")
         .arg("-")
         .arg(&outside)
-        .output()
-        .unwrap();
+        .output_with_deadline();
     assert_silent_exit_two(outside_output);
     assert!(!outside.exists());
 }
@@ -2098,8 +2124,7 @@ fn migration_binary_preserves_existing_data_before_validating_the_source() {
             .arg("--prepare-install-data")
             .arg(source)
             .arg(&data)
-            .output()
-            .unwrap();
+            .output_with_deadline();
         assert!(output.status.success());
         assert!(output.stdout.is_empty());
         assert!(output.stderr.is_empty());

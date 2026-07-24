@@ -21,15 +21,15 @@ pub enum InstallDataMigrationOutcome {
 }
 
 #[cfg(windows)]
-pub use windows_secure::InstallParentGuard;
+pub(crate) use windows_secure::InstallParentGuard;
 
 #[cfg(windows)]
-pub fn open_install_parent(path: &Path) -> Result<InstallParentGuard> {
+pub(crate) fn open_install_parent(path: &Path) -> Result<InstallParentGuard> {
     windows_secure::open_install_parent(path)
 }
 
 #[cfg(windows)]
-pub fn destination_belongs_to_install_parent(
+pub(crate) fn destination_belongs_to_install_parent(
     parent: &InstallParentGuard,
     destination: &Path,
 ) -> Result<bool> {
@@ -37,7 +37,7 @@ pub fn destination_belongs_to_install_parent(
 }
 
 #[cfg(windows)]
-pub fn prepare_install_data_in_install_parent(
+pub(crate) fn prepare_install_data_in_install_parent(
     source: Option<&Path>,
     parent: &InstallParentGuard,
 ) -> Result<InstallDataMigrationOutcome> {
@@ -593,15 +593,15 @@ mod windows_secure {
                 PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
             },
             Storage::FileSystem::{
-                CreateFileW, FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle,
-                GetFileType, GetFinalPathNameByHandleW, SetFileInformationByHandle,
-                BY_HANDLE_FILE_INFORMATION, CREATE_NEW, DELETE, FILE_ATTRIBUTE_DIRECTORY,
-                FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
-                FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-                FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED,
-                FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE,
-                FILE_TRAVERSE, FILE_TYPE_DISK, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE,
-                VOLUME_NAME_DOS, WRITE_DAC,
+                CreateFileW, FileDispositionInfo, FileIdInfo, FileRenameInfo,
+                GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType,
+                GetFinalPathNameByHandleW, SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+                CREATE_NEW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+                FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+                FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_ID_INFO,
+                FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
+                FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_TYPE_DISK, OPEN_EXISTING,
+                READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS, WRITE_DAC,
             },
             System::{
                 Kernel::{OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE},
@@ -723,9 +723,10 @@ mod windows_secure {
     struct FixedEntry {
         handle: FixedHandle,
         information: BY_HANDLE_FILE_INFORMATION,
+        file_id: FILE_ID_INFO,
     }
 
-    pub struct InstallParentGuard {
+    pub(crate) struct InstallParentGuard {
         entry: FixedEntry,
         pinned_path: PathBuf,
     }
@@ -759,8 +760,8 @@ mod windows_secure {
             )?;
             require_target_directory(&candidate.information, "安装数据目录的父目录无效")?;
             Ok(same_directory_object(
-                &self.entry.information,
-                &candidate.information,
+                &self.entry.file_id,
+                &candidate.file_id,
             ))
         }
     }
@@ -1342,6 +1343,7 @@ mod windows_secure {
         })();
         match entry_result {
             Ok(information) => Ok(FixedEntry {
+                file_id: file_id(&handle)?,
                 handle,
                 information,
             }),
@@ -1583,6 +1585,7 @@ mod windows_secure {
             return Err(anyhow!("账户文件类型无效"));
         }
         Ok(Some(FixedEntry {
+            file_id: file_id(&handle)?,
             handle,
             information,
         }))
@@ -1610,6 +1613,7 @@ mod windows_secure {
             return Err(anyhow!("迁移源包含不受支持的文件类型"));
         }
         Ok(FixedEntry {
+            file_id: file_id(&handle)?,
             handle,
             information,
         })
@@ -1639,6 +1643,7 @@ mod windows_secure {
         let information = information(&handle)?;
         require_regular_file(&information)?;
         Ok(FixedEntry {
+            file_id: file_id(&handle)?,
             handle,
             information,
         })
@@ -1713,6 +1718,22 @@ mod windows_secure {
         Ok(information)
     }
 
+    fn file_id(handle: &FixedHandle) -> Result<FILE_ID_INFO> {
+        let mut identity = unsafe { std::mem::zeroed::<FILE_ID_INFO>() };
+        if unsafe {
+            GetFileInformationByHandleEx(
+                handle.0,
+                FileIdInfo,
+                (&mut identity as *mut FILE_ID_INFO).cast(),
+                std::mem::size_of::<FILE_ID_INFO>() as u32,
+            )
+        } == 0
+        {
+            return Err(anyhow!("无法读取安装目录身份"));
+        }
+        Ok(identity)
+    }
+
     fn get_file_type_safe(handle: &FixedHandle) -> Result<u32> {
         let file_type = unsafe { GetFileType(handle.0) };
         if file_type == 0 {
@@ -1741,13 +1762,9 @@ mod windows_secure {
         Ok(())
     }
 
-    fn same_directory_object(
-        left: &BY_HANDLE_FILE_INFORMATION,
-        right: &BY_HANDLE_FILE_INFORMATION,
-    ) -> bool {
-        left.dwVolumeSerialNumber == right.dwVolumeSerialNumber
-            && left.nFileIndexHigh == right.nFileIndexHigh
-            && left.nFileIndexLow == right.nFileIndexLow
+    fn same_directory_object(left: &FILE_ID_INFO, right: &FILE_ID_INFO) -> bool {
+        left.VolumeSerialNumber == right.VolumeSerialNumber
+            && left.FileId.Identifier == right.FileId.Identifier
     }
 
     fn require_regular_file(information: &BY_HANDLE_FILE_INFORMATION) -> Result<()> {
