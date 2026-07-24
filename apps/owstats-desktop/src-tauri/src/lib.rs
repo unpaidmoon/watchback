@@ -543,8 +543,6 @@ fn open_windows_published_install_data(
         },
     };
 
-    const ROOT_MARKER: &str = ".watchback-data-root-v1";
-    const ROOT_MARKER_CONTENTS: &[u8] = b"v1";
     const FILE_CREATED_INFORMATION: usize = 2;
     const DELETE: u32 = 0x0001_0000;
 
@@ -697,7 +695,7 @@ fn open_windows_published_install_data(
 
     let marker = open_relative_file(
         &data_directory,
-        OsStr::new(ROOT_MARKER),
+        OsStr::new(install_data_migration::INSTALL_DATA_ROOT_MARKER),
         FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES | DELETE,
         FILE_OPEN_IF,
         StartupFailure::DataDirectoryPermissions,
@@ -720,7 +718,7 @@ fn open_windows_published_install_data(
             .file
             .as_mut()
             .expect("写入测试句柄存在")
-            .write_all(ROOT_MARKER_CONTENTS)
+            .write_all(install_data_migration::INSTALL_DATA_ROOT_MARKER_CONTENTS)
             .and_then(|_| marker.file.as_ref().expect("写入测试句柄存在").sync_all())
             .is_err()
         {

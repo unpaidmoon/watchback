@@ -13,6 +13,10 @@ use owstats_desktop_lib::install_data_migration::{
     prepare_install_data, InstallDataMigrationOutcome,
 };
 
+fn mark_initialized_data(data: &Path) {
+    fs::write(data.join(".watchback-data-root-v1"), b"v1").unwrap();
+}
+
 #[cfg(windows)]
 use std::{
     cell::{Cell, RefCell},
@@ -29,8 +33,9 @@ use std::{
 use owstats_desktop_lib::install_data_migration::{
     set_windows_cleanup_enumeration_hook, set_windows_cleanup_limits_for_test,
     set_windows_copy_enumeration_hook, set_windows_copy_limits_for_test,
-    set_windows_migration_hook, set_windows_parent_guard_hook, WindowsCleanupLimits,
-    WindowsCopyLimits, WindowsMigrationHookPoint,
+    set_windows_migration_hook, set_windows_parent_guard_hook,
+    set_windows_validation_limits_for_test, WindowsCleanupLimits, WindowsCopyLimits,
+    WindowsMigrationHookPoint, WindowsValidationLimits,
 };
 
 #[cfg(windows)]
@@ -153,6 +158,22 @@ impl Drop for CleanupLimitsReset {
     fn drop(&mut self) {
         set_windows_cleanup_limits_for_test(None);
     }
+}
+
+#[cfg(windows)]
+struct ValidationLimitsReset;
+
+#[cfg(windows)]
+impl Drop for ValidationLimitsReset {
+    fn drop(&mut self) {
+        set_windows_validation_limits_for_test(None);
+    }
+}
+
+#[cfg(windows)]
+fn install_validation_limits(limits: WindowsValidationLimits) -> ValidationLimitsReset {
+    set_windows_validation_limits_for_test(Some(limits));
+    ValidationLimitsReset
 }
 
 #[cfg(windows)]
@@ -689,6 +710,176 @@ fn create_valid_sqlite(path: &Path) {
         .unwrap();
 }
 
+#[cfg(windows)]
+#[test]
+fn root_database_without_accounts_is_validated_and_published() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    create_valid_sqlite(&source.join("owstats.sqlite3"));
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert!(data.join("owstats.sqlite3").is_file());
+    assert_no_validation_artifacts(&data);
+}
+
+#[cfg(windows)]
+#[test]
+fn root_corrupt_database_is_not_published() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("owstats.sqlite3"), b"not sqlite").unwrap();
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+
+    assert!(!data.exists());
+    assert_eq!(
+        fs::read(source.join("owstats.sqlite3")).unwrap(),
+        b"not sqlite"
+    );
+}
+
+#[cfg(windows)]
+fn assert_orphan_root_sidecar_is_rejected(name: &str) {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join(name), b"synthetic sidecar").unwrap();
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+
+    assert!(!data.exists());
+    assert_eq!(fs::read(source.join(name)).unwrap(), b"synthetic sidecar");
+}
+
+#[cfg(windows)]
+#[test]
+fn root_orphan_wal_is_rejected() {
+    assert_orphan_root_sidecar_is_rejected("owstats.sqlite3-wal");
+}
+
+#[cfg(windows)]
+#[test]
+fn root_orphan_shm_is_rejected() {
+    assert_orphan_root_sidecar_is_rejected("owstats.sqlite3-shm");
+}
+
+#[cfg(windows)]
+fn validation_limits(
+    max_metadata_bytes: u64,
+    max_accounts: usize,
+    max_handles: usize,
+    max_snapshot_bytes: u64,
+    quick_check_ops: i32,
+    max_quick_check_callbacks: u64,
+) -> WindowsValidationLimits {
+    WindowsValidationLimits::new(
+        max_metadata_bytes,
+        max_accounts,
+        max_handles,
+        max_snapshot_bytes,
+        quick_check_ops,
+        max_quick_check_callbacks,
+    )
+}
+
+#[cfg(windows)]
+#[test]
+fn validation_budget_rejects_oversized_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        br#"{"version":1,"activeAccountId":null,"accounts":[]}"#,
+    )
+    .unwrap();
+    let _limits = install_validation_limits(validation_limits(1, 8, 32, 1 << 20, 1, 10_000));
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn validation_budget_rejects_too_many_accounts() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        r#"{"version":1,"activeAccountId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","accounts":[{"accountId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","battleTag":"合成账号甲#0000","createdAt":"2026-01-01T00:00:00Z","lastUsedAt":"2026-01-02T00:00:00Z","credentialState":"ready"},{"accountId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","battleTag":"合成账号乙#0000","createdAt":"2026-01-01T00:00:00Z","lastUsedAt":"2026-01-01T00:00:00Z","credentialState":"ready"}]}"#
+            .as_bytes(),
+    )
+    .unwrap();
+    let _limits = install_validation_limits(validation_limits(1 << 20, 1, 32, 1 << 20, 1, 10_000));
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn validation_budget_rejects_too_many_simultaneous_handles() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("accounts.json"),
+        br#"{"version":1,"activeAccountId":null,"accounts":[]}"#,
+    )
+    .unwrap();
+    let _limits = install_validation_limits(validation_limits(1 << 20, 8, 0, 1 << 20, 1, 10_000));
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn validation_budget_charges_snapshot_bytes_across_databases() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    let (_, account) = write_valid_account_metadata(&source);
+    let root_database = source.join("owstats.sqlite3");
+    let account_database = account.join("owstats.sqlite3");
+    create_valid_sqlite(&root_database);
+    create_valid_sqlite(&account_database);
+    let combined = fs::metadata(&root_database).unwrap().len()
+        + fs::metadata(&account_database).unwrap().len();
+    let _limits =
+        install_validation_limits(validation_limits(1 << 20, 8, 64, combined - 1, 1, 10_000));
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn validation_budget_interrupts_quick_check() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    fs::create_dir_all(&source).unwrap();
+    create_valid_sqlite(&source.join("owstats.sqlite3"));
+    let _limits = install_validation_limits(validation_limits(1 << 20, 8, 64, 1 << 20, 1, 0));
+
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
+    assert!(!data.exists());
+}
+
 fn assert_no_validation_artifacts(root: &Path) {
     for entry in fs::read_dir(root).unwrap() {
         let entry = entry.unwrap();
@@ -1145,6 +1336,7 @@ fn existing_data_is_never_overwritten() {
     let data = temp.path().join("install").join("data");
     fs::create_dir_all(&source).unwrap();
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
     fs::write(source.join("old.txt"), b"old").unwrap();
     fs::write(data.join("new.txt"), b"new").unwrap();
 
@@ -1165,6 +1357,10 @@ fn no_source_creates_an_empty_data_directory() {
 
     assert_eq!(outcome, InstallDataMigrationOutcome::Created);
     assert!(data.is_dir());
+    assert_eq!(
+        fs::read(data.join(".watchback-data-root-v1")).unwrap(),
+        b"v1"
+    );
 }
 
 #[test]
@@ -1174,6 +1370,7 @@ fn existing_data_wins_when_the_source_is_missing() {
     let data = temp.path().join("install").join("data");
     let staging = data.with_file_name("data.migrating");
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
     fs::create_dir_all(&staging).unwrap();
     fs::write(data.join("existing.txt"), b"existing").unwrap();
     fs::write(staging.join("stale.txt"), b"stale").unwrap();
@@ -1194,6 +1391,7 @@ fn existing_data_wins_when_the_source_is_an_unsupported_file() {
     let staging = data.with_file_name("data.migrating");
     fs::write(&source, b"unsupported").unwrap();
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
     fs::create_dir_all(&staging).unwrap();
     fs::write(data.join("existing.txt"), b"existing").unwrap();
     fs::write(staging.join("stale.txt"), b"stale").unwrap();
@@ -1219,6 +1417,7 @@ fn existing_data_wins_when_the_source_is_a_symlink() {
     fs::write(&external, b"external").unwrap();
     symlink_file(&external, &source).expect("当前 Windows 环境必须允许合成 symlink 测试输入");
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
     fs::create_dir_all(&staging).unwrap();
     fs::write(data.join("existing.txt"), b"existing").unwrap();
     fs::write(staging.join("stale.txt"), b"stale").unwrap();
@@ -1238,6 +1437,7 @@ fn existing_data_wins_when_the_source_overlaps_staging() {
     let data = temp.path().join("install").join("data");
     let staging = data.with_file_name("data.migrating");
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
     fs::create_dir_all(&staging).unwrap();
     fs::write(data.join("existing.txt"), b"existing").unwrap();
     fs::write(staging.join("stale.txt"), b"stale").unwrap();
@@ -1395,6 +1595,26 @@ fn rejects_a_windows_symlink_without_mutating_its_target_or_publishing_data() {
 
     assert_eq!(fs::read(&external).unwrap(), b"external");
     assert!(linked.symlink_metadata().is_ok());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_source_hardlink_without_mutating_the_external_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let external = temp.path().join("external.txt");
+    let linked = source.join("linked.txt");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(&external, b"external").unwrap();
+    fs::hard_link(&external, &linked).unwrap();
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(&external).unwrap(), b"external");
+    assert_eq!(fs::read(&linked).unwrap(), b"external");
     assert!(!data.exists());
 }
 
@@ -1607,10 +1827,10 @@ fn non_windows_publish_refuses_a_destination_created_after_copy_and_retries_safe
     assert!(staging.join(".install-data-migration-v1.json").is_file());
     assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
 
-    let outcome =
-        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
-    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
     assert!(staging.is_dir());
+    assert_eq!(fs::read(staging.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
 
     fs::remove_dir(&data).unwrap();
     let outcome =
@@ -1647,8 +1867,7 @@ fn non_windows_no_source_refuses_a_destination_created_after_checks() {
     assert_eq!(fs::read_dir(&data).unwrap().count(), 0);
     assert!(!staging.exists());
 
-    let outcome = prepare_install_data(None, &SharedAppPaths::from_data_root(&data)).unwrap();
-    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert!(prepare_install_data(None, &SharedAppPaths::from_data_root(&data)).is_err());
 }
 
 #[cfg(all(
@@ -1761,7 +1980,7 @@ fn refuses_a_destination_created_immediately_before_handle_publish_and_retries_s
     let MigrationRace::CreateDestination { invoked, .. } = race else {
         panic!("发布竞态测试状态错误");
     };
-    assert!(invoked);
+    assert!(invoked, "首次发布在竞态钩子前失败: {result:?}");
     assert!(result.is_err());
     assert!(data.is_dir());
     assert_eq!(fs::read_dir(&data).unwrap().count(), 0);
@@ -1770,10 +1989,10 @@ fn refuses_a_destination_created_immediately_before_handle_publish_and_retries_s
     assert!(staging.join(".install-data-migration-v1.json").is_file());
     assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
 
-    let outcome =
-        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
-    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert!(prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).is_err());
     assert!(staging.is_dir());
+    assert_eq!(fs::read(staging.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
 
     fs::remove_dir(&data).unwrap();
     let outcome =
@@ -1813,8 +2032,7 @@ fn no_source_refuses_a_destination_created_after_checks() {
     assert_eq!(fs::read_dir(&data).unwrap().count(), 0);
     assert!(!staging.exists());
 
-    let outcome = prepare_install_data(None, &SharedAppPaths::from_data_root(&data)).unwrap();
-    assert_eq!(outcome, InstallDataMigrationOutcome::ExistingData);
+    assert!(prepare_install_data(None, &SharedAppPaths::from_data_root(&data)).is_err());
 }
 
 #[cfg(windows)]
@@ -1951,6 +2169,30 @@ fn rejects_a_malicious_staging_symlink_without_touching_its_target() {
         b"external"
     );
     assert!(staging.symlink_metadata().is_ok());
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_stale_staging_hardlink_without_mutating_the_external_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let external = temp.path().join("external.txt");
+    let linked = staging.join("linked.txt");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(source.join("source.txt"), b"source").unwrap();
+    fs::write(&external, b"external").unwrap();
+    fs::hard_link(&external, &linked).unwrap();
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(&external).unwrap(), b"external");
+    assert_eq!(fs::read(&linked).unwrap(), b"external");
     assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
     assert!(!data.exists());
 }
@@ -2309,6 +2551,7 @@ fn migration_binary_preserves_existing_data_before_validating_the_source() {
     let missing = install.join("missing-source");
     let unsupported = install.join("unsupported-source.txt");
     fs::create_dir_all(&data).unwrap();
+    mark_initialized_data(&data);
     fs::write(data.join("retained.txt"), b"retained").unwrap();
     fs::write(&unsupported, b"not a directory").unwrap();
 

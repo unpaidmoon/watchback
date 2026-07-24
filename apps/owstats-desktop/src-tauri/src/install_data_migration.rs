@@ -7,7 +7,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 #[cfg(not(windows))]
 use rusqlite::{Connection, OpenFlags};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(not(windows))]
 use crate::account_store::{read_manifest, read_registry};
@@ -19,6 +19,11 @@ pub enum InstallDataMigrationOutcome {
     ExistingData,
     Migrated,
 }
+
+pub(crate) const INSTALL_DATA_ROOT_MARKER: &str = ".watchback-data-root-v1";
+pub(crate) const INSTALL_DATA_ROOT_MARKER_CONTENTS: &[u8] = b"v1";
+const INSTALL_DATA_MIGRATION_MARKER: &str = ".install-data-migration-v1.json";
+const MAX_EXISTING_MARKER_BYTES: u64 = 4096;
 
 #[cfg(windows)]
 pub(crate) use windows_secure::InstallParentGuard;
@@ -41,7 +46,7 @@ pub(crate) fn prepare_install_data_in_install_parent(
     source: Option<&Path>,
     parent: &InstallParentGuard,
 ) -> Result<InstallDataMigrationOutcome> {
-    if parent.has_existing_data()? {
+    if parent.has_initialized_data()? {
         return Ok(InstallDataMigrationOutcome::ExistingData);
     }
     let staging = parent.staging_path();
@@ -90,7 +95,8 @@ pub(crate) fn protect_install_data_for_user(
     windows_secure::protect_install_data_for_user(parent, user_sid)
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 struct MigrationMarker {
     version: u32,
@@ -104,45 +110,39 @@ pub fn prepare_install_data(
     if !is_install_data_root(destination.root()) {
         return Err(anyhow!("安装数据目录名称无效"));
     }
-    match fs::symlink_metadata(destination.root()) {
-        Ok(metadata) if is_supported_directory(&metadata) => {
-            return Ok(InstallDataMigrationOutcome::ExistingData);
-        }
-        Ok(_) => return Err(anyhow!("安装目录中的数据路径不是目录")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).context("无法读取安装数据目录"),
-    }
-
-    let staging = destination.install_migration_staging();
-    let source = match source {
-        Some(source) => Some(validate_source_and_staging(source, &staging)?),
-        None => None,
-    };
-    if source.is_none() {
-        canonicalize_future_path(&staging)?;
-    }
 
     #[cfg(windows)]
     {
-        let marker = source
-            .as_ref()
-            .map(|_| {
-                serde_json::to_vec_pretty(&MigrationMarker {
-                    version: 1,
-                    source_retained: true,
-                })
-            })
-            .transpose()?;
         return windows_secure::prepare_install_data_from_path(
-            source.as_deref(),
-            &staging,
+            source,
+            &destination.install_migration_staging(),
             destination.root(),
-            marker.as_deref(),
         );
     }
 
     #[cfg(not(windows))]
     {
+        match fs::symlink_metadata(destination.root()) {
+            Ok(metadata) if is_supported_directory(&metadata) => {
+                if existing_data_is_initialized(destination.root())? {
+                    return Ok(InstallDataMigrationOutcome::ExistingData);
+                }
+                return Err(anyhow!("安装数据目录缺少有效初始化标记"));
+            }
+            Ok(_) => return Err(anyhow!("安装目录中的数据路径不是目录")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("无法读取安装数据目录"),
+        }
+
+        let staging = destination.install_migration_staging();
+        let source = match source {
+            Some(source) => Some(validate_source_and_staging(source, &staging)?),
+            None => None,
+        };
+        if source.is_none() {
+            canonicalize_future_path(&staging)?;
+        }
+
         let Some(source) = source else {
             return create_empty_data_directory(&staging, destination.root());
         };
@@ -160,8 +160,13 @@ pub fn prepare_install_data(
             version: 1,
             source_retained: true,
         })?;
-        fs::write(staging.join(".install-data-migration-v1.json"), marker)
+        fs::write(staging.join(INSTALL_DATA_MIGRATION_MARKER), marker)
             .context("无法写入迁移完成标记")?;
+        fs::write(
+            staging.join(INSTALL_DATA_ROOT_MARKER),
+            INSTALL_DATA_ROOT_MARKER_CONTENTS,
+        )
+        .context("无法写入安装数据初始化标记")?;
         invoke_non_windows_migration_hook(
             NonWindowsMigrationHookPoint::BeforePublish,
             &staging,
@@ -169,6 +174,47 @@ pub fn prepare_install_data(
         );
         publish_staged_data(&staging, destination.root())?;
         Ok(InstallDataMigrationOutcome::Migrated)
+    }
+}
+
+#[cfg(not(windows))]
+fn existing_data_is_initialized(root: &Path) -> Result<bool> {
+    let migration_marker = root.join(INSTALL_DATA_MIGRATION_MARKER);
+    match fs::symlink_metadata(&migration_marker) {
+        Ok(metadata)
+            if metadata.is_file()
+                && !is_unsupported_link_or_reparse_point(&metadata)
+                && metadata.len() <= MAX_EXISTING_MARKER_BYTES =>
+        {
+            let marker: MigrationMarker = serde_json::from_slice(
+                &fs::read(&migration_marker).context("无法读取安装数据迁移标记")?,
+            )
+            .context("安装数据迁移标记无效")?;
+            if marker.version == 1 && marker.source_retained {
+                return Ok(true);
+            }
+        }
+        Ok(_) => return Err(anyhow!("安装数据迁移标记无效")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("无法读取安装数据迁移标记"),
+    }
+
+    let root_marker = root.join(INSTALL_DATA_ROOT_MARKER);
+    match fs::symlink_metadata(&root_marker) {
+        Ok(metadata)
+            if metadata.is_file()
+                && !is_unsupported_link_or_reparse_point(&metadata)
+                && metadata.len() <= INSTALL_DATA_ROOT_MARKER_CONTENTS.len() as u64 =>
+        {
+            let contents = fs::read(root_marker).context("无法读取安装数据初始化标记")?;
+            if contents.is_empty() || contents == INSTALL_DATA_ROOT_MARKER_CONTENTS {
+                return Ok(true);
+            }
+            Err(anyhow!("安装数据初始化标记无效"))
+        }
+        Ok(_) => Err(anyhow!("安装数据初始化标记无效")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context("无法读取安装数据初始化标记"),
     }
 }
 
@@ -249,12 +295,19 @@ fn create_empty_data_directory(
         .parent()
         .ok_or_else(|| anyhow!("无法定位安装数据目录"))?;
     fs::create_dir_all(parent).context("无法创建安装数据目录的父目录")?;
+    reset_staging_by_path(staging)?;
+    fs::create_dir(staging).context("无法创建迁移临时目录")?;
+    fs::write(
+        staging.join(INSTALL_DATA_ROOT_MARKER),
+        INSTALL_DATA_ROOT_MARKER_CONTENTS,
+    )
+    .context("无法写入安装数据初始化标记")?;
     invoke_non_windows_migration_hook(
         NonWindowsMigrationHookPoint::BeforePublish,
         staging,
         destination,
     );
-    fs::create_dir(destination).context("无法排他创建安装数据目录")?;
+    publish_staged_data(staging, destination)?;
     Ok(InstallDataMigrationOutcome::Created)
 }
 
@@ -485,6 +538,45 @@ pub fn set_windows_copy_limits_for_test(limits: Option<WindowsCopyLimits>) {
 
 #[cfg(windows)]
 #[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowsValidationLimits {
+    max_metadata_bytes: u64,
+    max_accounts: usize,
+    max_handles: usize,
+    max_snapshot_bytes: u64,
+    quick_check_ops: i32,
+    max_quick_check_callbacks: u64,
+}
+
+#[cfg(windows)]
+impl WindowsValidationLimits {
+    pub const fn new(
+        max_metadata_bytes: u64,
+        max_accounts: usize,
+        max_handles: usize,
+        max_snapshot_bytes: u64,
+        quick_check_ops: i32,
+        max_quick_check_callbacks: u64,
+    ) -> Self {
+        Self {
+            max_metadata_bytes,
+            max_accounts,
+            max_handles,
+            max_snapshot_bytes,
+            quick_check_ops,
+            max_quick_check_callbacks,
+        }
+    }
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn set_windows_validation_limits_for_test(limits: Option<WindowsValidationLimits>) {
+    windows_secure::set_validation_limits(limits);
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
 pub fn set_windows_cleanup_enumeration_hook(hook: Option<fn()>) {
     windows_secure::set_cleanup_enumeration_hook(hook);
 }
@@ -582,6 +674,11 @@ mod windows_secure {
             io::FromRawHandle,
         },
         path::{Path, PathBuf},
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Arc,
+        },
+        time::{Duration, Instant},
     };
 
     use anyhow::{anyhow, Context, Result};
@@ -629,8 +726,9 @@ mod windows_secure {
     };
 
     use super::{
-        InstallDataMigrationOutcome, WindowsCleanupLimits, WindowsCopyLimits,
-        WindowsMigrationHookPoint,
+        InstallDataMigrationOutcome, MigrationMarker, WindowsCleanupLimits, WindowsCopyLimits,
+        WindowsMigrationHookPoint, WindowsValidationLimits, INSTALL_DATA_MIGRATION_MARKER,
+        INSTALL_DATA_ROOT_MARKER, INSTALL_DATA_ROOT_MARKER_CONTENTS, MAX_EXISTING_MARKER_BYTES,
     };
     use crate::account_store::{
         validate_manifest, validate_registry, AccountManifest, AccountRegistry,
@@ -639,6 +737,15 @@ mod windows_secure {
     const DEFAULT_CLEANUP_LIMITS: WindowsCleanupLimits = WindowsCleanupLimits::new(64, 100_000);
     const DEFAULT_COPY_LIMITS: WindowsCopyLimits =
         WindowsCopyLimits::new(64, 100_000, 20 * 1024 * 1024 * 1024);
+    const DEFAULT_VALIDATION_LIMITS: WindowsValidationLimits = WindowsValidationLimits::new(
+        16 * 1024 * 1024,
+        1024,
+        8192,
+        20 * 1024 * 1024 * 1024,
+        10_000,
+        100_000,
+    );
+    const MAX_QUICK_CHECK_DURATION: Duration = Duration::from_secs(30);
 
     thread_local! {
         static CLEANUP_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
@@ -646,6 +753,7 @@ mod windows_secure {
         static COPY_OPEN_HOOK: Cell<Option<fn(&Path)>> = const { Cell::new(None) };
         static COPY_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
         static COPY_LIMITS: Cell<Option<WindowsCopyLimits>> = const { Cell::new(None) };
+        static VALIDATION_LIMITS: Cell<Option<WindowsValidationLimits>> = const { Cell::new(None) };
         static MIGRATION_HOOK: Cell<
             Option<fn(WindowsMigrationHookPoint, &Path, &Path)>,
         > = const { Cell::new(None) };
@@ -670,6 +778,10 @@ mod windows_secure {
 
     pub(super) fn set_copy_limits(limits: Option<WindowsCopyLimits>) {
         COPY_LIMITS.with(|value| value.set(limits));
+    }
+
+    pub(super) fn set_validation_limits(limits: Option<WindowsValidationLimits>) {
+        VALIDATION_LIMITS.with(|value| value.set(limits));
     }
 
     pub(super) fn set_migration_hook(hook: Option<fn(WindowsMigrationHookPoint, &Path, &Path)>) {
@@ -762,14 +874,8 @@ mod windows_secure {
     }
 
     impl InstallParentGuard {
-        pub(super) fn has_existing_data(&self) -> Result<bool> {
-            let destination = self.pinned_path.join("data");
-            match fs::symlink_metadata(destination) {
-                Ok(metadata) if super::is_supported_directory(&metadata) => Ok(true),
-                Ok(_) => Err(anyhow!("安装目录中的数据路径不是目录")),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-                Err(error) => Err(error).context("无法读取安装数据目录"),
-            }
+        pub(super) fn has_initialized_data(&self) -> Result<bool> {
+            existing_data_is_initialized(&self.entry.handle)
         }
 
         pub(super) fn staging_path(&self) -> PathBuf {
@@ -810,6 +916,55 @@ mod windows_secure {
     struct ValidationGuards {
         directories: Vec<FixedHandle>,
         files: Vec<File>,
+    }
+
+    #[derive(Default)]
+    struct ValidationBudget {
+        metadata_bytes: u64,
+        snapshot_bytes: u64,
+    }
+
+    impl ValidationBudget {
+        fn record_metadata(&mut self, bytes: u64, limits: WindowsValidationLimits) -> Result<()> {
+            let total = self
+                .metadata_bytes
+                .checked_add(bytes)
+                .ok_or_else(|| anyhow!("迁移元数据大小超过安全限制"))?;
+            if total > limits.max_metadata_bytes {
+                return Err(anyhow!("迁移元数据大小超过安全限制"));
+            }
+            self.metadata_bytes = total;
+            Ok(())
+        }
+
+        fn record_snapshot(&mut self, bytes: u64, limits: WindowsValidationLimits) -> Result<()> {
+            let total = self
+                .snapshot_bytes
+                .checked_add(bytes)
+                .ok_or_else(|| anyhow!("数据库验证快照大小超过安全限制"))?;
+            if total > limits.max_snapshot_bytes {
+                return Err(anyhow!("数据库验证快照大小超过安全限制"));
+            }
+            self.snapshot_bytes = total;
+            Ok(())
+        }
+    }
+
+    impl ValidationGuards {
+        fn handle_count(&self) -> usize {
+            self.directories.len().saturating_add(self.files.len())
+        }
+    }
+
+    fn require_handle_capacity(
+        guards: &ValidationGuards,
+        temporary_handles: usize,
+        limits: WindowsValidationLimits,
+    ) -> Result<()> {
+        if guards.handle_count().saturating_add(temporary_handles) > limits.max_handles {
+            return Err(anyhow!("迁移验证打开的文件过多"));
+        }
+        Ok(())
     }
 
     struct DeleteFrame {
@@ -933,7 +1088,6 @@ mod windows_secure {
         source: Option<&Path>,
         staging: &Path,
         destination: &Path,
-        marker: Option<&[u8]>,
     ) -> Result<InstallDataMigrationOutcome> {
         let parent = staging
             .parent()
@@ -949,7 +1103,33 @@ mod windows_secure {
 
         fs::create_dir_all(parent).context("无法创建迁移临时目录的父目录")?;
         let parent = open_install_parent(parent).context("无法固定迁移临时目录的父目录")?;
-        prepare_install_data_with_parent(source, &parent, marker, staging, destination)
+        if parent.has_initialized_data()? {
+            return Ok(InstallDataMigrationOutcome::ExistingData);
+        }
+        let source = match source {
+            Some(source) => Some(super::validate_source_and_staging(source, staging)?),
+            None => {
+                super::canonicalize_future_path(staging)?;
+                None
+            }
+        };
+        let marker = source
+            .as_ref()
+            .map(|_| {
+                serde_json::to_vec_pretty(&MigrationMarker {
+                    version: 1,
+                    source_retained: true,
+                })
+            })
+            .transpose()?;
+        invoke_parent_guard_hook(parent.pinned_path());
+        prepare_install_data_with_parent(
+            source.as_deref(),
+            &parent,
+            marker.as_deref(),
+            staging,
+            destination,
+        )
     }
 
     pub(super) fn prepare_install_data_with_parent(
@@ -965,27 +1145,38 @@ mod windows_secure {
         let pinned_parent = parent.pinned_path();
         let parent_entry = &parent.entry;
         let staging_name = OsStr::new("data.migrating");
-        let destination_name = OsStr::new("data");
         let pinned_staging = parent.staging_path();
         let pinned_destination = pinned_parent.join("data");
 
-        match fs::symlink_metadata(&pinned_destination) {
-            Ok(metadata) if super::is_supported_directory(&metadata) => {
-                return Ok(InstallDataMigrationOutcome::ExistingData);
-            }
-            Ok(_) => return Err(anyhow!("安装目录中的数据路径不是目录")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).context("无法读取安装数据目录"),
+        if existing_data_is_initialized(&parent_entry.handle)? {
+            return Ok(InstallDataMigrationOutcome::ExistingData);
         }
 
         let Some(source) = source else {
+            reset_staging(&pinned_staging)?;
+            let staging_entry =
+                create_protected_directory_relative(&parent_entry.handle, staging_name)?;
+            require_target_directory(&staging_entry.information, "迁移临时目录无效")?;
+            protect_staging(&staging_entry.handle)?;
+            write_marker(
+                &pinned_staging.join(INSTALL_DATA_ROOT_MARKER),
+                INSTALL_DATA_ROOT_MARKER_CONTENTS,
+            )?;
             invoke_migration_hook(
                 WindowsMigrationHookPoint::BeforePublish,
                 hook_staging,
                 hook_destination,
             );
-            let data_entry = create_directory_relative(&parent_entry.handle, destination_name)?;
-            require_target_directory(&data_entry.information, "安装数据目录无效")?;
+            let published = rename_without_replace(
+                &staging_entry.handle,
+                &parent_entry.handle,
+                &pinned_destination,
+            );
+            if let Err(error) = published {
+                drop(staging_entry);
+                reset_staging(&pinned_staging)?;
+                return Err(error);
+            }
             return Ok(InstallDataMigrationOutcome::Created);
         };
         let marker = marker.ok_or_else(|| anyhow!("无法生成迁移完成标记"))?;
@@ -1012,9 +1203,10 @@ mod windows_secure {
             hook_destination,
         );
         let validation_guards = validate_staged_data(&staging_entry.handle)?;
+        write_marker(&pinned_staging.join(INSTALL_DATA_MIGRATION_MARKER), marker)?;
         write_marker(
-            &pinned_staging.join(".install-data-migration-v1.json"),
-            marker,
+            &pinned_staging.join(INSTALL_DATA_ROOT_MARKER),
+            INSTALL_DATA_ROOT_MARKER_CONTENTS,
         )?;
         let staged_information = information(&staging_entry.handle)?;
         require_target_directory(&staged_information, "迁移临时目录无效")?;
@@ -1040,6 +1232,71 @@ mod windows_secure {
         let published_information = information(&staging_entry.handle)?;
         require_target_directory(&published_information, "安装数据目录无效")?;
         Ok(InstallDataMigrationOutcome::Migrated)
+    }
+
+    fn existing_data_is_initialized(parent: &FixedHandle) -> Result<bool> {
+        let Some(data) = open_optional_child_fixed(
+            parent,
+            OsStr::new("data"),
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+        )?
+        else {
+            return Ok(false);
+        };
+        require_target_directory(&data.information, "安装目录中的数据路径不是目录")?;
+
+        if let Some(marker) = open_optional_child_fixed(
+            &data.handle,
+            OsStr::new(INSTALL_DATA_MIGRATION_MARKER),
+            FILE_GENERIC_READ,
+        )? {
+            require_regular_file(&marker.information).context("安装数据迁移标记无效")?;
+            let bytes =
+                read_bounded_file(marker, MAX_EXISTING_MARKER_BYTES, "安装数据迁移标记无效")?;
+            let marker: MigrationMarker = from_slice(&bytes).context("安装数据迁移标记无效")?;
+            if marker.version == 1 && marker.source_retained {
+                return Ok(true);
+            }
+            return Err(anyhow!("安装数据迁移标记无效"));
+        }
+
+        if let Some(marker) = open_optional_child_fixed(
+            &data.handle,
+            OsStr::new(INSTALL_DATA_ROOT_MARKER),
+            FILE_GENERIC_READ,
+        )? {
+            require_regular_file(&marker.information).context("安装数据初始化标记无效")?;
+            let bytes = read_bounded_file(
+                marker,
+                INSTALL_DATA_ROOT_MARKER_CONTENTS.len() as u64,
+                "安装数据初始化标记无效",
+            )?;
+            if bytes.is_empty() || bytes == INSTALL_DATA_ROOT_MARKER_CONTENTS {
+                return Ok(true);
+            }
+            return Err(anyhow!("安装数据初始化标记无效"));
+        }
+
+        Err(anyhow!("安装数据目录缺少有效初始化标记"))
+    }
+
+    fn read_bounded_file(
+        entry: FixedEntry,
+        max_bytes: u64,
+        message: &'static str,
+    ) -> Result<Vec<u8>> {
+        if file_size(&entry.information) > max_bytes {
+            return Err(anyhow!(message));
+        }
+        let file = entry.handle.into_file();
+        let mut bytes = Vec::new();
+        file.take(max_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .context(message)?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(anyhow!(message));
+        }
+        Ok(bytes)
     }
 
     fn protected_staging_security_descriptor() -> Result<LocalSecurityDescriptor> {
@@ -1143,16 +1400,30 @@ mod windows_secure {
     }
 
     fn validate_staged_data(staging: &FixedHandle) -> Result<ValidationGuards> {
+        let limits =
+            VALIDATION_LIMITS.with(|value| value.get().unwrap_or(DEFAULT_VALIDATION_LIMITS));
         let mut guards = ValidationGuards::default();
+        let mut budget = ValidationBudget::default();
+        validate_database_snapshot(staging, &mut guards, &mut budget, limits, 0)?;
         let Some(registry) =
             open_optional_child_fixed(staging, OsStr::new("accounts.json"), FILE_GENERIC_READ)
                 .context("旧账户索引校验失败")?
         else {
             return Ok(guards);
         };
-        let bytes = read_and_hold(registry, &mut guards, "旧账户索引校验失败")?;
+        require_handle_capacity(&guards, 1, limits)?;
+        let bytes = read_and_hold(
+            registry,
+            &mut guards,
+            &mut budget,
+            limits,
+            "旧账户索引校验失败",
+        )?;
         let registry: AccountRegistry = from_slice(&bytes).context("旧账户索引校验失败")?;
         validate_registry(&registry).context("旧账户索引校验失败")?;
+        if registry.accounts.len() > limits.max_accounts {
+            return Err(anyhow!("旧账户数量超过安全限制"));
+        }
         if registry.accounts.is_empty() {
             return Ok(guards);
         }
@@ -1163,6 +1434,7 @@ mod windows_secure {
         )
         .context("旧账户目录校验失败")?;
         require_target_directory(&accounts.information, "旧账户目录校验失败")?;
+        require_handle_capacity(&guards, 1, limits)?;
 
         for entry in registry.accounts {
             let account = open_child_fixed(
@@ -1172,16 +1444,23 @@ mod windows_secure {
             )
             .context("旧账户目录校验失败")?;
             require_target_directory(&account.information, "旧账户目录校验失败")?;
+            require_handle_capacity(&guards, 3, limits)?;
             let manifest = open_child_fixed(
                 &account.handle,
                 OsStr::new("account.json"),
                 FILE_GENERIC_READ,
             )
             .context("旧账户清单校验失败")?;
-            let bytes = read_and_hold(manifest, &mut guards, "旧账户清单校验失败")?;
+            let bytes = read_and_hold(
+                manifest,
+                &mut guards,
+                &mut budget,
+                limits,
+                "旧账户清单校验失败",
+            )?;
             let manifest: AccountManifest = from_slice(&bytes).context("旧账户清单校验失败")?;
             validate_manifest(&manifest, &entry.account_id).context("旧账户清单校验失败")?;
-            validate_database_snapshot(&account.handle, &mut guards)?;
+            validate_database_snapshot(&account.handle, &mut guards, &mut budget, limits, 2)?;
             guards.directories.push(account.handle);
         }
         guards.directories.push(accounts.handle);
@@ -1191,14 +1470,27 @@ mod windows_secure {
     fn validate_database_snapshot(
         account: &FixedHandle,
         guards: &mut ValidationGuards,
+        budget: &mut ValidationBudget,
+        limits: WindowsValidationLimits,
+        base_handles: usize,
     ) -> Result<()> {
         let Some(database) =
             open_optional_child_fixed(account, OsStr::new("owstats.sqlite3"), FILE_GENERIC_READ)
                 .context("旧账户数据库校验失败")?
         else {
+            for sidecar in ["owstats.sqlite3-wal", "owstats.sqlite3-shm"] {
+                let sidecar =
+                    open_optional_child_fixed(account, OsStr::new(sidecar), FILE_GENERIC_READ)
+                        .context("旧账户数据库校验失败")?;
+                if sidecar.is_some() {
+                    require_handle_capacity(guards, base_handles.saturating_add(1), limits)?;
+                    return Err(anyhow!("旧账户数据库校验失败"));
+                }
+            }
             return Ok(());
         };
         require_regular_file(&database.information).context("旧账户数据库校验失败")?;
+        require_handle_capacity(guards, base_handles.saturating_add(2), limits)?;
 
         let snapshot_name = OsString::from(format!(".install-data-validation-{}", Uuid::new_v4()));
         let snapshot =
@@ -1212,6 +1504,9 @@ mod windows_secure {
                 OsStr::new("owstats.sqlite3"),
                 guards,
                 &mut snapshot_files,
+                budget,
+                limits,
+                base_handles,
             )?;
             for sidecar in ["owstats.sqlite3-wal", "owstats.sqlite3-shm"] {
                 copy_optional_validation_file(
@@ -1221,14 +1516,37 @@ mod windows_secure {
                     OsStr::new(sidecar),
                     guards,
                     &mut snapshot_files,
+                    budget,
+                    limits,
+                    base_handles,
                 )?;
             }
+            require_handle_capacity(
+                guards,
+                base_handles
+                    .saturating_add(snapshot_files.len())
+                    .saturating_add(2),
+                limits,
+            )?;
             let connection =
                 Connection::open_with_flags(&snapshot_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
                     .context("旧账户数据库校验失败")?;
-            let value: String = connection
+            let callbacks = Arc::new(AtomicU64::new(0));
+            let callback_count = Arc::clone(&callbacks);
+            let quick_check_started = Instant::now();
+            connection.progress_handler(
+                limits.quick_check_ops.max(1),
+                Some(move || {
+                    callback_count.fetch_add(1, Ordering::Relaxed)
+                        >= limits.max_quick_check_callbacks
+                        || quick_check_started.elapsed() >= MAX_QUICK_CHECK_DURATION
+                }),
+            );
+            let checked = connection
                 .query_row("PRAGMA quick_check", [], |row| row.get(0))
-                .context("旧账户数据库完整性校验失败")?;
+                .context("旧账户数据库完整性校验失败");
+            connection.progress_handler(0, None::<fn() -> bool>);
+            let value: String = checked?;
             if value != "ok" {
                 return Err(anyhow!("旧账户数据库完整性校验失败"));
             }
@@ -1248,13 +1566,25 @@ mod windows_secure {
         target_name: &OsStr,
         guards: &mut ValidationGuards,
         snapshot_files: &mut Vec<File>,
+        budget: &mut ValidationBudget,
+        limits: WindowsValidationLimits,
+        base_handles: usize,
     ) -> Result<()> {
         let Some(source) = open_optional_child_fixed(source_parent, source_name, FILE_GENERIC_READ)
             .context("旧账户数据库校验失败")?
         else {
             return Ok(());
         };
-        copy_validation_entry(source, target_parent, target_name, guards, snapshot_files)
+        copy_validation_entry(
+            source,
+            target_parent,
+            target_name,
+            guards,
+            snapshot_files,
+            budget,
+            limits,
+            base_handles,
+        )
     }
 
     fn copy_validation_entry(
@@ -1263,13 +1593,28 @@ mod windows_secure {
         target_name: &OsStr,
         guards: &mut ValidationGuards,
         snapshot_files: &mut Vec<File>,
+        budget: &mut ValidationBudget,
+        limits: WindowsValidationLimits,
+        base_handles: usize,
     ) -> Result<()> {
         require_regular_file(&source.information).context("旧账户数据库校验失败")?;
+        let expected_bytes = file_size(&source.information);
+        budget.record_snapshot(expected_bytes, limits)?;
+        require_handle_capacity(
+            guards,
+            base_handles
+                .saturating_add(snapshot_files.len())
+                .saturating_add(2),
+            limits,
+        )?;
         let mut source = source.handle.into_file();
         let target_path = final_path(target_parent)?.join(target_name);
         let target = create_file(&target_path).context("旧账户数据库校验失败")?;
         let mut target = target.handle.into_file();
-        std::io::copy(&mut source, &mut target).context("旧账户数据库校验失败")?;
+        let copied = std::io::copy(&mut source, &mut target).context("旧账户数据库校验失败")?;
+        if copied != expected_bytes {
+            return Err(anyhow!("旧账户数据库校验失败"));
+        }
         target.sync_all().context("旧账户数据库校验失败")?;
         guards.files.push(source);
         snapshot_files.push(target);
@@ -1279,12 +1624,22 @@ mod windows_secure {
     fn read_and_hold(
         entry: FixedEntry,
         guards: &mut ValidationGuards,
+        budget: &mut ValidationBudget,
+        limits: WindowsValidationLimits,
         message: &'static str,
     ) -> Result<Vec<u8>> {
         require_regular_file(&entry.information).context(message)?;
+        let expected_bytes = file_size(&entry.information);
+        budget.record_metadata(expected_bytes, limits)?;
         let mut file = entry.handle.into_file();
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).context(message)?;
+        (&mut file)
+            .take(expected_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .context(message)?;
+        if bytes.len() as u64 != expected_bytes {
+            return Err(anyhow!(message));
+        }
         guards.files.push(file);
         Ok(bytes)
     }
