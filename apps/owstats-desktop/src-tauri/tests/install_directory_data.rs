@@ -1854,3 +1854,92 @@ fn resets_only_the_exact_staging_directory_before_publishing() {
     assert!(!data.join("stale.txt").exists());
     assert!(!staging.exists());
 }
+
+#[test]
+fn migration_cli_accepts_source_and_destination() {
+    let mode = owstats_desktop_lib::parse_startup_mode([
+        "Watchback.exe",
+        "--prepare-install-data",
+        r"D:\\old\\data",
+        r"D:\\new\\data",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        owstats_desktop_lib::StartupMode::PrepareInstallData {
+            source: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn migration_cli_uses_dash_for_an_empty_source() {
+    let mode = owstats_desktop_lib::parse_startup_mode([
+        "Watchback.exe",
+        "--prepare-install-data",
+        "-",
+        r"D:\\new\\data",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        owstats_desktop_lib::StartupMode::PrepareInstallData { source: None, .. }
+    ));
+}
+
+#[test]
+fn migration_cli_rejects_missing_or_unknown_arguments() {
+    for args in [
+        vec!["Watchback.exe", "--prepare-install-data"],
+        vec!["Watchback.exe", "--prepare-install-data", "-"],
+        vec!["Watchback.exe", "--unknown"],
+        vec![
+            "Watchback.exe",
+            "--prepare-install-data",
+            "-",
+            r"D:\\new\\data",
+            "extra",
+        ],
+    ] {
+        assert!(owstats_desktop_lib::parse_startup_mode(args).is_err());
+    }
+}
+
+#[test]
+fn migration_execution_accepts_only_the_executable_data_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let install = temp.path().join("install");
+    let executable = install.join("Watchback.exe");
+    let data = install.join("data");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(&executable, b"synthetic executable").unwrap();
+
+    owstats_desktop_lib::run_install_data_mode(&executable, None, &data).unwrap();
+
+    assert!(data.is_dir());
+}
+
+#[test]
+fn migration_execution_rejects_outside_relative_and_dot_destinations_without_creating_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let install = temp.path().join("install");
+    let executable = install.join("Watchback.exe");
+    let outside = temp.path().join("outside").join("data");
+    let relative = std::path::PathBuf::from("data");
+    let dot = install.join("nested").join("..").join("data");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(&executable, b"synthetic executable").unwrap();
+
+    for destination in [&outside, &relative, &dot] {
+        assert!(
+            owstats_desktop_lib::run_install_data_mode(&executable, None, destination).is_err()
+        );
+    }
+
+    assert!(!outside.exists());
+    assert!(!install.join("data").exists());
+    assert!(!install.join("nested").exists());
+}

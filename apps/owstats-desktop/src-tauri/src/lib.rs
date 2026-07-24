@@ -71,6 +71,118 @@ pub use sync::{
     SeasonModeKey, SeasonSyncInventory, SeasonSyncStore,
 };
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum StartupMode {
+    Desktop,
+    PrepareInstallData {
+        source: std::option::Option<std::path::PathBuf>,
+        destination: std::path::PathBuf,
+    },
+}
+
+pub fn parse_startup_mode<I, S>(args: I) -> anyhow::Result<StartupMode>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    let mut args = args.into_iter().map(Into::into);
+    let _program = args.next();
+    let Some(mode) = args.next() else {
+        return Ok(StartupMode::Desktop);
+    };
+    if mode != "--prepare-install-data" {
+        return Err(anyhow::anyhow!("不支持的启动参数"));
+    }
+
+    let source = args
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("缺少迁移源参数"))?;
+    let destination = args
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("缺少迁移目标参数"))?;
+    if args.next().is_some() {
+        return Err(anyhow::anyhow!("迁移参数过多"));
+    }
+
+    Ok(StartupMode::PrepareInstallData {
+        source: if source == "-" {
+            None
+        } else {
+            Some(source.into())
+        },
+        destination: destination.into(),
+    })
+}
+
+pub fn run_install_data_mode(
+    executable: &std::path::Path,
+    source: Option<&std::path::Path>,
+    destination: &std::path::Path,
+) -> anyhow::Result<()> {
+    let expected = normalized_install_data_root(executable)?;
+    let destination = normalized_destination(destination, expected.parent())?;
+    if destination != expected {
+        return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
+    }
+
+    let paths = app_paths::SharedAppPaths::from_data_root(destination);
+    install_data_migration::prepare_install_data(source, &paths)?;
+    Ok(())
+}
+
+fn normalized_install_data_root(
+    executable: &std::path::Path,
+) -> anyhow::Result<std::path::PathBuf> {
+    let data_root = app_paths::data_root_from_executable(executable)?;
+    let install_directory = data_root
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("无法定位安装目录"))?;
+    let install_directory = std::fs::canonicalize(install_directory)
+        .map_err(|_| anyhow::anyhow!("无法定位安装目录"))?;
+    if !install_directory.is_dir() {
+        return Err(anyhow::anyhow!("无法定位安装目录"));
+    }
+    Ok(install_directory.join("data"))
+}
+
+fn normalized_destination(
+    destination: &std::path::Path,
+    expected_parent: Option<&std::path::Path>,
+) -> anyhow::Result<std::path::PathBuf> {
+    if !destination.is_absolute()
+        || destination.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+    {
+        return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
+    }
+
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"))?;
+    let parent = std::fs::canonicalize(parent)
+        .map_err(|_| anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"))?;
+    if Some(parent.as_path()) != expected_parent || !is_data_directory_name(destination) {
+        return Err(anyhow::anyhow!("迁移目标不是当前安装目录的数据目录"));
+    }
+    Ok(parent.join("data"))
+}
+
+#[cfg(windows)]
+fn is_data_directory_name(destination: &std::path::Path) -> bool {
+    destination
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("data"))
+}
+
+#[cfg(not(windows))]
+fn is_data_directory_name(destination: &std::path::Path) -> bool {
+    destination.file_name().is_some_and(|name| name == "data")
+}
+
 pub fn run() {
     use std::sync::Arc;
     use tauri::{Emitter, Manager};
