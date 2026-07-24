@@ -13,8 +13,9 @@ use std::{
 
 #[cfg(windows)]
 use owstats_desktop_lib::install_data_migration::{
+    set_windows_cleanup_enumeration_hook, set_windows_cleanup_limits_for_test,
     set_windows_copy_enumeration_hook, set_windows_copy_limits_for_test,
-    set_windows_migration_hook, WindowsCopyLimits, WindowsMigrationHookPoint,
+    set_windows_migration_hook, WindowsCleanupLimits, WindowsCopyLimits, WindowsMigrationHookPoint,
 };
 
 #[cfg(not(windows))]
@@ -46,6 +47,7 @@ enum MigrationRace {
 
 #[cfg(windows)]
 thread_local! {
+    static ENUMERATED_CLEANUP_ENTRIES: Cell<usize> = const { Cell::new(0) };
     static COPY_OPEN_RACE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static ENUMERATED_SOURCE_ENTRIES: Cell<usize> = const { Cell::new(0) };
     static MIGRATION_RACE: RefCell<Option<MigrationRace>> = const { RefCell::new(None) };
@@ -78,6 +80,45 @@ impl Drop for CopyLimitsReset {
 fn install_copy_limits(limits: WindowsCopyLimits) -> CopyLimitsReset {
     set_windows_copy_limits_for_test(Some(limits));
     CopyLimitsReset
+}
+
+#[cfg(windows)]
+struct CleanupLimitsReset;
+
+#[cfg(windows)]
+impl Drop for CleanupLimitsReset {
+    fn drop(&mut self) {
+        set_windows_cleanup_limits_for_test(None);
+    }
+}
+
+#[cfg(windows)]
+fn install_cleanup_limits(limits: WindowsCleanupLimits) -> CleanupLimitsReset {
+    set_windows_cleanup_limits_for_test(Some(limits));
+    CleanupLimitsReset
+}
+
+#[cfg(windows)]
+struct CleanupEnumerationHookReset;
+
+#[cfg(windows)]
+impl Drop for CleanupEnumerationHookReset {
+    fn drop(&mut self) {
+        set_windows_cleanup_enumeration_hook(None);
+        ENUMERATED_CLEANUP_ENTRIES.with(|count| count.set(0));
+    }
+}
+
+#[cfg(windows)]
+fn count_enumerated_cleanup_entry() {
+    ENUMERATED_CLEANUP_ENTRIES.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(windows)]
+fn install_cleanup_enumeration_counter() -> CleanupEnumerationHookReset {
+    ENUMERATED_CLEANUP_ENTRIES.with(|count| count.set(0));
+    set_windows_cleanup_enumeration_hook(Some(count_enumerated_cleanup_entry));
+    CleanupEnumerationHookReset
 }
 
 #[cfg(windows)]
@@ -968,6 +1009,81 @@ fn rejects_a_reparse_point_in_existing_staging_without_touching_its_target() {
     assert!(staging.symlink_metadata().is_ok());
     assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
     assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn stops_streaming_a_flat_staging_directory_at_the_cleanup_entry_budget_and_retries() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let sibling = data.with_file_name("keep.txt");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(source.join("source.txt"), b"source").unwrap();
+    fs::write(&sibling, b"keep").unwrap();
+    for index in 0..8 {
+        fs::write(staging.join(format!("stale-{index}.txt")), b"stale").unwrap();
+    }
+    let enumeration = install_cleanup_enumeration_counter();
+    let limits = install_cleanup_limits(WindowsCleanupLimits::new(64, 2));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    drop(limits);
+    set_windows_cleanup_enumeration_hook(None);
+    let enumerated = ENUMERATED_CLEANUP_ENTRIES.with(Cell::get);
+    drop(enumeration);
+    assert!(result.is_err());
+    assert_eq!(enumerated, 3);
+    assert!(!data.exists());
+    assert!(staging.is_dir());
+    assert!(fs::read_dir(&staging).unwrap().count() > 0);
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(&sibling).unwrap(), b"keep");
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert_eq!(fs::read(data.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(&sibling).unwrap(), b"keep");
+    assert!(!staging.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_staging_deeper_than_the_cleanup_depth_budget_and_retries() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("legacy");
+    let data = temp.path().join("install").join("data");
+    let staging = data.with_file_name("data.migrating");
+    let sibling = data.with_file_name("keep.txt");
+    let deepest = staging.join("first").join("second").join("third");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&deepest).unwrap();
+    fs::write(source.join("source.txt"), b"source").unwrap();
+    fs::write(deepest.join("stale.txt"), b"stale").unwrap();
+    fs::write(&sibling, b"keep").unwrap();
+    let limits = install_cleanup_limits(WindowsCleanupLimits::new(2, 32));
+
+    let result = prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data));
+
+    drop(limits);
+    assert!(result.is_err());
+    assert!(!data.exists());
+    assert!(deepest.join("stale.txt").is_file());
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(&sibling).unwrap(), b"keep");
+
+    let outcome =
+        prepare_install_data(Some(&source), &SharedAppPaths::from_data_root(&data)).unwrap();
+    assert_eq!(outcome, InstallDataMigrationOutcome::Migrated);
+    assert_eq!(fs::read(data.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(source.join("source.txt")).unwrap(), b"source");
+    assert_eq!(fs::read(&sibling).unwrap(), b"keep");
+    assert!(!staging.exists());
 }
 
 #[cfg(unix)]

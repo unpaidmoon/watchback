@@ -347,6 +347,36 @@ pub fn set_windows_copy_limits_for_test(limits: Option<WindowsCopyLimits>) {
 
 #[cfg(windows)]
 #[doc(hidden)]
+pub fn set_windows_cleanup_enumeration_hook(hook: Option<fn()>) {
+    windows_secure::set_cleanup_enumeration_hook(hook);
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowsCleanupLimits {
+    max_depth: usize,
+    max_entries: u64,
+}
+
+#[cfg(windows)]
+impl WindowsCleanupLimits {
+    pub const fn new(max_depth: usize, max_entries: u64) -> Self {
+        Self {
+            max_depth,
+            max_entries,
+        }
+    }
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn set_windows_cleanup_limits_for_test(limits: Option<WindowsCleanupLimits>) {
+    windows_secure::set_cleanup_limits(limits);
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsMigrationHookPoint {
     StagingCreated,
@@ -437,18 +467,32 @@ mod windows_secure {
         },
     };
 
-    use super::{InstallDataMigrationOutcome, WindowsCopyLimits, WindowsMigrationHookPoint};
+    use super::{
+        InstallDataMigrationOutcome, WindowsCleanupLimits, WindowsCopyLimits,
+        WindowsMigrationHookPoint,
+    };
 
+    const DEFAULT_CLEANUP_LIMITS: WindowsCleanupLimits = WindowsCleanupLimits::new(64, 100_000);
     const DEFAULT_COPY_LIMITS: WindowsCopyLimits =
         WindowsCopyLimits::new(64, 100_000, 20 * 1024 * 1024 * 1024);
 
     thread_local! {
+        static CLEANUP_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
+        static CLEANUP_LIMITS: Cell<Option<WindowsCleanupLimits>> = const { Cell::new(None) };
         static COPY_OPEN_HOOK: Cell<Option<fn(&Path)>> = const { Cell::new(None) };
         static COPY_ENUMERATION_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
         static COPY_LIMITS: Cell<Option<WindowsCopyLimits>> = const { Cell::new(None) };
         static MIGRATION_HOOK: Cell<
             Option<fn(WindowsMigrationHookPoint, &Path, &Path)>,
         > = const { Cell::new(None) };
+    }
+
+    pub(super) fn set_cleanup_enumeration_hook(hook: Option<fn()>) {
+        CLEANUP_ENUMERATION_HOOK.with(|value| value.set(hook));
+    }
+
+    pub(super) fn set_cleanup_limits(limits: Option<WindowsCleanupLimits>) {
+        CLEANUP_LIMITS.with(|value| value.set(limits));
     }
 
     pub(super) fn set_copy_open_hook(hook: Option<fn(&Path)>) {
@@ -471,6 +515,14 @@ mod windows_secure {
         COPY_OPEN_HOOK.with(|value| {
             if let Some(hook) = value.get() {
                 hook(path);
+            }
+        });
+    }
+
+    fn invoke_cleanup_enumeration_hook() {
+        CLEANUP_ENUMERATION_HOOK.with(|value| {
+            if let Some(hook) = value.get() {
+                hook();
             }
         });
     }
@@ -512,6 +564,31 @@ mod windows_secure {
     struct FixedEntry {
         handle: FixedHandle,
         information: BY_HANDLE_FILE_INFORMATION,
+    }
+
+    struct DeleteFrame {
+        handle: FixedHandle,
+        entries: fs::ReadDir,
+        depth: usize,
+    }
+
+    #[derive(Default)]
+    struct CleanupBudget {
+        entries: u64,
+    }
+
+    impl CleanupBudget {
+        fn record_entry(&mut self, limits: WindowsCleanupLimits) -> Result<()> {
+            let entries = self
+                .entries
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("迁移临时目录项数量超过安全限制"))?;
+            if entries > limits.max_entries {
+                return Err(anyhow!("迁移临时目录项数量超过安全限制"));
+            }
+            self.entries = entries;
+            Ok(())
+        }
     }
 
     #[derive(Default)]
@@ -884,43 +961,68 @@ mod windows_secure {
     }
 
     fn delete_tree(path: &Path) -> Result<()> {
-        let entry = open_fixed(path, FILE_GENERIC_READ | DELETE)?;
-        if is_reparse(&entry.information) {
+        let root = open_fixed(path, FILE_GENERIC_READ | DELETE)?;
+        if is_reparse(&root.information) {
             return Err(anyhow!("迁移临时目录包含不受支持的链接"));
         }
-        if !is_directory(&entry.information) {
+        if !is_directory(&root.information) {
             return Err(anyhow!("迁移临时目录包含不受支持的文件类型"));
         }
 
-        let mut children = Vec::new();
-        for child in fs::read_dir(path).context("无法枚举迁移临时目录")? {
-            children.push(child.context("无法读取迁移临时目录项")?.path());
-        }
-        children.sort();
-        for child in children {
-            delete_entry(&child)?;
-        }
-        mark_for_delete(entry.handle)
-    }
+        let limits = CLEANUP_LIMITS.with(|value| value.get().unwrap_or(DEFAULT_CLEANUP_LIMITS));
+        let mut budget = CleanupBudget::default();
+        let mut frames = vec![DeleteFrame {
+            handle: root.handle,
+            entries: fs::read_dir(path).context("无法枚举迁移临时目录")?,
+            depth: 0,
+        }];
 
-    fn delete_entry(path: &Path) -> Result<()> {
-        let entry = open_fixed(path, FILE_GENERIC_READ | DELETE)?;
-        if is_reparse(&entry.information) {
-            return Err(anyhow!("迁移临时目录包含不受支持的链接"));
-        }
-        if is_directory(&entry.information) {
-            let mut children = Vec::new();
-            for child in fs::read_dir(path).context("无法枚举迁移临时目录")? {
-                children.push(child.context("无法读取迁移临时目录项")?.path());
+        while !frames.is_empty() {
+            let next = frames
+                .last_mut()
+                .expect("清理栈已检查为非空")
+                .entries
+                .next();
+            match next {
+                Some(child) => {
+                    let child = child.context("无法读取迁移临时目录项")?;
+                    invoke_cleanup_enumeration_hook();
+                    budget.record_entry(limits)?;
+                    let child_path = child.path();
+                    let child = open_fixed(&child_path, FILE_GENERIC_READ | DELETE)?;
+                    if is_reparse(&child.information) {
+                        return Err(anyhow!("迁移临时目录包含不受支持的链接"));
+                    }
+                    if is_directory(&child.information) {
+                        let child_depth = frames
+                            .last()
+                            .expect("清理栈已检查为非空")
+                            .depth
+                            .checked_add(1)
+                            .ok_or_else(|| anyhow!("迁移临时目录层级超过安全限制"))?;
+                        if child_depth > limits.max_depth {
+                            return Err(anyhow!("迁移临时目录层级超过安全限制"));
+                        }
+                        frames.push(DeleteFrame {
+                            handle: child.handle,
+                            entries: fs::read_dir(&child_path).context("无法枚举迁移临时目录")?,
+                            depth: child_depth,
+                        });
+                    } else {
+                        require_regular_file(&child.information)?;
+                        mark_for_delete(child.handle)?;
+                    }
+                }
+                None => {
+                    let DeleteFrame {
+                        handle, entries, ..
+                    } = frames.pop().expect("清理栈已检查为非空");
+                    drop(entries);
+                    mark_for_delete(handle)?;
+                }
             }
-            children.sort();
-            for child in children {
-                delete_entry(&child)?;
-            }
-        } else {
-            require_regular_file(&entry.information)?;
         }
-        mark_for_delete(entry.handle)
+        Ok(())
     }
 
     fn open_fixed(path: &Path, access: u32) -> Result<FixedEntry> {
