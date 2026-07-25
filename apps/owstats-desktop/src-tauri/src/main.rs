@@ -37,6 +37,16 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        Ok(owstats_desktop_lib::StartupMode::ProbeInstallData { destination }) => {
+            let executable = match std::env::current_exe() {
+                Ok(value) => value,
+                Err(_) => std::process::exit(2),
+            };
+            if owstats_desktop_lib::run_probe_install_data_mode(&executable, &destination).is_err()
+            {
+                std::process::exit(2);
+            }
+        }
         Ok(owstats_desktop_lib::StartupMode::PrepareInstallRoot {
             install_root,
             user_sid,

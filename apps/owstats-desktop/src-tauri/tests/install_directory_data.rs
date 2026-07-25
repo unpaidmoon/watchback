@@ -2225,6 +2225,63 @@ fn resets_only_the_exact_staging_directory_before_publishing() {
 }
 
 #[test]
+fn install_data_probe_cli_accepts_exactly_one_destination() {
+    let destination = std::path::PathBuf::from(r"D:\Watchback\data\.write-test-123");
+    let mode = owstats_desktop_lib::parse_startup_mode([
+        "Watchback.exe",
+        "--probe-install-data",
+        destination.as_os_str().to_str().unwrap(),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        mode,
+        owstats_desktop_lib::StartupMode::ProbeInstallData { destination }
+    );
+    for args in [
+        vec!["Watchback.exe", "--probe-install-data"],
+        vec![
+            "Watchback.exe",
+            "--probe-install-data",
+            r"D:\Watchback\data\.write-test-123",
+            "extra",
+        ],
+    ] {
+        assert!(owstats_desktop_lib::parse_startup_mode(args).is_err());
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn install_data_probe_writes_only_a_new_exact_sibling_probe() {
+    let temp = tempfile::tempdir().unwrap();
+    let install = temp.path().join("Watchback");
+    let executable = install.join("Watchback.exe");
+    let data = install.join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join(".watchback-data-root-v1"), b"v1").unwrap();
+    fs::write(&executable, b"synthetic executable").unwrap();
+
+    let probe = data.join(".write-test-123");
+    owstats_desktop_lib::run_probe_install_data_mode(&executable, &probe).unwrap();
+    assert_eq!(fs::read(&probe).unwrap(), b"ok");
+
+    let outside = temp.path().join(".write-test-456");
+    let nested = data.join("nested").join(".write-test-456");
+    let wrong_name = data.join("ordinary.txt");
+    fs::create_dir_all(nested.parent().unwrap()).unwrap();
+    for destination in [&outside, &nested, &wrong_name, &probe] {
+        assert!(
+            owstats_desktop_lib::run_probe_install_data_mode(&executable, destination).is_err()
+        );
+    }
+    assert!(!outside.exists());
+    assert!(!nested.exists());
+    assert!(!wrong_name.exists());
+    assert_eq!(fs::read(&probe).unwrap(), b"ok");
+}
+
+#[test]
 fn migration_cli_accepts_source_and_destination() {
     let mode = owstats_desktop_lib::parse_startup_mode([
         "Watchback.exe",

@@ -64,7 +64,11 @@ assert.match(hooks, /ProfileList/);
 assert.match(hooks, /User Shell Folders/);
 assert.match(hooks, /S-1-5-18/);
 assert.match(hooks, /nsis_tauri_utils::RunAsUser/);
-assert.match(hooks, /WATCHBACK_DATA_PROBE/);
+assert.match(
+  hooks,
+  /RunAsUser "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe" "--probe-install-data \$\\"\$6\$\\""/,
+);
+assert.doesNotMatch(hooks, /WATCHBACK_DATA_PROBE/);
 assert.match(hooks, /\$INSTDIR\\data/);
 assert.match(hooks, /Delete "\$INSTDIR\\data\\\.write-test-\$/);
 assert.match(hooks, /\/SD IDNO/);
@@ -316,14 +320,7 @@ assert.ok(oldInstallSource >= 0);
 assert.ok(existingDestination > oldInstallSource);
 assert.ok(legacyAppDataSource > existingDestination);
 
-const encodedProbe = hooks.match(
-  /!define INSTALL_DATA_PROBE_COMMAND "([A-Za-z0-9+/=]+)"/,
-)?.[1];
-assert.ok(encodedProbe);
-const probe = Buffer.from(encodedProbe, "base64").toString("utf16le");
-assert.match(probe, /WATCHBACK_DATA_PROBE/);
-assert.match(probe, /WriteAllText/);
-assert.doesNotMatch(probe, /Users|Everyone|S-1-5-32-545/i);
+assert.doesNotMatch(hooks, /INSTALL_DATA_PROBE_COMMAND/);
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),

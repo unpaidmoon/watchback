@@ -81,6 +81,9 @@ pub enum StartupMode {
     DeleteInstallData {
         destination: std::path::PathBuf,
     },
+    ProbeInstallData {
+        destination: std::path::PathBuf,
+    },
     PrepareInstallRoot {
         install_root: std::path::PathBuf,
         user_sid: std::ffi::OsString,
@@ -186,6 +189,17 @@ where
             return Err(anyhow::anyhow!("删除参数过多"));
         }
         return Ok(StartupMode::DeleteInstallData {
+            destination: destination.into(),
+        });
+    }
+    if mode == "--probe-install-data" {
+        let destination = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("缺少写入探针目标参数"))?;
+        if args.next().is_some() {
+            return Err(anyhow::anyhow!("写入探针参数过多"));
+        }
+        return Ok(StartupMode::ProbeInstallData {
             destination: destination.into(),
         });
     }
@@ -332,6 +346,44 @@ pub fn run_delete_install_data_mode(
         let _ = (executable, destination);
         Err(anyhow::anyhow!("当前平台不支持安装数据删除命令"))
     }
+}
+
+pub fn run_probe_install_data_mode(
+    executable: &std::path::Path,
+    destination: &std::path::Path,
+) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    if !strict_absolute_path(destination) {
+        return Err(anyhow::anyhow!("写入探针目标无效"));
+    }
+    destination
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(|name| name.strip_prefix(".write-test-"))
+        .filter(|suffix| !suffix.is_empty() && suffix.bytes().all(|value| value.is_ascii_digit()))
+        .ok_or_else(|| anyhow::anyhow!("写入探针目标无效"))?;
+
+    let published = open_published_install_data(executable)?;
+    let expected_root = std::fs::canonicalize(published.paths().root())
+        .map_err(|_| anyhow::anyhow!("写入探针目标无效"))?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("写入探针目标无效"))?;
+    let parent = std::fs::canonicalize(parent).map_err(|_| anyhow::anyhow!("写入探针目标无效"))?;
+    if parent != expected_root {
+        return Err(anyhow::anyhow!("写入探针目标无效"));
+    }
+
+    let mut probe = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|_| anyhow::anyhow!("写入探针失败"))?;
+    probe
+        .write_all(b"ok")
+        .and_then(|_| probe.sync_all())
+        .map_err(|_| anyhow::anyhow!("写入探针失败"))
 }
 
 pub fn run_install_data_mode(

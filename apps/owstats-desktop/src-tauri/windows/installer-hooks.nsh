@@ -9,8 +9,6 @@ Var InstallDataDeleteRequested
 
 !define INSTALL_DATA_USER_SID_COMMAND "JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACIAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAiADsAJABzAD0AWwBEAGkAYQBnAG4AbwBzAHQAaQBjAHMALgBQAHIAbwBjAGUAcwBzAF0AOgA6AEcAZQB0AEMAdQByAHIAZQBuAHQAUAByAG8AYwBlAHMAcwAoACkALgBTAGUAcwBzAGkAbwBuAEkAZAA7ACQAcAA9AGcAYwBpAG0AIABXAGkAbgAzADIAXwBQAHIAbwBjAGUAcwBzACAALQBGAGkAbAB0AGUAcgAgACIATgBhAG0AZQA9ACcAZQB4AHAAbABvAHIAZQByAC4AZQB4AGUAJwAgAGEAbgBkACAAUwBlAHMAcwBpAG8AbgBJAGQAPQAkAHMAIgB8AHMAZQBsAGUAYwB0ACAALQBGAGkAcgBzAHQAIAAxADsAaQBmACgAIQAkAHAAKQB7AGUAeABpAHQAIAAyAH0AOwAkAHIAPQBpAGMAaQBtACAALQBJAG4AcAB1AHQATwBiAGoAZQBjAHQAIAAkAHAAIAAtAE0AZQB0AGgAbwBkAE4AYQBtAGUAIABHAGUAdABPAHcAbgBlAHIAUwBpAGQAOwBpAGYAKAAkAHIALgBSAGUAdAB1AHIAbgBWAGEAbAB1AGUAKQB7AGUAeABpAHQAIAAzAH0AOwBbAEMAbwBuAHMAbwBsAGUAXQA6ADoATwB1AHQALgBXAHIAaQB0AGUAKAAkAHIALgBTAGkAZAApAA=="
 
-!define INSTALL_DATA_PROBE_COMMAND "JABwAD0AWwBFAG4AdgBpAHIAbwBuAG0AZQBuAHQAXQA6ADoARwBlAHQARQBuAHYAaQByAG8AbgBtAGUAbgB0AFYAYQByAGkAYQBiAGwAZQAoACIAVwBBAFQAQwBIAEIAQQBDAEsAXwBEAEEAVABBAF8AUABSAE8AQgBFACIALAAiAFAAcgBvAGMAZQBzAHMAIgApADsAdAByAHkAewBbAEkATwAuAEYAaQBsAGUAXQA6ADoAVwByAGkAdABlAEEAbABsAFQAZQB4AHQAKAAkAHAALAAiAG8AawAiACwAWwBUAGUAeAB0AC4ARQBuAGMAbwBkAGkAbgBnAF0AOgA6AEEAUwBDAEkASQApADsAZQB4AGkAdAAgADAAfQBjAGEAdABjAGgAewBlAHgAaQB0ACAAMQB9AA=="
-
 !macro InstallDataAbort MESSAGE
   MessageBox MB_OK|MB_ICONSTOP "${MESSAGE}" /SD IDOK
   Abort
@@ -96,21 +94,16 @@ Var InstallDataDeleteRequested
     !insertmacro InstallDataAbort "无法迁移或创建安装目录数据。安装将停止。"
   ${EndIf}
 
-  ; Verify the ACL with a process launched from Tauri's original shell token,
-  ; not with the elevated installer token. The encoded command writes only the
-  ; path supplied through this process-local environment variable.
+  ; Verify the ACL with the installed binary launched from Tauri's original
+  ; shell token, not with the elevated installer token. Probe mode accepts only
+  ; a new .write-test-N file in this executable's sibling data directory.
   System::Call 'kernel32::GetTickCount() i.r5'
   StrCpy $6 "$INSTDIR\data\.write-test-$5"
   ${If} ${FileExists} "$6"
     !insertmacro InstallDataAbort "无法验证数据目录写权限。安装将停止。"
   ${EndIf}
-  System::Call 'kernel32::SetEnvironmentVariableW(w "WATCHBACK_DATA_PROBE", w "$6") i.r7'
-  ${If} $7 == 0
-    !insertmacro InstallDataAbort "无法验证数据目录写权限。安装将停止。"
-  ${EndIf}
-  nsis_tauri_utils::RunAsUser "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${INSTALL_DATA_PROBE_COMMAND}"
+  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "--probe-install-data $\"$6$\""
   Pop $7
-  System::Call 'kernel32::SetEnvironmentVariableW(w "WATCHBACK_DATA_PROBE", p 0) i.r4'
   ${If} $7 != 0
     !insertmacro InstallDataAbort "无法验证数据目录写权限。安装将停止。"
   ${EndIf}
