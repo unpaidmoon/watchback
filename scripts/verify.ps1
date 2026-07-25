@@ -3,7 +3,8 @@ param(
   [switch]$SkipBuild,
   [switch]$SkipClippy,
   [switch]$SkipCheckout,
-  [switch]$ChangedOnly
+  [switch]$ChangedOnly,
+  [switch]$TestInstallDirectoryDataBoundary
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +23,95 @@ function Invoke-VerifyStep([string]$Name, [scriptblock]$Action) {
 
 function Skip-VerifyStep([string]$Name) {
   Write-Host "[验证] 已跳过：$Name"
+}
+
+function Get-RuntimeAppDataScanExitCode([string]$RuntimeSource) {
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = 'rg'
+  $startInfo.Arguments = '-n "\bapp_data_dir\s*\(" "' + $RuntimeSource.Replace('"', '\"') + '" -g "!**/bin/**"'
+  $startInfo.UseShellExecute = $false
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  try {
+    if (-not $process.Start()) {
+      throw '无法启动桌面运行时路径扫描'
+    }
+    $standardOutput = $process.StandardOutput.ReadToEndAsync()
+    $standardError = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($standardOutput, $standardError))
+    return $process.ExitCode
+  } finally {
+    $process.Dispose()
+  }
+}
+
+function Assert-RuntimeAppDataScanExitCode([int]$ExitCode) {
+  switch ($ExitCode) {
+    0 { throw '桌面业务路径不得从 app_data_dir 派生' }
+    1 { return }
+    default { throw "无法扫描桌面运行时路径（退出码 $ExitCode）" }
+  }
+}
+
+function Assert-ExpectedFailure([scriptblock]$Action, [string]$ExpectedMessage) {
+  $failure = $null
+  try {
+    & $Action
+  } catch {
+    $failure = $_
+  }
+  if ($null -eq $failure) {
+    throw "预期验证失败：$ExpectedMessage"
+  }
+  if ($failure.Exception.Message -notlike "*$ExpectedMessage*") {
+    throw "验证失败信息不正确：$($failure.Exception.Message)"
+  }
+}
+
+if ($TestInstallDirectoryDataBoundary) {
+  $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("owstats-verify-rg-" + [guid]::NewGuid().ToString('N'))
+  try {
+    $sourceRoot = Join-Path $tempRoot 'src'
+    $sourceFile = Join-Path $sourceRoot 'runtime.rs'
+    $binFile = Join-Path $sourceRoot 'bin\developer.rs'
+    New-Item -ItemType Directory -Force (Split-Path -Parent $binFile) | Out-Null
+
+    [System.IO.File]::WriteAllText($sourceFile, 'app_data_dir(')
+    $matchedExitCode = Get-RuntimeAppDataScanExitCode $sourceRoot
+    if ($matchedExitCode -ne 0) { throw "普通源码匹配应返回 0，实际为 $matchedExitCode" }
+    Assert-ExpectedFailure { Assert-RuntimeAppDataScanExitCode $matchedExitCode } '桌面业务路径不得从 app_data_dir 派生'
+
+    Remove-Item -LiteralPath $sourceFile -Force
+    $noMatchExitCode = Get-RuntimeAppDataScanExitCode $sourceRoot
+    if ($noMatchExitCode -ne 1) { throw "普通源码无匹配应返回 1，实际为 $noMatchExitCode" }
+    Assert-RuntimeAppDataScanExitCode $noMatchExitCode
+
+    [System.IO.File]::WriteAllText($binFile, 'app_data_dir(')
+    $binOnlyExitCode = Get-RuntimeAppDataScanExitCode $sourceRoot
+    if ($binOnlyExitCode -ne 1) { throw "开发 bin 应被排除并返回 1，实际为 $binOnlyExitCode" }
+    Assert-RuntimeAppDataScanExitCode $binOnlyExitCode
+
+    $missingExitCode = Get-RuntimeAppDataScanExitCode (Join-Path $tempRoot 'missing')
+    if ($missingExitCode -in @(0, 1)) { throw "不存在目录应返回扫描错误，实际为 $missingExitCode" }
+    Assert-ExpectedFailure { Assert-RuntimeAppDataScanExitCode $missingExitCode } "无法扫描桌面运行时路径（退出码 $missingExitCode）"
+
+    $runtimeSource = Join-Path $tauriRoot 'src'
+    Assert-RuntimeAppDataScanExitCode (Get-RuntimeAppDataScanExitCode $runtimeSource)
+    $tauriConfig = Get-Content -Raw (Join-Path $tauriRoot 'tauri.conf.json') | ConvertFrom-Json
+    if ($tauriConfig.bundle.targets -ne 'nsis') { throw 'Windows 发布目标必须仅为 NSIS' }
+    Write-Host '[验证] 安装目录数据边界退出码测试通过。'
+  } finally {
+    $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $resolvedTempRoot = [System.IO.Path]::GetFullPath($tempRoot)
+    if ((Test-Path $tempRoot) -and $resolvedTempRoot.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    }
+  }
+  exit 0
 }
 
 function Invoke-TrackedCheckout {
@@ -63,6 +153,19 @@ function Invoke-TrackedCheckout {
 }
 
 Invoke-VerifyStep '敏感信息与绝对路径扫描' { node (Join-Path $repoRoot 'scripts\verify-sensitive-paths.mjs') --root $repoRoot }
+Write-Host '[验证] 开始：安装目录数据发布边界'
+try {
+  $runtimeSource = Join-Path $tauriRoot 'src'
+  Assert-RuntimeAppDataScanExitCode (Get-RuntimeAppDataScanExitCode $runtimeSource)
+
+  $tauriConfig = Get-Content -Raw (Join-Path $tauriRoot 'tauri.conf.json') | ConvertFrom-Json
+  if ($tauriConfig.bundle.targets -ne 'nsis') {
+    throw 'Windows 发布目标必须仅为 NSIS'
+  }
+} catch {
+  throw "验证失败：安装目录数据发布边界（$($_.Exception.Message)）"
+}
+Write-Host '[验证] 通过：安装目录数据发布边界'
 
 Push-Location $desktopRoot
 try {

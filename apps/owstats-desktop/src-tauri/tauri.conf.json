@@ -25,9 +25,19 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "icon": [
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "installerHooks": "./windows/installer-hooks.nsh",
+        "template": "./windows/installer.nsi",
+        "languages": [
+          "SimpChinese"
+        ]
+      }
+    }
   }
 }

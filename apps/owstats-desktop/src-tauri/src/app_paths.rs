@@ -1,8 +1,23 @@
-use anyhow::Result;
-use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use anyhow::{anyhow, Result};
+use std::path::{Component, Path, PathBuf};
 
 use crate::account_store::AccountId;
+
+pub fn data_root_from_executable(executable: &Path) -> Result<PathBuf> {
+    if !executable.is_absolute()
+        || executable
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(anyhow!("无法定位安装目录"));
+    }
+
+    let install = executable
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .ok_or_else(|| anyhow!("无法定位安装目录"))?;
+    Ok(install.join("data"))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedAppPaths {
@@ -10,18 +25,27 @@ pub struct SharedAppPaths {
 }
 
 impl SharedAppPaths {
-    pub fn from_app_data_dir(root: impl AsRef<Path>) -> Self {
+    pub fn from_data_root(root: impl AsRef<Path>) -> Self {
         Self {
             root: root.as_ref().to_path_buf(),
         }
     }
 
-    pub fn from_app(app: &AppHandle) -> Result<Self> {
-        Ok(Self::from_app_data_dir(app.path().app_data_dir()?))
+    #[doc(hidden)]
+    pub fn from_app_data_dir(root: impl AsRef<Path>) -> Self {
+        Self::from_data_root(root)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn install_migration_staging(&self) -> PathBuf {
+        self.root.with_file_name("data.migrating")
+    }
+
+    pub fn install_migration_marker(&self) -> PathBuf {
+        self.root.join(".install-data-migration-v1.json")
     }
 
     pub fn registry(&self) -> PathBuf {
@@ -163,10 +187,6 @@ impl AppPaths {
         }
     }
 
-    pub fn from_app(app: &AppHandle) -> Result<Self> {
-        Ok(Self::from_app_data_dir(app.path().app_data_dir()?))
-    }
-
     pub fn database(&self) -> PathBuf {
         self.root.join("owstats.sqlite3")
     }
@@ -201,11 +221,57 @@ impl AppPaths {
 
 #[cfg(test)]
 mod tests {
-    use super::AppPaths;
-    use std::path::Path;
+    use super::{data_root_from_executable, AppPaths, SharedAppPaths};
+    use std::path::{Path, PathBuf};
 
     #[test]
-    fn all_runtime_paths_stay_under_app_data_with_compatible_names() {
+    fn executable_parent_owns_data() {
+        assert_eq!(
+            data_root_from_executable(Path::new(r"D:\应用\Watchback\Watchback.exe")).unwrap(),
+            PathBuf::from(r"D:\应用\Watchback\data"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unc_executable_parent_owns_data() {
+        assert_eq!(
+            data_root_from_executable(Path::new(r"\\server\share\Watchback.exe")).unwrap(),
+            PathBuf::from(r"\\server\share\data"),
+        );
+    }
+
+    #[test]
+    fn empty_executable_path_is_rejected() {
+        assert!(data_root_from_executable(Path::new("")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_executable_path_must_be_absolute_without_dot_components() {
+        for executable in [
+            r"relative\Watchback.exe",
+            r"D:Watchback.exe",
+            r"\Watchback.exe",
+            r"D:\apps\..\Watchback.exe",
+        ] {
+            assert!(data_root_from_executable(Path::new(executable)).is_err());
+        }
+    }
+
+    #[test]
+    fn shared_business_paths_stay_under_install_data() {
+        let root = Path::new(r"D:\Watchback\data");
+        let paths = SharedAppPaths::from_data_root(root);
+        assert_eq!(paths.root(), root);
+        assert!(paths.registry().starts_with(root));
+        assert!(paths.user_settings().starts_with(root));
+        assert!(paths.browser_profile().starts_with(root));
+        assert!(paths.accounts_root().starts_with(root));
+    }
+
+    #[test]
+    fn legacy_app_paths_stay_under_injected_root_with_compatible_names() {
         let root = Path::new("portable-app-data");
         let paths = AppPaths::from_app_data_dir(root);
         let expected = [

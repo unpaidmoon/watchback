@@ -153,7 +153,10 @@ pub(crate) fn validate_registry(registry: &AccountRegistry) -> Result<()> {
     Ok(())
 }
 
-fn validate_manifest(manifest: &AccountManifest, expected_account_id: &AccountId) -> Result<()> {
+pub(crate) fn validate_manifest(
+    manifest: &AccountManifest,
+    expected_account_id: &AccountId,
+) -> Result<()> {
     if manifest.version != ACCOUNT_STORE_VERSION {
         bail!("unsupported account manifest version")
     }
