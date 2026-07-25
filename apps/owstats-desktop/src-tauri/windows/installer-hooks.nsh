@@ -7,6 +7,8 @@ Var InstallDataUserSid
 Var InstallDataLegacyAppData
 Var InstallDataDeleteRequested
 
+!define INSTALL_DATA_USER_SID_COMMAND "JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACIAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAiADsAJABzAD0AWwBEAGkAYQBnAG4AbwBzAHQAaQBjAHMALgBQAHIAbwBjAGUAcwBzAF0AOgA6AEcAZQB0AEMAdQByAHIAZQBuAHQAUAByAG8AYwBlAHMAcwAoACkALgBTAGUAcwBzAGkAbwBuAEkAZAA7ACQAcAA9AGcAYwBpAG0AIABXAGkAbgAzADIAXwBQAHIAbwBjAGUAcwBzACAALQBGAGkAbAB0AGUAcgAgACIATgBhAG0AZQA9ACcAZQB4AHAAbABvAHIAZQByAC4AZQB4AGUAJwAgAGEAbgBkACAAUwBlAHMAcwBpAG8AbgBJAGQAPQAkAHMAIgB8AHMAZQBsAGUAYwB0ACAALQBGAGkAcgBzAHQAIAAxADsAaQBmACgAIQAkAHAAKQB7AGUAeABpAHQAIAAyAH0AOwAkAHIAPQBpAGMAaQBtACAALQBJAG4AcAB1AHQATwBiAGoAZQBjAHQAIAAkAHAAIAAtAE0AZQB0AGgAbwBkAE4AYQBtAGUAIABHAGUAdABPAHcAbgBlAHIAUwBpAGQAOwBpAGYAKAAkAHIALgBSAGUAdAB1AHIAbgBWAGEAbAB1AGUAKQB7AGUAeABpAHQAIAAzAH0AOwBbAEMAbwBuAHMAbwBsAGUAXQA6ADoATwB1AHQALgBXAHIAaQB0AGUAKAAkAHIALgBTAGkAZAApAA=="
+
 !define INSTALL_DATA_PROBE_COMMAND "JABwAD0AWwBFAG4AdgBpAHIAbwBuAG0AZQBuAHQAXQA6ADoARwBlAHQARQBuAHYAaQByAG8AbgBtAGUAbgB0AFYAYQByAGkAYQBiAGwAZQAoACIAVwBBAFQAQwBIAEIAQQBDAEsAXwBEAEEAVABBAF8AUABSAE8AQgBFACIALAAiAFAAcgBvAGMAZQBzAHMAIgApADsAdAByAHkAewBbAEkATwAuAEYAaQBsAGUAXQA6ADoAVwByAGkAdABlAEEAbABsAFQAZQB4AHQAKAAkAHAALAAiAG8AawAiACwAWwBUAGUAeAB0AC4ARQBuAGMAbwBkAGkAbgBnAF0AOgA6AEEAUwBDAEkASQApADsAZQB4AGkAdAAgADAAfQBjAGEAdABjAGgAewBlAHgAaQB0ACAAMQB9AA=="
 
 !macro InstallDataAbort MESSAGE
@@ -17,7 +19,7 @@ Var InstallDataDeleteRequested
 !macro ResolveInstallDataUserSid
   ; Resolve the owner of the Explorer shell in this interactive session. This
   ; remains the original user when UAC credentials belong to another account.
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$s=[Diagnostics.Process]::GetCurrentProcess().SessionId;$$p=Get-CimInstance Win32_Process|Where-Object{$$_.Name-eq$\"explorer.exe$\"-and$$_.SessionId-eq$$s}|Select-Object -First 1;if($$null-eq$$p){exit 2};$$r=Invoke-CimMethod -InputObject $$p -MethodName GetOwnerSid;if($$r.ReturnValue-ne 0){exit 3};[Console]::Out.Write($$r.Sid)"'
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${INSTALL_DATA_USER_SID_COMMAND}'
   Pop $0
   Pop $InstallDataUserSid
   ${If} $0 != 0

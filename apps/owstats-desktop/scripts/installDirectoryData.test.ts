@@ -42,8 +42,24 @@ assert.match(hooks, /InstallLocation/);
 assert.match(hooks, /Software\\\$\{BUNDLEID\}/);
 assert.match(hooks, /nsExec::ExecToStack/);
 assert.match(hooks, /Pop \$[0-9R]/);
-assert.match(hooks, /GetOwnerSid/);
-assert.match(hooks, /explorer\.exe/i);
+const sidCommand = hooks.match(
+  /!define INSTALL_DATA_USER_SID_COMMAND "([A-Za-z0-9+/=]+)"/,
+);
+assert.ok(sidCommand, "interactive-user SID query must use an encoded command");
+assert.ok(
+  sidCommand[1].length <= 900,
+  "encoded SID query must stay below the NSIS command-buffer limit",
+);
+const decodedSidCommand = Buffer.from(sidCommand[1], "base64").toString("utf16le");
+assert.match(decodedSidCommand, /\$ProgressPreference="SilentlyContinue"/);
+assert.match(decodedSidCommand, /GetCurrentProcess\(\)\.SessionId/);
+assert.match(decodedSidCommand, /explorer\.exe/i);
+assert.match(decodedSidCommand, /GetOwnerSid/);
+assert.match(
+  hooks,
+  /-EncodedCommand \$\{INSTALL_DATA_USER_SID_COMMAND\}/,
+);
+assert.doesNotMatch(hooks, /-Command "\$\$s=/);
 assert.match(hooks, /ProfileList/);
 assert.match(hooks, /User Shell Folders/);
 assert.match(hooks, /S-1-5-18/);
