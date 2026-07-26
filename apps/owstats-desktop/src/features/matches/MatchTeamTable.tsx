@@ -4,6 +4,7 @@ import { arenaRankAssetUrl, competitiveRankAssetUrl, resolvePerkInfo } from "../
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../../shared/playerHighlights";
 import { HeroAvatar } from "../../shared/phase6Components";
 import type { PlayerRow } from "../../shared/types";
+import { isValidBattleTag, normalizeBattleTag } from "../player-query/playerQueryState";
 import { playerPartyBlocks } from "./partyGroups";
 
 export type MatchTeamTableProps = {
@@ -16,6 +17,7 @@ export type MatchTeamTableProps = {
   onTogglePlayer?: (playerKey: string) => void;
   onSelectPlayerSummary?: (player: PlayerRow, trigger: HTMLButtonElement) => void;
   renderExpansion?: (player: PlayerRow) => ReactNode;
+  onQueryPlayer?: (battleTag: string) => void;
 };
 
 export function MatchTeamTable({
@@ -28,6 +30,7 @@ export function MatchTeamTable({
   onTogglePlayer,
   onSelectPlayerSummary,
   renderExpansion,
+  onQueryPlayer,
 }: MatchTeamTableProps) {
   const highlights = playerHighlightMap(players);
   return (
@@ -49,6 +52,7 @@ export function MatchTeamTable({
                   expanded={expanded}
                   onToggle={onTogglePlayer ? () => onTogglePlayer(key) : undefined}
                   onSelectPlayerSummary={onSelectPlayerSummary}
+                  onQueryPlayer={onQueryPlayer}
                 />
                 {expanded && renderExpansion ? renderExpansion(player) : null}
               </div>
@@ -86,6 +90,7 @@ function MatchTeamPlayerRow({
   expanded = false,
   onToggle,
   onSelectPlayerSummary,
+  onQueryPlayer,
 }: {
   player: PlayerRow;
   showPerks?: boolean;
@@ -94,6 +99,7 @@ function MatchTeamPlayerRow({
   expanded?: boolean;
   onToggle?: () => void;
   onSelectPlayerSummary?: (player: PlayerRow, trigger: HTMLButtonElement) => void;
+  onQueryPlayer?: (battleTag: string) => void;
 }) {
   const rankIcon =
     rankVariant === "arena"
@@ -111,11 +117,15 @@ function MatchTeamPlayerRow({
   const avatar = (
     <HeroAvatar heroKey={player.heroGuid || player.heroName} name={player.heroName} size="sm" />
   );
+  const battleTag = normalizeBattleTag(player.name);
+  const queryPlayerName = isValidBattleTag(battleTag) && onQueryPlayer
+    ? <button type="button" className="matchTeamPlayerQueryButton" onClick={(event) => { event.stopPropagation(); onQueryPlayer(battleTag); }}>{player.name}</button>
+    : <strong>{player.name}</strong>;
   const playerContent = (
     <>
       <span className="phase6CompactPlayerName">
         <span className="phase7CompactPlayerNameLine">
-          <strong>{player.name}</strong>
+          {queryPlayerName}
           {(rankIcon || rankTierLabel) && (
             <small className="phase7CompactRankBadge">
               {rankIcon && <img src={rankIcon} alt="" />}
@@ -181,15 +191,17 @@ function MatchTeamPlayerRow({
         ) : (
           <span className="phase6CompactAvatarPlate">{avatar}</span>
         )}
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           className="phase7CompactPlayerRowToggle"
           onClick={onToggle}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onToggle(); } }}
           aria-expanded={expanded}
           aria-label={`${player.name}${expanded ? "收起角斗详情" : "展开角斗详情"}`}
         >
           {playerContent}
-        </button>
+        </div>
       </div>
     );
   }

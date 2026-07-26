@@ -16,6 +16,7 @@ export type CommandMetric = {
 
 export const phase6NavItems: Phase6NavItem[] = [
   { label: "对局", path: "/matches", title: "浏览和筛选对局" },
+  { label: "查询", path: "/player-query", title: "即时查询玩家数据" },
   { label: "战报", path: "/review", title: "个人赛季战报" },
   { label: "成就", path: "/achievements", title: "赛季成就与进度" },
   { label: "排行", path: "/ranking", title: "英雄与地图排行" },

@@ -1,0 +1,16 @@
+{
+  "fixtureKind": "synthetic-contract",
+  "code": 0,
+  "data": {
+    "matchId": "normal-detail-001",
+    "matchRet": 1,
+    "teamScore": 3,
+    "opponentScore": 1,
+    "gameTimeSec": 734,
+    "mapGuid": "map-alpha",
+    "mapName": "示例地图",
+    "teammateList": [{ "playerName": "队友A", "heroGuid": "hero-a", "kill": 10, "assist": 6, "death": 2 }],
+    "enemyList": [{ "playerName": "对手A", "heroGuid": "hero-b", "kill": 8, "assist": 2, "death": 5 }],
+    "heroList": [{ "heroGuid": "hero-a", "gameTimeSec": 734, "equipment": [], "powers": [] }]
+  }
+}

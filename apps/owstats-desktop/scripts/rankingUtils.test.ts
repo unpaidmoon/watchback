@@ -30,6 +30,7 @@ assertEqual(modeLabel("SportOpen"), "竞技开放", "SportOpen mode label");
 assertEqual(modeLabel("custom"), "custom", "unknown mode label falls back");
 assertEqual(formatWinRate(0.624), "62.4%", "win rate uses one decimal place");
 assertEqual(formatWinRate(0.624, 0), "62%", "win rate can use integer display");
+assertEqual(formatWinRate(62.4), "62.4%", "percentage-scale win rate remains percentage-scale");
 assertEqual(formatPlayTimeHours(3.25), "3.3 小时", "play time uses one decimal place");
 assertEqual(defaultRankingSort("heroes").key, "matches", "hero ranking defaults to matches");
 assertEqual(defaultRankingSort("heroes").direction, "desc", "hero ranking defaults to matches desc");

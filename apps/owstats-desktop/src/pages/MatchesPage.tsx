@@ -52,7 +52,7 @@ const emptyOptions: FilterOptions = {
   modes: []
 };
 
-export function MatchesPage() {
+export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: string) => void } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamsKey = searchParams.toString();
   const cachedPage = useMemo(() => getMatchesPageCache(), []);
@@ -556,6 +556,9 @@ export function MatchesPage() {
           matchId={selectedMatchId}
           favoriteController={favoriteController}
           onRetry={() => setDetailRetryKey((value) => value + 1)}
+          onQueryPlayer={onQueryPlayer ? (battleTag) => {
+            if (favoriteController.confirmDiscard()) onQueryPlayer(battleTag);
+          } : undefined}
           onBack={() => {
             if (!favoriteController.confirmDiscard()) return;
             setMobileDetailOpen(false);

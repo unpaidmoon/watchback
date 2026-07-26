@@ -150,7 +150,7 @@ for (const [commandName, firstSideEffect] of [
 ] as const) {
   assertAcquiresBefore(commandName, "try_acquire_account_operation()", firstSideEffect);
 }
-assertAcquiresBefore("sync_season", "try_acquire_account_operation()", "active_account(&accounts)");
+assertAcquiresBefore("sync_season", "try_acquire_sync()", "active_account(&accounts)");
 assert.doesNotMatch(
   commandBody(commands, "cancel_dashen_login"),
   /try_acquire_(?:account_operation|sync)/,

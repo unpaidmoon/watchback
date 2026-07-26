@@ -25,7 +25,7 @@ pub async fn quick_list_update_with_credentials_and_target_paths_base_url(
         season,
         customer_base_url: customer_base_url.to_string(),
         pages_per_batch: 5,
-        detail_concurrency: 2,
+        detail_concurrency: 4,
         include_fight: true,
     };
     let probe = crate::season_fetch::fetch_quick_list_pages(&request).await?;
@@ -267,7 +267,7 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_with_mode_
             season,
             customer_base_url: customer_base_url.to_string(),
             pages_per_batch: 5,
-            detail_concurrency: 2,
+            detail_concurrency: 4,
             include_fight: true,
         },
         mode,
@@ -328,7 +328,7 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_with_m
             season,
             customer_base_url: customer_base_url.to_string(),
             pages_per_batch: 5,
-            detail_concurrency: 2,
+            detail_concurrency: 4,
             include_fight: true,
         },
         mode,

@@ -1,0 +1,12 @@
+{
+  "fixtureKind": "synthetic-contract",
+  "pageSize": 12,
+  "samples": [
+    { "mode": "LeisurePreset", "kind": "normal", "firstPage": { "code": 0, "data": { "matchList": [{ "matchId": "lp-001", "matchRet": 1, "teamScore": 3, "opponentScore": 2, "mapGuid": "map-alpha", "mapName": "示例地图", "heroGuid": "hero-a", "heroName": "示例英雄A", "kill": 20, "assist": 8, "death": 4, "beginTs": 1767225600000 }] } }, "lastPage": { "code": 0, "data": { "matchList": [] } } },
+    { "mode": "Leisure6v6", "kind": "normal", "firstPage": { "code": 0, "data": { "matchList": [{ "matchId": "l6-001", "matchRet": 2, "teamScore": 1, "opponentScore": 2, "mapGuid": "map-beta", "mapName": "示例地图B", "heroGuid": "hero-b", "heroName": "示例英雄B", "kill": 9, "assist": 3, "death": 7, "beginTs": 1767312000000 }] } }, "lastPage": { "code": 0, "data": { "matchList": [] } } },
+    { "mode": "SportPreset", "kind": "normal", "firstPage": { "code": 0, "data": { "matchList": [{ "matchId": "sp-001", "matchRet": 1, "teamScore": 3, "opponentScore": 0, "mapGuid": "map-gamma", "mapName": "示例地图C", "heroGuid": "hero-c", "heroName": "示例英雄C", "kill": 18, "assist": 11, "death": 2, "beginTs": 1767398400000 }] } }, "lastPage": { "code": 0, "data": { "matchList": [] } } },
+    { "mode": "SportOpen", "kind": "normal", "firstPage": { "code": 0, "data": { "matchList": [{ "matchId": "so-001", "matchRet": 2, "teamScore": null, "opponentScore": null, "mapGuid": "map-unknown", "mapName": null, "heroGuid": "hero-d", "heroName": "示例英雄D", "kill": null, "assist": 5, "death": 6, "beginTs": 1767484800000 }] } }, "lastPage": { "code": 0, "data": { "matchList": [] } } },
+    { "mode": "SportFight", "kind": "arena", "firstPage": { "code": 0, "data": { "matchList": [{ "matchId": "sf-001", "matchRet": 1, "teamScore": 3, "opponentScore": 2, "heroGuid": "hero-e", "heroName": "示例英雄E", "kill": 25, "assist": 4, "death": 5, "beginTs": 1767571200000 }] } }, "lastPage": { "code": 0, "data": { "matchList": [] } } },
+    { "mode": "LeisureFight", "kind": "arena", "firstPage": { "code": 0, "data": { "matchList": [{ "matchId": "lf-001", "matchRet": 2, "teamScore": 2, "opponentScore": 3, "heroGuid": "hero-f", "heroName": "示例英雄F", "kill": 12, "assist": 9, "death": 8, "beginTs": 1767657600000 }] } }, "lastPage": { "code": 0, "data": { "matchList": [] } } }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "fixtureKind": "synthetic-contract",
+  "samples": [
+    { "mode": "LeisurePreset", "response": { "code": 0, "data": { "roleRanks": [{ "role": "tank", "rank": "gold", "division": 2, "wins": 4, "games": 10, "winRate": 40 }], "heroList": [{ "heroGuid": "hero-tank", "heroName": "示例坦克", "gameTimeSec": 7200, "wins": 6, "games": 10, "winRate": 60 }] } } },
+    { "mode": "Leisure6v6", "response": { "code": 0, "data": { "roleRanks": [], "heroList": [{ "heroGuid": "hero-support", "heroName": "示例支援", "gameTimeSec": 3599, "wins": 2, "games": 5, "winRate": 40 }] } } },
+    { "mode": "SportPreset", "response": { "code": 0, "data": { "roleRanks": [{ "role": "damage", "rank": "platinum", "division": 4, "wins": 8, "games": 12, "winRate": 67 }], "heroList": [{ "heroGuid": "hero-damage", "heroName": "示例输出", "gameTimeSec": 9000, "wins": 8, "games": 12, "winRate": 67 }] } } },
+    { "mode": "SportOpen", "response": { "code": 0, "data": { "roleRanks": [{ "role": "open", "rank": "diamond", "division": 5, "wins": 1, "games": 3, "winRate": 33 }], "heroList": [] } } },
+    { "mode": "SportFight", "response": { "code": 0, "data": { "roleRanks": [{ "role": "stadium", "rank": "master", "division": 1, "wins": 7, "games": 9, "winRate": 78 }], "heroList": [{ "heroGuid": "hero-stadium", "heroName": "示例角斗英雄", "gameTimeSec": 5400, "wins": 7, "games": 9, "winRate": 78 }] } } },
+    { "mode": "LeisureFight", "response": { "code": 0, "data": { "roleRanks": [], "heroList": [{ "heroGuid": "hero-stadium", "heroName": "示例角斗英雄", "gameTimeSec": 60, "wins": 0, "games": 1, "winRate": 0 }] } } }
+  ]
+}

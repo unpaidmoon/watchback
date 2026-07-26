@@ -516,8 +516,8 @@ async fn full_season_fetch_fetches_details_with_configured_concurrency() {
     assert_eq!(fetch.details, 3);
     assert_eq!(
         *server.max_active_details.lock().unwrap(),
-        2,
-        "detail requests should respect the Python-equivalent datamsapi domain cap"
+        3,
+        "detail requests should respect the configured request concurrency below the domain cap"
     );
 }
 

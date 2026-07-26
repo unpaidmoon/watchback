@@ -1,0 +1,134 @@
+.playerQueryWorkspace {
+  width: calc(100% - 64px);
+  max-width: var(--phase6-content-max);
+  display: grid;
+  gap: var(--space-4);
+  padding-bottom: var(--space-8);
+}
+
+.playerQueryRegion { display: contents; }
+.playerQueryIdentityPanel,
+.playerQueryRanksPanel,
+.playerQueryModePanel { min-width: 0; padding: var(--space-6); }
+
+.playerQueryIdentityLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(420px, .95fr);
+  align-items: center;
+  gap: var(--space-6);
+}
+.playerQuerySearchArea { min-width: 0; }
+.playerQueryForm { display: grid; gap: var(--space-2); }
+.playerQueryFormControls { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: start; gap: var(--space-3); }
+.playerQueryFormControls .pageSeasonSelect { align-self: start; }
+.playerQueryFormControls .pageSeasonSelect label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.playerQueryFormControls .pageSeasonSelect select,
+.playerQueryFormControls > button { min-height: 44px; }
+.playerQueryFormControls input {
+  min-height: 44px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  padding: 0 var(--space-3);
+  font-size: 16px;
+}
+.playerQueryFormControls input:focus-visible,
+.playerQueryModeTabWrap button:focus-visible,
+.playerQueryCompactMatchRow:focus-visible { outline: 2px solid var(--data-primary); outline-offset: 2px; }
+.playerQueryFormHint,
+.playerQueryInlineError { margin: 0; font-size: 13px; }
+.playerQueryFormHint { color: var(--text-secondary); }
+.playerQueryInlineError { color: var(--status-danger); }
+.playerQueryGate,
+.playerQueryResourceState { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 72px; }
+
+.playerQueryProfileArea { min-width: 0; }
+.playerQuerySectionHeading { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+.playerQuerySectionHeading h2 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; }
+.playerQueryProfileCard { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: var(--space-4); align-items: center; }
+.playerQueryProfileIdentity { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
+.playerQueryProfileIdentity > img,
+.playerQueryImagePlaceholder { width: 64px; height: 64px; flex: 0 0 64px; border-radius: var(--radius-secondary); object-fit: cover; background: var(--surface-control); }
+.playerQueryIdentityCopy { min-width: 0; }
+.playerQueryIdentityCopy h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.playerQueryTitle { margin: var(--space-1) 0 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.playerQueryProfileCard dl { display: grid; grid-template-columns: repeat(2, minmax(110px, 1fr)); gap: var(--space-3); margin: 0; }
+.playerQueryProfileCard dl div { min-width: 110px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-control); }
+.playerQueryProfileCard dt { color: var(--text-secondary); font-size: 12px; }
+.playerQueryProfileCard dd { margin: var(--space-1) 0 0; color: var(--text-primary); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.playerQueryRanksPanel .phase6RoleRankGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.playerQueryRanksPanel .reviewCompetitiveRankGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.playerQueryModeHeader { display: grid; gap: var(--space-3); }
+.playerQueryModeTabs { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.playerQueryModeTabWrap { display: flex; align-items: center; min-height: 40px; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-control); padding-left: var(--space-2); color: var(--text-secondary); cursor: grab; transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease, border-color var(--motion-fast) ease; }
+.playerQueryModeTabWrap:has(button[aria-selected="true"]) { border-color: var(--data-primary); background: color-mix(in srgb, var(--data-primary) 10%, var(--surface-control)); color: var(--data-primary); }
+.playerQueryModeTabWrap.dragging { opacity: .55; transform: scale(.98); }
+.playerQueryModeDragHandle { display: inline-grid; place-items: center; align-self: stretch; border: 0; padding: 0; background: transparent; color: inherit; cursor: grab; touch-action: none; }
+.playerQueryModeDragHandle:active { cursor: grabbing; }
+.playerQueryModeDragHandle:disabled { cursor: not-allowed; }
+.playerQueryModeTabWrap button { min-height: 38px; border: 0; padding: 0 var(--space-3) 0 var(--space-1); background: transparent; color: inherit; cursor: pointer; }
+.playerQueryModeTabWrap .playerQueryModeDragHandle { min-height: 38px; padding: 0; }
+.playerQueryModeTabWrap button[aria-selected="true"] { font-weight: 700; }
+.playerQueryModeTabWrap button:disabled { cursor: not-allowed; opacity: .5; }
+
+.playerQueryModeGrid { display: grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap: var(--space-4); margin-top: var(--space-4); align-items: stretch; }
+.playerQueryColumnPanel { min-width: 0; min-height: 220px; padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-secondary); background: var(--surface-control); }
+.playerQueryMatchRows { display: grid; gap: var(--space-2); overflow: visible; }
+.playerQueryMoreButton { width: 100%; min-height: 44px; margin-top: var(--space-3); }
+
+button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow {
+  width: 100%; min-height: 60px; display: grid;
+  grid-template-columns: 52px 58px minmax(92px, 1fr) 40px minmax(72px, auto) 76px 52px;
+  align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3);
+  overflow: hidden; border: 1px solid var(--border-subtle); border-left: 4px solid var(--text-secondary);
+  border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-primary); box-shadow: none; text-align: left; cursor: pointer;
+}
+button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow.win { border-left-color: var(--status-success); }
+button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow.loss { border-left-color: var(--status-danger); }
+button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow:hover { border-top-color: var(--data-primary); border-right-color: var(--data-primary); border-bottom-color: var(--data-primary); background: var(--surface-control); box-shadow: none; transform: translateY(-1px); }
+.playerQueryCompactMatchRow .phase6HeroAvatarShared { width: 36px; height: 36px; }
+.playerQueryCompactResult,
+.playerQueryCompactScore,
+.playerQueryCompactKad,
+.playerQueryCompactDate { white-space: nowrap; }
+.playerQueryCompactMap,
+.playerQueryCompactHero { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playerQueryCompactResult.result-win { color: var(--status-success); }
+.playerQueryCompactResult.result-loss { color: var(--status-danger); }
+.playerQueryCompactKad,
+.playerQueryCompactDate { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+.playerQueryHeroRows { display: grid; gap: var(--space-2); }
+.playerQueryHeroRow { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--space-3); min-height: 68px; padding: var(--space-2); border-bottom: 1px solid var(--border-subtle); }
+.playerQueryHeroRow:last-child { border-bottom: 0; }
+.playerQueryHeroCopy { display: grid; gap: var(--space-2); min-width: 0; }
+.playerQueryHeroCopy > div:first-child { display: flex; justify-content: space-between; gap: var(--space-3); }
+.playerQueryHeroCopy small,
+.playerQueryLocalEmpty,
+.playerQueryResourceState { color: var(--text-secondary); }
+.playerQueryHeroProgress { height: 7px; overflow: hidden; border-radius: var(--radius-control); background: var(--border-subtle); }
+.playerQueryHeroProgress span { display: block; width: 100%; height: 100%; transform-origin: left; background: var(--data-primary); border-radius: inherit; }
+.playerQuerySkeleton { position: relative; overflow: hidden; min-height: 128px; border-radius: var(--radius-control); background: var(--surface-control); }
+.playerQuerySkeleton::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface-primary) 60%, transparent), transparent); transform: translateX(-100%); animation: player-query-shimmer 1.3s infinite; }
+@keyframes player-query-shimmer { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .playerQuerySkeleton::after { animation: none; } .playerQueryModeTabWrap { transition: none; } }
+@media (max-width:900px) {
+  .playerQueryWorkspace { width: calc(100% - 28px); }
+  .playerQueryIdentityLayout,
+  .playerQueryModeGrid,
+  .playerQueryProfileCard { grid-template-columns: 1fr; }
+  .playerQueryFormControls { grid-template-columns: minmax(0, 1fr) auto; }
+  .playerQueryFormControls > input { grid-column: 1 / -1; }
+  .playerQueryProfileCard dl { justify-self: stretch; }
+  .playerQueryRanksPanel .phase6RoleRankGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow { grid-template-columns: 48px 54px minmax(0,1fr) 36px minmax(64px,auto) 68px 48px; gap: 6px; padding-inline: var(--space-2); }
+}

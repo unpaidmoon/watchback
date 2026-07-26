@@ -9,7 +9,9 @@ import type { MatchFavoriteController } from "../src/features/matches/useMatchFa
 import type { MatchDetailView, MatchSummary, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
-const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const compactDetailSource = ["CompactMatchDetail.tsx", "MatchDetailContent.tsx"]
+  .map((file) => readFileSync(new URL(`../src/features/matches/${file}`, import.meta.url), "utf8"))
+  .join("\n");
 const detailHeaderSource = readFileSync(new URL("../src/features/matches/MatchDetailHeader.tsx", import.meta.url), "utf8");
 const teamTableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");

@@ -1,0 +1,20 @@
+.playerQueryMatchesWorkspace { display:grid; grid-template-rows:auto minmax(0,1fr); gap:18px; min-height:0; height:100%; padding-bottom:24px; }
+.playerQueryMatchesHeader { align-items:flex-start; }
+.playerQueryMatchesBack { display:inline-flex; align-items:center; gap:7px; }
+.playerQueryMatchesWorkbench { display:grid; grid-template-columns:minmax(320px,.92fr) minmax(0,1.45fr); gap:18px; min-height:0; height:min(760px,calc(100vh - 210px)); }
+.playerQueryMatchesList,.playerQueryMatchesDetail { min-height:0; overflow:hidden; }
+.playerQueryMatchesList { overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.playerQueryMatchesTimeline { display:grid; gap:10px; padding:2px 8px 14px 2px; }
+.playerQueryPaginationSentinel { height:1px; pointer-events:none; }
+.playerQueryPaginationStatus,.playerQueryPaginationError { min-height:48px; display:flex; align-items:center; justify-content:center; gap:10px; color:var(--text-muted,#697086); text-align:center; }
+.playerQueryPaginationError { color:var(--danger,#c33); }
+.playerQueryMatchesDetail { display:flex; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.playerQueryMatchesDetail>.phase6CompactDetail,.playerQueryMatchesDetail>.pageState,.playerQueryMatchesDetail>.emptyState { flex:1; min-width:0; }
+.playerQueryMatchesDetail>.phase6CompactDetail { height:auto; min-height:100%; grid-template-rows:auto auto; }
+.playerQueryMatchesDetail>.phase7CompactArenaDetail { grid-template-rows:auto auto auto; }
+@media (max-width:900px) {
+  .playerQueryMatchesWorkspace { height:auto; }
+  .playerQueryMatchesWorkbench { grid-template-columns:1fr; height:auto; }
+  .playerQueryMatchesList { max-height:58vh; }
+  .playerQueryMatchesDetail { min-height:540px; }
+}

@@ -1,0 +1,10 @@
+{
+  "fixtureKind": "synthetic-contract",
+  "samples": [
+    { "season": 15, "response": { "code": 0, "data": { "icon": "https://invalid.example/icon.png", "level": 1, "gameTime": 1, "title": "", "titleIcon": "" } } },
+    { "season": 20, "response": { "code": 0, "data": { "icon": "https://invalid.example/icon.png", "level": 2, "gameTime": 60, "title": "先锋", "titleIcon": "https://invalid.example/title.png" } } },
+    { "season": 21, "response": { "code": 0, "data": { "icon": "", "level": 3, "gameTime": 61, "title": "先锋", "titleIcon": "" } } },
+    { "season": 22, "response": { "code": 0, "data": { "icon": "https://invalid.example/icon.png", "level": 4, "gameTime": 3600, "title": "", "titleIcon": "https://invalid.example/title.png" } } },
+    { "season": 23, "response": { "code": 0, "data": { "icon": "https://invalid.example/icon.png", "level": 123, "gameTime": 45296, "title": "全能", "titleIcon": "https://invalid.example/title.png" } } }
+  ]
+}

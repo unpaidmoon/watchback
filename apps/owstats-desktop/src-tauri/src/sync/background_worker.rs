@@ -17,6 +17,10 @@ pub struct BackgroundRunSummary {
     pub details_written: usize,
     pub failed_details: usize,
     pub snapshot_rebuilt: bool,
+    /// The snapshot input changed while it was being assembled. The caller
+    /// should immediately run the queued local snapshot work again instead of
+    /// reporting the background job as completed.
+    pub snapshot_stale: bool,
 }
 
 pub async fn run_background_job_once(
@@ -116,7 +120,7 @@ async fn run_claimed_job(
                 }
             }
         }))
-        .buffer_unordered(2)
+        .buffer_unordered(4)
         .chunks(10);
     let mut had_failures = false;
     while let Some(results) = result_batches.next().await {
@@ -171,6 +175,7 @@ async fn run_claimed_job(
                 &job.job_id,
                 current_season_revision(store, job.season)?,
             )?;
+            summary.snapshot_stale = true;
             return Ok(summary);
         }
         super::snapshot::SnapshotOutcome::Replaced => summary.snapshot_rebuilt = true,

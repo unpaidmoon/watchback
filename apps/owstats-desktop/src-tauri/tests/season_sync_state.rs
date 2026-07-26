@@ -274,6 +274,44 @@ fn foreground_local_commit_stays_below_250_ms_on_s22_scale_fixture() -> Result<(
 }
 
 #[test]
+fn canonical_mode_history_supplies_quick_watermark_without_background_scan() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let db = OwDatabase::new(temp.path().join("canonical-watermark.sqlite3"));
+    db.initialize()?;
+    let mut conn = db.connect()?;
+    let tx = conn.transaction()?;
+    insert_match(
+        &tx,
+        "known-leisure",
+        23,
+        "normal",
+        "LeisurePreset",
+        1_780_000_000,
+    )?;
+    tx.commit()?;
+    drop(conn);
+    let probe = QuickListProbe {
+        season: 23,
+        list_duration_ms: 0,
+        modes: vec![quick_mode(
+            "normal",
+            "leisure",
+            serde_json::json!({"code":0,"data":{"matchList":[
+                {"matchId":"known-leisure","beginTs":1_780_000_000,"gameMode":"leisure","matchRet":1}
+            ]}}),
+        )],
+    };
+
+    let summary = commit_quick_list_probe(&db, probe)?;
+
+    assert!(!summary.data_changed);
+    assert_eq!(summary.background_status, "idle");
+    assert_eq!(store_active_jobs(&db.connect()?, 23)?, 0);
+    assert_eq!(summary.modes[0].outcome, "unchangedBoundary");
+    Ok(())
+}
+
+#[test]
 fn foreground_partial_failure_preserves_cursor_and_queues_only_failed_mode() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let db = OwDatabase::new(temp.path().join("partial-failure.sqlite3"));

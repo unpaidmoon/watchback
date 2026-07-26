@@ -122,10 +122,10 @@ assert.equal((dialogMarkup.match(/phase7SummaryTraitSlot/g) ?? []).length, rows.
 assert.equal((dialogMarkup.match(/phase7SummaryModSlot/g) ?? []).length, rows.length * 6);
 assert.doesNotMatch(dialogMarkup, /phase6PerkTooltipPanel/);
 
-const compactSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const compactSource = readFileSync(new URL("../src/features/matches/MatchDetailContent.tsx", import.meta.url), "utf8");
 const tableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 
-assert.match(compactSource, /selected\.key === "summary" \? openArenaPlayerSummary : undefined/);
+assert.match(compactSource, /onSelectPlayerSummary=\{selected\.key === "summary" \?/);
 assert.match(compactSource, /buildArenaPlayerRoundSummary\(summaryTarget\.player, arena\.rounds\)/);
 assert.match(tableSource, /onSelectPlayerSummary\?: \(player: PlayerRow, trigger: HTMLButtonElement\) => void/);
 assert.match(tableSource, /aria-label=\{`查看\$\{player\.name\}的汇总卡片`\}/);

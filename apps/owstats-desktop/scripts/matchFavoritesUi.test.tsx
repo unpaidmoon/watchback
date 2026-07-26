@@ -21,7 +21,9 @@ const guardSource = readFileSync(guardUrl, "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
-const compactDetailSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const compactDetailSource = ["CompactMatchDetail.tsx", "MatchDetailContent.tsx"]
+  .map((file) => readFileSync(new URL(`../src/features/matches/${file}`, import.meta.url), "utf8"))
+  .join("\n");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
 const favoriteEditorHookSource = readFileSync(new URL("../src/features/matches/useMatchFavoriteEditor.ts", import.meta.url), "utf8");
 const matchesCss = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
@@ -50,7 +52,7 @@ assert.doesNotMatch(compactDetailSource, /useMatchFavoriteEditor\s*\(/);
 assert.doesNotMatch(detailPaneSource, /useMatchFavoriteEditor\s*\(/);
 assert.match(
   compactDetailSource,
-  /function selectCompactArenaSlice[\s\S]*favoriteController\.confirmDiscard\(\)[\s\S]*selected\.key === "summary"[\s\S]*<MatchFavoriteEditor/,
+  /confirmDiscard:\s*favoriteController\.confirmDiscard[\s\S]*renderFavorite:\s*\(\) => <MatchFavoriteEditor/,
 );
 
 let cleanConfirmCount = 0;

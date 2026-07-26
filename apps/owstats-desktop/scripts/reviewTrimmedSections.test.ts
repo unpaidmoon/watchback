@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { qaRegionsForPath } from "../src/shared/qaFeedback";
 
 const source = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
+const roleRankSource = readFileSync(new URL("../src/features/review/RoleRankOverview.tsx", import.meta.url), "utf8");
 const reviewRegions = qaRegionsForPath("/review").map((region) => region.id);
 
 assert.equal(source.includes("phase6AchievementWall"), false, "review page should keep achievements on their dedicated route");
-assert.equal(source.includes("phase6RoleRankGrid"), true, "review page should keep role rank overview");
+assert.equal(source.includes("<RoleRankOverview"), true, "review page should delegate the role rank overview to the shared component");
+assert.equal(roleRankSource.includes("phase6RoleRankGrid"), true, "shared role rank overview should keep the established grid");
 assert.equal(source.includes("phase6ConclusionList"), false, "review page should remove review evidence conclusions");
 assert.equal(source.includes("phase6BestList"), false, "review page should remove evidence-backed personal best panel");
 assert.equal(source.includes("review.baseline"), false, "review page should remove season summary baseline panel");
@@ -21,10 +23,10 @@ assert.match(source, /review\.heroPool\.mainHeroes\.slice\(0, 3\)\.map/);
 assert.match(source, /<HeroAvatar key=\{hero\.hero\} heroKey=\{hero\.hero\} name=\{hero\.hero\} size="md" \/>/);
 assert.match(source, /<Metric label="赛季对局" value=\{`\$\{review\.summary\.totalMatches\} 场`\} \/>/);
 assert.match(source, /<Metric label="总胜率" value=\{formatWinRate\(review\.summary\.winRate, 0\)\} \/>/);
-assert.match(source, /review\.stadiumRoleSummaries\.map/);
-assert.match(source, /<RoleRankCard key=\{`stadium-\$\{role\.roleType\}`\} role=\{role\} arena \/>/);
+assert.match(source, /stadium=\{review\.stadiumRoleSummaries\}/);
+assert.match(roleRankSource, /roles\.map\(\(role\) => <RoleRankCard/);
 assert.ok(
-  source.indexOf('className="reviewHeroSummary"') < source.indexOf('className="reviewRoleRankGroup"'),
+  source.indexOf('className="reviewHeroSummary"') < source.indexOf("<RoleRankOverview"),
   "season facts should lead the role panel before rank groups",
 );
 assert.match(source, /<div className="reviewReportFlow">[\s\S]*?<RoleAndHeroView[\s\S]*?<FriendAnalysisModules[\s\S]*?<MapAnalysisModules/);

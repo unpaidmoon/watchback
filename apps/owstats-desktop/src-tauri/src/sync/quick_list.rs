@@ -135,7 +135,13 @@ fn commit_mode_page_one(
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()?
-        .flatten();
+        .flatten()
+        .or(canonical_mode_watermark(
+            tx,
+            season,
+            &mode.match_kind,
+            &mode.game_mode,
+        )?);
     let decision = super::classify_quick_page(&payload, &known_ids, watermark);
     if matches!(decision, super::QuickPageDecision::Unsafe) {
         mode_work.push(super::ModeWork {
@@ -234,11 +240,7 @@ fn known_mode_match_ids(
     match_kind: &str,
     game_mode: &str,
 ) -> Result<HashSet<String>> {
-    let (modes, kind) = match (match_kind, game_mode) {
-        ("normal", "sport") => (vec!["sport", "SportPreset", "SportOpen"], "normal"),
-        ("normal", "leisure") => (vec!["leisure", "LeisurePreset", "Leisure6v6"], "normal"),
-        _ => (vec![game_mode], match_kind),
-    };
+    let (modes, kind) = mode_storage_names(match_kind, game_mode);
     let mut statement = tx.prepare(
         "SELECT match_id FROM matches WHERE season=?1 AND match_kind=?2 AND game_mode IN (?3,?4,?5)",
     )?;
@@ -253,6 +255,34 @@ fn known_mode_match_ids(
         |row| row.get::<_, String>(0),
     )?;
     Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
+}
+
+fn canonical_mode_watermark(
+    tx: &Transaction<'_>,
+    season: i64,
+    match_kind: &str,
+    game_mode: &str,
+) -> Result<Option<i64>> {
+    let (modes, kind) = mode_storage_names(match_kind, game_mode);
+    Ok(tx.query_row(
+        "SELECT MAX(begin_ts) FROM matches WHERE season=?1 AND match_kind=?2 AND game_mode IN (?3,?4,?5)",
+        params![
+            season,
+            kind,
+            modes.first().copied().unwrap_or(""),
+            modes.get(1).copied().unwrap_or(""),
+            modes.get(2).copied().unwrap_or("")
+        ],
+        |row| row.get(0),
+    )?)
+}
+
+fn mode_storage_names<'a>(match_kind: &'a str, game_mode: &'a str) -> (Vec<&'a str>, &'a str) {
+    match (match_kind, game_mode) {
+        ("normal", "sport") => (vec!["sport", "SportPreset", "SportOpen"], "normal"),
+        ("normal", "leisure") => (vec!["leisure", "LeisurePreset", "Leisure6v6"], "normal"),
+        _ => (vec![game_mode], match_kind),
+    }
 }
 
 fn upsert_list_entry(
@@ -412,7 +442,13 @@ pub(super) fn commit_background_page(
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()?
-        .flatten();
+        .flatten()
+        .or(canonical_mode_watermark(
+            &tx,
+            job.season,
+            &mode.match_kind,
+            &mode.game_mode,
+        )?);
     let decision = super::classify_quick_page(&payload, &known_ids, watermark);
     if decision == super::QuickPageDecision::Unsafe {
         tx.execute(

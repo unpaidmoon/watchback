@@ -33,11 +33,11 @@ pub struct DashenRateLimitConfig {
 impl Default for DashenRateLimitConfig {
     fn default() -> Self {
         Self {
-            datamsapi_max_concurrent: 2,
-            account_max_requests_per_window: 5,
+            datamsapi_max_concurrent: 4,
+            account_max_requests_per_window: 8,
             account_window_ms: 1_000,
             max_http_attempts: 3,
-            retry_base_ms: 5_000,
+            retry_base_ms: 1_000,
         }
     }
 }
@@ -143,6 +143,28 @@ impl DashenClient {
         ];
         push_season(&mut params, season);
         self.customer_get("fight/queryMatchList", &params, "读取斗技列表")
+            .await
+    }
+
+    pub async fn fight_query_count(
+        &self,
+        customer_token: &str,
+        season: Option<i64>,
+    ) -> Result<Value> {
+        let mut params = vec![("token", customer_token.to_string())];
+        push_season(&mut params, season);
+        self.customer_get("fight/queryCount", &params, "读取竞技角斗统计")
+            .await
+    }
+
+    pub async fn fight_leisure_role_card(
+        &self,
+        customer_token: &str,
+        season: Option<i64>,
+    ) -> Result<Value> {
+        let mut params = vec![("token", customer_token.to_string())];
+        push_season(&mut params, season);
+        self.customer_get("fight/getLeisureFightRoleCard", &params, "读取快速角斗统计")
             .await
     }
 

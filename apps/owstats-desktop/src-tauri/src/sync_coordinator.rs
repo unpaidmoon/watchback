@@ -1,46 +1,150 @@
 use std::sync::{Arc, Mutex};
 
 const SYNC_IN_PROGRESS_MESSAGE: &str = "账号操作或赛季同步正在进行，请等待完成后再试";
+pub const QUERY_BLOCKS_SYNC_MESSAGE: &str = "请先退出玩家查询";
+pub const SYNC_BLOCKS_QUERY_MESSAGE: &str = "当前账号正在同步，请等待完成";
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveOperation {
+    Idle,
+    AccountOperation,
+    ForegroundSync,
+    BackgroundQueued,
+    BackgroundRunning,
+    QuerySession,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationStatus {
+    Idle,
+    Account,
+    ForegroundSync,
+    BackgroundQueued,
+    BackgroundRunning,
+    Query,
+}
+
+#[derive(Clone)]
 pub struct SyncCoordinator {
-    running: Arc<Mutex<bool>>,
+    active: Arc<Mutex<ActiveOperation>>,
+}
+
+impl Default for SyncCoordinator {
+    fn default() -> Self {
+        Self {
+            active: Arc::new(Mutex::new(ActiveOperation::Idle)),
+        }
+    }
 }
 
 pub struct OperationPermit {
-    running: Arc<Mutex<bool>>,
+    active: Arc<Mutex<ActiveOperation>>,
+}
+
+pub struct BackgroundSyncPermit {
+    permit: OperationPermit,
+}
+
+pub struct QuerySessionPermit {
+    #[allow(dead_code)] // consumed by the player-query session module in T2
+    permit: OperationPermit,
 }
 
 impl SyncCoordinator {
-    pub fn try_acquire_account_operation(&self) -> Result<OperationPermit, &'static str> {
-        self.try_acquire()
-    }
-
-    #[allow(dead_code)]
-    pub fn try_acquire_sync(&self) -> Result<OperationPermit, &'static str> {
-        self.try_acquire()
-    }
-
-    fn try_acquire(&self) -> Result<OperationPermit, &'static str> {
-        let mut running = self
-            .running
-            .try_lock()
-            .map_err(|_| SYNC_IN_PROGRESS_MESSAGE)?;
-        if *running {
-            return Err(SYNC_IN_PROGRESS_MESSAGE);
+    pub fn status(&self) -> OperationStatus {
+        let active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match *active {
+            ActiveOperation::Idle => OperationStatus::Idle,
+            ActiveOperation::AccountOperation => OperationStatus::Account,
+            ActiveOperation::ForegroundSync => OperationStatus::ForegroundSync,
+            ActiveOperation::BackgroundQueued => OperationStatus::BackgroundQueued,
+            ActiveOperation::BackgroundRunning => OperationStatus::BackgroundRunning,
+            ActiveOperation::QuerySession => OperationStatus::Query,
         }
-        *running = true;
-        Ok(OperationPermit {
-            running: Arc::clone(&self.running),
+    }
+    pub fn try_acquire_account_operation(&self) -> Result<OperationPermit, &'static str> {
+        self.try_acquire(ActiveOperation::AccountOperation, |_| {
+            SYNC_IN_PROGRESS_MESSAGE
         })
+    }
+
+    pub fn try_acquire_sync(&self) -> Result<OperationPermit, &'static str> {
+        self.try_acquire_sync_kind(ActiveOperation::ForegroundSync)
+    }
+
+    /// Atomically reserves the coordinator before a background task is spawned.
+    /// Holding this permit represents both its queued and running lifetime.
+    pub fn try_register_background_sync(&self) -> Result<BackgroundSyncPermit, &'static str> {
+        self.try_acquire_sync_kind(ActiveOperation::BackgroundQueued)
+            .map(|permit| BackgroundSyncPermit { permit })
+    }
+
+    /// Acquires the permit that must live for the complete in-memory query session.
+    pub fn try_acquire_query_session(&self) -> Result<QuerySessionPermit, &'static str> {
+        self.try_acquire(ActiveOperation::QuerySession, |_| SYNC_BLOCKS_QUERY_MESSAGE)
+            .map(|permit| QuerySessionPermit { permit })
+    }
+
+    fn try_acquire_sync_kind(
+        &self,
+        operation: ActiveOperation,
+    ) -> Result<OperationPermit, &'static str> {
+        self.try_acquire(operation, |active| {
+            if active == ActiveOperation::QuerySession {
+                QUERY_BLOCKS_SYNC_MESSAGE
+            } else {
+                SYNC_IN_PROGRESS_MESSAGE
+            }
+        })
+    }
+
+    fn try_acquire<F>(
+        &self,
+        operation: ActiveOperation,
+        rejection: F,
+    ) -> Result<OperationPermit, &'static str>
+    where
+        F: FnOnce(ActiveOperation) -> &'static str,
+    {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *active != ActiveOperation::Idle {
+            return Err(rejection(*active));
+        }
+        *active = operation;
+        Ok(OperationPermit {
+            active: Arc::clone(&self.active),
+        })
+    }
+}
+
+impl BackgroundSyncPermit {
+    pub fn mark_running(&mut self) {
+        let mut active = self
+            .permit
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        debug_assert_eq!(*active, ActiveOperation::BackgroundQueued);
+        if *active == ActiveOperation::BackgroundQueued {
+            *active = ActiveOperation::BackgroundRunning;
+        }
     }
 }
 
 impl Drop for OperationPermit {
     fn drop(&mut self) {
-        if let Ok(mut running) = self.running.lock() {
-            *running = false;
-        }
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *active = ActiveOperation::Idle;
     }
 }
 
@@ -52,23 +156,59 @@ mod tests {
     fn account_operation_blocks_sync_until_permit_is_dropped() {
         let coordinator = SyncCoordinator::default();
         let guard = coordinator.try_acquire_account_operation().unwrap();
-        assert!(matches!(
-            coordinator.try_acquire_sync(),
-            Err(SYNC_IN_PROGRESS_MESSAGE)
-        ));
+        assert!(coordinator.try_acquire_sync().is_err());
         drop(guard);
         assert!(coordinator.try_acquire_sync().is_ok());
     }
 
     #[test]
-    fn sync_blocks_account_operation_until_permit_is_dropped() {
+    fn sync_blocks_query_until_permit_is_dropped() {
         let coordinator = SyncCoordinator::default();
         let guard = coordinator.try_acquire_sync().unwrap();
         assert!(matches!(
-            coordinator.try_acquire_account_operation(),
-            Err(SYNC_IN_PROGRESS_MESSAGE)
+            coordinator.try_acquire_query_session(),
+            Err(SYNC_BLOCKS_QUERY_MESSAGE)
         ));
         drop(guard);
-        assert!(coordinator.try_acquire_account_operation().is_ok());
+        assert!(coordinator.try_acquire_query_session().is_ok());
+    }
+
+    #[test]
+    fn status_is_a_secret_free_operation_category() {
+        let coordinator = SyncCoordinator::default();
+        assert_eq!(coordinator.status(), OperationStatus::Idle);
+        let query = coordinator.try_acquire_query_session().unwrap();
+        assert_eq!(coordinator.status(), OperationStatus::Query);
+        let json = serde_json::to_string(&coordinator.status()).unwrap();
+        assert_eq!(json, "\"query\"");
+        drop(query);
+        assert_eq!(coordinator.status(), OperationStatus::Idle);
+    }
+
+    #[test]
+    fn query_blocks_foreground_and_background_sync_until_released() {
+        let coordinator = SyncCoordinator::default();
+        let query = coordinator.try_acquire_query_session().unwrap();
+        assert!(matches!(
+            coordinator.try_acquire_sync(),
+            Err(QUERY_BLOCKS_SYNC_MESSAGE)
+        ));
+        assert!(matches!(
+            coordinator.try_register_background_sync(),
+            Err(QUERY_BLOCKS_SYNC_MESSAGE)
+        ));
+        drop(query);
+        assert!(coordinator.try_acquire_sync().is_ok());
+    }
+
+    #[test]
+    fn queued_and_running_background_sync_both_block_query() {
+        let coordinator = SyncCoordinator::default();
+        let mut background = coordinator.try_register_background_sync().unwrap();
+        assert!(coordinator.try_acquire_query_session().is_err());
+        background.mark_running();
+        assert!(coordinator.try_acquire_query_session().is_err());
+        drop(background);
+        assert!(coordinator.try_acquire_query_session().is_ok());
     }
 }

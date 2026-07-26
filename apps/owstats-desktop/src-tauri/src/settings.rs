@@ -9,6 +9,43 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 
+/// Stable, global ordering used when the settings file has no player-query
+/// preference yet. This preference is deliberately unrelated to an account or
+/// an active query session.
+pub const DEFAULT_PLAYER_QUERY_MODE_ORDER: [&str; 6] = [
+    "LeisurePreset",
+    "Leisure6v6",
+    "SportPreset",
+    "SportOpen",
+    "SportFight",
+    "LeisureFight",
+];
+
+/// Makes persisted player-query mode preferences forward/backward compatible:
+/// unknown values are ignored, duplicates keep their first occurrence, and
+/// newly introduced or missing modes are appended in the default order.
+pub fn normalize_player_query_mode_order<I, S>(modes: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut normalized = Vec::with_capacity(DEFAULT_PLAYER_QUERY_MODE_ORDER.len());
+    for mode in modes {
+        let mode = mode.as_ref();
+        if DEFAULT_PLAYER_QUERY_MODE_ORDER.contains(&mode)
+            && !normalized.iter().any(|saved| saved == mode)
+        {
+            normalized.push(mode.to_string());
+        }
+    }
+    for mode in DEFAULT_PLAYER_QUERY_MODE_ORDER {
+        if !normalized.iter().any(|saved| saved == mode) {
+            normalized.push(mode.to_string());
+        }
+    }
+    normalized
+}
+
 pub fn get_player_profile_for_path(path: &Path, role_id: Option<i64>) -> Result<PlayerProfile> {
     let mut profile = read_json::<PlayerProfile>(path)?.unwrap_or(PlayerProfile {
         role_id,
@@ -225,12 +262,21 @@ fn safe_player_id(candidate: Option<String>, role_id: Option<i64>) -> Option<Str
 }
 
 pub fn get_user_settings_for_path(path: &Path) -> Result<UserSettings> {
-    Ok(read_json::<UserSettings>(path)?.unwrap_or_default())
+    let settings = read_json::<UserSettings>(path)?.unwrap_or_default();
+    Ok(UserSettings {
+        theme: normalize_theme(&settings.theme).to_string(),
+        player_query_mode_order: normalize_player_query_mode_order(
+            settings.player_query_mode_order,
+        ),
+    })
 }
 
 pub fn save_user_settings_for_path(path: &Path, settings: UserSettings) -> Result<UserSettings> {
     let normalized = UserSettings {
         theme: normalize_theme(&settings.theme).to_string(),
+        player_query_mode_order: normalize_player_query_mode_order(
+            settings.player_query_mode_order,
+        ),
     };
     write_json(path, &normalized)?;
     Ok(normalized)
@@ -297,6 +343,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn player_query_mode_order_defaults_to_all_six_modes() {
+        assert_eq!(
+            normalize_player_query_mode_order(std::iter::empty::<&str>()),
+            DEFAULT_PLAYER_QUERY_MODE_ORDER.map(str::to_string)
+        );
+    }
+
+    #[test]
+    fn player_query_mode_order_filters_unknown_deduplicates_and_fills_missing() {
+        assert_eq!(
+            normalize_player_query_mode_order([
+                "SportOpen",
+                "future-mode",
+                "SportOpen",
+                "LeisurePreset",
+            ]),
+            [
+                "SportOpen",
+                "LeisurePreset",
+                "Leisure6v6",
+                "SportPreset",
+                "SportFight",
+                "LeisureFight",
+            ]
+            .map(str::to_string)
+        );
+    }
+
+    #[test]
     fn missing_profile_never_serializes_role_id_as_player_identity() {
         let temp = tempfile::tempdir().unwrap();
         let role_id = 42424242;
@@ -352,6 +427,7 @@ mod tests {
             &path,
             UserSettings {
                 theme: "solarized".to_string(),
+                ..UserSettings::default()
             },
         )
         .unwrap();

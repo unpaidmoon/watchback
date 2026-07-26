@@ -648,7 +648,7 @@ pub async fn sync_season(
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
 ) -> Result<SeasonSyncResult, String> {
     let _permit = operation_coordinator
-        .try_acquire_account_operation()
+        .try_acquire_sync()
         .map_err(str::to_string)?;
     let account = active_account(&accounts)?;
     let root = account.paths().seasons();
@@ -710,6 +710,135 @@ pub async fn sync_season(
 }
 
 #[tauri::command]
+pub async fn player_query_start(
+    accounts: State<'_, AccountContextManager>,
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    battle_tag: String,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::SessionStart> {
+    let account = active_account(&accounts)
+        .map_err(crate::player_query::models::QueryError::SessionInvalid)?;
+    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
+        .map_err(|_| {
+            crate::player_query::models::QueryError::SessionInvalid(
+                "登录凭证不可用，请重新登录".to_string(),
+            )
+        })?;
+    let credentials = crate::dashen_client::DashenCredentials {
+        role_id: credentials.role_id,
+        token: credentials.token,
+        dts: credentials.dts.and_then(|value| value.parse().ok()),
+        server: credentials.server,
+    };
+    let client = crate::dashen_client::DashenClient::new(credentials, DASHEN_ROOT_BASE.to_string())
+        .and_then(crate::player_query::upstream::DashenPlayerQueryUpstream::new)
+        .map_err(|_| {
+            crate::player_query::models::QueryError::Upstream("无法初始化查询，请重试".to_string())
+        })?;
+    service.start_query(&battle_tag, Arc::new(client)).await
+}
+
+#[tauri::command]
+pub fn get_operation_status(
+    coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+) -> crate::sync_coordinator::OperationStatus {
+    coordinator.status()
+}
+
+#[tauri::command]
+pub async fn player_query_card(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::PlayerQueryCard> {
+    service.load_card(&session_id).await
+}
+
+#[tauri::command]
+pub async fn player_query_card_images(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::PlayerQueryCardImages> {
+    service.load_card_images(&session_id).await
+}
+
+#[tauri::command]
+pub async fn player_query_season(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+    season: i64,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::SeasonOverview> {
+    service
+        .load_season(&session_id, player_query_season_value(season)?)
+        .await
+}
+
+#[tauri::command]
+pub async fn player_query_mode_page(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+    season: i64,
+    mode: crate::player_query::models::QueryMode,
+    page: u32,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::ModePage> {
+    service
+        .load_mode_page(&session_id, player_query_season_value(season)?, mode, page)
+        .await
+}
+
+#[tauri::command]
+pub async fn player_query_mode_heroes(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+    season: i64,
+    mode: crate::player_query::models::QueryMode,
+) -> crate::player_query::models::QueryResult<Vec<crate::player_query::models::HeroUsage>> {
+    service
+        .load_mode_heroes(&session_id, player_query_season_value(season)?, mode)
+        .await
+}
+
+#[tauri::command]
+pub async fn player_query_match_detail(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+    match_kind: crate::player_query::models::MatchKind,
+    match_id: String,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::MatchDetailView> {
+    service
+        .load_match_detail(&session_id, match_kind, &match_id)
+        .await
+}
+
+#[tauri::command]
+pub fn player_query_release_more_data(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+) -> crate::player_query::models::QueryResult<()> {
+    service.release_more_data(&session_id)
+}
+
+#[tauri::command]
+pub fn player_query_end(
+    service: State<'_, crate::player_query::PlayerQueryService>,
+    session_id: String,
+) {
+    service.end_query(&session_id);
+}
+
+fn player_query_season_value(
+    season: i64,
+) -> crate::player_query::models::QueryResult<crate::player_query::models::Season> {
+    use crate::player_query::models::{QueryError, Season};
+    match season {
+        15 => Ok(Season::S15),
+        20 => Ok(Season::S20),
+        21 => Ok(Season::S21),
+        22 => Ok(Season::S22),
+        23 => Ok(Season::S23),
+        _ => Err(QueryError::InvalidInput("不支持的赛季".to_string())),
+    }
+}
+
+#[tauri::command]
 pub fn season_sync_status(
     accounts: State<'_, AccountContextManager>,
     season: i64,
@@ -728,18 +857,14 @@ pub fn retry_season_background_sync(
     season: i64,
 ) -> Result<bool, String> {
     let account = active_account(&accounts)?;
-    let queued = crate::SeasonSyncStore::new(account.database())
-        .retry_season(season)
-        .map_err(to_message)?;
-    if queued {
-        background_sync.wake(
-            account.account_id().as_str(),
-            account.paths().clone(),
-            season,
-            background_event_sink(&app),
-        );
-    }
-    Ok(queued)
+    let store = crate::SeasonSyncStore::new(account.database());
+    background_sync.wake_after_prepare(
+        account.account_id().as_str(),
+        account.paths().clone(),
+        season,
+        background_event_sink(&app),
+        || store.retry_season(season).map_err(to_message),
+    )
 }
 
 fn background_event_sink(app: &AppHandle) -> crate::BackgroundEventSink {

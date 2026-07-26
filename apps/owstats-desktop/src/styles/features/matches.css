@@ -802,6 +802,33 @@ body:has(.matchesPage) {
   padding: 0;
 }
 
+.phase6WorkbenchList .matchListCardQueryData {
+  grid-template-columns: 60px minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(64px, 0.6fr);
+}
+
+.phase6WorkbenchList .matchListCardQueryHero {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.phase6WorkbenchList .matchListCardQueryHero strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.phase6WorkbenchList .matchListCard-playerQuery .matchListCardArenaLabel {
+  font-size: 12px;
+}
+
 .phase7CompactAvatarSummaryButton {
   width: 100%;
   padding: 0;
@@ -816,6 +843,7 @@ body:has(.matchesPage) {
 
 .phase7CompactAvatarSummaryButton:focus-visible,
 .phase7CompactPlayerRowToggle:focus-visible,
+.matchTeamPlayerQueryButton:focus-visible,
 .phase7SummaryCloseButton:focus-visible {
   outline: 2px solid var(--data-primary);
   outline-offset: 2px;
@@ -954,6 +982,23 @@ body:has(.matchesPage) {
 
 .phase7SummarySlots.trait {
   grid-template-columns: repeat(4, 44px);
+}
+
+.matchTeamPlayerQueryButton {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matchTeamPlayerQueryButton:hover {
+  color: var(--data-primary);
+  text-decoration: underline;
 }
 
 .phase7SummarySlots.mod {

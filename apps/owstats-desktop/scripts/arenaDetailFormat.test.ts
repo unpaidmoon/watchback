@@ -21,7 +21,7 @@ assert.equal(arenaHeaderTitle(summary), "国王大道");
 assert.equal(arenaHeaderTitle(round), "地图：阿努比斯王座");
 
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
-const compactSource = readFileSync(new URL("../src/features/matches/CompactMatchDetail.tsx", import.meta.url), "utf8");
+const compactSource = readFileSync(new URL("../src/features/matches/MatchDetailContent.tsx", import.meta.url), "utf8");
 const teamTableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 
 assert.equal(styleSource.includes(".phase7ArenaTab + .phase7ArenaTab"), true, "arena tabs should overlap adjacent slants");
@@ -53,8 +53,8 @@ assert.equal(compactSource.includes("const variant = slots === 4 ? \"trait\" : \
 assert.equal(compactSource.includes("phase7ArenaSlotName"), true, "compact arena trait slots should render mapped names beside icons");
 assert.equal(compactSource.includes("const displayName = info?.name ?? guid"), true, "unmapped arena slots should use their raw GUID as the display fallback");
 assert.equal(compactSource.includes("fallbackName="), false, "arena slot groups should not keep a pending-text fallback");
-assert.equal(compactSource.includes('CompactArenaSlotGroup title="异能" guids={player.traitGuids} slots={4} />'), true, "compact arena trait slots should be fixed to four without a pending-text fallback");
-assert.equal(compactSource.includes('CompactArenaSlotGroup title="装备" guids={player.modGuids} slots={6} />'), true, "compact arena mod slots should be fixed to six without a pending-text fallback");
+assert.match(compactSource, /ArenaSlotGroup title="[^"]+" guids=\{player\.traitGuids\} slots=\{4\} \/>/, "compact arena trait slots should be fixed to four without a pending-text fallback");
+assert.match(compactSource, /ArenaSlotGroup title="[^"]+" guids=\{player\.modGuids\} slots=\{6\} \/>/, "compact arena mod slots should be fixed to six without a pending-text fallback");
 assert.equal(compactSource.includes("aria-label={guid ? displayName : undefined}"), true, "missing compact arena slot mappings should expose their raw GUID in the accessibility label");
 assert.equal(compactSource.includes("<strong>{displayName}</strong>"), true, "missing compact arena slot mappings should expose their raw GUID in the tooltip");
 assert.equal(compactSource.includes("暂无装备"), false, "empty compact arena mod slots should not render empty copy");
@@ -86,7 +86,7 @@ assert.match(
 );
 assert.doesNotMatch(compactSource, /return `\$\{player\.worth\} -> \$\{player\.endWorth\}`;/);
 assert.equal(compactSource.includes('economyMode={selected.key === "summary" ? "final" : "round"}'), true, "compact arena summary and rounds should use separate economy display modes");
-assert.equal(compactSource.includes('function formatCompactArenaEconomy(player: PlayerRow, mode: "final" | "round"): string'), true, "compact arena economy formatter should know whether it is rendering summary or round detail");
+assert.equal(compactSource.includes('function formatArenaEconomy(player: PlayerRow, mode: "final" | "round"): string'), true, "compact arena economy formatter should know whether it is rendering summary or round detail");
 const highlightRule = styleSource.match(/\.phase6StatHighlight\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
 assert.equal(highlightRule.includes("background:"), false, "stat highlight should use slight text color only, without a background block");
 assert.equal(highlightRule.includes("text-shadow:"), false, "stat highlight should avoid glow");

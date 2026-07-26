@@ -1,0 +1,16 @@
+{
+  "fixtureKind": "synthetic-contract",
+  "code": 0,
+  "data": {
+    "matchId": "arena-detail-001",
+    "totalCount": { "matchRet": 1, "teamScore": 3, "opponentScore": 2, "gameTimeSec": 901 },
+    "roundCountList": [
+      { "round": 1, "mapGuid": "arena-round-alpha", "mapName": "示例角斗场A", "matchRet": 1, "gameTimeSec": 301 },
+      { "round": 2, "mapGuid": "arena-round-beta", "mapName": "示例角斗场B", "matchRet": 2, "gameTimeSec": 310 },
+      { "round": 3, "mapGuid": "arena-round-gamma", "mapName": "示例角斗场C", "matchRet": 1, "gameTimeSec": 290 }
+    ],
+    "teammateList": [],
+    "enemyList": [],
+    "heroList": [{ "heroGuid": "hero-stadium", "gameTimeSec": 901, "equipment": [{ "id": "equipment-a" }], "powers": [{ "id": "power-a" }] }]
+  }
+}

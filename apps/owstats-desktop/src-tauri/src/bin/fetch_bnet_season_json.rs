@@ -69,12 +69,12 @@ impl FetchArgs {
             customer_token: None,
             output_path: None,
             pages_per_batch: 5,
-            detail_concurrency: 2,
-            account_rps: 5,
+            detail_concurrency: 4,
+            account_rps: 8,
             account_window_ms: 1_000,
-            datamsapi_concurrency: 2,
+            datamsapi_concurrency: 4,
             max_http_attempts: 3,
-            retry_base_ms: 5_000,
+            retry_base_ms: 1_000,
             include_fight: true,
         })
     }
@@ -87,12 +87,12 @@ impl FetchArgs {
         let mut customer_token = None;
         let mut output_path = None;
         let mut pages_per_batch = 5_i64;
-        let mut detail_concurrency = 2_usize;
-        let mut account_rps = 5_usize;
+        let mut detail_concurrency = 4_usize;
+        let mut account_rps = 8_usize;
         let mut account_window_ms = 1_000_u64;
-        let mut datamsapi_concurrency = 2_usize;
+        let mut datamsapi_concurrency = 4_usize;
         let mut max_http_attempts = 3_usize;
-        let mut retry_base_ms = 5_000_u64;
+        let mut retry_base_ms = 1_000_u64;
         let mut include_fight = true;
         let mut index = 0_usize;
         while index < tokens.len() {
@@ -482,12 +482,12 @@ mod tests {
             Some(PathBuf::from("cached-player.json"))
         );
         assert_eq!(args.pages_per_batch, 5);
-        assert_eq!(args.detail_concurrency, 2);
-        assert_eq!(args.account_rps, 5);
+        assert_eq!(args.detail_concurrency, 4);
+        assert_eq!(args.account_rps, 8);
         assert_eq!(args.account_window_ms, 1000);
-        assert_eq!(args.datamsapi_concurrency, 2);
+        assert_eq!(args.datamsapi_concurrency, 4);
         assert_eq!(args.max_http_attempts, 3);
-        assert_eq!(args.retry_base_ms, 5000);
+        assert_eq!(args.retry_base_ms, 1000);
         assert!(args.include_fight);
     }
 

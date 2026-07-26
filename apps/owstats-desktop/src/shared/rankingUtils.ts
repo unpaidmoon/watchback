@@ -26,7 +26,8 @@ export function modeLabel(mode: string) {
 }
 
 export function formatWinRate(value: number, digits = 1) {
-  return `${(value * 100).toFixed(digits)}%`;
+  const percentage = Math.abs(value) <= 1 ? value * 100 : value;
+  return `${percentage.toFixed(digits)}%`;
 }
 
 export function formatPlayTimeHours(value: number) {

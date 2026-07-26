@@ -1,0 +1,8 @@
+{
+  "fixtureKind": "synthetic-contract",
+  "code": 0,
+  "data": {
+    "battleTag": "ContractPlayer#1001",
+    "accountKey": "synthetic-account-key"
+  }
+}

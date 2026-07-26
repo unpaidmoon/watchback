@@ -24,6 +24,7 @@ pub mod login_target;
 mod match_evaluation;
 mod match_favorites;
 mod models;
+pub mod player_query;
 pub mod player_target;
 mod queries;
 pub mod ranking;
@@ -1007,11 +1008,13 @@ pub fn run() -> anyhow::Result<()> {
     let sync_coordinator = sync_coordinator::SyncCoordinator::default();
     let background_manager =
         background_sync::BackgroundSeasonSyncManager::new(sync_coordinator.clone());
+    let player_query_service = player_query::PlayerQueryService::new(sync_coordinator.clone());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(published_data)
         .manage(background_manager)
+        .manage(player_query_service)
         .setup(move |app| {
             let account_context = account_context::AccountContextManager::load(shared.clone())
                 .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
@@ -1090,6 +1093,16 @@ pub fn run() -> anyhow::Result<()> {
             commands::season_sync_status,
             commands::retry_season_background_sync,
             commands::sync_season,
+            commands::get_operation_status,
+            commands::player_query_start,
+            commands::player_query_card,
+            commands::player_query_card_images,
+            commands::player_query_season,
+            commands::player_query_mode_page,
+            commands::player_query_mode_heroes,
+            commands::player_query_match_detail,
+            commands::player_query_release_more_data,
+            commands::player_query_end,
         ])
         .run(tauri::generate_context!())
         .map_err(|_| anyhow::Error::new(StartupFailure::GenericStartup))

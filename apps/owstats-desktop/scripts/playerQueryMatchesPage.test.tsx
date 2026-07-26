@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const page=readFileSync(new URL("../src/pages/PlayerQueryMatchesPage.tsx",import.meta.url),"utf8");
+assert.match(page,/battleTag} · S\$\{season} ·/); assert.match(page,/返回查询/); assert.match(page,/PlayerQueryMatchesWorkbench/);
+assert.doesNotMatch(page, /对局详情按选择加载|列表滚动到底部后按页加载/);
+assert.match(page, /className="playerQueryMatchesHeader"/);
+assert.doesNotMatch(page,/筛选|收藏|AI 锐评|赛季切换|模式切换|localStorage|sessionStorage/);
+const source=readFileSync(new URL("../src/features/player-query/PlayerQueryMatchesWorkbench.tsx",import.meta.url),"utf8");
+const styles=readFileSync(new URL("../src/styles/features/player-query-matches.css",import.meta.url),"utf8");
+assert.match(source,/setDetail\(null\)[\s\S]*setDetailLoading\(true\)/); assert.match(source,/variant="playerQuery"/); assert.doesNotMatch(source,/localStorage|sessionStorage/);
+assert.match(styles,/\.playerQueryMatchesDetail\s*\{[^}]*overflow-y:auto/s,"query detail pane must scroll independently");
+console.log("player query matches page tests passed");

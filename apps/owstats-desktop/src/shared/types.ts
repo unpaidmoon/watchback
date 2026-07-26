@@ -183,6 +183,7 @@ export type PlayerProfile = {
 
 export type UserSettings = {
   theme: "system" | "light" | "dark";
+  playerQueryModeOrder: import("../features/player-query/playerQueryTypes").PlayerQueryMode[];
 };
 
 export type UpdateCheckResult = {

@@ -6,7 +6,7 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const rankingCss = readFileSync(new URL("../src/styles/features/ranking.css", import.meta.url), "utf8");
 
-assert.equal(phase6NavItems.map((item) => item.label).join(","), "对局,战报,成就,排行,生涯 MMR,指挥台");
+assert.equal(phase6NavItems.map((item) => item.label).join(","), "对局,查询,战报,成就,排行,生涯 MMR,指挥台");
 assert.match(appSource, /path="\/" element=\{<Navigate to="\/matches" replace \/>\}/);
 assert.match(rankingSource, /<PageHeader/);
 assert.match(rankingSource, /<PageSeasonSelect/);

@@ -13,6 +13,16 @@ const NAV_REGION: QaRegionDefinition = { id: "NAV-CAPSULE", label: "顶部胶囊
 
 export const phase6QaPages: QaPageDefinition[] = [
   {
+    key: "/player-query",
+    label: "查询",
+    regions: [NAV_REGION],
+  },
+  {
+    key: "/player-query/matches",
+    label: "查询对局",
+    regions: [NAV_REGION],
+  },
+  {
     key: "/onboarding",
     label: "指挥台",
     regions: [

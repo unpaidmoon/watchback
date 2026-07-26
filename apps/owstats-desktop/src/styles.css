@@ -9,3 +9,5 @@
 @import "./styles/features/ranking.css";
 @import "./styles/features/friends.css";
 @import "./styles/features/career-mmr.css";
+@import "./styles/features/player-query.css";
+@import "./styles/features/player-query-matches.css";

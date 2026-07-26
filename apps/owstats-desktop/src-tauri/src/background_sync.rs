@@ -59,6 +59,52 @@ impl BackgroundSeasonSyncManager {
         )
     }
 
+    /// Atomically reserves background-sync admission, executes the queued-state
+    /// transition, and publishes the worker with that same permit. If admission
+    /// is denied, `prepare` is never called, so query sessions cannot race with
+    /// a retry write to the sync database.
+    pub fn wake_after_prepare<F>(
+        &self,
+        account_scope: &str,
+        paths: AccountPaths,
+        season: i64,
+        events: BackgroundEventSink,
+        prepare: F,
+    ) -> Result<bool, String>
+    where
+        F: FnOnce() -> Result<bool, String>,
+    {
+        let Some(background_permit) = self.reserve_after_prepare(prepare)? else {
+            return Ok(false);
+        };
+        Ok(self.spawn_with_permit(
+            account_scope,
+            paths,
+            season,
+            DASHEN_CUSTOMER_BASE.to_string(),
+            Some(events),
+            background_permit,
+        ))
+    }
+
+    fn reserve_after_prepare<F>(
+        &self,
+        prepare: F,
+    ) -> Result<Option<crate::sync_coordinator::BackgroundSyncPermit>, String>
+    where
+        F: FnOnce() -> Result<bool, String>,
+    {
+        let permit = self
+            .operation_coordinator
+            .try_register_background_sync()
+            .map_err(str::to_string)?;
+        if prepare()? {
+            Ok(Some(permit))
+        } else {
+            Ok(None)
+        }
+    }
+
     #[doc(hidden)]
     pub fn wake_headless(
         &self,
@@ -78,6 +124,31 @@ impl BackgroundSeasonSyncManager {
         customer_base_url: String,
         events: Option<BackgroundEventSink>,
     ) -> bool {
+        // Reserve the queued state before publishing/spawning the task. This closes
+        // the window where a query session could start ahead of an already queued job.
+        let background_permit = match self.operation_coordinator.try_register_background_sync() {
+            Ok(permit) => permit,
+            Err(_) => return false,
+        };
+        self.spawn_with_permit(
+            account_scope,
+            paths,
+            season,
+            customer_base_url,
+            events,
+            background_permit,
+        )
+    }
+
+    fn spawn_with_permit(
+        &self,
+        account_scope: &str,
+        paths: AccountPaths,
+        season: i64,
+        customer_base_url: String,
+        events: Option<BackgroundEventSink>,
+        background_permit: crate::sync_coordinator::BackgroundSyncPermit,
+    ) -> bool {
         let key = AccountSeasonKey {
             account_scope: account_scope.to_string(),
             season,
@@ -95,7 +166,13 @@ impl BackgroundSeasonSyncManager {
         let manager = self.clone();
         tauri::async_runtime::spawn(async move {
             manager
-                .run_task(&key, paths, customer_base_url, events.as_ref())
+                .run_task(
+                    &key,
+                    paths,
+                    customer_base_url,
+                    events.as_ref(),
+                    background_permit,
+                )
                 .await;
             if let Ok(mut running) = manager.running.lock() {
                 running.remove(&key);
@@ -111,24 +188,9 @@ impl BackgroundSeasonSyncManager {
         paths: AccountPaths,
         customer_base_url: String,
         events: Option<&BackgroundEventSink>,
+        mut background_permit: crate::sync_coordinator::BackgroundSyncPermit,
     ) {
-        let _permit = loop {
-            match self.operation_coordinator.try_acquire_sync() {
-                Ok(permit) => break permit,
-                Err(_) => {
-                    emit(
-                        events,
-                        "season-background-progress",
-                        key,
-                        "queued",
-                        "queued",
-                        0,
-                        0,
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            }
-        };
+        background_permit.mark_running();
         let db = OwDatabase::for_account(&paths);
         let store = SeasonSyncStore::new(db);
         let _ = store.requeue_orphaned_running();
@@ -159,7 +221,25 @@ impl BackgroundSeasonSyncManager {
                 return;
             }
         };
-        match run_background_job_once(&store, &request, &paths.seasons()).await {
+        let result = loop {
+            let result = run_background_job_once(&store, &request, &paths.seasons()).await;
+            match &result {
+                Ok(summary) if summary.snapshot_stale => {
+                    emit(
+                        events,
+                        "season-background-progress",
+                        key,
+                        "rebuildSnapshot",
+                        "running",
+                        summary.new_list_matches,
+                        summary.failed_details,
+                    );
+                    continue;
+                }
+                _ => break result,
+            }
+        };
+        match result {
             Ok(summary) => {
                 if summary.new_list_matches > 0 {
                     emit(
@@ -183,6 +263,7 @@ impl BackgroundSeasonSyncManager {
                         summary.failed_details,
                     );
                 }
+                let persisted_status = store.season_status(key.season).ok();
                 if summary.failed_details > 0 {
                     emit(
                         events,
@@ -193,7 +274,10 @@ impl BackgroundSeasonSyncManager {
                         summary.new_list_matches,
                         summary.failed_details,
                     );
-                } else {
+                } else if persisted_status
+                    .as_ref()
+                    .is_some_and(|status| status.status == "completed")
+                {
                     emit(
                         events,
                         "season-background-completed",
@@ -202,6 +286,25 @@ impl BackgroundSeasonSyncManager {
                         "completed",
                         summary.new_list_matches,
                         0,
+                    );
+                } else {
+                    let phase = persisted_status
+                        .as_ref()
+                        .map_or("background", |status| status.phase.as_str());
+                    let status = persisted_status
+                        .as_ref()
+                        .map_or("queued", |status| status.status.as_str());
+                    let pending = persisted_status
+                        .as_ref()
+                        .map_or(0, |status| status.pending_details);
+                    emit(
+                        events,
+                        "season-background-progress",
+                        key,
+                        phase,
+                        status,
+                        summary.new_list_matches,
+                        pending,
                     );
                 }
             }
@@ -297,7 +400,7 @@ fn request_for_account(
         season,
         customer_base_url,
         pages_per_batch: 5,
-        detail_concurrency: 2,
+        detail_concurrency: 4,
         include_fight: true,
     })
 }
@@ -328,7 +431,8 @@ fn emit(
 
 #[cfg(test)]
 mod tests {
-    use super::BackgroundEvent;
+    use super::{BackgroundEvent, BackgroundSeasonSyncManager};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn event_payloads_are_anonymous_and_bounded() {
@@ -371,5 +475,21 @@ mod tests {
         ] {
             assert!(!serialized.contains(forbidden));
         }
+    }
+
+    #[test]
+    fn active_query_rejects_retry_before_prepare_can_write() {
+        let coordinator = crate::sync_coordinator::SyncCoordinator::default();
+        let manager = BackgroundSeasonSyncManager::new(coordinator.clone());
+        let _query = coordinator.try_acquire_query_session().unwrap();
+        let prepared = AtomicBool::new(false);
+
+        let result = manager.reserve_after_prepare(|| {
+            prepared.store(true, Ordering::SeqCst);
+            Ok(true)
+        });
+
+        assert!(result.is_err());
+        assert!(!prepared.load(Ordering::SeqCst));
     }
 }
