@@ -325,7 +325,11 @@ impl AccountContextManager {
         })
     }
 
-    fn database_for(&self, account_id: &AccountId, paths: &AccountPaths) -> Result<crate::OwDatabase> {
+    fn database_for(
+        &self,
+        account_id: &AccountId,
+        paths: &AccountPaths,
+    ) -> Result<crate::OwDatabase> {
         let mut databases = self
             .databases
             .lock()

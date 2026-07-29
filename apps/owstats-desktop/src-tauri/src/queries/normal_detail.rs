@@ -157,49 +157,52 @@ pub(super) fn team_awards_for_matches(
     let placeholders = std::iter::repeat_n("?", match_ids.len())
         .collect::<Vec<_>>()
         .join(",");
-    let mut stmt = conn.prepare(
-        &format!(r#"
+    let mut stmt = conn.prepare(&format!(
+        r#"
         SELECT match_id, side, player_name, bnet_id, hero_guid, hero_name, kill, assist, death,
                hero_damage, cure, resist_damage, final_hit, target_competing_time,
                healing_taken, damage_taken
         FROM match_players
         WHERE match_id IN ({placeholders}) AND side='teammate'
         ORDER BY match_id, is_current_player DESC, rowid ASC
-        "#),
-    )?;
+        "#
+    ))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(match_ids), |row| {
-        Ok((row.get::<_, String>(0)?, PlayerRow {
-            side: row.get(1)?,
-            name: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            bnet_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            rank_label: None,
-            rank_key: None,
-            hero_guid: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            hero_name: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-            kills: row.get(6)?,
-            assists: row.get(7)?,
-            deaths: row.get(8)?,
-            damage: row.get(9)?,
-            healing: row.get(10)?,
-            mitigation: row.get(11)?,
-            final_hits: row.get(12)?,
-            target_time_sec: row.get(13)?,
-            healing_taken: row.get(14)?,
-            damage_taken: row.get(15)?,
-            worth: None,
-            end_worth: None,
-            worth_max: false,
-            mod_guids: Vec::new(),
-            trait_guids: Vec::new(),
-            has_source_max_flags: false,
-            kill_max: false,
-            hero_damage_max: false,
-            cure_max: false,
-            resist_damage_max: false,
-            perks: Vec::new(),
-            hero_stats: Vec::new(),
-            party_group: None,
-        }))
+        Ok((
+            row.get::<_, String>(0)?,
+            PlayerRow {
+                side: row.get(1)?,
+                name: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                bnet_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                rank_label: None,
+                rank_key: None,
+                hero_guid: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                hero_name: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                kills: row.get(6)?,
+                assists: row.get(7)?,
+                deaths: row.get(8)?,
+                damage: row.get(9)?,
+                healing: row.get(10)?,
+                mitigation: row.get(11)?,
+                final_hits: row.get(12)?,
+                target_time_sec: row.get(13)?,
+                healing_taken: row.get(14)?,
+                damage_taken: row.get(15)?,
+                worth: None,
+                end_worth: None,
+                worth_max: false,
+                mod_guids: Vec::new(),
+                trait_guids: Vec::new(),
+                has_source_max_flags: false,
+                kill_max: false,
+                hero_damage_max: false,
+                cure_max: false,
+                resist_damage_max: false,
+                perks: Vec::new(),
+                hero_stats: Vec::new(),
+                party_group: None,
+            },
+        ))
     })?;
     let mut players_by_match = HashMap::<String, Vec<PlayerRow>>::new();
     for row in rows {

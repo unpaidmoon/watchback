@@ -27,7 +27,11 @@ fn match_pages_are_stable_across_equal_timestamps() -> Result<()> {
 
     let first = list_matches_page(&db, MatchFilters::default(), None, 2)?;
     assert_eq!(
-        first.matches.iter().map(|item| item.match_id.as_str()).collect::<Vec<_>>(),
+        first
+            .matches
+            .iter()
+            .map(|item| item.match_id.as_str())
+            .collect::<Vec<_>>(),
         ["m3", "m1"]
     );
     assert!(first.next_cursor.is_some());
@@ -35,7 +39,11 @@ fn match_pages_are_stable_across_equal_timestamps() -> Result<()> {
 
     let second = list_matches_page(&db, MatchFilters::default(), first.next_cursor, 2)?;
     assert_eq!(
-        second.matches.iter().map(|item| item.match_id.as_str()).collect::<Vec<_>>(),
+        second
+            .matches
+            .iter()
+            .map(|item| item.match_id.as_str())
+            .collect::<Vec<_>>(),
         ["m2"]
     );
     assert!(second.next_cursor.is_none());

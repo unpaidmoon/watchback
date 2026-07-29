@@ -88,7 +88,9 @@ pub(super) fn list_matches_impl(
             None
         };
         let fight_projection = fight.as_ref().map(|data| &data.projection);
-        let map_preview_guid = fight.as_ref().and_then(|data| data.map_preview_guid.clone());
+        let map_preview_guid = fight
+            .as_ref()
+            .and_then(|data| data.map_preview_guid.clone());
         let display_map_name = map_preview_guid
             .as_deref()
             .and_then(|guid| map_names.get(guid).cloned())

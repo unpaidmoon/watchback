@@ -50,7 +50,11 @@ impl OwDatabase {
         let mut initialized = self
             .initialized
             .as_ref()
-            .map(|state| state.lock().map_err(|_| anyhow!("database initialization lock poisoned")))
+            .map(|state| {
+                state
+                    .lock()
+                    .map_err(|_| anyhow!("database initialization lock poisoned"))
+            })
             .transpose()?;
         if initialized.as_deref() == Some(&true) {
             return Ok(());
