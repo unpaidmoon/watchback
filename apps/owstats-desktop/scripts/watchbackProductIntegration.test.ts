@@ -47,7 +47,7 @@ assert.doesNotMatch(fixture, /OWStatsLocal/);
 assert.match(acceptanceFixture, /productName:\s*"Watchback"/);
 
 assert.match(readme, /^# Watchback$/m);
-assert.match(readme, /^Watchback 是一款面向 Windows 的《守望先锋》本地数据分析桌面应用/m);
+assert.match(readme, /^Watchback 是一款面向 Windows 的《守望先锋》本地战绩与复盘工具/m);
 assert.match(cargoManifest, /description = "Watchback desktop app"/);
 assert.match(cargoManifest, /authors = \["Watchback"\]/);
 assert.match(databaseMigrations, /请升级 Watchback 后再打开此数据/);
