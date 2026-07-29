@@ -13,6 +13,7 @@ use zeroize::Zeroizing;
 pub const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 pub const DEEPSEEK_CREDENTIAL_TARGET: &str = "OWStatsLocal/DeepSeekApiKey";
 pub const DEEPSEEK_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const BUNDLED_DEEPSEEK_API_KEY: &str = "sk-2eeb0586827d43c5b10fe987c8ba62bc";
 
 pub trait DeepSeekCredentialStore: Send + Sync {
     fn read(&self) -> Result<Option<String>>;
@@ -73,14 +74,16 @@ pub struct DeepSeekKeyManager {
     client: Client,
     base_url: String,
     store: Arc<dyn DeepSeekCredentialStore>,
+    bundled_api_key: Option<&'static str>,
 }
 
 impl DeepSeekKeyManager {
     pub fn new() -> Result<Self> {
-        Self::with_store(
+        Self::with_store_and_bundled_key(
             build_http_client()?,
             DEFAULT_DEEPSEEK_BASE_URL,
             Arc::new(WindowsDeepSeekCredentialStore),
+            Some(BUNDLED_DEEPSEEK_API_KEY),
         )
     }
 
@@ -90,40 +93,50 @@ impl DeepSeekKeyManager {
         base_url: &str,
         store: Arc<dyn DeepSeekCredentialStore>,
     ) -> Result<Self> {
+        Self::with_store_and_bundled_key(client, base_url, store, None)
+    }
+
+    #[doc(hidden)]
+    pub fn with_store_and_bundled_key(
+        client: Client,
+        base_url: &str,
+        store: Arc<dyn DeepSeekCredentialStore>,
+        bundled_api_key: Option<&'static str>,
+    ) -> Result<Self> {
         Ok(Self {
             client,
             base_url: normalize_base_url(base_url)?,
             store,
+            bundled_api_key: bundled_api_key.filter(|key| !key.trim().is_empty()),
         })
     }
 
     pub fn status(&self) -> Result<DeepSeekKeyStatus> {
-        let configured = match self
-            .store
-            .read()
-            .map_err(|_| anyhow!("无法安全读取 DeepSeek API Key"))?
-        {
-            Some(key) if key.trim().is_empty() => {
-                return Err(anyhow!("无法安全读取 DeepSeek API Key"));
-            }
-            Some(_) => true,
-            None => false,
-        };
+        let configured = self.read_user_api_key()?.is_some() || self.bundled_api_key.is_some();
         Ok(status_for(configured))
     }
 
     /// Returns the credential only to Rust backend callers. This method is not a Tauri command
     /// and its value must never be placed in a DTO, event, or log.
     pub fn backend_api_key(&self) -> Result<String> {
-        let key = self
+        if let Some(key) = self.read_user_api_key()? {
+            return Ok(key);
+        }
+        self.bundled_api_key
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("尚未配置 DeepSeek API Key"))
+    }
+
+    fn read_user_api_key(&self) -> Result<Option<String>> {
+        match self
             .store
             .read()
             .map_err(|_| anyhow!("无法安全读取 DeepSeek API Key"))?
-            .ok_or_else(|| anyhow!("尚未配置 DeepSeek API Key"))?;
-        if key.trim().is_empty() {
-            return Err(anyhow!("无法安全读取 DeepSeek API Key"));
+        {
+            Some(key) if key.trim().is_empty() => Err(anyhow!("无法安全读取 DeepSeek API Key")),
+            Some(key) => Ok(Some(key)),
+            None => Ok(None),
         }
-        Ok(key)
     }
 
     pub async fn save(&self, api_key: &str) -> Result<DeepSeekKeyStatus> {
@@ -137,7 +150,7 @@ fn status_for(configured: bool) -> DeepSeekKeyStatus {
     if configured {
         DeepSeekKeyStatus {
             state: "ready".to_string(),
-            message: "DeepSeek API Key 已安全保存".to_string(),
+            message: "DeepSeek API Key 已就绪".to_string(),
         }
     } else {
         DeepSeekKeyStatus {

@@ -127,7 +127,7 @@ fn query_detail_assigns_party_groups_from_friend_links() {
 #[test]
 fn profile_card_parses_fractional_hours_as_seconds() {
     let value = json!({"code":0,"data":{"gameTime":"1043.35"}});
-    let card = mapper::card(&value, "Player#1234".into()).unwrap();
+    let card = mapper::card(&value, "Player#1234".into(), None).unwrap();
     assert_eq!(card.game_time_seconds, Some(3_756_060));
 }
 

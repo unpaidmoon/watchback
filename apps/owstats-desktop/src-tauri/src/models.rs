@@ -924,11 +924,21 @@ pub struct CredentialLoginCancelResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct PlayerGameAction {
+    pub comment: Option<String>,
+    pub send_honors_cnt: Option<i64>,
+    pub get_honors_cnt: Option<i64>,
+    pub reported_cnt: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct PlayerProfile {
     #[serde(skip_serializing)]
     pub role_id: Option<i64>,
     pub player_id: Option<String>,
     pub avatar_url: Option<String>,
+    pub title_icon_url: Option<String>,
     pub endorsement_level: Option<i64>,
     pub play_time_hours: Option<f64>,
     pub title: Option<String>,

@@ -508,6 +508,7 @@ async fn reconcile_target(
         DASHEN_ROOT_BASE,
     )
     .await;
+    let _ = crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE).await;
     Ok(())
 }
 

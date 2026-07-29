@@ -1,16 +1,19 @@
 use super::{models::*, upstream::PlayerQueryUpstream};
 use crate::sync_coordinator::QuerySessionPermit;
+use serde_json::Value;
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicU64, Ordering},
     sync::{Arc, Mutex},
 };
+use tokio::sync::OnceCell;
 
 pub(crate) struct Session {
     pub battle_tag: String,
     pub customer_token: String,
     pub generation: u64,
     pub upstream: Arc<dyn PlayerQueryUpstream>,
+    pub card_response: Arc<OnceCell<Value>>,
     pub _permit: QuerySessionPermit,
 }
 pub(crate) struct Sessions {
@@ -49,6 +52,31 @@ impl Sessions {
                     s.customer_token.clone(),
                     s.generation,
                     Arc::clone(&s.upstream),
+                )
+            })
+            .ok_or_else(|| QueryError::SessionInvalid("查询会话已结束".into()))
+    }
+    pub fn card_snapshot(
+        &self,
+        id: &str,
+    ) -> QueryResult<(
+        String,
+        String,
+        u64,
+        Arc<dyn PlayerQueryUpstream>,
+        Arc<OnceCell<Value>>,
+    )> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .map(|s| {
+                (
+                    s.battle_tag.clone(),
+                    s.customer_token.clone(),
+                    s.generation,
+                    Arc::clone(&s.upstream),
+                    Arc::clone(&s.card_response),
                 )
             })
             .ok_or_else(|| QueryError::SessionInvalid("查询会话已结束".into()))

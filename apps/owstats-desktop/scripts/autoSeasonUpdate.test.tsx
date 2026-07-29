@@ -8,6 +8,7 @@ const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx",
 const backendSource = readFileSync(new URL("../src-tauri/src/auto_season_update.rs", import.meta.url), "utf8");
 const commandsSource = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const libSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const commandCenterStyles = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
 
 const html = renderToStaticMarkup(createElement(SeasonSyncWorkbench, {
   selectedSeason: 23,
@@ -40,5 +41,6 @@ assert.match(backendSource, /quick_list_update_with_credentials_and_target_paths
 assert.match(backendSource, /active_job_count\(season\)/);
 assert.match(commandsSource, /switch_account[\s\S]*?auto_season_update::spawn/);
 assert.match(libSource, /\.setup\([\s\S]*?auto_season_update::spawn/);
+assert.match(commandCenterStyles, /\.seasonAutoUpdateToggle input\s*\{[\s\S]*?min-block-size:\s*20px !important;/, "switch track overrides the global 44px input minimum");
 
 console.log("auto season update tests passed");

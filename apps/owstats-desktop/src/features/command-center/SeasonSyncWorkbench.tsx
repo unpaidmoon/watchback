@@ -93,7 +93,6 @@ export function SeasonSyncWorkbench({
         <label className="seasonAutoUpdateToggle">
           <span>
             <strong>自动更新</strong>
-            <small>启动或切换账号时更新最新本地赛季</small>
           </span>
           <input
             type="checkbox"

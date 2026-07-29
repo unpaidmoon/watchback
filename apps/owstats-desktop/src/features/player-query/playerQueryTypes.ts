@@ -1,5 +1,5 @@
 import type { PlayerQueryMatchRowView } from "../matches/MatchListCard";
-import type { ArenaMatchDetail, PlayerRow } from "../../shared/types";
+import type { ArenaMatchDetail, PlayerGameAction, PlayerRow } from "../../shared/types";
 
 export const PLAYER_QUERY_SEASONS = [23, 22, 21, 20, 15] as const;
 export type PlayerQuerySeason = (typeof PLAYER_QUERY_SEASONS)[number];
@@ -42,10 +42,12 @@ export type PlayerQueryCard = {
   level: number | null;
   gameTimeSeconds: number | null;
   title: string | null;
+  gameAction: PlayerGameAction | null;
 };
 
 export type PlayerQueryCardImages = {
   icon: PlayerQueryMemoryImage | null;
+  titleIcon: PlayerQueryMemoryImage | null;
 };
 
 export type PlayerQueryRankRow = {

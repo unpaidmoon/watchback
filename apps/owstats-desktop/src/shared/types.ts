@@ -172,9 +172,17 @@ export type ClearPlayerTargetResult = {
   target: LoginTargetStatus;
 };
 
+export type PlayerGameAction = {
+  comment: string | null;
+  sendHonorsCnt: number | null;
+  getHonorsCnt: number | null;
+  reportedCnt: number | null;
+};
+
 export type PlayerProfile = {
   playerId: string | null;
   avatarUrl: string | null;
+  titleIconUrl: string | null;
   endorsementLevel: number | null;
   playTimeHours: number | null;
   title: string | null;

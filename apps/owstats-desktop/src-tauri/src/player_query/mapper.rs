@@ -69,7 +69,11 @@ pub fn identity(value: &Value) -> QueryResult<(Option<String>, String)> {
             .to_string(),
     ))
 }
-pub fn card(value: &Value, battle_tag: String) -> QueryResult<PlayerQueryCard> {
+pub fn card(
+    value: &Value,
+    battle_tag: String,
+    game_action: Option<crate::models::PlayerGameAction>,
+) -> QueryResult<PlayerQueryCard> {
     let d = data(value)?;
     let game_time_seconds = d.get("gameTime").and_then(|value| {
         value
@@ -87,6 +91,20 @@ pub fn card(value: &Value, battle_tag: String) -> QueryResult<PlayerQueryCard> {
             .and_then(Value::as_str)
             .filter(|v| !v.is_empty())
             .map(str::to_string),
+        game_action,
+    })
+}
+
+pub fn game_action(value: &Value) -> Option<crate::models::PlayerGameAction> {
+    let raw = value.pointer("/data/gameAction")?.as_object()?;
+    Some(crate::models::PlayerGameAction {
+        comment: raw
+            .get("comment")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        send_honors_cnt: raw.get("sendHonorsCnt").and_then(Value::as_i64),
+        get_honors_cnt: raw.get("getHonorsCnt").and_then(Value::as_i64),
+        reported_cnt: raw.get("reportedCnt").and_then(Value::as_i64),
     })
 }
 
@@ -99,8 +117,17 @@ pub async fn card_images(
         .get("icon")
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty());
+    let title_icon_url = d
+        .get("titleIcon")
+        .or_else(|| d.get("titleIconUrl"))
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty());
+    // Keep the two small CDN downloads sequential. Some proxies/CDNs intermittently drop
+    // one of two simultaneous requests, which previously left titleIcon empty while the
+    // avatar still rendered.
     let icon = image(icon_url, upstream).await;
-    Ok(PlayerQueryCardImages { icon })
+    let title_icon = image(title_icon_url, upstream).await;
+    Ok(PlayerQueryCardImages { icon, title_icon })
 }
 async fn image(
     url: Option<&str>,

@@ -1,6 +1,6 @@
 [package]
 name = "owstats-desktop"
-version = "0.1.0"
+version = "0.3.0-beta.1"
 description = "Watchback desktop app"
 authors = ["Watchback"]
 edition = "2021"

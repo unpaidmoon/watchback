@@ -185,6 +185,18 @@ fn career_achievement_contract_is_stable() {
         achievement("comeback").tiers[0].requirement,
         "完成 1 场角斗领域的让三追四"
     );
+    assert_eq!(
+        achievement("switching")
+            .tiers
+            .iter()
+            .map(|tier| tier.requirement.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "生涯使用 20 名不同英雄",
+            "生涯使用 35 名不同英雄",
+            "生涯使用 50 名不同英雄"
+        ]
+    );
     assert_eq!(achievement("unwavering").title, "风雨无阻");
     assert_eq!(achievement("unwavering").detail, "连续自然日完成可统计对局");
     assert_eq!(
@@ -686,6 +698,122 @@ fn career_fact_projection_drives_single_match_rules_and_uses_current_player_dama
         0,
         "同场多名好友只能计一场"
     );
+}
+
+#[test]
+fn revised_mode_scopes_exclude_stadium_rank_and_include_stadium_friends() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("achievement-mode-scopes.sqlite3"));
+    db.initialize().unwrap();
+
+    seed_stadium_match(
+        &db,
+        "stadium-champion-with-friend",
+        100,
+        0,
+        r#"{"roundCountList":[{"teammateList":[{"bnetId":"current-player","friendBnetIds":["friend"]}]}]}"#,
+    );
+    db.connect()
+        .unwrap()
+        .execute(
+            "UPDATE matches SET raw_entry_json=?2 WHERE match_id=?1",
+            params![
+                "stadium-champion-with-friend",
+                serde_json::json!({"rankInfo": {"rankName": "Champion"}}).to_string()
+            ],
+        )
+        .unwrap();
+
+    for index in 1..20 {
+        let id = format!("stadium-friend-{index}");
+        seed_stadium_match(
+            &db,
+            &id,
+            100 + index,
+            0,
+            r#"{"roundCountList":[{"teammateList":[{"bnetId":"current-player","friendBnetIds":["friend"]}]}]}"#,
+        );
+    }
+
+    let achievements = get_career_achievements(&db).unwrap();
+    let achievement = |key: &str| achievements.iter().find(|item| item.key == key).unwrap();
+    assert_eq!(achievement("rank-proof").current_level, 0);
+    assert_eq!(achievement("brothers-in-arms").current_level, 1);
+    assert_eq!(
+        achievement("brothers-in-arms").tiers[0].unlocked_at,
+        Some(119)
+    );
+
+    seed_match(
+        &db,
+        "open-champion",
+        23,
+        "win",
+        200,
+        1,
+        1,
+        1,
+        1,
+        600,
+        "Champion",
+        "{}",
+    );
+    db.connect()
+        .unwrap()
+        .execute(
+            "UPDATE matches SET bucket='open', game_mode='SportOpen' WHERE match_id='open-champion'",
+            [],
+        )
+        .unwrap();
+    seed_player(&db, "open-champion", "current-player", true, false, 1);
+
+    let achievements = get_career_achievements(&db).unwrap();
+    assert_eq!(
+        achievements
+            .iter()
+            .find(|item| item.key == "rank-proof")
+            .unwrap()
+            .current_level,
+        3
+    );
+}
+
+#[test]
+fn switching_unlocks_at_twenty_distinct_career_heroes() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("switching-threshold.sqlite3"));
+    db.initialize().unwrap();
+
+    for index in 0..20 {
+        let id = format!("hero-{index}");
+        seed_match(
+            &db,
+            &id,
+            23,
+            "win",
+            1_000 + index,
+            1,
+            1,
+            1,
+            1,
+            600,
+            "Gold",
+            "{}",
+        );
+        seed_player(&db, &id, "current-player", true, false, 1);
+        set_current_hero(&db, &id, &format!("hero-{index}"));
+    }
+
+    let achievements = get_career_achievements(&db).unwrap();
+    let switching = achievements
+        .iter()
+        .find(|item| item.key == "switching")
+        .unwrap();
+    assert_eq!(switching.current_level, 1);
+    assert_eq!(switching.tiers[0].unlocked_at, Some(1_019));
+    assert!(switching.tiers[1..]
+        .iter()
+        .all(|tier| tier.unlocked_at.is_none()));
 }
 
 #[test]

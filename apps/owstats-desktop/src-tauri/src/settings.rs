@@ -1,7 +1,6 @@
 use crate::db::OwDatabase;
 use crate::models::{PlayerProfile, UpdateCheckResult, UserSettings};
-use anyhow::Result;
-#[cfg(test)]
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -51,6 +50,7 @@ pub fn get_player_profile_for_path(path: &Path, role_id: Option<i64>) -> Result<
         role_id,
         player_id: None,
         avatar_url: None,
+        title_icon_url: None,
         endorsement_level: None,
         play_time_hours: None,
         title: None,
@@ -90,6 +90,52 @@ pub fn get_player_profile(
         return Ok(profile);
     }
     get_player_profile_for_path(path, role_id)
+}
+
+pub fn save_profile_card(
+    db: &OwDatabase,
+    path: &Path,
+    role_id: i64,
+    payload: &Value,
+) -> Result<PlayerProfile> {
+    let raw = payload
+        .get("data")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| anyhow!("资料卡数据不完整"))?;
+    let persisted_raw = raw.clone();
+    let bnet_id = role_id.to_string();
+    let display_name = json_string(raw, "name").unwrap_or_else(|| bnet_id.clone());
+    let refreshed_at = Utc::now().to_rfc3339();
+
+    db.initialize()?;
+    db.connect()?.execute(
+        r#"
+        INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(player_id) DO UPDATE SET
+            bnet_id=excluded.bnet_id,
+            display_name=excluded.display_name,
+            raw_json=excluded.raw_json,
+            updated_at=excluded.updated_at
+        "#,
+        params![
+            bnet_id,
+            bnet_id,
+            display_name,
+            serde_json::to_string(&persisted_raw)?,
+            refreshed_at
+        ],
+    )?;
+
+    let profile = profile_from_raw(
+        &persisted_raw,
+        Some(role_id),
+        Some(bnet_id),
+        Some(display_name),
+        Some(refreshed_at),
+    );
+    write_json(path, &profile)?;
+    Ok(profile)
 }
 
 fn get_player_profile_from_db(
@@ -237,6 +283,7 @@ fn profile_from_raw(
             .or_else(|| json_string(raw, "headIcon"))
             .or_else(|| json_string(raw, "avatar"))
             .or_else(|| json_string(raw, "avatarUrl")),
+        title_icon_url: json_string(raw, "titleIcon").or_else(|| json_string(raw, "titleIconUrl")),
         endorsement_level: json_i64(raw, "level").or_else(|| json_i64(raw, "endorsementLevel")),
         play_time_hours: json_f64(raw, "gameTime").or_else(|| json_f64(raw, "playTimeHours")),
         title: json_string(raw, "title"),
@@ -410,6 +457,47 @@ mod tests {
         assert_eq!(profile.player_id, None);
         assert!(!json.contains(&role_id.to_string()));
         assert!(!json.contains(&format!("角色 {role_id}")));
+    }
+
+    #[test]
+    fn refreshed_profile_card_updates_database_and_profile_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temp.path().join("owstats.db"));
+        let profile_path = temp.path().join("player_profile.json");
+
+        let profile = save_profile_card(
+            &db,
+            &profile_path,
+            595945364,
+            &serde_json::json!({
+                "code": 0,
+                "data": {
+                    "bnetId": 595945364,
+                    "name": "风偏偏呢#5479",
+                    "icon": "https://example.test/refreshed.png",
+                    "titleIcon": "https://example.test/title.png",
+                    "level": 5,
+                    "gameTime": "1069.4"
+                }
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(profile.player_id.as_deref(), Some("风偏偏呢#5479"));
+        assert_eq!(profile.endorsement_level, Some(5));
+        assert_eq!(profile.play_time_hours, Some(1069.4));
+        assert_eq!(
+            profile.title_icon_url.as_deref(),
+            Some("https://example.test/title.png")
+        );
+        assert_eq!(
+            get_player_profile(&db, &profile_path, Some(595945364))
+                .unwrap()
+                .avatar_url
+                .as_deref(),
+            Some("https://example.test/refreshed.png")
+        );
+        assert!(profile_path.is_file());
     }
 
     #[test]

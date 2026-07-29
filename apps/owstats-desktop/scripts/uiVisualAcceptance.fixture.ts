@@ -488,6 +488,7 @@ export const fixtureOnboarding = {
 export const fixturePlayerProfile = {
   playerId: "示例玩家",
   avatarUrl: null,
+  titleIconUrl: "https://invalid.example/title-icon.png",
   endorsementLevel: 3,
   playTimeHours: 128.5,
   title: "视觉验收示例",
@@ -680,6 +681,12 @@ export const visualInvokeResponses: Record<string, unknown> = {
   get_rankings: fixtureRanking,
   get_onboarding_status: fixtureOnboarding,
   get_player_profile: fixturePlayerProfile,
+  get_player_game_action: {
+    comment: "良好",
+    sendHonorsCnt: 51,
+    getHonorsCnt: 27,
+    reportedCnt: 0,
+  },
   get_player_target_status: fixturePlayerTargetStatus,
   get_user_settings: { theme: "system" },
   check_app_update: { status: "current", currentVersion: "0.1.0", latestVersion: "0.1.0", message: "当前已是合成验收版本" },

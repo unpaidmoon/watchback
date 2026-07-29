@@ -5,6 +5,7 @@ use crate::ai_roast::coordinator::{
 };
 use crate::deepseek_key::DeepSeekKeyManager;
 use crate::importer::existing_import_summary;
+use crate::PublishedInstallData;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
@@ -15,13 +16,36 @@ use crate::{
     CredentialStatus, DeepSeekKeyStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters,
     FriendDetail, ImportSummary, LoginTargetStatus, MatchDetailView, MatchFavoriteRequest,
     MatchFavoriteView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerProfile, PlayerSearchOption,
-    PlayerTargetStatus, RankingResponse, SeasonAnalysis, SeasonSyncResult, SyncRequest,
-    UpdateCheckResult, UserSettings,
+    PersonalReviewRequest, PersonalSeasonReview, PlayerGameAction, PlayerProfile,
+    PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis, SeasonSyncResult,
+    SyncRequest, UpdateCheckResult, UserSettings,
 };
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
+
+const PROJECT_REPOSITORY_URL: &str = "https://github.com/fengpianpianne/watchback";
+
+#[tauri::command]
+pub fn open_project_repository() -> Result<(), String> {
+    tauri_plugin_opener::open_url(PROJECT_REPOSITORY_URL, None::<&str>).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn open_support_directory(
+    kind: String,
+    data: State<'_, PublishedInstallData>,
+) -> Result<(), String> {
+    match kind.as_str() {
+        "data" => tauri_plugin_opener::open_path(data.paths().root(), None::<&str>)
+            .map_err(to_message),
+        "logs" => {
+            crate::initialize_log_file(data.paths()).map_err(to_message)?;
+            tauri_plugin_opener::reveal_item_in_dir(data.paths().log_file()).map_err(to_message)
+        }
+        _ => Err("不支持的目录类型".to_string()),
+    }
+}
 
 const DASHEN_ROOT_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool";
 
@@ -277,6 +301,15 @@ pub async fn add_account(
         DASHEN_ROOT_BASE,
     )
     .await?;
+    if let Some(account_id) = result
+        .account_id
+        .as_deref()
+        .and_then(|value| crate::account_store::AccountId::parse(value).ok())
+    {
+        if let Ok(account) = accounts.snapshot_for(&account_id) {
+            let _ = crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE).await;
+        }
+    }
     Ok(result)
 }
 
@@ -299,6 +332,34 @@ pub fn add_account_with_qr(
         login_target_coordinator.inner().clone(),
     )
     .map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn refresh_profile_card(
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+) -> Result<PlayerProfile, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    let account = active_account(&accounts)?;
+    crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE)
+        .await
+        .map_err(to_message)
+}
+
+#[tauri::command]
+pub async fn get_player_game_action(
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+) -> Result<PlayerGameAction, String> {
+    let _permit = operation_coordinator
+        .try_acquire_account_operation()
+        .map_err(str::to_string)?;
+    let account = active_account(&accounts)?;
+    crate::profile_card::fetch_game_action_for_account(&account, DASHEN_ROOT_BASE)
+        .await
+        .map_err(to_message)
 }
 
 #[tauri::command]

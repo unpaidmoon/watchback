@@ -6,10 +6,9 @@ import {
   FileText,
   FolderOpen,
   Github,
-  UserRound,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addAccount,
   cancelDashenLogin,
@@ -18,13 +17,17 @@ import {
   getUserSettings,
   getSeasonSyncStatus,
   getPlayerProfile,
+  getPlayerGameAction,
   getLoginTargetStatus,
   listAccounts,
   clearPlayerTarget,
   keepCurrentPlayerTarget,
   removeAccount,
+  openSupportDirectory,
+  openProjectRepository,
   retryLoginTargetBinding,
   retrySeasonBackgroundSync,
+  refreshProfileCard,
   switchAccount,
   syncSeason,
   saveUserSettings,
@@ -32,6 +35,7 @@ import {
 import { AccountManager } from "../features/command-center/AccountManager";
 import { DeepSeekSettings } from "../features/command-center/DeepSeekSettings";
 import { QrAccountLoginDialog } from "../features/command-center/QrAccountLoginDialog";
+import { ProfileGameActionDialog, ProfileSummaryCard } from "../features/profile-card/ProfileSummaryCard";
 import {
   loadDashboardRequest,
   runAddAccountOperation,
@@ -48,9 +52,10 @@ import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFronten
 import { clearMatchesPageCache, clearMatchesPageCacheForSeason } from "../shared/matchesPageCache";
 import { isCurrentSeasonEvent, quickListRefreshScope } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
-import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
+import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerGameAction, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
+const APP_VERSION = "0.3.0-beta.1";
 const browserPreviewLoginHint = "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
 
 let dashboardCache: DashboardSnapshot | null = null;
@@ -82,9 +87,18 @@ export function OnboardingPage() {
   const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
   const [qrLoginDialogOpen, setQrLoginDialogOpen] = useState(false);
+  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
+  const [gameActionDialogOpen, setGameActionDialogOpen] = useState(false);
+  const [gameAction, setGameAction] = useState<PlayerGameAction | null>(null);
+  const [gameActionLoading, setGameActionLoading] = useState(false);
+  const [openingSupportDirectory, setOpeningSupportDirectory] = useState<"logs" | "data" | null>(null);
+  const [openingProjectRepository, setOpeningProjectRepository] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
+  const [profileRefreshing, setProfileRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const closeVersionDialog = useCallback(() => setVersionDialogOpen(false), []);
+  const closeGameActionDialog = useCallback(() => setGameActionDialogOpen(false), []);
   const mountedRef = useRef(false);
   const dashboardRequestGenerationRef = useRef(0);
   const accountOperationLockRef = useRef(false);
@@ -93,6 +107,40 @@ export function OnboardingPage() {
   const previousPrimaryTargetStateRef = useRef<string | null>(null);
   const activeAccountScopeRef = useRef<string | null>(null);
   const seasonRefreshTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  async function openSettingsDirectory(kind: "logs" | "data") {
+    if (openingSupportDirectory) return;
+    if (!hasDesktopBackend()) {
+      setNotice("请在安装版 Watchback 中打开该路径");
+      return;
+    }
+    setOpeningSupportDirectory(kind);
+    setError(null);
+    try {
+      await openSupportDirectory(kind);
+    } catch (err) {
+      setError(`打开${kind === "logs" ? "日志文件" : "数据存放路径"}失败：${productErrorMessage(err)}`);
+    } finally {
+      setOpeningSupportDirectory(null);
+    }
+  }
+
+  async function openGithubRepository() {
+    if (openingProjectRepository) return;
+    if (!hasDesktopBackend()) {
+      setNotice("请在安装版 Watchback 中打开 Github 地址");
+      return;
+    }
+    setOpeningProjectRepository(true);
+    setError(null);
+    try {
+      await openProjectRepository();
+    } catch (err) {
+      setError(`打开 Github 地址失败：${productErrorMessage(err)}`);
+    } finally {
+      setOpeningProjectRepository(false);
+    }
+  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -183,6 +231,11 @@ export function OnboardingPage() {
       void getUserSettings().then(setUserSettings).catch(() => undefined);
     }
   }, []);
+
+  useEffect(() => {
+    setGameAction(null);
+    setGameActionDialogOpen(false);
+  }, [accountStatus?.activeAccountId]);
 
   useEffect(() => {
     const seasons = status?.seasonStatuses.map((item) => item.season) ?? [];
@@ -480,6 +533,46 @@ export function OnboardingPage() {
     }
   }
 
+  async function refreshCurrentProfile() {
+    if (profileRefreshing || accountOperationBusy || syncingSeason !== null) return;
+    setProfileRefreshing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextProfile = await refreshProfileCard();
+      if (!mountedRef.current) return;
+      setProfile(nextProfile);
+      if (dashboardCache) {
+        dashboardCache = { ...dashboardCache, profile: nextProfile };
+      }
+      setNotice("账号资料已刷新。");
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(`刷新账号资料失败：${productErrorMessage(err)}。请稍后重试。`);
+      }
+    } finally {
+      if (mountedRef.current) setProfileRefreshing(false);
+    }
+  }
+
+  async function openGameAction() {
+    if (gameActionLoading || accountOperationBusy || syncingSeason !== null) return;
+    setGameActionLoading(true);
+    setError(null);
+    try {
+      const nextGameAction = await getPlayerGameAction();
+      if (!mountedRef.current) return;
+      setGameAction(nextGameAction);
+      setGameActionDialogOpen(true);
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(`读取本周表现失败：${productErrorMessage(err)}。请稍后重试。`);
+      }
+    } finally {
+      if (mountedRef.current) setGameActionLoading(false);
+    }
+  }
+
   async function changeAutoUpdate(enabled: boolean) {
     if (autoUpdateSaving) return;
     setAutoUpdateSaving(true);
@@ -631,7 +724,7 @@ export function OnboardingPage() {
     normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
   );
   const warnings = status?.health.warnings ?? [];
-  const displayName = activeAccount?.battleTag ?? "未登录玩家";
+  const displayName = profile?.playerId ?? activeAccount?.battleTag ?? "未登录玩家";
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
   const canUseData = Boolean(status?.canEnterReview);
   const {
@@ -759,20 +852,25 @@ export function OnboardingPage() {
           </section>
 
           <aside className="commandCenterAccountPanel" aria-labelledby="command-center-account-title">
-            <div className="commandCenterIdentity">
-              <div className="phase6ProfileAvatar">
-                {profile?.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <UserRound size={32} />}
-              </div>
-              <div>
-                <span className="phase6Eyebrow">当前账号与健康</span>
-                <h2 id="command-center-account-title">{displayName}</h2>
-                <p>{profile?.title ?? "暂无头衔"}</p>
-              </div>
-            </div>
-            <div className="commandCenterAccountFacts">
-              <ProfileInlineStat label="赞赏等级" value={profile?.endorsementLevel ?? "-"} />
-              <ProfileInlineStat label="游戏时间" value={profile?.playTimeHours != null ? `${profile.playTimeHours.toFixed(1)} 小时` : "-"} />
-            </div>
+            <ProfileSummaryCard
+              nameHeadingId="command-center-account-title"
+              profile={{
+                name: displayName,
+                title: profile?.title ?? null,
+                titleIconUrl: profile?.titleIconUrl ?? null,
+                avatarUrl: profile?.avatarUrl ?? null,
+                endorsementLevel: profile?.endorsementLevel ?? null,
+                playTimeHours: profile?.playTimeHours ?? null,
+                gameAction,
+              }}
+              avatarAction={{
+                onClick: () => void refreshCurrentProfile(),
+                busy: profileRefreshing,
+                disabled: profileRefreshing || accountOperationBusy || syncingSeason !== null,
+              }}
+              gameActionLoading={gameActionLoading}
+              onGameActionClick={() => void openGameAction()}
+            />
             <section className="phase6CoverageMeter phase6DataCoverageCard" aria-label="数据覆盖度">
               <div className="phase6CoveragePrimary">
                 <div><span className="phase6Eyebrow">数据覆盖度</span><strong>{coveragePercent}%</strong></div>
@@ -820,16 +918,20 @@ export function OnboardingPage() {
           onCompleted={completeQrAccountLogin}
           onUseExistingLogin={async () => { await runAddAccount(); }}
         />
+        <VersionDialog open={versionDialogOpen} onClose={closeVersionDialog} />
+        {gameActionDialogOpen && gameAction ? (
+          <ProfileGameActionDialog action={gameAction} onClose={closeGameActionDialog} />
+        ) : null}
       </QaRegion>
 
       <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
         <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>
         <DeepSeekSettings />
         <div className="phase6SettingsLauncherGrid syncSecondaryActions">
-          <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setNotice("版本号入口后续提供")} />
-          <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => setNotice("日志文件入口后续提供")} />
-          <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => setNotice("数据存放路径入口后续提供")} />
-          <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => setNotice("Github地址入口后续提供")} />
+          <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setVersionDialogOpen(true)} />
+          <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => void openSettingsDirectory("logs")} disabled={openingSupportDirectory !== null} />
+          <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => void openSettingsDirectory("data")} disabled={openingSupportDirectory !== null} />
+          <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => void openGithubRepository()} disabled={openingProjectRepository} />
         </div>
       </section>
     </section>
@@ -837,21 +939,49 @@ export function OnboardingPage() {
 }
 
 
-function ProfileInlineStat({ label, value }: { label: string; value: string | number }) {
+function SettingsPlaceholder({ icon, label, onClick, disabled = false }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <span>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </span>
-  );
-}
-
-function SettingsPlaceholder({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button className="ghostButton phase6SettingsPlaceholderAction" type="button" onClick={onClick}>
+    <button className="ghostButton phase6SettingsPlaceholderAction" type="button" onClick={onClick} disabled={disabled}>
       {icon}
       {label}
     </button>
+  );
+}
+
+function VersionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="versionDialogBackdrop" role="presentation" onMouseDown={onClose}>
+      <section className="versionDialog" role="dialog" aria-modal="true" aria-labelledby="version-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
+        <BadgeInfo aria-hidden="true" size={24} />
+        <div>
+          <h3 id="version-dialog-title">版本号</h3>
+          <p className="versionDialogNumber">{APP_VERSION}</p>
+        </div>
+        <button ref={closeButtonRef} className="iconButton versionDialogClose" type="button" aria-label="关闭版本号弹窗" onClick={onClose}>
+          <X aria-hidden="true" size={20} />
+        </button>
+      </section>
+    </div>
   );
 }
 

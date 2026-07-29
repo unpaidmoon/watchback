@@ -18,6 +18,7 @@ import type {
   OnboardingStatus,
   Overview,
   PersonalSeasonReview,
+  PlayerGameAction,
   PlayerProfile,
   PlayerTargetStatus,
   QrAccountLoginStartResult,
@@ -60,6 +61,14 @@ export const removeAccount = (accountId: string) =>
 
 export function getOverview() {
   return invoke<Overview>("get_overview");
+}
+
+export function openSupportDirectory(kind: "logs" | "data") {
+  return invoke<void>("open_support_directory", { kind });
+}
+
+export function openProjectRepository() {
+  return invoke<void>("open_project_repository");
 }
 
 export function listMatchFilters() {
@@ -143,6 +152,14 @@ export function getCredentialStatus() {
 
 export function getPlayerProfile() {
   return invoke<PlayerProfile>("get_player_profile");
+}
+
+export function refreshProfileCard() {
+  return invoke<PlayerProfile>("refresh_profile_card");
+}
+
+export function getPlayerGameAction() {
+  return invoke<PlayerGameAction>("get_player_game_action");
 }
 
 export function getUserSettings() {

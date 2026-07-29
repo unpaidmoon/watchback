@@ -27,6 +27,7 @@ mod match_favorites;
 mod models;
 pub mod player_query;
 pub mod player_target;
+mod profile_card;
 pub mod qr_login;
 mod queries;
 pub mod ranking;
@@ -57,6 +58,15 @@ pub use sync::{
     benchmark_snapshot, rebuild_complete_season_payload, rebuild_snapshot_for_revision,
     rebuild_snapshot_for_revision_with_hook, SnapshotBenchmark, SnapshotOutcome,
 };
+
+pub fn initialize_log_file(paths: &app_paths::SharedAppPaths) -> anyhow::Result<()> {
+    std::fs::create_dir_all(paths.logs())?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(paths.log_file())?;
+    Ok(())
+}
 pub use sync::{
     build_page_diagnostics, classify_quick_page, commit_quick_list_probe, dump_season_json,
     dump_season_json_with_base_url, load_season_sync_inventory,
@@ -1000,6 +1010,7 @@ fn open_windows_published_install_data(
 }
 
 pub fn run() -> anyhow::Result<()> {
+    use std::io::Write;
     use std::sync::Arc;
     use tauri::{Emitter, Manager};
 
@@ -1007,6 +1018,10 @@ pub fn run() -> anyhow::Result<()> {
         .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
     let published_data = open_published_install_data(&executable)?;
     let shared = published_data.paths().clone();
+    initialize_log_file(&shared)?;
+    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(shared.log_file()) {
+        let _ = writeln!(file, "{} Watchback started", chrono::Utc::now().to_rfc3339());
+    }
     let sync_coordinator = sync_coordinator::SyncCoordinator::default();
     let background_manager =
         background_sync::BackgroundSeasonSyncManager::new(sync_coordinator.clone());
@@ -1062,6 +1077,8 @@ pub fn run() -> anyhow::Result<()> {
         .manage(qr_login::QrLoginCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
+            commands::open_project_repository,
+            commands::open_support_directory,
             commands::list_match_filters,
             commands::list_match_timeline,
             commands::search_match_player_options,
@@ -1079,6 +1096,8 @@ pub fn run() -> anyhow::Result<()> {
             commands::save_deepseek_key,
             commands::generate_match_ai_roast,
             commands::get_player_profile,
+            commands::refresh_profile_card,
+            commands::get_player_game_action,
             commands::get_user_settings,
             commands::save_user_settings,
             commands::check_app_update,

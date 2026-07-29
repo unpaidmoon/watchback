@@ -35,7 +35,7 @@
 
 .commandCenterMainGrid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(450px, 1fr);
   gap: var(--space-6);
   scroll-margin-top: 96px;
 }
@@ -455,15 +455,38 @@
   gap: 18px;
 }
 
-.commandCenterAccountPanel .phase6ProfileAvatar {
-  width: 56px;
-  height: 56px;
+.profileSummaryCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.commandCenterTitleIcon {
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.commandCenterTitleIcon img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 5 / 1;
+  object-fit: cover;
+  object-position: center;
+  user-select: none;
+}
+
+.profileSummaryCard .phase6ProfileAvatar {
+  width: 80px;
+  height: 80px;
   background: var(--glass-secondary);
   border: 1px solid var(--glass-border);
   color: var(--data-secondary);
 }
 
-.commandCenterAccountPanel .phase6ProfileAvatar img {
+.profileSummaryCard .phase6ProfileAvatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -479,31 +502,161 @@
 }
 
 .commandCenterIdentity {
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: start;
+  justify-content: stretch;
+  gap: 16px;
 }
 
-.commandCenterIdentity h2,
+.commandCenterIdentityCopy {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.commandCenterIdentityLine {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.commandCenterIdentityLine > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandCenterProfileTitle {
+  flex: 0 1 auto;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.commandCenterIdentityLine h2 {
+  flex: 0 1 auto;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.commandCenterProfileRefresh {
+  position: relative;
+  padding: 0;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.commandCenterProfileRefresh:hover:not(:disabled) {
+  border-color: var(--data-primary);
+}
+
+.commandCenterProfileRefresh:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 3px;
+}
+
+.commandCenterProfileRefresh:disabled {
+  cursor: wait;
+}
+
+.commandCenterProfileRefreshState {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.5);
+  color: white;
+}
+
+.commandCenterProfileRefresh .isSpinning {
+  animation: commandCenterProfileRefreshSpin 800ms linear infinite;
+}
+
+@keyframes commandCenterProfileRefreshSpin {
+  to { transform: rotate(360deg); }
+}
+
 .phase8TargetPlayerSummary strong {
   overflow-wrap: anywhere;
 }
 
 .commandCenterAccountFacts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
 }
 
 .commandCenterAccountFacts > span {
-  display: grid;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  padding: 12px;
-  border-radius: var(--phase6-radius-md);
-  background: rgba(250, 251, 247, 0.38);
 }
 
 .commandCenterAccountFacts span span {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.commandCenterAccountFacts strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.commandCenterGameActionTrigger {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 180ms ease, border-color 180ms ease, opacity 180ms ease;
+}
+
+.commandCenterGameActionTrigger > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.commandCenterGameActionTrigger > strong {
+  font-size: 13px;
+}
+
+.commandCenterGameActionTrigger > svg {
+  flex: 0 0 auto;
+  color: var(--data-primary);
+}
+
+.commandCenterGameActionTrigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--data-primary) 46%, var(--border-subtle));
+  background: color-mix(in srgb, var(--data-primary) 7%, var(--surface-control));
+}
+
+.commandCenterGameActionTrigger:focus-visible {
+  outline: 2px solid var(--data-primary);
+  outline-offset: 2px;
+}
+
+.commandCenterGameActionTrigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .commandCenterAccountActions {
@@ -625,6 +778,141 @@
   outline-offset: 2px;
 }
 
+.phase6CommandCenter .versionDialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--text-primary) 42%, transparent);
+}
+
+.phase6CommandCenter .versionDialog {
+  width: min(420px, 100%);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  background: var(--glass-primary);
+  color: var(--text-primary);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--text-primary) 20%, transparent);
+}
+
+.phase6CommandCenter .versionDialog h3,
+.phase6CommandCenter .versionDialog p {
+  margin: 0;
+}
+
+.phase6CommandCenter .versionDialog h3 {
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.phase6CommandCenter .versionDialogNumber {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.phase6CommandCenter .versionDialogClose {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.gameActionDialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.68);
+  backdrop-filter: blur(3px);
+}
+
+.gameActionDialog {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-secondary) 96%, var(--text-primary) 4%);
+  color: var(--text-primary);
+  box-shadow: 0 22px 64px rgb(0 0 0 / 0.38);
+}
+
+.gameActionDialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.gameActionDialog h3,
+.gameActionDialog p,
+.gameActionDialog dl,
+.gameActionDialog dd {
+  margin: 0;
+}
+
+.gameActionDialog h3 {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.gameActionDialogClose {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.gameActionDialogComment {
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--data-primary) 24%, var(--glass-border));
+  border-radius: var(--phase6-radius-md);
+  background: color-mix(in srgb, var(--data-primary) 7%, var(--surface-control));
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.gameActionDialogStats {
+  display: grid;
+}
+
+.gameActionDialogStats > div {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gameActionDialogStats > div:last-child {
+  border-bottom: 0;
+}
+
+.gameActionDialogStats dt {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.gameActionDialogStats dd {
+  color: var(--text-primary);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gameActionDialogStats .isWarning dd {
+  color: var(--status-danger-strong);
+}
+
 .phase6CommandCenter .dangerButton {
   border-color: color-mix(in srgb, var(--status-danger) 34%, var(--border-subtle));
   background: var(--status-danger-bg);
@@ -681,6 +969,10 @@
 
   .phase6CommandCenter .phase6DataHealthGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gameActionDialogBackdrop {
+    padding: 12px;
   }
 
 }
@@ -874,6 +1166,7 @@
 }
 
 .seasonAutoUpdateToggle {
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -897,43 +1190,47 @@
   font-weight: 600;
 }
 
-.seasonAutoUpdateToggle small {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
 .seasonAutoUpdateToggle input {
-  width: 38px;
-  height: 22px;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  min-height: 20px;
+  min-block-size: 20px !important;
   flex: 0 0 auto;
   appearance: none;
+  padding: 0;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-secondary) 18%, var(--surface-control));
+  background: color-mix(in srgb, var(--text-tertiary) 24%, var(--surface-control));
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text-primary) 8%, transparent);
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
 }
 
 .seasonAutoUpdateToggle input::before {
   content: "";
-  display: block;
-  width: 16px;
-  height: 16px;
-  margin: 2px;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--text-secondary);
-  transition: transform 140ms ease, background 140ms ease;
+  background: var(--surface-secondary);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text-primary) 24%, transparent);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .seasonAutoUpdateToggle input:checked {
   border-color: var(--data-primary);
-  background: color-mix(in srgb, var(--data-primary) 32%, var(--surface-control));
+  background: var(--data-primary);
 }
 
 .seasonAutoUpdateToggle input:checked::before {
   transform: translateX(16px);
-  background: var(--data-primary);
+}
+
+.seasonAutoUpdateToggle:hover input:not(:disabled) {
+  border-color: color-mix(in srgb, var(--data-primary) 55%, var(--border-subtle));
 }
 
 .seasonAutoUpdateToggle input:focus-visible {
@@ -947,6 +1244,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .commandCenterProfileRefresh .isSpinning { animation: none; }
   .seasonAutoUpdateToggle input,
   .seasonAutoUpdateToggle input::before {
     transition: none;

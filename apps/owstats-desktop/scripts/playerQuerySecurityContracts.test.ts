@@ -16,8 +16,8 @@ for (const forbidden of ["customerToken", "bigdata", "authorization", "cookie", 
 type WebViewBoundary = PlayerQuerySessionStart | PlayerQueryCard | PlayerQueryCardImages | PlayerQueryMatchDetail;
 const samples: WebViewBoundary[] = [
   { sessionId: "pq-1", generation: 1, battleTag: "测试#1" },
-  { battleTag: "测试#1", level: 1, gameTimeSeconds: 60, title: null },
-  { icon: { mimeType: "image/png", dataBase64: "AQID" } },
+  { battleTag: "测试#1", level: 1, gameTimeSeconds: 60, title: null, gameAction: null },
+  { icon: { mimeType: "image/png", dataBase64: "AQID" }, titleIcon: null },
 ];
 for (const sample of samples) {
   assert.equal(/https?:\/\//i.test(JSON.stringify(sample)), false, "WebView DTO sample must use in-memory image bytes, never a remote URL");

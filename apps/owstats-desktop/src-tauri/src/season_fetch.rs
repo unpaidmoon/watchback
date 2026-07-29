@@ -170,13 +170,7 @@ pub async fn fetch_quick_season_with_base_url_and_selection_progress(
     )?;
     let list_started = Instant::now();
     let season_candidates = request_season_candidates(request.season);
-    let (profile_card, sport_count, leisure_count) = tokio::join!(
-        async {
-            client
-                .query_card(&request.customer_token)
-                .await
-                .unwrap_or(Value::Null)
-        },
+    let (sport_count, leisure_count) = tokio::join!(
         fetch_count_info_for_candidates(
             &client,
             &request.customer_token,
@@ -253,7 +247,7 @@ pub async fn fetch_quick_season_with_base_url_and_selection_progress(
     let detail_duration_ms = detail_started.elapsed().as_millis() as u64;
     let payload = build_payload(
         &request,
-        profile_card,
+        Value::Null,
         sport_count,
         leisure_count,
         entries,
@@ -295,13 +289,7 @@ async fn fetch_season_with_rate_limit_base_url(
     )?;
     let list_started = Instant::now();
     let season_candidates = request_season_candidates(request.season);
-    let (profile_card, sport_count, leisure_count) = tokio::join!(
-        async {
-            client
-                .query_card(&request.customer_token)
-                .await
-                .unwrap_or(Value::Null)
-        },
+    let (sport_count, leisure_count) = tokio::join!(
         fetch_count_info_for_candidates(
             &client,
             &request.customer_token,
@@ -372,7 +360,7 @@ async fn fetch_season_with_rate_limit_base_url(
     let detail_duration_ms = detail_started.elapsed().as_millis() as u64;
     let payload = build_payload(
         &request,
-        profile_card,
+        Value::Null,
         sport_count,
         leisure_count,
         entries,

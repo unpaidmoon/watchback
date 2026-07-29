@@ -1942,6 +1942,7 @@ fn public_status_and_profile_serialization_hide_internal_role_ids_and_secrets() 
             role_id: Some(987654321),
             player_id: Some("synthetic-player".to_string()),
             avatar_url: None,
+            title_icon_url: None,
             endorsement_level: None,
             play_time_hours: None,
             title: None,

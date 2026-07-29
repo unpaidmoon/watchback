@@ -44,6 +44,7 @@ impl PlayerQueryService {
                 customer_token: token,
                 generation,
                 upstream,
+                card_response: Arc::new(tokio::sync::OnceCell::new()),
                 _permit: permit,
             },
         );
@@ -54,16 +55,25 @@ impl PlayerQueryService {
         })
     }
     pub async fn load_card(&self, id: &str) -> QueryResult<PlayerQueryCard> {
-        let (tag, token, g, u) = self.sessions.snapshot(id)?;
-        let v = u.card(&token).await.map_err(|e| self.error(id, e))?;
+        let (tag, token, g, u, card_response) = self.sessions.card_snapshot(id)?;
+        let card_request = card_response.get_or_try_init(|| async {
+            u.card(&token).await.map_err(|error| self.error(id, error))
+        });
+        let (card_result, action_result) = tokio::join!(card_request, u.fight_count(&token, None),);
+        let v = card_result?;
+        let game_action = action_result.ok().as_ref().and_then(mapper::game_action);
         self.ensure_generation(id, g)?;
-        mapper::card(&v, tag)
+        mapper::card(v, tag, game_action)
     }
     pub async fn load_card_images(&self, id: &str) -> QueryResult<PlayerQueryCardImages> {
-        let (_, token, g, u) = self.sessions.snapshot(id)?;
-        let v = u.card(&token).await.map_err(|e| self.error(id, e))?;
+        let (_, token, g, u, card_response) = self.sessions.card_snapshot(id)?;
+        let v = card_response
+            .get_or_try_init(|| async {
+                u.card(&token).await.map_err(|error| self.error(id, error))
+            })
+            .await?;
         self.ensure_generation(id, g)?;
-        mapper::card_images(&v, u.as_ref()).await
+        mapper::card_images(v, u.as_ref()).await
     }
     pub async fn load_season(&self, id: &str, season: Season) -> QueryResult<SeasonOverview> {
         let (_, token, g, u) = self.sessions.snapshot(id)?;
@@ -217,6 +227,7 @@ mod tests {
 
     #[derive(Default)]
     struct CountingUpstream {
+        cards: AtomicUsize,
         lists: AtomicUsize,
         details: AtomicUsize,
         counts: AtomicUsize,
@@ -235,6 +246,7 @@ mod tests {
             })
         }
         fn card<'a>(&'a self, _: &'a str) -> UpstreamFuture<'a> {
+            self.cards.fetch_add(1, Ordering::SeqCst);
             Box::pin(async {
                 Ok(
                     json!({"code": 0, "data": {"level": 123, "gameTime": 90, "title": "title", "icon": "https://images/icon.png", "titleIcon": "https://images/title.png"}}),
@@ -266,7 +278,7 @@ mod tests {
                     anyhow::bail!("unsupported fight count")
                 }
                 Ok(
-                    json!({"code":0,"data":{"roleTypeCountData":[{"roleType":"tank","matchSum":1,"winRate":"100","kda":"2.0","lastRankInfo":{"rankName":"Gold","rankSubTier":2}}],"heroUseSummaryList":[]}}),
+                    json!({"code":0,"data":{"gameAction":{"comment":"良好","sendHonorsCnt":5,"getHonorsCnt":3,"reportedCnt":0},"roleTypeCountData":[{"roleType":"tank","matchSum":1,"winRate":"100","kda":"2.0","lastRankInfo":{"rankName":"Gold","rankSubTier":2}}],"heroUseSummaryList":[]}}),
                 )
             })
         }
@@ -297,16 +309,13 @@ mod tests {
             self.details.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Ok(Value::Null) })
         }
-        fn image<'a>(&'a self, url: &'a str, _: usize) -> UpstreamFuture<'a> {
+        fn image<'a>(&'a self, _url: &'a str, _: usize) -> UpstreamFuture<'a> {
             Box::pin(async move {
                 self.images.fetch_add(1, Ordering::SeqCst);
                 let active = self.active_images.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_active_images.fetch_max(active, Ordering::SeqCst);
                 tokio::task::yield_now().await;
                 self.active_images.fetch_sub(1, Ordering::SeqCst);
-                if url.contains("title") {
-                    anyhow::bail!("one image failed")
-                }
                 Ok(json!({"mimeType":"image/png","bytes":[1,2,3]}))
             })
         }
@@ -362,18 +371,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn card_text_never_fetches_images_and_card_images_fetches_only_the_avatar() {
+    async fn card_fetches_game_action_and_card_images_bound_both_profile_images() {
         let upstream = Arc::new(CountingUpstream::default());
         let (service, id) = session(Arc::clone(&upstream)).await;
 
-        let card = service.load_card(&id).await.unwrap();
+        let (card, images) = tokio::join!(service.load_card(&id), service.load_card_images(&id));
+        let card = card.unwrap();
+        let images = images.unwrap();
         assert_eq!(card.level, Some(123));
-        assert_eq!(upstream.images.load(Ordering::SeqCst), 0);
-
-        let images = service.load_card_images(&id).await.unwrap();
-        assert_eq!(upstream.images.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            card.game_action
+                .and_then(|action| action.comment)
+                .as_deref(),
+            Some("良好")
+        );
+        assert_eq!(upstream.cards.load(Ordering::SeqCst), 1);
+        assert_eq!(upstream.images.load(Ordering::SeqCst), 2);
         assert_eq!(upstream.max_active_images.load(Ordering::SeqCst), 1);
         assert!(images.icon.is_some());
+        assert!(images.title_icon.is_some());
     }
 
     #[tokio::test]

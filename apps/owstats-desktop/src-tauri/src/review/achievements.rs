@@ -68,9 +68,9 @@ const DEFINITIONS: [AchievementDefinition; 19] = [
         title: "战术变阵",
         detail: "生涯英雄池广度",
         requirements: [
-            "生涯使用 5 名不同英雄",
-            "生涯使用 10 名不同英雄",
-            "生涯使用 15 名不同英雄",
+            "生涯使用 20 名不同英雄",
+            "生涯使用 35 名不同英雄",
+            "生涯使用 50 名不同英雄",
         ],
     },
     AchievementDefinition {
@@ -210,6 +210,7 @@ struct CareerMatchFact {
     damage_taken: Option<i64>,
     duration_sec: Option<i64>,
     rank_level: i64,
+    is_standard_competitive: bool,
     is_stadium: bool,
     stadium_end_worth: Option<i64>,
     stadium_rank_level: i64,
@@ -290,6 +291,9 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
         let bucket: String = row.get(17)?;
         let game_mode: String = row.get(18)?;
         let bnet_id: Option<String> = row.get(19)?;
+        let is_standard_competitive = matches!(game_mode.as_str(), "SportPreset" | "SportOpen");
+        let is_arena =
+            bucket == "stadium" && matches!(game_mode.as_str(), "SportFight" | "LeisureFight");
         let is_stadium = bucket == "stadium" && game_mode == "SportFight";
         let stadium = is_stadium
             .then(|| {
@@ -310,11 +314,17 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
             damage: row.get(8)?,
             duration_sec: row.get(9)?,
             rank_level: parse_rank_level(&raw_entry),
+            is_standard_competitive,
             is_stadium,
             stadium_end_worth: stadium.as_ref().and_then(|value| value.end_worth),
             stadium_rank_level: stadium.as_ref().map(|value| value.rank_level).unwrap_or(0),
             damage_taken: row.get(11)?,
-            has_friend: row.get::<_, i64>(12)? == 1,
+            has_friend: row.get::<_, i64>(12)? == 1
+                || (is_arena
+                    && raw_detail
+                        .as_deref()
+                        .zip(bnet_id.as_deref())
+                        .is_some_and(|(detail, bnet_id)| arena_has_friend(detail, bnet_id))),
             arena_was_three_points_behind: result == "win"
                 && raw_detail.as_deref().is_some_and(was_three_points_behind),
             grade: row.get(14)?,
@@ -327,6 +337,34 @@ fn load_career_facts(db: &OwDatabase) -> Result<Vec<CareerMatchFact>> {
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .context("无法读取生涯成就对局事实")
+}
+
+fn arena_has_friend(raw_detail: &str, bnet_id: &str) -> bool {
+    fn visit(value: &Value, bnet_id: &str) -> bool {
+        match value {
+            Value::Object(object) => {
+                let is_current_player = object
+                    .get("bnetId")
+                    .or_else(|| object.get("bnet_id"))
+                    .and_then(value_as_string)
+                    .as_deref()
+                    == Some(bnet_id);
+                (is_current_player
+                    && object
+                        .get("friendBnetIds")
+                        .or_else(|| object.get("friend_bnet_ids"))
+                        .and_then(Value::as_array)
+                        .is_some_and(|friends| !friends.is_empty()))
+                    || object.values().any(|item| visit(item, bnet_id))
+            }
+            Value::Array(items) => items.iter().any(|item| visit(item, bnet_id)),
+            _ => false,
+        }
+    }
+
+    serde_json::from_str::<Value>(raw_detail)
+        .ok()
+        .is_some_and(|value| visit(&value, bnet_id))
 }
 
 fn parse_stadium_fact(raw_detail: &str, bnet_id: &str) -> Option<StadiumAchievementFact> {
@@ -574,7 +612,11 @@ fn evaluate_new_achievements(facts: &[CareerMatchFact], achievements: &mut [Care
     set_dates(
         achievements,
         "rank-proof",
-        [4, 6, 8].map(|threshold| first_match_unlock(facts, |fact| fact.rank_level >= threshold)),
+        [4, 6, 8].map(|threshold| {
+            first_match_unlock(facts, |fact| {
+                fact.is_standard_competitive && fact.rank_level >= threshold
+            })
+        }),
     );
     set_dates(
         achievements,
@@ -635,7 +677,7 @@ fn evaluate_existing_achievements(
         if !fact.hero.is_empty() {
             *hero_counts.entry(&fact.hero).or_default() += 1;
             heroes.insert(&fact.hero);
-            for (index, threshold) in [5_usize, 10, 15].into_iter().enumerate() {
+            for (index, threshold) in [20_usize, 35, 50].into_iter().enumerate() {
                 if heroes.len() >= threshold && switching_dates[index].is_none() {
                     switching_dates[index] = Some(fact.begin_ts);
                 }

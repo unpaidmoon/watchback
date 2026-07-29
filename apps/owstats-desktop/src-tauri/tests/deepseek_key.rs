@@ -179,6 +179,32 @@ async fn manager_reports_ready_or_missing_and_writes_only_after_200() {
     assert!(empty_manager.backend_api_key().is_err());
 }
 
+#[test]
+fn bundled_key_is_used_only_when_the_user_has_not_saved_an_override() {
+    let bundled_only = DeepSeekKeyManager::with_store_and_bundled_key(
+        build_http_client().unwrap(),
+        DEFAULT_DEEPSEEK_BASE_URL,
+        Arc::new(FakeStore::with_key(None)),
+        Some("bundled-synthetic-key"),
+    )
+    .unwrap();
+    assert_eq!(bundled_only.status().unwrap().state, "ready");
+    assert_eq!(
+        bundled_only.backend_api_key().unwrap(),
+        "bundled-synthetic-key"
+    );
+
+    let overridden = DeepSeekKeyManager::with_store_and_bundled_key(
+        build_http_client().unwrap(),
+        DEFAULT_DEEPSEEK_BASE_URL,
+        Arc::new(FakeStore::with_key(Some("user-synthetic-key"))),
+        Some("bundled-synthetic-key"),
+    )
+    .unwrap();
+    assert_eq!(overridden.status().unwrap().state, "ready");
+    assert_eq!(overridden.backend_api_key().unwrap(), "user-synthetic-key");
+}
+
 #[tokio::test]
 async fn successful_validation_overwrites_existing_key() {
     let store = Arc::new(FakeStore::with_key(Some("old-synthetic-key")));

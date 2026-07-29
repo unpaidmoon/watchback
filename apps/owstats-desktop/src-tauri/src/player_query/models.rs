@@ -1,3 +1,4 @@
+use crate::models::PlayerGameAction;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -137,12 +138,14 @@ pub struct PlayerQueryCard {
     pub level: Option<u64>,
     pub game_time_seconds: Option<u64>,
     pub title: Option<String>,
+    pub game_action: Option<PlayerGameAction>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerQueryCardImages {
     pub icon: Option<MemoryImage>,
+    pub title_icon: Option<MemoryImage>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

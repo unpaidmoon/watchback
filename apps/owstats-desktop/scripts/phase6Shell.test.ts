@@ -83,7 +83,7 @@ assertEqual(/@media \(max-width: 920px\)[\s\S]*?\.seasonSyncWorkbench\s*\{[\s\S]
 assertEqual(/\.commandCenterMetricsRow\s*\{[\s\S]*?border:\s*0;/.test(commandCenterStyles), true, "metrics strip removes its heavy outer border");
 assertEqual(/\.commandCenterSyncPanel,[\s\S]*?\.commandCenterAccountPanel[\s\S]*?background:\s*var\(--glass-primary\);/.test(commandCenterStyles), true, "main panels use the primary glass surface");
 assertEqual(/@media \(max-width: 1440px\)[\s\S]*?\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "1440px folds metrics into two columns");
-assertEqual(/\.commandCenterAccountPanel \.phase6ProfileAvatar\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*56px;/.test(commandCenterStyles), true, "account identity uses a compact neutral avatar");
+assertEqual(/\.profileSummaryCard \.phase6ProfileAvatar\s*\{[\s\S]*?width:\s*80px;[\s\S]*?height:\s*80px;/.test(commandCenterStyles), true, "shared account identity uses the confirmed 80px avatar");
 assertEqual(/\.commandCenterTools \.phase6SettingsLauncherGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/.test(commandCenterStyles), true, "tools use four columns on wide screens");
 assertEqual(
   /\.phase6CommandCenter \.phase6SettingsPlaceholderAction\s*\{(?=[^}]*border:\s*1px solid var\(--border-subtle\))(?=[^}]*background:\s*var\(--surface-control\))(?=[^}]*color:\s*var\(--text-primary\))[^}]*\}/s.test(commandCenterStyles),
@@ -145,7 +145,13 @@ assertEqual(
 assertEqual(/\.phase6CommandCenter \.syncTargetStrip\s*\{[\s\S]*?background:\s*rgba\(250, 251, 247, 0\.38\);/.test(commandCenterStyles), true, "target strip removes the opaque white inner card");
 assertEqual(/\.phase6CommandCenter \.phase6DataCoverageCard\s*\{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/.test(commandCenterStyles), true, "coverage card is flattened into the account surface");
 assertEqual(/\.syncedSeasonLedgerRow\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--glass-border\);/.test(commandCenterStyles), true, "season ledger rows use dividers instead of floating cards");
-assertEqual(appSource.includes('<Navigate to="/matches" replace />'), true, "root route redirects to matches");
+assertEqual(appSource.includes("function StartupRoute()"), true, "root route checks local accounts before redirecting");
+assertEqual(
+  appSource.includes('status.accounts.length === 0 ? "/onboarding" : "/matches"'),
+  true,
+  "root route opens command center without local accounts and matches with an account",
+);
+assertEqual(appSource.includes('<Route path="/" element={<StartupRoute />} />'), true, "root route uses the account-aware startup route");
 assertEqual(appSource.includes('to="/onboarding#local-data"'), false, "global shell removes the local data entry");
 assertEqual(appSource.includes('aria-label="查看本地数据"'), false, "global shell removes the local data entry accessible node");
 assertEqual(friendAnalyticsSource.includes('<span className="phase6Eyebrow">地图分析</span>'), false, "map analysis removes its redundant eyebrow");
@@ -159,9 +165,9 @@ assertEqual(
   "command center is horizontally centered inside the wide workspace",
 );
 assertEqual(
-  /\.commandCenterMainGrid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 2fr\) minmax\(280px, 1fr\);/.test(styles),
+  /\.commandCenterMainGrid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1\.55fr\) minmax\(450px, 1fr\);/.test(styles),
   true,
-  "command center gives season sync two thirds and account health one third",
+  "command center reserves enough width for the expanded player profile card",
 );
 assertEqual(
   /\.commandCenterMetricsRow\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/.test(styles),
@@ -314,9 +320,17 @@ assertEqual(onboardingSource.includes("数据覆盖度"), true, "command center 
 assertEqual(onboardingSource.includes("同步状态"), false, "command center no longer labels a separate sync timeline");
 assertEqual(onboardingSource.includes("数据健康检查"), false, "command center no longer labels a separate health card");
 assertEqual(onboardingSource.includes("版本号"), true, "settings exposes version entry");
+assertEqual(onboardingSource.includes('const APP_VERSION = "0.3.0-beta.1"'), true, "version dialog exposes the requested release version");
+assertEqual(onboardingSource.includes('role="dialog" aria-modal="true" aria-labelledby="version-dialog-title"'), true, "version entry opens an accessible modal dialog");
 assertEqual(onboardingSource.includes("日志文件"), true, "settings exposes log file entry");
 assertEqual(onboardingSource.includes("数据存放路径"), true, "settings exposes data path entry");
+assertEqual(onboardingSource.includes('openSettingsDirectory("logs")'), true, "log entry opens the installed log file location");
+assertEqual(onboardingSource.includes('openSettingsDirectory("data")'), true, "data entry opens the installed data directory");
+assertEqual(onboardingSource.includes("日志文件入口后续提供"), false, "log entry is no longer a placeholder");
+assertEqual(onboardingSource.includes("数据存放路径入口后续提供"), false, "data entry is no longer a placeholder");
 assertEqual(onboardingSource.includes("Github地址"), true, "settings exposes GitHub entry");
+assertEqual(onboardingSource.includes("openGithubRepository()"), true, "GitHub entry opens the project repository");
+assertEqual(onboardingSource.includes("Github地址入口后续提供"), false, "GitHub entry is no longer a placeholder");
 assertEqual(onboardingSource.includes("phase6SettingsLauncherGrid"), true, "settings uses a compact launcher grid");
 assertEqual(onboardingSource.includes("phase6AccountBanner"), false, "old diagonal account banner is removed");
 assertEqual(onboardingSource.includes("phase6CommandMainGrid"), false, "separate data/settings card grid is removed");

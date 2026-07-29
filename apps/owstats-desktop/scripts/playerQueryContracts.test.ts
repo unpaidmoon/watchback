@@ -31,6 +31,7 @@ const card: PlayerQueryCard = {
   level: 3,
   gameTimeSeconds: 3600,
   title: null,
+  gameAction: null,
 };
 assert.equal(card.battleTag, "示例玩家#1234");
 

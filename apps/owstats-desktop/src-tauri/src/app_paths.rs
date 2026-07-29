@@ -92,6 +92,14 @@ impl SharedAppPaths {
         self.root.join("user_settings.json")
     }
 
+    pub fn logs(&self) -> PathBuf {
+        self.root.join("logs")
+    }
+
+    pub fn log_file(&self) -> PathBuf {
+        self.logs().join("watchback.log")
+    }
+
     pub fn browser_profile(&self) -> PathBuf {
         self.root.join("chrome-dashen-profile")
     }

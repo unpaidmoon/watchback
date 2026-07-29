@@ -13,11 +13,11 @@
 
 .playerQueryIdentityLayout {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(420px, .95fr);
+  grid-template-columns: minmax(450px, 1fr) minmax(0, 1.55fr);
   align-items: center;
   gap: var(--space-6);
 }
-.playerQuerySearchArea { min-width: 0; }
+.playerQuerySearchArea { min-width: 0; align-self: center; }
 .playerQueryForm { display: grid; gap: var(--space-2); }
 .playerQueryFormControls { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: start; gap: var(--space-3); }
 .playerQueryFormControls .pageSeasonSelect { align-self: start; }
@@ -51,19 +51,9 @@
 .playerQueryResourceState { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 72px; }
 
 .playerQueryProfileArea { min-width: 0; }
+.playerQueryProfileArea .profileSummaryCard { width: 100%; }
 .playerQuerySectionHeading { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
 .playerQuerySectionHeading h2 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; }
-.playerQueryProfileCard { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: var(--space-4); align-items: center; }
-.playerQueryProfileIdentity { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
-.playerQueryProfileIdentity > img,
-.playerQueryImagePlaceholder { width: 64px; height: 64px; flex: 0 0 64px; border-radius: var(--radius-secondary); object-fit: cover; background: var(--surface-control); }
-.playerQueryIdentityCopy { min-width: 0; }
-.playerQueryIdentityCopy h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: 20px; text-overflow: ellipsis; white-space: nowrap; }
-.playerQueryTitle { margin: var(--space-1) 0 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
-.playerQueryProfileCard dl { display: grid; grid-template-columns: repeat(2, minmax(110px, 1fr)); gap: var(--space-3); margin: 0; }
-.playerQueryProfileCard dl div { min-width: 110px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-control); }
-.playerQueryProfileCard dt { color: var(--text-secondary); font-size: 12px; }
-.playerQueryProfileCard dd { margin: var(--space-1) 0 0; color: var(--text-primary); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .playerQueryRanksPanel .phase6RoleRankGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .playerQueryRanksPanel .reviewCompetitiveRankGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -121,14 +111,13 @@ button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow:hover { borde
 .playerQuerySkeleton::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface-primary) 60%, transparent), transparent); transform: translateX(-100%); animation: player-query-shimmer 1.3s infinite; }
 @keyframes player-query-shimmer { to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .playerQuerySkeleton::after { animation: none; } .playerQueryModeTabWrap { transition: none; } }
-@media (max-width:900px) {
+@media (max-width:1100px) {
   .playerQueryWorkspace { width: calc(100% - 28px); }
   .playerQueryIdentityLayout,
-  .playerQueryModeGrid,
-  .playerQueryProfileCard { grid-template-columns: 1fr; }
+  .playerQueryModeGrid { grid-template-columns: 1fr; }
+  .playerQuerySearchArea { align-self: stretch; }
   .playerQueryFormControls { grid-template-columns: minmax(0, 1fr) auto; }
   .playerQueryFormControls > input { grid-column: 1 / -1; }
-  .playerQueryProfileCard dl { justify-self: stretch; }
   .playerQueryRanksPanel .phase6RoleRankGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   button.matchListCard.phase6MatchRowReal.playerQueryCompactMatchRow { grid-template-columns: 48px 54px minmax(0,1fr) 36px minmax(64px,auto) 68px 48px; gap: 6px; padding-inline: var(--space-2); }
 }

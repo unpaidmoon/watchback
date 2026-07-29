@@ -1,3 +1,5 @@
+import { useCallback, useState } from "react";
+import { ProfileGameActionDialog, ProfileSummaryCard } from "../profile-card/ProfileSummaryCard";
 import type { PlayerQueryCard, PlayerQueryCardImages, PlayerQueryMemoryImage } from "./playerQueryTypes";
 
 const memoryImageUrl = (image: PlayerQueryMemoryImage | null) =>
@@ -22,29 +24,25 @@ export function PlayerProfileCard({
   battleTag: string;
 }) {
   const icon = memoryImageUrl(images?.icon ?? null);
+  const titleIcon = memoryImageUrl(images?.titleIcon ?? null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const closeDialog = useCallback(() => setDialogOpen(false), []);
   return (
-    <article className="playerQueryProfileCard">
-      <div className="playerQueryProfileIdentity">
-        {icon ? (
-          <img src={icon} alt="玩家头像" />
-        ) : (
-          <span className="playerQueryImagePlaceholder" aria-label="暂无玩家头像" />
-        )}
-        <div className="playerQueryIdentityCopy">
-          <h2>{battleTag}</h2>
-          {card.title ? <p className="playerQueryTitle">{card.title}</p> : null}
-        </div>
-      </div>
-      <dl>
-        <div>
-          <dt>赞赏等级</dt>
-          <dd>{card.level ?? "-"}</dd>
-        </div>
-        <div>
-          <dt>游戏时长</dt>
-          <dd>{formatQueryDuration(card.gameTimeSeconds)}</dd>
-        </div>
-      </dl>
-    </article>
+    <>
+      <ProfileSummaryCard
+        showTitleIcon={false}
+        profile={{
+          name: battleTag,
+          title: card.title,
+          titleIconUrl: titleIcon,
+          avatarUrl: icon,
+          endorsementLevel: card.level,
+          playTimeHours: card.gameTimeSeconds == null ? null : card.gameTimeSeconds / 3_600,
+          gameAction: card.gameAction,
+        }}
+        onGameActionClick={card.gameAction ? () => setDialogOpen(true) : undefined}
+      />
+      {dialogOpen && card.gameAction ? <ProfileGameActionDialog action={card.gameAction} onClose={closeDialog} /> : null}
+    </>
   );
 }
