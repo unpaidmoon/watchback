@@ -5,9 +5,7 @@ import type {
   AiRoastGenerationResult,
   CareerAchievement,
   FilterOptions,
-  CredentialStatus,
   DeepSeekKeyStatus,
-  FriendAnalytics,
   FriendAnalyticsFilters,
   FriendDetail,
   MatchDetailView,
@@ -20,7 +18,6 @@ import type {
   PersonalSeasonReview,
   PlayerGameAction,
   PlayerProfile,
-  PlayerTargetStatus,
   QrAccountLoginStartResult,
   QrAccountLoginSnapshot,
   LoginTargetStatus,
@@ -32,7 +29,6 @@ import type {
   SyncMode,
   SeasonBackgroundStatus,
   SeasonSyncResult,
-  SyncSummary,
   UpdateCheckResult,
   UserSettings,
 } from "./types";
@@ -114,10 +110,6 @@ export function refreshMatchEvaluations() {
   return invoke<void>("refresh_match_evaluations");
 }
 
-export function getFriendAnalytics(filters: FriendAnalyticsFilters) {
-  return invoke<FriendAnalytics>("get_friend_analytics", { filters });
-}
-
 export function getFriendDetails(bnetId: string, filters: FriendAnalyticsFilters) {
   return invoke<FriendDetail>("get_friend_details", { bnetId, filters });
 }
@@ -146,10 +138,6 @@ export function getCareerAchievements() {
   return invoke<CareerAchievement[]>("get_career_achievements");
 }
 
-export function getCredentialStatus() {
-  return invoke<CredentialStatus>("get_credential_status");
-}
-
 export function getPlayerProfile() {
   return invoke<PlayerProfile>("get_player_profile");
 }
@@ -176,10 +164,6 @@ export function checkAppUpdate() {
 
 export function cancelDashenLogin() {
   return invoke<{ cancelled: boolean; message: string }>("cancel_dashen_login");
-}
-
-export function getPlayerTargetStatus() {
-  return invoke<PlayerTargetStatus>("get_player_target_status");
 }
 
 export function getLoginTargetStatus() {

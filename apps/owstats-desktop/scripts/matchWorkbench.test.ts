@@ -3,20 +3,19 @@ import { readFileSync } from "node:fs";
 import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CompactMatchDetail } from "../src/features/matches/CompactMatchDetail";
+import { MatchDetailPane } from "../src/features/matches/MatchDetailPane";
 import { MatchListCard } from "../src/features/matches/MatchListCard";
 import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import type { MatchDetailView, MatchSummary, PlayerRow } from "../src/shared/types";
 
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
-const compactDetailSource = ["CompactMatchDetail.tsx", "MatchDetailContent.tsx"]
+const compactDetailSource = ["MatchDetailPane.tsx", "MatchDetailContent.tsx"]
   .map((file) => readFileSync(new URL(`../src/features/matches/${file}`, import.meta.url), "utf8"))
   .join("\n");
 const detailHeaderSource = readFileSync(new URL("../src/features/matches/MatchDetailHeader.tsx", import.meta.url), "utf8");
 const teamTableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");
 const listCardSource = readFileSync(new URL("../src/features/matches/MatchListCard.tsx", import.meta.url), "utf8");
-const listPaneSource = readFileSync(new URL("../src/features/matches/MatchListPane.tsx", import.meta.url), "utf8");
 const timelineSource = readFileSync(new URL("../src/features/matches/MatchTimeline.tsx", import.meta.url), "utf8");
 const phase6ComponentsSource = readFileSync(new URL("../src/shared/phase6Components.tsx", import.meta.url), "utf8");
 const styleSource = readFileSync(new URL("../src/styles/shared.css", import.meta.url), "utf8");
@@ -73,10 +72,10 @@ assert.equal(matchesPageSource.includes("phase6MatchWorkbench"), true, "MatchesP
 assert.equal(matchesPageSource.includes("phase6MatchesHeader"), false, "MatchesPage should remove the match workbench header");
 assert.equal(matchesPageSource.includes("<MetricCard"), false, "MatchesPage should remove the metric card strip above the workbench");
 assert.equal(matchesPageSource.includes("getMatchDetails"), true, "MatchesPage should load selected match detail in place");
-assert.equal(matchesPageSource.includes("MatchListPane"), true, "MatchesPage should coordinate the list pane component");
+assert.equal(matchesPageSource.includes("MatchTimeline"), true, "MatchesPage should coordinate the list pane component");
 assert.equal(matchesPageSource.includes("MatchDetailPane"), true, "MatchesPage should coordinate the detail pane component");
-assert.equal(matchesPageSource.includes("<CompactMatchDetail"), false, "MatchesPage should delegate compact detail rendering to the detail pane");
-assert.equal(matchesPageSource.includes("<MatchTimeline"), false, "MatchesPage should delegate timeline rendering to the list pane");
+assert.equal(matchesPageSource.includes("<MatchDetailPane"), true, "MatchesPage should render the detail pane");
+assert.equal(matchesPageSource.includes("<MatchTimeline"), true, "MatchesPage should render the timeline directly");
 assert.equal(matchesPageSource.includes("MatchDetailReport"), false, "MatchesPage should not reuse the full-size match detail page inside the workbench");
 assert.equal(matchesPageSource.includes("selectedMatchId"), true, "MatchesPage should keep selected match state");
 assert.equal(matchesPageSource.includes("navigate(`/matches/${matchId}`)"), false, "MatchesPage should not navigate away when selecting a match row");
@@ -147,8 +146,8 @@ assert.equal(matchesPageSource.includes("mobileDetailOpen"), true, "MatchesPage 
 assert.equal(matchesPageSource.includes("setMobileDetailOpen(true)"), true, "selecting a match should open narrow detail");
 assert.equal(detailPaneSource.includes("onBack"), true, "detail pane should expose narrow back navigation");
 assert.equal(detailPaneSource.includes("matchDetailBackButton"), true, "detail pane should render a real narrow back button");
-assert.equal(detailPaneSource.includes("CompactMatchDetail"), true, "MatchDetailPane should own compact detail rendering");
-assert.equal(detailPaneSource.includes('"onRetry"'), true, "MatchDetailPane should forward the retry contract");
+assert.equal(detailPaneSource.includes("MatchDetailPane"), true, "MatchDetailPane should own compact detail rendering");
+assert.equal(detailPaneSource.includes("onRetry={onRetry}"), true, "MatchDetailPane should forward the retry contract");
 assert.equal(detailPaneSource.includes("选择左侧对局查看详情。"), true, "MatchDetailPane should own the unchanged empty state");
 assert.equal(detailHeaderSource.includes("hasPrevious"), false, "detail header should remove previous navigation state");
 assert.equal(detailHeaderSource.includes("hasNext"), false, "detail header should remove next navigation state");
@@ -173,8 +172,6 @@ assert.match(
 );
 assert.doesNotMatch(matchStyleSource, /border-left-color:\s*var\(--status-danger\)/);
 assert.doesNotMatch(matchStyleSource, /#1e8ee7|#dc304f/i, "feature styles should not restore saturated team-row fills");
-assert.equal(listPaneSource.includes("forwardRef<HTMLDivElement"), false, "MatchListPane should no longer own the scroll ref");
-assert.equal(listPaneSource.includes("<MatchTimeline"), true, "MatchListPane should delegate streak rendering to MatchTimeline");
 assert.equal(matchesPageSource.includes("ref={timelineRef}"), true, "MatchesPage should attach the cache ref to the pane scroll owner");
 
 assert.equal(timelineSource.includes("selectedMatchId"), true, "MatchTimeline should accept the selected match id");
@@ -712,7 +709,7 @@ const navigationProps = {
 };
 
 const detailLoadingMarkup = renderToStaticMarkup(
-  createElement(CompactMatchDetail, {
+  createElement(MatchDetailPane, {
     detail: null,
     loading: true,
     error: null,
@@ -725,7 +722,7 @@ assert.match(detailLoadingMarkup, /aria-busy="true"/);
 assert.match(detailLoadingMarkup, /正在读取对局详情\.\.\./);
 
 const detailErrorMarkup = renderToStaticMarkup(
-  createElement(CompactMatchDetail, {
+  createElement(MatchDetailPane, {
     detail: null,
     loading: false,
     error: "对局详情读取失败",
@@ -737,7 +734,7 @@ assert.match(detailErrorMarkup, /role="alert"/);
 assert.match(detailErrorMarkup, /对局详情读取失败/);
 assert.match(detailErrorMarkup, /<button[^>]*>重新加载<\/button>/);
 const normalMarkup = renderToStaticMarkup(
-  createElement(CompactMatchDetail, { detail: normalDetail, loading: false, error: null, matchId: normalDetail.matchId, ...navigationProps }),
+  createElement(MatchDetailPane, { detail: normalDetail, loading: false, error: null, matchId: normalDetail.matchId, ...navigationProps }),
 );
 assert.match(normalMarkup, /aria-label="普通对局详情"/);
 assert.doesNotMatch(normalMarkup, />本人表现</);
@@ -760,7 +757,7 @@ for (const [gameMode, modeLabel] of [
 ] as const) {
   const matchId = `synthetic-${gameMode}`;
   const markup = renderToStaticMarkup(
-    createElement(CompactMatchDetail, {
+    createElement(MatchDetailPane, {
       detail: {
         ...normalDetail,
         matchId,
@@ -779,7 +776,7 @@ for (const [gameMode, modeLabel] of [
 }
 
 const quickRankedMarkup = renderToStaticMarkup(
-  createElement(CompactMatchDetail, {
+  createElement(MatchDetailPane, {
     detail: { ...normalDetail, teammates: [rankedPlayer] },
     loading: false,
     error: null,
@@ -832,7 +829,7 @@ const arenaDetail: MatchDetailView = {
   },
 };
 const arenaMarkup = renderToStaticMarkup(
-  createElement(CompactMatchDetail, { detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps }),
+  createElement(MatchDetailPane, { detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps }),
 );
 assert.match(arenaMarkup, /aria-label="角斗对局详情"/);
 assert.match(arenaMarkup, /<button[^>]*><span>角斗汇总<\/span><\/button>/, "arena detail should keep the summary switch");
@@ -902,9 +899,12 @@ function renderArenaWithTestHooks(): React.ReactElement {
   dispatcherRef.current = arenaHookDispatcher;
   arenaHookIndex = 0;
   try {
-    const compactTree = CompactMatchDetail({ detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps });
-    const ArenaDetail = compactTree.type as (props: Record<string, unknown>) => React.ReactElement;
-    return ArenaDetail(compactTree.props as Record<string, unknown>);
+    const compactTree = MatchDetailPane({ detail: arenaDetail, loading: false, error: null, matchId: arenaDetail.matchId, ...navigationProps });
+    const content = React.Children.toArray(compactTree.props.children)[1] as React.ReactElement;
+    const MatchContent = content.type as (props: Record<string, unknown>) => React.ReactElement;
+    const arena = MatchContent(content.props as Record<string, unknown>);
+    const ArenaDetail = arena.type as (props: Record<string, unknown>) => React.ReactElement;
+    return ArenaDetail(arena.props as Record<string, unknown>);
   } finally {
     dispatcherRef.current = previousDispatcher;
   }

@@ -7,17 +7,6 @@ type GlassPanelProps = {
   tone?: "soft" | "solid";
 };
 
-type MetricCardProps = {
-  label: string;
-  value: ReactNode;
-  meta?: ReactNode;
-};
-
-type StatusBadgeProps = {
-  children: ReactNode;
-  tone?: "neutral" | "good" | "warn" | "bad";
-};
-
 type AssetImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src"> & {
   sources: string[];
   fallbackLabel: string;
@@ -38,20 +27,6 @@ type MapPreviewProps = {
 
 export function GlassPanel({ children, className = "", tone = "soft" }: GlassPanelProps) {
   return <section className={`phase6GlassPanelShared ${tone === "solid" ? "solid" : ""} ${className}`}>{children}</section>;
-}
-
-export function MetricCard({ label, value, meta }: MetricCardProps) {
-  return (
-    <article className="phase6MetricCardShared">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {meta ? <small>{meta}</small> : null}
-    </article>
-  );
-}
-
-export function StatusBadge({ children, tone = "neutral" }: StatusBadgeProps) {
-  return <span className={`phase6StatusBadge ${tone}`}>{children}</span>;
 }
 
 function AssetImage({ sources, fallbackLabel, className = "", ...imageProps }: AssetImageProps) {

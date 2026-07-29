@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -9,9 +8,7 @@ use owstats_desktop_lib::ai_roast::client::{
 };
 use owstats_desktop_lib::ai_roast::coordinator::{AiRoastCoordinator, CapturedRoastRequest};
 use owstats_desktop_lib::ai_roast::knowledge::{embedded_knowledge, knowledge_for_match};
-use owstats_desktop_lib::ai_roast::report::{AiRoastReport, RoastInsight};
 use owstats_desktop_lib::ai_roast::snapshot::build_roast_snapshot;
-use owstats_desktop_lib::ai_roast::validator::validate_report_output;
 use owstats_desktop_lib::app_paths::SharedAppPaths;
 use owstats_desktop_lib::deepseek_key::DeepSeekKeyManager;
 use owstats_desktop_lib::{get_match_detail, MatchDetailView, OwDatabase};
@@ -59,13 +56,6 @@ enum FailureCategory {
     GenerateNumberAscii,
     GenerateNumberChinese,
     GenerateService,
-    Validate,
-    ValidateDuplicate,
-    ValidateCliche,
-    ValidateIdentity,
-    ValidateLength,
-    ValidateRebuild,
-    ValidateRecheck,
     ValidateStructure,
 }
 
@@ -99,13 +89,6 @@ impl FailureCategory {
             Self::GenerateNumberAscii => "generate_number_ascii",
             Self::GenerateNumberChinese => "generate_number_chinese",
             Self::GenerateService => "generate_service",
-            Self::Validate => "validate",
-            Self::ValidateDuplicate => "validate_duplicate",
-            Self::ValidateCliche => "validate_cliche",
-            Self::ValidateIdentity => "validate_identity",
-            Self::ValidateLength => "validate_length",
-            Self::ValidateRebuild => "validate_rebuild",
-            Self::ValidateRecheck => "validate_recheck",
             Self::ValidateStructure => "validate_structure",
         }
     }
@@ -370,168 +353,4 @@ fn current_player_is_not_objective_leader(detail: &MatchDetailView) -> bool {
         .map(|player| player.target_time_sec)
         .max();
     team_max.is_some_and(|maximum| current[0].target_time_sec < maximum)
-}
-
-enum LiveValidationFailure {
-    Duplicate,
-    Cliche,
-    Identity,
-    Length,
-    Rebuild,
-    Recheck,
-    Structure,
-}
-
-fn validate_live_report(
-    database: &OwDatabase,
-    match_id: &str,
-    report: &AiRoastReport,
-) -> Result<usize, LiveValidationFailure> {
-    if !(2..=3).contains(&report.decisive_factors.len())
-        || !(1..=3).contains(&report.team_and_matchups.len())
-    {
-        return Err(LiveValidationFailure::Structure);
-    }
-    let detail =
-        get_match_detail(database, match_id).map_err(|_| LiveValidationFailure::Rebuild)?;
-    let conn = database
-        .connect()
-        .map_err(|_| LiveValidationFailure::Rebuild)?;
-    let knowledge = embedded_knowledge().map_err(|_| LiveValidationFailure::Rebuild)?;
-    let context = knowledge_for_match(
-        &knowledge,
-        detail
-            .teammates
-            .iter()
-            .chain(&detail.enemies)
-            .map(|player| player.hero_name.clone()),
-        detail.map_name.as_deref(),
-    );
-    let snapshot = build_roast_snapshot(&conn, match_id, &detail, context)
-        .map_err(|_| LiveValidationFailure::Rebuild)?;
-    let serialized = serde_json::to_string(report).map_err(|_| LiveValidationFailure::Structure)?;
-    validate_report_output(&serialized, &snapshot).map_err(|_| LiveValidationFailure::Recheck)?;
-
-    let visible = visible_text(report);
-    if report.verdict.title.trim().is_empty()
-        || report.current_player.commentary.trim().is_empty()
-        || report.closing_roast.trim().is_empty()
-    {
-        return Err(LiveValidationFailure::Structure);
-    }
-    if !visible.windows(2).all(|pair| pair[0] != pair[1]) {
-        return Err(LiveValidationFailure::Duplicate);
-    }
-    if contains_cliche(&visible.join(" ")) {
-        return Err(LiveValidationFailure::Cliche);
-    }
-    if contains_excluded_identity(&visible.join(" "), &detail) {
-        return Err(LiveValidationFailure::Identity);
-    }
-    let chars = visible
-        .iter()
-        .flat_map(|text| text.chars())
-        .filter(|character| matches!(*character, '\u{3400}'..='\u{9fff}'))
-        .count();
-    if chars > 600 {
-        return Err(LiveValidationFailure::Length);
-    }
-    Ok(chars)
-}
-
-fn visible_text(report: &AiRoastReport) -> Vec<&str> {
-    let insights = report
-        .decisive_factors
-        .iter()
-        .chain(std::iter::once(&report.current_player))
-        .chain(report.team_and_matchups.iter().map(|item| &item.insight));
-    std::iter::once(report.verdict.title.as_str())
-        .chain(std::iter::once(report.verdict.summary.as_str()))
-        .chain(insights.flat_map(insight_text))
-        .chain(std::iter::once(report.closing_roast.as_str()))
-        .collect()
-}
-
-fn insight_text(insight: &RoastInsight) -> std::array::IntoIter<&str, 2> {
-    [insight.title.as_str(), insight.commentary.as_str()].into_iter()
-}
-
-fn contains_cliche(text: &str) -> bool {
-    ["不是你不努力", "数据不会说谎", "电子竞技成王败寇", "尽力局"]
-        .iter()
-        .any(|value| text.contains(value))
-}
-
-fn contains_excluded_identity(text: &str, detail: &MatchDetailView) -> bool {
-    let excluded = detail
-        .teammates
-        .iter()
-        .chain(&detail.enemies)
-        .flat_map(|player| [&player.name, &player.bnet_id, &player.hero_guid])
-        .chain(detail.map_guid.iter())
-        .filter(|value| value.chars().count() >= 3)
-        .collect::<HashSet<_>>();
-    excluded.iter().any(|value| text.contains(value.as_str()))
-        || [
-            "token",
-            "cookie",
-            "authorization",
-            "credential",
-            "sqlite3",
-            ":\\",
-        ]
-        .iter()
-        .any(|value| text.to_ascii_lowercase().contains(value))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use owstats_desktop_lib::ai_roast::report::{ClaimType, RoastVerdict};
-
-    fn synthetic_report() -> AiRoastReport {
-        let insight = RoastInsight {
-            title: "合成条目".into(),
-            commentary: "合成正文".into(),
-            claim_type: ClaimType::DirectFact,
-            evidence_refs: vec!["synthetic.path".into()],
-        };
-        AiRoastReport {
-            verdict: RoastVerdict {
-                title: "合成判词".into(),
-                summary: "合成总评".into(),
-            },
-            decisive_factors: vec![
-                insight.clone(),
-                RoastInsight {
-                    title: "另一条目".into(),
-                    ..insight.clone()
-                },
-            ],
-            current_player: RoastInsight {
-                title: "当前玩家".into(),
-                ..insight.clone()
-            },
-            team_and_matchups: vec![owstats_desktop_lib::ai_roast::report::TeamInsight {
-                kind: owstats_desktop_lib::ai_roast::report::TeamInsightKind::RoleMatchup,
-                insight,
-            }],
-            closing_roast: "合成收尾".into(),
-        }
-    }
-
-    #[test]
-    fn visible_text_has_all_five_sections_without_internal_fields() {
-        let text = visible_text(&synthetic_report()).join("|");
-        assert!(text.contains("合成判词"));
-        assert!(text.contains("当前玩家"));
-        assert!(text.contains("合成收尾"));
-        assert!(!text.contains("synthetic.path"));
-    }
-
-    #[test]
-    fn cliche_gate_is_explicit_and_anonymous() {
-        assert!(contains_cliche("数据不会说谎"));
-        assert!(!contains_cliche("合成事实可以很尖锐"));
-    }
 }

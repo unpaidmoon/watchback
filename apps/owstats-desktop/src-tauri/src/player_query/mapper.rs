@@ -1,4 +1,5 @@
 use super::models::*;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{TimeZone, Utc};
 use serde_json::Value;
 use std::{
@@ -155,30 +156,8 @@ async fn image(
         .collect();
     Some(MemoryImage {
         mime_type: mime,
-        data_base64: encode_base64(&raw),
+        data_base64: STANDARD.encode(raw),
     })
-}
-fn encode_base64(bytes: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let a = chunk[0];
-        let b = *chunk.get(1).unwrap_or(&0);
-        let c = *chunk.get(2).unwrap_or(&0);
-        out.push(T[(a >> 2) as usize] as char);
-        out.push(T[(((a & 3) << 4) | (b >> 4)) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            T[(((b & 15) << 2) | (c >> 6)) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            T[(c & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
 }
 pub fn ranks(value: &Value) -> QueryResult<Vec<RankRow>> {
     let data = data(value)?;

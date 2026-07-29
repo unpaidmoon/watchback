@@ -151,6 +151,8 @@ impl Drop for OperationPermit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     #[test]
     fn account_operation_blocks_sync_until_permit_is_dropped() {
@@ -209,6 +211,53 @@ mod tests {
         background.mark_running();
         assert!(coordinator.try_acquire_query_session().is_err());
         drop(background);
+        assert!(coordinator.try_acquire_query_session().is_ok());
+    }
+
+    #[test]
+    fn background_registration_is_atomic_with_query_acquisition() {
+        for _ in 0..100 {
+            let coordinator = Arc::new(SyncCoordinator::default());
+            let barrier = Arc::new(Barrier::new(3));
+            let background = {
+                let coordinator = Arc::clone(&coordinator);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    coordinator.try_register_background_sync().ok()
+                })
+            };
+            let query = {
+                let coordinator = Arc::clone(&coordinator);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    coordinator.try_acquire_query_session().ok()
+                })
+            };
+            barrier.wait();
+            assert_ne!(
+                background.join().unwrap().is_some(),
+                query.join().unwrap().is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn panic_unwind_releases_permits() {
+        let coordinator = SyncCoordinator::default();
+        let copy = coordinator.clone();
+        assert!(std::panic::catch_unwind(move || {
+            let _permit = copy.try_acquire_query_session().unwrap();
+            panic!("synthetic failure");
+        })
+        .is_err());
+        let copy = coordinator.clone();
+        assert!(std::panic::catch_unwind(move || {
+            let _permit = copy.try_acquire_sync().unwrap();
+            panic!("synthetic failure");
+        })
+        .is_err());
         assert!(coordinator.try_acquire_query_session().is_ok());
     }
 }

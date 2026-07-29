@@ -34,7 +34,7 @@ const commandCenterCssSource = readFileSync(
   new URL('../src/styles/features/command-center.css', import.meta.url),
   'utf8',
 );
-const compactMatchDetailSource = ['CompactMatchDetail.tsx', 'MatchDetailContent.tsx']
+const compactMatchDetailSource = ['MatchDetailPane.tsx', 'MatchDetailContent.tsx']
   .map((file) => readFileSync(new URL(`../src/features/matches/${file}`, import.meta.url), 'utf8'))
   .join('\n');
 const matchesCssSource = readFileSync(
@@ -43,7 +43,7 @@ const matchesCssSource = readFileSync(
 );
 const matchListSources = [
   readFileSync(new URL('../src/pages/MatchesPage.tsx', import.meta.url), 'utf8'),
-  readFileSync(new URL('../src/features/matches/MatchListPane.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/features/matches/MatchTimeline.tsx', import.meta.url), 'utf8'),
   readFileSync(new URL('../src/features/matches/MatchListCard.tsx', import.meta.url), 'utf8'),
   readFileSync(new URL('../src/features/matches/MatchFilterToolbar.tsx', import.meta.url), 'utf8'),
 ].join('\n');

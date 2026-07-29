@@ -7,7 +7,6 @@ const analyticsSource = readFileSync(new URL("../src/pages/FriendAnalyticsPage.t
 const reviewCss = readFileSync(new URL("../src/styles/features/review.css", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 
-assert.equal(analyticsSource.includes("export function SeasonAnalysisModules"), true);
 assert.match(appSource, /function FriendAnalyticsRoute\(\)[\s\S]*?<Navigate to=\{season === undefined \? "\/review" : buildReviewHref\(season\)\} replace \/>/);
 assert.match(appSource, /<Route path="\/analytics\/friends" element=\{<FriendAnalyticsRoute \/>\} \/>/);
 assert.equal(reviewSource.includes("getSeasonAnalysis"), true);

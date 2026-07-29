@@ -486,11 +486,6 @@ export type FriendDetail = {
 
 export type SyncMode = "quickUpdate" | "fullFetch";
 
-export type SyncRequest = {
-  season: number;
-  mode: SyncMode;
-};
-
 export type SyncPageDiagnostic = {
   matchKind: string;
   gameMode: string;
@@ -587,14 +582,6 @@ export type SyncProgress = {
   currentMatchId: string | null;
   failedDetails: number;
   latestErrors: string[];
-};
-
-export type PersonalReviewRequest = {
-  season?: number;
-};
-
-export type OnboardingStatusRequest = {
-  season?: number;
 };
 
 export type EvidenceLink = {

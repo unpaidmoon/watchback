@@ -5,7 +5,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FilterBar } from "../src/features/matches/FilterBar";
 import { MatchDetailPane } from "../src/features/matches/MatchDetailPane";
-import { MatchListPane } from "../src/features/matches/MatchListPane";
+import { MatchTimeline } from "../src/features/matches/MatchTimeline";
 import type { MatchFavoriteController } from "../src/features/matches/useMatchFavoriteEditor";
 import { PageHeader, PageSeasonSelect, StatusPill } from "../src/shared/page-shell";
 import type { ArenaDetailSlice, FilterOptions, MatchDetailView, MatchFilters, MatchSummary, PlayerRow } from "../src/shared/types";
@@ -129,7 +129,7 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
           </div>
           <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${detailOpen ? "detailOpen" : ""}`}>
             <div className="matchListPane phase6WorkbenchList">
-              <MatchListPane matches={matches} selectedMatchId={matches[0].matchId} onSelect={() => undefined} />
+              <MatchTimeline matches={matches} selectedMatchId={matches[0].matchId} onSelect={() => undefined} />
             </div>
             <MatchDetailPane
               detail={detail}

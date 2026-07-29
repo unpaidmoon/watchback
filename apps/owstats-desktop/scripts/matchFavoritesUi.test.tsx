@@ -21,7 +21,7 @@ const guardSource = readFileSync(guardUrl, "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
-const compactDetailSource = ["CompactMatchDetail.tsx", "MatchDetailContent.tsx"]
+const compactDetailSource = ["MatchDetailPane.tsx", "MatchDetailContent.tsx"]
   .map((file) => readFileSync(new URL(`../src/features/matches/${file}`, import.meta.url), "utf8"))
   .join("\n");
 const detailPaneSource = readFileSync(new URL("../src/features/matches/MatchDetailPane.tsx", import.meta.url), "utf8");

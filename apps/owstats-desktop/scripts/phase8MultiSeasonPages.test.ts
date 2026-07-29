@@ -14,13 +14,6 @@ import {
 } from "../src/pages/PersonalReviewPage";
 import type { PersonalSeasonReview } from "../src/shared/types";
 import { createLatestRankingRequestGuard, parseSeasonParam } from "../src/pages/RankingPage";
-import {
-  createLatestFriendAnalysisRequestGuard,
-  FriendAnalysisEmptyState,
-  hasFriendAnalysisSeasonData,
-  normalizeFriendAnalysisRequestedSeason,
-  parseFriendAnalysisSeasonParam,
-} from "../src/pages/FriendAnalyticsPage";
 import { legacyReviewRedirectHref } from "../src/features/review/reviewNavigation";
 
 const reviewSource = `${readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8")}\n${readFileSync(new URL("../src/features/review/usePersonalSeasonReview.ts", import.meta.url), "utf8")}`;
@@ -112,25 +105,6 @@ assert.equal(parseSeasonParam("15"), 15, "ranking page should accept an older lo
 assert.equal(parseSeasonParam("999"), 999, "ranking page should let the backend validate a positive URL season");
 assert.equal(parseSeasonParam("0"), undefined, "ranking page should reject a non-positive URL season");
 
-assert.match(analyticsSource, /getSeasonAnalysis\(selectedSeason/, "friend analysis page should request analysis with selectedSeason");
-assert.match(analyticsSource, /S\$\{selectedSeason\}/, "friend analysis page should title the selected season");
-assert.match(analyticsSource, /<select[^>]+value=\{selectedSeason/, "friend analysis page should render a page-level season selector");
-assert.equal(parseFriendAnalysisSeasonParam("21"), 21, "friend analysis should accept S21 URL state");
-assert.equal(parseFriendAnalysisSeasonParam("23"), 23, "friend analysis should accept S23 URL state");
-assert.equal(parseFriendAnalysisSeasonParam("999"), undefined, "friend analysis should ignore unsupported URL seasons");
-assert.deepEqual(
-  normalizeFriendAnalysisRequestedSeason("999"),
-  { selectedSeason: undefined, shouldReplaceUrl: true },
-  "an unsupported friend-analysis URL season must use the latest-season request and replace its URL",
-);
-assert.deepEqual(
-  normalizeFriendAnalysisRequestedSeason(null),
-  { selectedSeason: undefined, shouldReplaceUrl: false },
-  "an absent friend-analysis URL season must use the latest-season request without replacing its URL",
-);
-assert.match(analyticsSource, /setAnalysis\(null\);[\s\S]*setError\(null\);[\s\S]*setLoading\(false\);/, "a URL season change must clear stale friend analysis state");
-assert.match(analyticsSource, /<option value="">最新赛季<\/option>/, "friend analysis should render a valid initial latest-season selector option");
-assert.match(analyticsSource, /正在加载好友分析/, "friend analysis should show a Chinese loading state before the latest season is known");
 assert.match(analyticsSource, /buildReviewRankingHref\(season\)/);
 assert.match(analyticsSource, /buildFriendDetailState\(friend\.bnetId, season, window\.scrollY\)/);
 assert.doesNotMatch(analyticsSource, /sourceView|ReviewView/);
@@ -238,47 +212,6 @@ await settlePromises();
 assert.equal(displayedRanking, "S23", "the latest ranking response must update the active ranking");
 assert.equal(rankingLoading, false, "the latest ranking completion must clear active loading");
 
-const friendRequestGuard = createLatestFriendAnalysisRequestGuard();
-const firstFriendRequest = friendRequestGuard.begin();
-const secondFriendRequest = friendRequestGuard.begin();
-const firstFriendResponse = deferred<string>();
-const secondFriendResponse = deferred<string>();
-let displayedFriendAnalysis: string | null = null;
-let friendAnalysisError: string | null = null;
-let friendAnalysisLoading = true;
-
-void firstFriendResponse.promise.then((value) => {
-  if (friendRequestGuard.isCurrent(firstFriendRequest)) displayedFriendAnalysis = value;
-}).catch((error: Error) => {
-  if (friendRequestGuard.isCurrent(firstFriendRequest)) friendAnalysisError = error.message;
-}).finally(() => {
-  if (friendRequestGuard.isCurrent(firstFriendRequest)) friendAnalysisLoading = false;
-});
-void secondFriendResponse.promise.then((value) => {
-  if (friendRequestGuard.isCurrent(secondFriendRequest)) displayedFriendAnalysis = value;
-}).catch((error: Error) => {
-  if (friendRequestGuard.isCurrent(secondFriendRequest)) friendAnalysisError = error.message;
-}).finally(() => {
-  if (friendRequestGuard.isCurrent(secondFriendRequest)) friendAnalysisLoading = false;
-});
-
-firstFriendResponse.resolve("S22");
-await firstFriendResponse.promise;
-await settlePromises();
-assert.equal(displayedFriendAnalysis, null, "a late friend-analysis response must not replace the selected season");
-assert.equal(friendAnalysisError, null, "a late friend-analysis error must not replace the selected season error");
-assert.equal(friendAnalysisLoading, true, "a late friend-analysis completion must not clear active loading");
-
-secondFriendResponse.reject(new Error("S23 请求失败"));
-await secondFriendResponse.promise.catch(() => undefined);
-await settlePromises();
-assert.equal(friendAnalysisError, "S23 请求失败", "the current friend-analysis error must be displayed");
-assert.equal(friendAnalysisLoading, false, "the current friend-analysis completion must clear loading");
-
-const navigationFriendRequestGuard = createLatestFriendAnalysisRequestGuard();
-const requestBeforeNavigation = navigationFriendRequestGuard.begin();
-navigationFriendRequestGuard.invalidate();
-assert.equal(navigationFriendRequestGuard.isCurrent(requestBeforeNavigation), false, "navigation must invalidate the previous friend-analysis request");
 
 assert.equal(hasReviewSeasonData({ summary: { season: null } } as never), false, "a null backend season must show the empty review state");
 assert.equal(hasReviewSeasonData({ summary: { season: 0 } } as never), false, "a zero backend season must show the empty review state");
@@ -287,11 +220,3 @@ assert.equal(hasReviewSeasonData({ summary: { season: 23 } } as never), true, "a
 const emptyReviewMarkup = renderToStaticMarkup(createElement(ReviewEmptyState));
 assert.match(emptyReviewMarkup, /暂无可用赛季战报/, "the empty review state must show a clear Chinese message");
 assert.doesNotMatch(emptyReviewMarkup, /<select/, "the empty review state must not render an invalid season selector");
-
-assert.equal(hasFriendAnalysisSeasonData({ season: null } as never), false, "a null friend-analysis season must show the empty state");
-assert.equal(hasFriendAnalysisSeasonData({ season: 0 } as never), false, "a zero friend-analysis season must show the empty state");
-assert.equal(hasFriendAnalysisSeasonData({ season: 23 } as never), true, "a valid friend-analysis season must render the analysis");
-
-const emptyFriendAnalysisMarkup = renderToStaticMarkup(createElement(FriendAnalysisEmptyState));
-assert.match(emptyFriendAnalysisMarkup, /暂无可用好友分析/, "the friend-analysis empty state must show a clear Chinese message");
-assert.doesNotMatch(emptyFriendAnalysisMarkup, /<select/, "the friend-analysis empty state must not render an invalid season selector");

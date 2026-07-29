@@ -5,7 +5,6 @@ import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchPa
 import { FriendDetailPage } from "./pages/FriendDetailPage";
 import { MatchesPage } from "./pages/MatchesPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
-import { Phase6StyleBoardPage } from "./pages/Phase6StyleBoardPage";
 import { PersonalReviewPage } from "./pages/PersonalReviewPage";
 import { AchievementsPage } from "./pages/AchievementsPage";
 import { RankingPage } from "./pages/RankingPage";
@@ -197,7 +196,6 @@ export function App() {
           <Routes>
             <Route path="/" element={<StartupRoute />} />
             <Route path="/onboarding" element={<OnboardingPage />} />
-            <Route path="/phase6-style-board" element={<Phase6StyleBoardPage />} />
             <Route path="/matches" element={<MatchesPage onQueryPlayer={queryPlayer} />} />
             <Route path="/player-query/*" element={<PlayerQueryFeatureRoutes queryIntent={queryIntent} onQueryPlayer={queryPlayer} />} />
             <Route path="/review" element={<PersonalReviewRoute />} />

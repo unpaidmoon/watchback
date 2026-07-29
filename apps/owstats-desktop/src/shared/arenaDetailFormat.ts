@@ -23,10 +23,3 @@ export function arenaHeaderTitle(slice: ArenaDetailSlice): string {
 export function arenaHeaderMapKey(slice: ArenaDetailSlice): string | null {
   return slice.mapGuid ?? slice.mapName;
 }
-
-export function arenaResultSubLabel(result: string | null): string {
-  if (result === "win") return "VICTORY";
-  if (result === "loss") return "DEFEAT";
-  if (result === "draw") return "DRAW";
-  return "";
-}

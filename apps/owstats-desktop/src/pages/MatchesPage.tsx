@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { FilterBar } from "../features/matches/FilterBar";
 import { MatchDetailPane } from "../features/matches/MatchDetailPane";
 import { useMatchFavoriteEditor } from "../features/matches/useMatchFavoriteEditor";
-import { MatchListPane } from "../features/matches/MatchListPane";
+import { MatchTimeline } from "../features/matches/MatchTimeline";
 import {
   activeMatchFilterChips,
   clearVisibleMatchFilters,
@@ -472,7 +472,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     const activeContainerTop = isElementScrollable(container) ? container.getBoundingClientRect().top : 0;
     const currentScrollTop = isElementScrollable(container) ? container.scrollTop : document.scrollingElement?.scrollTop ?? 0;
     if (scrollAnchor) {
-      const target = container.querySelector<HTMLElement>(`[data-match-id="${cssEscape(scrollAnchor.matchId)}"]`);
+      const target = container.querySelector<HTMLElement>(`[data-match-id="${CSS.escape(scrollAnchor.matchId)}"]`);
       if (target) {
         const itemTop = target.getBoundingClientRect().top;
         const nextScrollTop = computeMatchAnchorScrollTop({
@@ -541,7 +541,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
                 onAction={() => hasVisibleFilters ? setFilters(clearVisibleMatchFilters(filters)) : retryMatches()}
               />
             ) : (
-              <MatchListPane
+              <MatchTimeline
                 matches={matches}
                 selectedMatchId={selectedMatchId}
                 onSelect={selectMatch}
@@ -567,10 +567,6 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       </section>
     </div>
   );
-}
-
-function cssEscape(value: string) {
-  return value.replace(/["\\]/g, "\\$&");
 }
 
 function isElementScrollable(element: HTMLElement) {

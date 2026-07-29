@@ -599,7 +599,7 @@ pub fn evaluate_strategy(
         if delta.unwrap_or(0.0) < 0.0 {
             improved += 1
         }
-        let rejected = fold
+        let mut rejected = fold
             .validation
             .iter()
             .map(|&i| {
@@ -613,8 +613,9 @@ pub fn evaluate_strategy(
                     &effective,
                 ) > 0.35
             })
-            .collect::<Vec<_>>()
-            .tap_mut(|v| v.sort())
+            .collect::<Vec<_>>();
+        rejected.sort();
+        let rejected = rejected
             .get(
                 ((fold.validation.len() as f64 * 0.95).floor() as usize)
                     .min(fold.validation.len().saturating_sub(1)),
@@ -1647,11 +1648,3 @@ pub(crate) fn select_candidate_detailed(
     }
     selected
 }
-
-trait TapMut: Sized {
-    fn tap_mut(mut self, f: impl FnOnce(&mut Self)) -> Self {
-        f(&mut self);
-        self
-    }
-}
-impl<T> TapMut for T {}
