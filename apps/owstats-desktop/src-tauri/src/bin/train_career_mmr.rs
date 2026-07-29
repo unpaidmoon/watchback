@@ -783,7 +783,7 @@ impl OwnedTempFile {
             return self.fail_and_delete("输出文件已存在");
         }
         let name = target.as_os_str().encode_wide().collect::<Vec<_>>();
-        if name.is_empty() || name.iter().any(|unit| *unit == 0) {
+        if name.is_empty() || name.contains(&0) {
             return self.fail_and_delete("输出路径无效");
         }
         let bytes =

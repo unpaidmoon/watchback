@@ -7,16 +7,18 @@ use owstats_desktop_lib::career_mmr::{
 use std::collections::BTreeMap;
 
 fn row(index: usize, mode_family: ModeFamily, positive_pattern: bool) -> MatrixRow {
-    let positive = index % 2 == 0;
+    let positive = index.is_multiple_of(2);
     let sign = if positive == positive_pattern {
         1.0
     } else {
         -1.0
     };
-    let mut features = FeatureValues::default();
-    features.final_hit = Some(2.0 * sign);
-    features.non_final_eliminations = Some(sign);
-    features.death = Some(-sign);
+    let features = FeatureValues {
+        final_hit: Some(2.0 * sign),
+        non_final_eliminations: Some(sign),
+        death: Some(-sign),
+        ..Default::default()
+    };
     MatrixRow {
         match_group: format!("synthetic-{mode_family:?}-{index}"),
         hero_group: "synthetic-hero".into(),
@@ -25,7 +27,7 @@ fn row(index: usize, mode_family: ModeFamily, positive_pattern: bool) -> MatrixR
         begin_ts: index as i64,
         result: if positive { 1.0 } else { 0.0 },
         expected_win_rate: if index % 4 < 2 { 0.35 } else { 0.65 },
-        data_quality: if index % 5 == 0 { 0.5 } else { 1.0 },
+        data_quality: if index.is_multiple_of(5) { 0.5 } else { 1.0 },
         mode_family,
         per_ten: features.clone(),
         standardized: features,

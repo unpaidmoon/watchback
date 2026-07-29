@@ -1,3 +1,9 @@
+#![allow(
+    clippy::items_after_test_module,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+
 pub mod account_context;
 pub mod account_login;
 pub mod account_migration;
@@ -1019,8 +1025,15 @@ pub fn run() -> anyhow::Result<()> {
     let published_data = open_published_install_data(&executable)?;
     let shared = published_data.paths().clone();
     initialize_log_file(&shared)?;
-    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(shared.log_file()) {
-        let _ = writeln!(file, "{} Watchback started", chrono::Utc::now().to_rfc3339());
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .append(true)
+        .open(shared.log_file())
+    {
+        let _ = writeln!(
+            file,
+            "{} Watchback started",
+            chrono::Utc::now().to_rfc3339()
+        );
     }
     let sync_coordinator = sync_coordinator::SyncCoordinator::default();
     let background_manager =

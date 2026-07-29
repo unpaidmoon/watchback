@@ -5,6 +5,11 @@ use serde_json::json;
 fn seed_stadium_match(db: &OwDatabase, match_id: &str, game_mode: &str, result: &str) {
     let conn = db.connect().unwrap();
     conn.execute(
+        "INSERT INTO players (player_id, bnet_id, display_name, raw_json, updated_at) VALUES ('current', 'current', 'Synthetic Current', '{}', '2026-07-20T00:00:00Z') ON CONFLICT(player_id) DO NOTHING",
+        [],
+    )
+    .unwrap();
+    conn.execute(
         r#"
         INSERT INTO matches (
             match_id, season, bucket, game_mode, match_kind, result, map_guid, map_name,

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use owstats_desktop_lib::{
     career_mmr::{
         input::{ModeFamily, PerformanceTier, Role, TrainingCohort},
@@ -559,7 +561,7 @@ fn transaction_failure_preserves_previous_complete_events() {
 }
 
 #[test]
-fn import_commits_matches_and_returns_safe_warning_when_rebuild_fails() {
+fn import_commits_matches_without_rebuilding_disabled_career_mmr() {
     let (_dir, db) = database();
     let conn = db.connect().unwrap();
     conn.execute_batch("CREATE TRIGGER fail_mmr_summary BEFORE INSERT ON career_role_mmr BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
@@ -569,10 +571,7 @@ fn import_commits_matches_and_returns_safe_warning_when_rebuild_fails() {
         "matches": {"entries": [{"matchId":"imported-safe","gameMode":"SportPreset","matchRet":1,"mapGuid":"map","heroGuid":"hero","beginTs":1700000000,"roleType":"tank"}], "details": [], "detail_errors": []}
     });
     let summary = import_payload_value_embedded(&db, &payload).unwrap();
-    assert_eq!(
-        summary.mmr_warning.as_deref(),
-        Some("比赛已成功导入，但生涯分重建失败；已保留上一套完整结果。")
-    );
+    assert!(summary.mmr_warning.is_none());
     let conn = db.connect().unwrap();
     assert_eq!(
         conn.query_row(

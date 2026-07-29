@@ -37,8 +37,9 @@ pub fn open_support_directory(
     data: State<'_, PublishedInstallData>,
 ) -> Result<(), String> {
     match kind.as_str() {
-        "data" => tauri_plugin_opener::open_path(data.paths().root(), None::<&str>)
-            .map_err(to_message),
+        "data" => {
+            tauri_plugin_opener::open_path(data.paths().root(), None::<&str>).map_err(to_message)
+        }
         "logs" => {
             crate::initialize_log_file(data.paths()).map_err(to_message)?;
             tauri_plugin_opener::reveal_item_in_dir(data.paths().log_file()).map_err(to_message)

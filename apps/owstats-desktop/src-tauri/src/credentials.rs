@@ -411,25 +411,24 @@ where
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
         } else {
-            if !reloaded_authenticated_login {
-                if find_existing_page(SIGN_PAGE_URL, port)
+            if !reloaded_authenticated_login
+                && find_existing_page(SIGN_PAGE_URL, port)
                     .await
                     .map_err(|_| anyhow!("credential_auth_target_check_failed"))?
                     .is_some()
-                {
-                    let login_url = serde_json::to_string(LOGIN_URL)
-                        .map_err(|_| anyhow!("credential_login_url_failed"))?;
-                    page.evaluate(&format!("location.replace({login_url})"), false)
-                        .await
-                        .map_err(|_| anyhow!("credential_login_reload_failed"))?;
-                    reloaded_authenticated_login = true;
-                    progress.report(
-                        LoginPhase::WaitingForLogin,
-                        "已确认扫码，正在识别登录账号。",
-                    );
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
+            {
+                let login_url = serde_json::to_string(LOGIN_URL)
+                    .map_err(|_| anyhow!("credential_login_url_failed"))?;
+                page.evaluate(&format!("location.replace({login_url})"), false)
+                    .await
+                    .map_err(|_| anyhow!("credential_login_reload_failed"))?;
+                reloaded_authenticated_login = true;
+                progress.report(
+                    LoginPhase::WaitingForLogin,
+                    "已确认扫码，正在识别登录账号。",
+                );
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
             }
             progress.report(
                 LoginPhase::WaitingForLogin,

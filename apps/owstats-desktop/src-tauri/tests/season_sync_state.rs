@@ -127,7 +127,7 @@ fn season_job_store_claims_once_merges_and_recovers_orphans() -> Result<()> {
         max_page: 5,
     };
 
-    let first_id = store.enqueue_or_merge(22, 4, &[work.clone()], &[])?;
+    let first_id = store.enqueue_or_merge(22, 4, std::slice::from_ref(&work), &[])?;
     let merged_id = store.enqueue_or_merge(22, 6, &[work], &[])?;
     assert_eq!(first_id, merged_id);
     assert_eq!(store.active_job_count(22)?, 1);

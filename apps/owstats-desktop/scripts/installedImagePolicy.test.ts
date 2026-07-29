@@ -22,8 +22,8 @@ assert.ok(imageSources.has("data:"), "img-src must allow the inlined Watchback m
 const profileCardSource = await readFile(resolve(appRoot, "src/features/player-query/PlayerProfileCard.tsx"), "utf8");
 assert.match(profileCardSource, /`data:\$\{image\.mimeType\};base64,/);
 
-const commandCenterSource = await readFile(resolve(appRoot, "src/pages/OnboardingPage.tsx"), "utf8");
-assert.match(commandCenterSource, /<img src=\{profile\.avatarUrl\}/);
+const profileSummarySource = await readFile(resolve(appRoot, "src/features/profile-card/ProfileSummaryCard.tsx"), "utf8");
+assert.match(profileSummarySource, /<img src=\{profile\.avatarUrl\}/);
 assert.ok(imageSources.has("https:"), "img-src must allow HTTPS account avatars in the command center");
 
 console.log("installed image policy tests passed");

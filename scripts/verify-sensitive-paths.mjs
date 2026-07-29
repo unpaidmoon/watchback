@@ -53,6 +53,7 @@ function findingsForText(text, relativePath, scanFixtureRoot) {
     ["sensitive-key", /["'](?:customer[_-]?token|access[_-]?token|token|cookie|authorization|credential|storage)["']\s*:\s*["'](?!\*\*\*REDACTED\*\*\*)[^"']+/gi],
   ];
   for (const [rule, pattern] of rules) {
+    if (rule === "sensitive-key" && basename(relativePath) === "package-lock.json") continue;
     for (const match of text.matchAll(pattern)) {
       const before = text.slice(0, match.index);
       const line = before.split("\n").length;

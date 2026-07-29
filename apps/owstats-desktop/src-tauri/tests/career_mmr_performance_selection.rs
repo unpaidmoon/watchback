@@ -180,7 +180,7 @@ fn runtime_invariant_preserves_outcome_direction() {
             continue;
         }
         assert!(
-            !(base > 0.0 && base + correction < 0.0) && !(base < 0.0 && base + correction > 0.0),
+            !(base > 0.0 && base + correction < 0.0 || base < 0.0 && base + correction > 0.0),
             "correction reversed outcome direction for base {}",
             base
         );

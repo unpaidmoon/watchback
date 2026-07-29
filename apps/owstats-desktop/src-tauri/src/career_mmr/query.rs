@@ -312,7 +312,7 @@ pub fn get_mmr_match_explanation(
     else {
         bail!("未找到该场 MMR 记录")
     };
-    Ok(build_explanation(
+    build_explanation(
         role,
         base,
         performance,
@@ -324,7 +324,7 @@ pub fn get_mmr_match_explanation(
         result,
         &mode,
         tier.as_deref(),
-    )?)
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -342,7 +342,7 @@ fn build_explanation(
     tier: Option<&str>,
 ) -> Result<CareerMmrMatchExplanation> {
     let neutral =
-        outcome_delta_for_expected(sigma, mode_family(&mode)?, role_share, quality, result, 0.5);
+        outcome_delta_for_expected(sigma, mode_family(mode)?, role_share, quality, result, 0.5);
     let difficulty = base - neutral;
     let mut factors = vec![
         CareerMmrExplanationFactor {

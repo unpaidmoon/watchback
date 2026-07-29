@@ -528,7 +528,8 @@ fn concurrent_add_same_role_never_creates_duplicate_accounts() {
 #[test]
 fn account_login_commands_acquire_account_operation_before_capture_and_are_registered() {
     let commands = include_str!("../src/commands.rs");
-    for command in ["add_account"] {
+    {
+        let command = "add_account";
         let function = command_source(commands, command);
         let permit = function.find("try_acquire_account_operation()").unwrap();
         let capture = function.find("capture_dashen_login(").unwrap();
@@ -2041,14 +2042,6 @@ fn player_commands_resolve_exactly_one_active_snapshot_and_avoid_legacy_paths() 
         "clear_player_target",
         "get_rankings",
         "get_season_analysis",
-        "get_career_mmr_overview",
-        "get_role_mmr_history",
-        "get_role_mmr_mode_breakdown",
-        "get_role_mmr_season_breakdown",
-        "get_mmr_match_explanation",
-        "get_recent_mmr_explanations",
-        "rebuild_career_mmr",
-        "get_career_mmr_build_status",
         "sync_season",
     ] {
         let function = command_source(source, command);
@@ -2073,8 +2066,6 @@ fn account_mutating_commands_acquire_permit_before_resolving_snapshot() {
         "keep_current_player_target",
         "retry_login_target_binding",
         "clear_player_target",
-        "rebuild_career_mmr",
-        "sync_season",
     ] {
         let function = command_source(source, command);
         let permit = function

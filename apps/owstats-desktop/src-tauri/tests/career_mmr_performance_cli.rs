@@ -1,3 +1,5 @@
+#![allow(clippy::tabs_in_doc_comments)]
+
 use owstats_desktop_lib::career_mmr::{
     input::{ModeFamily, Role},
     performance_stability::{
@@ -35,7 +37,7 @@ fn row(index: usize, role: &str, mode: ModeFamily) -> TrainingRow {
         result: (index % 2) as f64,
         expected_win_rate: 0.5,
         data_quality: 0.9,
-        base_delta: Some(if index % 2 == 0 { 10.0 } else { -10.0 }),
+        base_delta: Some(if index.is_multiple_of(2) { 10.0 } else { -10.0 }),
         final_hit: Some(2.0 + index as f64),
         kill: Some(5.0 + index as f64),
         assist: Some(4.0),

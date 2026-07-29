@@ -879,14 +879,14 @@ pub fn evaluate_stability_with_progress(
             }
         })
         .collect();
-    let evaluation = StabilityEvaluation {
+
+    StabilityEvaluation {
         config: config_snapshot,
         reports,
         roles,
         cells,
         worker_errors,
-    };
-    evaluation
+    }
 }
 
 #[cfg(test)]
@@ -1842,7 +1842,7 @@ mod hierarchical_bootstrap_tests {
     }
 
     fn row(index: usize, mode_family: ModeFamily) -> TrainingRow {
-        let positive = index % 2 == 0;
+        let positive = index.is_multiple_of(2);
         let opposite = mode_family == ModeFamily::StadiumCompetitive;
         let strong = if positive != opposite { 20.0 } else { 1.0 };
         TrainingRow {

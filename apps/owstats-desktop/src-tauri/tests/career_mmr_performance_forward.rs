@@ -13,16 +13,18 @@ use owstats_desktop_lib::career_mmr::{
 use std::collections::BTreeMap;
 
 fn row(group: &str, ts: i64, _role: Role, value: f64) -> MatrixRow {
-    let mut features = FeatureValues::default();
-    features.final_hit = Some(value);
-    features.non_final_eliminations = Some(value / 2.0);
-    features.assist = Some(value / 3.0);
-    features.death = Some(value / 4.0);
-    features.damage = Some(value * 2.0);
-    features.healing = Some(value * 3.0);
-    features.mitigation = Some(value * 4.0);
-    features.damage_taken = Some(value * 5.0);
-    features.objective_time = Some(value / 5.0);
+    let features = FeatureValues {
+        final_hit: Some(value),
+        non_final_eliminations: Some(value / 2.0),
+        assist: Some(value / 3.0),
+        death: Some(value / 4.0),
+        damage: Some(value * 2.0),
+        healing: Some(value * 3.0),
+        mitigation: Some(value * 4.0),
+        damage_taken: Some(value * 5.0),
+        objective_time: Some(value / 5.0),
+        ..Default::default()
+    };
     MatrixRow {
         match_group: group.into(),
         hero_group: "private-hero".into(),

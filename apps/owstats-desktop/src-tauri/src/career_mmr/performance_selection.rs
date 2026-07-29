@@ -256,6 +256,7 @@ fn try_build_shrunk(
     })
 }
 
+#[allow(clippy::manual_clamp)]
 fn build_percentile(role: Role, records: &[PerformanceRecord]) -> SelectedRoleModel {
     let mut bucket: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     for record in records {
@@ -297,6 +298,7 @@ fn build_percentile(role: Role, records: &[PerformanceRecord]) -> SelectedRoleMo
     }
 }
 
+#[allow(clippy::manual_clamp)]
 fn recenter_zero(weights: &mut BTreeMap<String, f64>, records: &[PerformanceRecord]) {
     if records.is_empty() {
         return;

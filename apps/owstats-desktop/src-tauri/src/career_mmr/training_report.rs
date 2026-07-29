@@ -1697,7 +1697,7 @@ fn median(values: Vec<f64>) -> f64 {
 fn median_value(mut values: Vec<f64>) -> f64 {
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]
@@ -1861,8 +1861,9 @@ fn solve(mut matrix: [[f64; 5]; 5], mut rhs: [f64; 5]) -> Option<[f64; 5]> {
                 continue;
             }
             let factor = matrix[row][column];
-            for index in column..5 {
-                matrix[row][index] -= factor * matrix[column][index];
+            let pivot_row = matrix[column];
+            for (value, pivot) in matrix[row][column..].iter_mut().zip(&pivot_row[column..]) {
+                *value -= factor * pivot;
             }
             rhs[row] -= factor * rhs[column];
         }
@@ -2234,7 +2235,7 @@ fn build_aggregate_evidence(
         let rows = bucket.rows;
         total_rows += rows;
         if let Ok(role) =
-            serde_json::from_value::<Role>(serde_json::Value::String(bucket.role.clone().into()))
+            serde_json::from_value::<Role>(serde_json::Value::String(bucket.role.clone()))
         {
             *role_rows.entry(role).or_default() += rows;
         }
@@ -2269,11 +2270,11 @@ pub fn recompute_v3_config_hash(artifact: &CareerMmrV3Artifact) -> Result<String
 }
 
 fn validate_v3_numeric_boundary(artifact: &CareerMmrV3Artifact) -> Result<()> {
-    for (_, model) in &artifact.selected_models {
+    for model in artifact.selected_models.values() {
         if !model.base_offset.is_finite() || !model.shrink.is_finite() {
             bail!("v3 artifact contains a non-finite model scalar");
         }
-        for (_, weight) in &model.weights {
+        for weight in model.weights.values() {
             if !weight.is_finite() {
                 bail!("v3 artifact contains a non-finite feature weight");
             }
@@ -2282,7 +2283,7 @@ fn validate_v3_numeric_boundary(artifact: &CareerMmrV3Artifact) -> Result<()> {
             }
         }
     }
-    for (_, scale) in &artifact.mode_scales {
+    for scale in artifact.mode_scales.values() {
         if !scale.is_finite() || *scale < 0.0 {
             bail!("v3 artifact contains an invalid mode scale");
         }

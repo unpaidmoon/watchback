@@ -395,7 +395,7 @@ fn robust_baseline(values: &[f64]) -> Option<Baseline> {
 fn median(mut values: Vec<f64>) -> f64 {
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]
@@ -500,8 +500,9 @@ fn solve_5(mut matrix: [[f64; 5]; 5], mut rhs: [f64; 5]) -> Option<[f64; 5]> {
                 continue;
             }
             let factor = matrix[row][column];
-            for index in column..5 {
-                matrix[row][index] -= factor * matrix[column][index];
+            let pivot_row = matrix[column];
+            for (value, pivot) in matrix[row][column..].iter_mut().zip(&pivot_row[column..]) {
+                *value -= factor * pivot;
             }
             rhs[row] -= factor * rhs[column];
         }

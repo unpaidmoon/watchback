@@ -1,19 +1,4 @@
-#[path = "../src/player_query/models.rs"]
-mod models;
-mod upstream {
-    use anyhow::Result;
-    use serde_json::Value;
-    use std::{future::Future, pin::Pin};
-    pub type UpstreamFuture<'a> = Pin<Box<dyn Future<Output = Result<Value>> + Send + 'a>>;
-    pub trait PlayerQueryUpstream: Send + Sync {
-        fn image<'a>(&'a self, _: &'a str, _: usize) -> UpstreamFuture<'a> {
-            Box::pin(async { anyhow::bail!("unavailable") })
-        }
-    }
-}
-#[path = "../src/player_query/mapper.rs"]
-mod mapper;
-use models::*;
+use owstats_desktop_lib::player_query::{mapper, models::*};
 use serde_json::json;
 
 #[test]

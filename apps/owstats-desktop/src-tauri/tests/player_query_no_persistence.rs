@@ -215,8 +215,8 @@ async fn query_flow_is_memory_only_and_has_exact_request_boundaries() -> Result<
     );
     assert_eq!(
         home_calls.iter().filter(|v| *v == "card").count(),
-        2,
-        "text and image commands independently read the card endpoint"
+        1,
+        "text and image commands share the cached card response"
     );
     assert_eq!(
         home_calls
@@ -237,7 +237,8 @@ async fn query_flow_is_memory_only_and_has_exact_request_boundaries() -> Result<
             .iter()
             .filter(|v| v == &&"fight-count:None".to_string())
             .count(),
-        1
+        2,
+        "profile game action and season overview each read fight count"
     );
     assert_eq!(
         home_calls

@@ -760,9 +760,11 @@ fn apply_arena_incoming_totals(
 
 pub fn detail(value: Value, kind: MatchKind) -> QueryResult<MatchDetailView> {
     let d = data(&value)?;
-    let name_map = (kind == MatchKind::Arena)
-        .then(|| arena_name_map(d))
-        .unwrap_or_default();
+    let name_map = if kind == MatchKind::Arena {
+        arena_name_map(d)
+    } else {
+        Default::default()
+    };
     let summary_source = if kind == MatchKind::Arena {
         final_valid_arena_round(d)
             .or_else(|| d.get("totalCount"))

@@ -374,7 +374,7 @@ async fn failed_detail_preserves_original_error_and_keeps_job_retryable() -> Res
         )?,
         1
     );
-    assert_eq!(store.season_status(22)?.retryable, true);
+    assert!(store.season_status(22)?.retryable);
     let message: String = conn.query_row(
         "SELECT message FROM sync_errors WHERE season=22 AND match_id='background-new'",
         [],
@@ -783,14 +783,11 @@ async fn recovery_detail_retries_only_missing_detail() -> Result<()> {
         .is_some_and(|details| details
             .iter()
             .any(|detail| detail["match_id"] == "background-new")));
-    assert_eq!(
-        db.connect()?.query_row(
-            "SELECT season_revision=snapshot_revision FROM season_sync_state WHERE season=22",
-            [],
-            |row| row.get::<_, bool>(0)
-        )?,
-        true
-    );
+    assert!(db.connect()?.query_row(
+        "SELECT season_revision=snapshot_revision FROM season_sync_state WHERE season=22",
+        [],
+        |row| row.get::<_, bool>(0)
+    )?);
     Ok(())
 }
 
@@ -858,13 +855,10 @@ fn full_fetch_supersedes_stale_jobs() -> Result<()> {
         )?,
         "superseded"
     );
-    assert_eq!(
-        conn.query_row(
-            "SELECT season_revision=snapshot_revision FROM season_sync_state WHERE season=22",
-            [],
-            |row| row.get::<_, bool>(0)
-        )?,
-        true
-    );
+    assert!(conn.query_row(
+        "SELECT season_revision=snapshot_revision FROM season_sync_state WHERE season=22",
+        [],
+        |row| row.get::<_, bool>(0)
+    )?);
     Ok(())
 }

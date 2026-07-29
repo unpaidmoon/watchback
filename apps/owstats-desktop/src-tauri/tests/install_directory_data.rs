@@ -1022,7 +1022,7 @@ fn valid_wal_database_is_published_without_validation_artifacts() {
     let result = unsafe {
         rusqlite::ffi::sqlite3_file_control(
             writer.handle(),
-            b"main\0".as_ptr().cast(),
+            c"main".as_ptr(),
             rusqlite::ffi::SQLITE_FCNTL_PERSIST_WAL,
             (&mut persist_wal as *mut i32).cast(),
         )

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments, dead_code)]
+
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -21,7 +23,6 @@ use owstats_desktop_lib::{
         },
         snapshot::{build_roast_snapshot, INPUT_SCHEMA_VERSION},
         store::{roast_for_match, save_roast_once, AiRoastRecord},
-        validator::validate_report_output,
     },
     deepseek_key::{DeepSeekCredentialStore, DeepSeekKeyManager},
     get_match_detail, OwDatabase,
@@ -346,7 +347,7 @@ async fn unified_standard_and_arena_requests_include_complete_context_and_versio
                 .map(|row| row.hero_name.clone()),
             detail.map_name.as_deref(),
         );
-        let snapshot = build_roast_snapshot(&db.connect()?, "match", &detail, context)
+        let _snapshot = build_roast_snapshot(&db.connect()?, "match", &detail, context)
             .map_err(|error| anyhow::anyhow!("arena={arena}: {error}"))?;
         let generated = narrative(if arena {
             "角斗新标题"

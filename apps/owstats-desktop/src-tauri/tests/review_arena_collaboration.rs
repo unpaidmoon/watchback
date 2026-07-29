@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use owstats_desktop_lib::{
     get_friend_analytics, get_personal_season_review, FriendAnalyticsFilters, OwDatabase,
     PersonalReviewRequest,
@@ -294,7 +296,8 @@ fn friend_analytics_merges_normal_and_last_valid_arena_rounds() {
         [],
     )
     .unwrap();
-    for (guid, name) in [("synthetic-self-hero", "当前英雄")] {
+    {
+        let (guid, name) = ("synthetic-self-hero", "当前英雄");
         conn.execute(
             "INSERT INTO hero_dict (guid, name, updated_at) VALUES (?1, ?2, '2026-07-16T00:00:00Z')",
             params![guid, name],

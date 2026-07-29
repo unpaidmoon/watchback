@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NavLink } from "react-router-dom";
-import { StaticRouter } from "react-router-dom/server";
+import { NavLink, StaticRouter } from "react-router-dom";
 import * as routeFocusModule from "../src/shared/page-shell/RouteFocusManager.tsx";
 
 type RouteFocusLocation = {

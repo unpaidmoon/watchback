@@ -337,7 +337,11 @@ fn validation_extremes_never_change_fold_local_damage_center() {
         .collect::<Vec<_>>();
     let ordinary = validation_row("hero-a", "damage", 23, 12.0);
     let extreme = validation_row("hero-a", "damage", 23, 1.0e12);
-    let first = build_feature_matrix(&training, &[ordinary.clone()], HealingTakenStrategy::None);
+    let first = build_feature_matrix(
+        &training,
+        std::slice::from_ref(&ordinary),
+        HealingTakenStrategy::None,
+    );
     let second = build_feature_matrix(&training, &[ordinary, extreme], HealingTakenStrategy::None);
     assert_eq!(
         first.validation_by_role["damage"][0].damage_baseline_median_per_ten,
