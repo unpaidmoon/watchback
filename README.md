@@ -29,7 +29,7 @@ Watchback 当前仅提供 Windows 桌面版，不提供 macOS、Linux 或网页�
 
 ## 安装与首次使用
 
-目前仓库没有提供公开下载地址。取得 Watchback 安装包后：
+请从 [GitHub Releases](https://github.com/fengpianpianne/watchback/releases) 下载 Windows 安装包，并核对发行页提供的 SHA-256 哈希。下载后：
 
 1. 运行安装程序并启动 Watchback。
 2. 打开“指挥台”，选择“添加账号”。
