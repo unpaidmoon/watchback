@@ -367,8 +367,11 @@ pub fn list_accounts(
 
 #[tauri::command]
 pub fn switch_account(
+    app: AppHandle,
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
+    background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
     account_id: String,
 ) -> Result<crate::AccountManagerStatus, String> {
     let _permit = operation_coordinator
@@ -376,9 +379,18 @@ pub fn switch_account(
         .map_err(str::to_string)?;
     let account_id = crate::account_store::AccountId::parse(&account_id)
         .map_err(|_| "账号标识无效。".to_string())?;
-    accounts
+    let status = accounts
         .switch_active(&account_id, &chrono::Utc::now().to_rfc3339())
-        .map_err(to_message)
+        .map_err(to_message)?;
+    drop(_permit);
+    crate::auto_season_update::spawn(
+        app,
+        accounts.inner().clone(),
+        operation_coordinator.inner().clone(),
+        login_target_coordinator.inner().clone(),
+        background_sync.inner().clone(),
+    );
+    Ok(status)
 }
 
 #[tauri::command]
@@ -538,109 +550,6 @@ pub fn get_season_analysis(
 ) -> Result<SeasonAnalysis, String> {
     let account = active_account(&accounts)?;
     crate::get_season_analysis(&account.database(), season).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_career_mmr_overview(
-    accounts: State<'_, AccountContextManager>,
-) -> Result<crate::CareerMmrOverview, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_career_mmr_overview(&account.database()).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_role_mmr_history(
-    accounts: State<'_, AccountContextManager>,
-    role: String,
-    season: Option<i64>,
-    from: Option<i64>,
-    to: Option<i64>,
-    granularity: Option<String>,
-    limit: Option<usize>,
-    before: Option<i64>,
-    before_hash: Option<String>,
-    before_bucket: Option<i64>,
-    before_season: Option<i64>,
-) -> Result<crate::CareerMmrHistory, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_role_mmr_history(
-        &account.database(),
-        crate::CareerMmrHistoryRequest {
-            role,
-            season,
-            from,
-            to,
-            granularity,
-            limit,
-            before,
-            before_hash,
-            before_bucket,
-            before_season,
-        },
-    )
-    .map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_role_mmr_mode_breakdown(
-    accounts: State<'_, AccountContextManager>,
-    role: String,
-) -> Result<crate::CareerMmrModeBreakdown, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_role_mmr_mode_breakdown(&account.database(), &role)
-        .map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_role_mmr_season_breakdown(
-    accounts: State<'_, AccountContextManager>,
-    role: String,
-) -> Result<crate::CareerMmrSeasonBreakdown, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_role_mmr_season_breakdown(&account.database(), &role)
-        .map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_mmr_match_explanation(
-    accounts: State<'_, AccountContextManager>,
-    match_id: String,
-    role: String,
-) -> Result<crate::CareerMmrMatchExplanation, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_mmr_match_explanation(&account.database(), &match_id, &role)
-        .map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_recent_mmr_explanations(
-    accounts: State<'_, AccountContextManager>,
-    role: String,
-    limit: usize,
-) -> Result<crate::CareerMmrRecentExplanations, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_recent_mmr_explanations(&account.database(), &role, limit)
-        .map_err(to_message)
-}
-
-#[tauri::command]
-pub fn rebuild_career_mmr(
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-) -> Result<crate::career_mmr::replay::CareerMmrBuildSummary, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    let account = active_account(&accounts)?;
-    crate::career_mmr::replay::rebuild_career_mmr_active(&account.database()).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_career_mmr_build_status(
-    accounts: State<'_, AccountContextManager>,
-) -> Result<crate::CareerMmrBuildStatus, String> {
-    let account = active_account(&accounts)?;
-    crate::career_mmr::query::get_career_mmr_build_status(&account.database()).map_err(to_message)
 }
 
 #[tauri::command]

@@ -6,6 +6,7 @@ pub mod account_store;
 pub mod ai_roast;
 mod analytics;
 pub mod app_paths;
+mod auto_season_update;
 mod background_sync;
 pub mod browser_session;
 pub mod career_mmr;
@@ -1010,12 +1011,15 @@ pub fn run() -> anyhow::Result<()> {
     let background_manager =
         background_sync::BackgroundSeasonSyncManager::new(sync_coordinator.clone());
     let player_query_service = player_query::PlayerQueryService::new(sync_coordinator.clone());
+    let startup_sync_coordinator = sync_coordinator.clone();
+    let startup_background_manager = background_manager.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(published_data)
         .manage(background_manager)
         .manage(player_query_service)
+        .manage(login_target::LoginTargetCoordinator::default())
         .setup(move |app| {
             let account_context = account_context::AccountContextManager::load(shared.clone())
                 .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
@@ -1042,11 +1046,19 @@ pub fn run() -> anyhow::Result<()> {
                     manager.wake(entry.account_id.as_str(), paths.clone(), season, events);
                 }
             }
+            auto_season_update::spawn(
+                app.handle().clone(),
+                account_context,
+                startup_sync_coordinator.clone(),
+                app.state::<login_target::LoginTargetCoordinator>()
+                    .inner()
+                    .clone(),
+                startup_background_manager.clone(),
+            );
             Ok(())
         })
         .manage(sync_coordinator)
         .manage(ai_roast::coordinator::AiRoastCoordinator::default())
-        .manage(login_target::LoginTargetCoordinator::default())
         .manage(qr_login::QrLoginCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
@@ -1087,14 +1099,6 @@ pub fn run() -> anyhow::Result<()> {
             commands::clear_player_target,
             commands::get_rankings,
             commands::get_season_analysis,
-            commands::get_career_mmr_overview,
-            commands::get_role_mmr_history,
-            commands::get_role_mmr_mode_breakdown,
-            commands::get_role_mmr_season_breakdown,
-            commands::get_mmr_match_explanation,
-            commands::get_recent_mmr_explanations,
-            commands::rebuild_career_mmr,
-            commands::get_career_mmr_build_status,
             commands::season_sync_status,
             commands::retry_season_background_sync,
             commands::sync_season,

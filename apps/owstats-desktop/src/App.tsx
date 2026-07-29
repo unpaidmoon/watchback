@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { CareerMmrPage } from "./pages/CareerMmrPage";
 import { FriendDetailPage } from "./pages/FriendDetailPage";
 import { MatchesPage } from "./pages/MatchesPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
@@ -33,6 +32,26 @@ function FriendAnalyticsRoute() {
   const [params] = useSearchParams();
   const season = parsePositiveSeasonParam(params.get("season"));
   return <Navigate to={season === undefined ? "/review" : buildReviewHref(season)} replace />;
+}
+
+function StartupRoute() {
+  const [destination, setDestination] = useState<"/matches" | "/onboarding" | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    void listAccounts()
+      .then((status) => {
+        if (!disposed) setDestination(status.accounts.length === 0 ? "/onboarding" : "/matches");
+      })
+      .catch(() => {
+        if (!disposed) setDestination("/matches");
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  return destination ? <Navigate to={destination} replace /> : null;
 }
 
 type OperationStatus = "idle" | "account" | "foregroundSync" | "backgroundQueued" | "backgroundRunning" | "query";
@@ -176,14 +195,13 @@ export function App() {
 
         <div className="appCanvas phase6ProductSurface">
           <Routes>
-            <Route path="/" element={<Navigate to="/matches" replace />} />
+            <Route path="/" element={<StartupRoute />} />
             <Route path="/onboarding" element={<OnboardingPage />} />
             <Route path="/phase6-style-board" element={<Phase6StyleBoardPage />} />
             <Route path="/matches" element={<MatchesPage onQueryPlayer={queryPlayer} />} />
             <Route path="/player-query/*" element={<PlayerQueryFeatureRoutes queryIntent={queryIntent} onQueryPlayer={queryPlayer} />} />
             <Route path="/review" element={<PersonalReviewRoute />} />
             <Route path="/achievements" element={<AchievementsPage />} />
-            <Route path="/career-mmr" element={<CareerMmrPage />} />
             <Route path="/ranking" element={<RankingPage />} />
             <Route path="/analytics/friends" element={<FriendAnalyticsRoute />} />
             <Route path="/analytics/friends/detail" element={<FriendDetailPage />} />

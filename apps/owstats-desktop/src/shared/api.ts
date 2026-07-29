@@ -3,14 +3,6 @@ import type {
   AccountLoginResult,
   AccountManagerStatus,
   AiRoastGenerationResult,
-  CareerMmrBuildStatus,
-  CareerMmrHistory,
-  CareerMmrHistoryRequest,
-  CareerMmrModeBreakdown,
-  CareerMmrOverview,
-  CareerMmrRecentExplanations,
-  CareerMmrSeasonBreakdown,
-  CareerRole,
   CareerAchievement,
   FilterOptions,
   CredentialStatus,
@@ -199,32 +191,4 @@ export function getRankings(season?: number) {
 
 export function getSeasonAnalysis(season?: number) {
   return invoke<SeasonAnalysis>("get_season_analysis", { season });
-}
-
-export function getCareerMmrOverview() {
-  return invoke<CareerMmrOverview>("get_career_mmr_overview");
-}
-
-export function getRoleMmrHistory(request: CareerMmrHistoryRequest) {
-  return invoke<CareerMmrHistory>("get_role_mmr_history", { ...request });
-}
-
-export function getRoleMmrModeBreakdown(role: CareerRole) {
-  return invoke<CareerMmrModeBreakdown>("get_role_mmr_mode_breakdown", { role });
-}
-
-export function getRoleMmrSeasonBreakdown(role: CareerRole) {
-  return invoke<CareerMmrSeasonBreakdown>("get_role_mmr_season_breakdown", { role });
-}
-
-export function getCareerMmrBuildStatus() {
-  return invoke<CareerMmrBuildStatus>("get_career_mmr_build_status");
-}
-
-export function rebuildCareerMmr() {
-  return invoke("rebuild_career_mmr");
-}
-
-export function getRecentMmrExplanations(role: CareerRole, limit = 4) {
-  return invoke<CareerMmrRecentExplanations>("get_recent_mmr_explanations", { role, limit });
 }

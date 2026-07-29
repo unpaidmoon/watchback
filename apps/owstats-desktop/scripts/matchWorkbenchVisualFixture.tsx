@@ -99,7 +99,6 @@ function FixtureApp({ state, detail, detailOpen }: { state: MatchWorkbenchFixtur
           {[
             ["对局", true],
             ["战报", false],
-            ["生涯 MMR", false],
             ["排行", false],
             ["指挥台", false],
           ].map(([label, active]) => (

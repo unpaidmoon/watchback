@@ -20,7 +20,6 @@ export const phase6NavItems: Phase6NavItem[] = [
   { label: "战报", path: "/review", title: "个人赛季战报" },
   { label: "成就", path: "/achievements", title: "赛季成就与进度" },
   { label: "排行", path: "/ranking", title: "英雄与地图排行" },
-  { label: "生涯 MMR", path: "/career-mmr", title: "本地估算的三职责生涯 MMR" },
   { label: "指挥台", path: "/onboarding", title: "登录、同步与数据状态" },
 ];
 

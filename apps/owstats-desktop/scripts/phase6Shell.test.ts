@@ -19,7 +19,7 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
 }
 
 const navLabels = phase6NavItems.map((item) => item.label).join(",");
-assertEqual(navLabels, "对局,查询,战报,成就,排行,生涯 MMR,指挥台", "phase 6 navigation labels");
+assertEqual(navLabels, "对局,查询,战报,成就,排行,指挥台", "phase 6 navigation labels");
 assertEqual(
   phase6NavItems.find((item) => item.path === "/achievements")?.title,
   "赛季成就与进度",

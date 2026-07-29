@@ -1,10 +1,5 @@
 import type {
   CareerAchievement,
-  CareerMmrBuildStatus,
-  CareerMmrHistory,
-  CareerMmrModeBreakdown,
-  CareerMmrOverview,
-  CareerMmrSeasonBreakdown,
   FilterOptions,
   MatchDetailView,
   MatchSummary,
@@ -26,7 +21,6 @@ export const fixtureShell = {
     { label: "战报", route: "/review?season=23&view=overview" },
     { label: "成就", route: "/achievements" },
     { label: "排行", route: "/ranking?season=23&tab=heroes" },
-    { label: "生涯 MMR", route: "/career-mmr" },
     { label: "指挥台", route: "/onboarding" },
   ],
 } as const;
@@ -451,53 +445,6 @@ export const fixtureAnalysis = {
   },
 } satisfies SeasonAnalysis;
 
-export const fixtureCareerOverview = {
-  modelVersion: 2,
-  compositeMmr: 2638,
-  roles: [
-    { role: "tank", currentMmr: 2510, confidence: 0.76, confidenceLabel: "稳定", peakMmr: 2640, peakAt: 1783906200, effectiveMatches: 14.5, effectiveHours: 4.3 },
-    { role: "damage", currentMmr: 2715, confidence: 0.84, confidenceLabel: "较高", peakMmr: 2798, peakAt: 1783992600, effectiveMatches: 18.2, effectiveHours: 5.8 },
-    { role: "support", currentMmr: 2688, confidence: 0.89, confidenceLabel: "较高", peakMmr: 2760, peakAt: 1783992600, effectiveMatches: 21.4, effectiveHours: 6.6 },
-  ],
-  discoveredSeasons: [23, 22, 21],
-  disclaimer: "匿名合成模型数据，仅用于可视验收",
-} satisfies CareerMmrOverview;
-
-export const fixtureCareerHistory = {
-  role: "tank",
-  granularity: "match",
-  points: [
-    { timestamp: 1783733400, season: 23, mmr: 2410, confidence: 0.61, delta: 0 },
-    { timestamp: 1783819800, season: 23, mmr: 2475, confidence: 0.69, delta: 65 },
-    { timestamp: 1783906200, season: 23, mmr: 2540, confidence: 0.74, delta: 65 },
-    { timestamp: 1783992600, season: 23, mmr: 2510, confidence: 0.76, delta: -30 },
-  ],
-} satisfies CareerMmrHistory;
-
-export const fixtureCareerModes = {
-  role: "tank",
-  items: [
-    { modeFamily: "RoleQueue", matchesCount: 9, durationSec: 6840, wins: 6, losses: 3, draws: 0, cumulativeDelta: 118 },
-    { modeFamily: "OpenQueue", matchesCount: 4, durationSec: 2760, wins: 2, losses: 2, draws: 0, cumulativeDelta: 22 },
-  ],
-} satisfies CareerMmrModeBreakdown;
-
-export const fixtureCareerSeasons = {
-  role: "tank",
-  items: [
-    { season: 23, matchesCount: 13, startMmr: 2410, endMmr: 2510, peakMmr: 2540, netDelta: 100, firstMatchAt: 1783733400, lastMatchAt: 1783992600 },
-    { season: 22, matchesCount: 9, startMmr: 2320, endMmr: 2410, peakMmr: 2445, netDelta: 90, firstMatchAt: 1781055000, lastMatchAt: 1783647000 },
-  ],
-} satisfies CareerMmrSeasonBreakdown;
-
-export const fixtureCareerBuildStatus = {
-  modelVersion: 2,
-  targetModelVersion: 2,
-  needsRebuild: false,
-  summaryCount: 3,
-  isBuilt: true,
-} satisfies CareerMmrBuildStatus;
-
 export const fixtureRanking = {
   season: 23,
   availableSeasons: [23, 22, 21],
@@ -611,14 +558,6 @@ export const fixtureEmptyReview = {
   maps: { minSample: 3, bestMap: null, maps: [], conclusions: [] },
 } satisfies PersonalSeasonReview;
 
-export const fixtureEmptyCareerOverview = {
-  modelVersion: 2,
-  compositeMmr: null,
-  roles: [],
-  discoveredSeasons: [],
-  disclaimer: "暂无可用于计算生涯 MMR 的本地对局数据",
-} satisfies CareerMmrOverview;
-
 export const fixtureEmptyRanking = {
   season: 23,
   availableSeasons: [23, 22, 21],
@@ -668,7 +607,6 @@ export const visualPrimaryRequests = {
   matches: "list_match_timeline",
   review: "get_personal_season_review",
   achievements: "get_career_achievements",
-  mmr: "get_career_mmr_overview",
   ranking: "get_rankings",
   commandCenter: "get_onboarding_status",
 } as const;
@@ -693,7 +631,6 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
       list_match_timeline: {},
       get_personal_season_review: {},
       get_career_achievements: {},
-      get_career_mmr_overview: {},
       get_rankings: {},
       get_onboarding_status: {},
     },
@@ -704,7 +641,6 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
       list_match_timeline: { delayMs: 450 },
       get_personal_season_review: { delayMs: 450 },
       get_career_achievements: { delayMs: 450 },
-      get_career_mmr_overview: { delayMs: 450 },
       get_rankings: { delayMs: 450 },
       get_onboarding_status: { delayMs: 450 },
     },
@@ -715,7 +651,6 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
       list_match_timeline: { response: [] },
       get_personal_season_review: { response: fixtureEmptyReview },
       get_career_achievements: { response: [] },
-      get_career_mmr_overview: { response: fixtureEmptyCareerOverview },
       get_rankings: { response: fixtureEmptyRanking },
       get_onboarding_status: { response: fixtureEmptyOnboarding },
     },
@@ -726,7 +661,6 @@ export const visualAcceptanceScenarios: Record<VisualScenarioName, VisualScenari
       list_match_timeline: { errorMessage: "合成视觉验收错误：对局请求失败，请重新加载。" },
       get_personal_season_review: { errorMessage: "合成视觉验收错误：战报请求失败，请重新加载。" },
       get_career_achievements: { errorMessage: "合成视觉验收错误：成就请求失败，请重新加载。" },
-      get_career_mmr_overview: { errorMessage: "合成视觉验收错误：生涯 MMR 请求失败，请重新加载。" },
       get_rankings: { errorMessage: "合成视觉验收错误：排行请求失败，请重新加载。" },
       get_onboarding_status: { errorMessage: "合成视觉验收错误：指挥台请求失败，请重新加载。" },
     },
@@ -743,12 +677,6 @@ export const visualInvokeResponses: Record<string, unknown> = {
   get_personal_season_review: fixtureReview,
   get_career_achievements: fixtureCareerAchievements,
   get_season_analysis: fixtureAnalysis,
-  get_career_mmr_overview: fixtureCareerOverview,
-  get_role_mmr_history: fixtureCareerHistory,
-  get_role_mmr_mode_breakdown: fixtureCareerModes,
-  get_role_mmr_season_breakdown: fixtureCareerSeasons,
-  get_career_mmr_build_status: fixtureCareerBuildStatus,
-  rebuild_career_mmr: null,
   get_rankings: fixtureRanking,
   get_onboarding_status: fixtureOnboarding,
   get_player_profile: fixturePlayerProfile,
@@ -824,13 +752,6 @@ export const allVisualFixtures = {
     details: fixtureMatchDetailsById,
   },
   review: { review: fixtureReview, analysis: fixtureAnalysis },
-  mmr: {
-    overview: fixtureCareerOverview,
-    history: fixtureCareerHistory,
-    modes: fixtureCareerModes,
-    seasons: fixtureCareerSeasons,
-    buildStatus: fixtureCareerBuildStatus,
-  },
   ranking: fixtureRanking,
   commandCenter: {
     visualState: fixtureCommandCenter,

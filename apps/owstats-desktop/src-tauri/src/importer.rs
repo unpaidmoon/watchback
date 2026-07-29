@@ -340,7 +340,7 @@ fn import_payload_value_with_lookups(
     let _ = refresh_match_evaluations_conn(&tx);
     tx.commit()?;
 
-    let mut summary = ImportSummary {
+    let summary = ImportSummary {
         season,
         matches_seen: entries.len(),
         details_seen: details.len(),
@@ -349,10 +349,6 @@ fn import_payload_value_with_lookups(
         imported_at: now,
         mmr_warning: None,
     };
-    if crate::career_mmr::replay::rebuild_career_mmr_active(db).is_err() {
-        summary.mmr_warning =
-            Some("比赛已成功导入，但生涯分重建失败；已保留上一套完整结果。".to_string());
-    }
     Ok(summary)
 }
 

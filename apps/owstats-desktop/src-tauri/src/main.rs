@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 fn main() {
     match owstats_desktop_lib::parse_startup_mode(std::env::args_os()) {
         Ok(owstats_desktop_lib::StartupMode::Desktop) => {

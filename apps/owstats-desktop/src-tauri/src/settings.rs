@@ -265,6 +265,7 @@ pub fn get_user_settings_for_path(path: &Path) -> Result<UserSettings> {
     let settings = read_json::<UserSettings>(path)?.unwrap_or_default();
     Ok(UserSettings {
         theme: normalize_theme(&settings.theme).to_string(),
+        auto_update_season: settings.auto_update_season,
         player_query_mode_order: normalize_player_query_mode_order(
             settings.player_query_mode_order,
         ),
@@ -274,6 +275,7 @@ pub fn get_user_settings_for_path(path: &Path) -> Result<UserSettings> {
 pub fn save_user_settings_for_path(path: &Path, settings: UserSettings) -> Result<UserSettings> {
     let normalized = UserSettings {
         theme: normalize_theme(&settings.theme).to_string(),
+        auto_update_season: settings.auto_update_season,
         player_query_mode_order: normalize_player_query_mode_order(
             settings.player_query_mode_order,
         ),
@@ -416,6 +418,39 @@ mod tests {
         let settings = get_user_settings_for_path(&temp.path().join("settings.json")).unwrap();
 
         assert_eq!(settings.theme, "system");
+        assert!(settings.auto_update_season);
+    }
+
+    #[test]
+    fn settings_preserve_disabled_auto_season_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+        let saved = save_user_settings_for_path(
+            &path,
+            UserSettings {
+                auto_update_season: false,
+                ..UserSettings::default()
+            },
+        )
+        .unwrap();
+
+        assert!(!saved.auto_update_season);
+        assert!(
+            !get_user_settings_for_path(&path)
+                .unwrap()
+                .auto_update_season
+        );
+    }
+
+    #[test]
+    fn existing_settings_without_auto_update_field_default_to_enabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+        std::fs::write(&path, r#"{"theme":"dark"}"#).unwrap();
+
+        let settings = get_user_settings_for_path(&path).unwrap();
+        assert_eq!(settings.theme, "dark");
+        assert!(settings.auto_update_season);
     }
 
     #[test]

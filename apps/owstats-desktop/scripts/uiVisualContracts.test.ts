@@ -67,6 +67,6 @@ assert.match(pageState, /role="status"[^>]*aria-live="polite"[^>]*aria-busy="tru
 assert.match(pageState, /className="pageState pageState--error" role="alert"/);
 
 // OnboardingPage is intentionally added after the BattleTag integration gate.
-for (const page of ["MatchesPage.tsx", "PersonalReviewPage.tsx", "CareerMmrPage.tsx", "RankingPage.tsx"]) {
+for (const page of ["MatchesPage.tsx", "PersonalReviewPage.tsx", "RankingPage.tsx"]) {
   assert.match(read(`../src/pages/${page}`), /<PageHeader\b/, `${page} 应使用统一页面标题`);
 }

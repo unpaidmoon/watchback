@@ -16,11 +16,14 @@ export type SeasonSyncWorkbenchProps = {
   progress: SyncProgress | null;
   syncError: string | null;
   syncNotice: string | null;
+  autoUpdateEnabled: boolean;
+  autoUpdateSaving: boolean;
   backgroundStatuses: Record<number, SeasonBackgroundStatus>;
   onSelectSeason: (season: number) => void;
   onFullFetch: (season: number) => void;
   onQuickUpdate: (season: number) => void;
   onRetryBackground: (season: number) => void;
+  onAutoUpdateChange: (enabled: boolean) => void;
 };
 
 export function resolveCommandCenterSeason(
@@ -58,11 +61,14 @@ export function SeasonSyncWorkbench({
   progress,
   syncError,
   syncNotice,
+  autoUpdateEnabled,
+  autoUpdateSaving,
   backgroundStatuses,
   onSelectSeason,
   onFullFetch,
   onQuickUpdate,
   onRetryBackground,
+  onAutoUpdateChange,
 }: SeasonSyncWorkbenchProps) {
   const sortedStatuses = [...seasonStatuses].sort((left, right) => right.season - left.season);
   const isSyncing = syncingSeason === selectedSeason;
@@ -84,6 +90,18 @@ export function SeasonSyncWorkbench({
           <span className="phase6Eyebrow">赛季同步</span>
           <span id="season-sync-control-title" className="seasonSyncControlLabel">目标赛季</span>
         </div>
+        <label className="seasonAutoUpdateToggle">
+          <span>
+            <strong>自动更新</strong>
+            <small>启动或切换账号时更新最新本地赛季</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={autoUpdateEnabled}
+            disabled={autoUpdateSaving}
+            onChange={(event) => onAutoUpdateChange(event.target.checked)}
+          />
+        </label>
         <div className="seasonTargetStepper" aria-label="选择目标赛季">
           <button
             type="button"

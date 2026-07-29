@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import {
   allVisualFixtures,
   fixtureArenaDetail,
-  fixtureCareerOverview,
   fixtureCommandCenter,
-  fixtureEmptyCareerOverview,
   fixtureEmptyOnboarding,
   fixtureEmptyRanking,
   fixtureEmptyReview,
@@ -45,7 +43,7 @@ assert.match(serialized, /角斗竞技/, "visual fixtures include the arena matc
 
 assert.deepEqual(
   fixtureShell.navigation.map((item) => item.label),
-  ["对局", "战报", "成就", "排行", "生涯 MMR", "指挥台"],
+  ["对局", "战报", "成就", "排行", "指挥台"],
   "shell fixture covers the exact primary navigation order",
 );
 assert.equal(
@@ -86,7 +84,6 @@ assert.throws(
   "missing match ids fail deterministically",
 );
 assert.equal(fixtureReview.summary.season, 23, "review fixture exposes the S23 success state");
-assert.equal(fixtureCareerOverview.roles.length, 3, "MMR fixture covers tank, damage, and support role cards");
 assert.ok(fixtureRanking.heroes.length > 0 && fixtureRanking.maps.length > 0, "ranking fixture covers hero and map tabs");
 assert.equal(fixtureCommandCenter.accountLabel, "示例玩家", "command-center fixture uses a neutral anonymous account label");
 assert.equal(fixtureCommandCenter.loginState, "ready", "command-center fixture exposes a usable neutral state");
@@ -97,7 +94,6 @@ assert.deepEqual(
     matches: "list_match_timeline",
     review: "get_personal_season_review",
     achievements: "get_career_achievements",
-    mmr: "get_career_mmr_overview",
     ranking: "get_rankings",
     commandCenter: "get_onboarding_status",
   },
@@ -131,12 +127,6 @@ assert.equal(
   "review empty scenario returns a complete empty review DTO",
 );
 assert.equal(fixtureEmptyReview.summary.season, null, "empty review triggers the page's no-season-data branch");
-assert.equal(
-  resolveVisualInvokePlan(visualPrimaryRequests.mmr, {}, "empty").response,
-  fixtureEmptyCareerOverview,
-  "MMR empty scenario returns a complete empty overview DTO",
-);
-assert.deepEqual(fixtureEmptyCareerOverview.roles, [], "empty MMR overview carries no role results");
 assert.equal(
   resolveVisualInvokePlan(visualPrimaryRequests.ranking, { season: 23 }, "empty").response,
   fixtureEmptyRanking,
@@ -172,11 +162,6 @@ for (const command of [
   "get_match_details",
   "get_personal_season_review",
   "get_season_analysis",
-  "get_career_mmr_overview",
-  "get_role_mmr_history",
-  "get_role_mmr_mode_breakdown",
-  "get_role_mmr_season_breakdown",
-  "get_career_mmr_build_status",
   "get_rankings",
   "get_onboarding_status",
   "get_player_profile",

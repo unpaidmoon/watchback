@@ -20,7 +20,6 @@ const shell = source("src/styles/shell.css");
 const fixture = source("scripts/matchWorkbenchVisualFixture.tsx");
 const acceptanceFixture = source("scripts/uiVisualAcceptance.fixture.ts");
 const credentialStore = source("src-tauri/src/deepseek_key.rs");
-const careerMmrQuery = source("src-tauri/src/career_mmr/query.rs");
 const databaseMigrations = source("src-tauri/src/database/migrations.rs");
 const tauriLibrary = source("src-tauri/src/lib.rs");
 const tauriMain = source("src-tauri/src/main.rs");
@@ -51,7 +50,6 @@ assert.match(readme, /^# Watchback$/m);
 assert.match(readme, /^Watchback 是一款面向 Windows 的《守望先锋》本地数据分析桌面应用/m);
 assert.match(cargoManifest, /description = "Watchback desktop app"/);
 assert.match(cargoManifest, /authors = \["Watchback"\]/);
-assert.match(careerMmrQuery, /Watchback 本地模型推算，并非暴雪官方隐藏分。/);
 assert.match(databaseMigrations, /请升级 Watchback 后再打开此数据/);
 assert.match(
   tauriMain,

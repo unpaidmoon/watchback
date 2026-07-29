@@ -15,6 +15,7 @@ import {
   cancelDashenLogin,
   confirmLoginTargetSwitch,
   getOnboardingStatus,
+  getUserSettings,
   getSeasonSyncStatus,
   getPlayerProfile,
   getLoginTargetStatus,
@@ -26,6 +27,7 @@ import {
   retrySeasonBackgroundSync,
   switchAccount,
   syncSeason,
+  saveUserSettings,
 } from "../shared/api";
 import { AccountManager } from "../features/command-center/AccountManager";
 import { DeepSeekSettings } from "../features/command-center/DeepSeekSettings";
@@ -46,7 +48,7 @@ import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFronten
 import { clearMatchesPageCache, clearMatchesPageCacheForSeason } from "../shared/matchesPageCache";
 import { isCurrentSeasonEvent, quickListRefreshScope } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
-import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress } from "../shared/types";
+import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
 
 type TargetAction = "confirm" | "keep" | "retry" | "clear";
 const browserPreviewLoginHint = "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
@@ -75,6 +77,8 @@ export function OnboardingPage() {
   const [loginProgress, setLoginProgress] = useState<CredentialLoginProgress | null>(null);
   const [syncingSeason, setSyncingSeason] = useState<number | null>(null);
   const [syncingMode, setSyncingMode] = useState<SyncMode | null>(null);
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const [autoUpdateSaving, setAutoUpdateSaving] = useState(false);
   const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
   const [qrLoginDialogOpen, setQrLoginDialogOpen] = useState(false);
@@ -175,6 +179,9 @@ export function OnboardingPage() {
 
   useEffect(() => {
     void loadDashboard();
+    if (hasDesktopBackend()) {
+      void getUserSettings().then(setUserSettings).catch(() => undefined);
+    }
   }, []);
 
   useEffect(() => {
@@ -473,6 +480,26 @@ export function OnboardingPage() {
     }
   }
 
+  async function changeAutoUpdate(enabled: boolean) {
+    if (autoUpdateSaving) return;
+    setAutoUpdateSaving(true);
+    setSyncError(null);
+    let previous = userSettings;
+    try {
+      previous ??= await getUserSettings();
+      setUserSettings({ ...previous, autoUpdateSeason: enabled });
+      const saved = await saveUserSettings({ ...previous, autoUpdateSeason: enabled });
+      if (mountedRef.current) setUserSettings(saved);
+    } catch (err) {
+      if (mountedRef.current) {
+        setUserSettings(previous);
+        setSyncError(`保存自动更新设置失败：${productErrorMessage(err)}`);
+      }
+    } finally {
+      if (mountedRef.current) setAutoUpdateSaving(false);
+    }
+  }
+
   async function retryBackgroundSync(season: number) {
     try {
       const queued = await retrySeasonBackgroundSync(season);
@@ -717,11 +744,14 @@ export function OnboardingPage() {
                   progress={syncProgress}
                   syncError={syncError}
                   syncNotice={syncNotice}
+                  autoUpdateEnabled={userSettings?.autoUpdateSeason ?? true}
+                  autoUpdateSaving={autoUpdateSaving}
                   backgroundStatuses={backgroundStatuses}
                   onSelectSeason={selectSyncSeason}
                   onFullFetch={(season) => void runSeasonSync(season, "fullFetch")}
                   onQuickUpdate={(season) => void runSeasonSync(season, "quickUpdate")}
                   onRetryBackground={(season) => void retryBackgroundSync(season)}
+                  onAutoUpdateChange={(enabled) => void changeAutoUpdate(enabled)}
                 />
               ) : (
                 <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>

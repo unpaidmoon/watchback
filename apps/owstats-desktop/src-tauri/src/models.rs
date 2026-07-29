@@ -939,8 +939,14 @@ pub struct PlayerProfile {
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
     pub theme: String,
+    #[serde(default = "default_auto_update_season")]
+    pub auto_update_season: bool,
     #[serde(default = "default_player_query_mode_order")]
     pub player_query_mode_order: Vec<String>,
+}
+
+fn default_auto_update_season() -> bool {
+    true
 }
 
 fn default_player_query_mode_order() -> Vec<String> {
@@ -954,6 +960,7 @@ impl Default for UserSettings {
     fn default() -> Self {
         Self {
             theme: "system".to_string(),
+            auto_update_season: true,
             player_query_mode_order: default_player_query_mode_order(),
         }
     }

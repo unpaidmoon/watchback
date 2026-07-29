@@ -32,7 +32,11 @@ CLAUDE.md
 # Local-only project instructions and documentation
 /AGENTS.md
 /design.md
+/CONTEXT.md
+/player-query-implementation-plan.md
+/qr-login-implementation-plan.md
 /docs/
+/docs/superpowers/
 
 # OS
 .DS_Store

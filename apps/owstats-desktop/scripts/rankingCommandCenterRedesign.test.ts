@@ -6,8 +6,14 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 const rankingSource = readFileSync(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
 const rankingCss = readFileSync(new URL("../src/styles/features/ranking.css", import.meta.url), "utf8");
 
-assert.equal(phase6NavItems.map((item) => item.label).join(","), "对局,查询,战报,成就,排行,生涯 MMR,指挥台");
-assert.match(appSource, /path="\/" element=\{<Navigate to="\/matches" replace \/>\}/);
+assert.equal(phase6NavItems.map((item) => item.label).join(","), "对局,查询,战报,成就,排行,指挥台");
+assert.match(appSource, /function StartupRoute\(\)/, "根路由应先检测本地账号");
+assert.match(
+  appSource,
+  /status\.accounts\.length === 0 \? "\/onboarding" : "\/matches"/,
+  "没有本地账号时应进入指挥台，已有账号时应进入对局页",
+);
+assert.match(appSource, /path="\/" element=\{<StartupRoute \/>\}/, "根路由应使用账号感知的启动路由");
 assert.match(rankingSource, /<PageHeader/);
 assert.match(rankingSource, /<PageSeasonSelect/);
 assert.match(rankingSource, /<PageLoadingState/);
