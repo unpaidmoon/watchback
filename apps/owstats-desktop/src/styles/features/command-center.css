@@ -659,12 +659,6 @@
   opacity: 0.55;
 }
 
-.commandCenterAccountActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .commandCenterTools {
   margin-top: var(--space-6);
 }

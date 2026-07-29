@@ -1,10 +1,5 @@
 use super::*;
 
-pub(super) fn last_round_map_guid(raw_detail_json: Option<&str>) -> Option<String> {
-    let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
-    final_valid_arena_round(&detail).and_then(|round| string_field(round, "mapGuid"))
-}
-
 #[derive(Default)]
 pub(super) struct FightListProjection {
     pub(super) team_score: Option<i64>,
@@ -18,10 +13,16 @@ pub(super) struct FightListProjection {
     pub(super) duration_sec: Option<i64>,
 }
 
-pub(super) fn fight_list_projection(
+pub(super) struct FightListData {
+    pub(super) projection: FightListProjection,
+    pub(super) map_preview_guid: Option<String>,
+    pub(super) team_awards: Vec<MatchPerformanceAward>,
+}
+
+pub(super) fn fight_list_data(
     raw_detail_json: Option<&str>,
     current_bnet: Option<&str>,
-) -> Option<FightListProjection> {
+) -> Option<FightListData> {
     let detail = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())?;
     let last_round = final_valid_arena_round(&detail)?;
     let player = current_bnet.and_then(|current_bnet| {
@@ -34,40 +35,28 @@ pub(super) fn fight_list_projection(
                     .find(|player| string_field(player, "bnetId").as_deref() == Some(current_bnet))
             })
     });
-    Some(FightListProjection {
-        team_score: optional_i64(last_round, "teamScore"),
-        opponent_score: optional_i64(last_round, "opponentScore"),
-        kills: player.and_then(|item| optional_i64(item, "kill")),
-        assists: player.and_then(|item| optional_i64(item, "assist")),
-        deaths: player.and_then(|item| optional_i64(item, "death")),
-        damage: player.and_then(|item| optional_i64(item, "heroDamage")),
-        healing: player.and_then(|item| optional_i64(item, "cure")),
-        mitigation: player.and_then(|item| optional_i64(item, "resistDamage")),
-        duration_sec: optional_i64(last_round, "gameTimeSec"),
+    let mut players = player_rows(last_round.get("teammateList"), "teammate", &HashMap::new());
+    let team_awards = current_bnet
+        .and_then(|bnet| players.iter().position(|item| item.bnet_id == bnet))
+        .map_or_else(Vec::new, |current_index| {
+            players.swap(0, current_index);
+            team_awards_from_players(&players)
+        });
+    Some(FightListData {
+        projection: FightListProjection {
+            team_score: optional_i64(last_round, "teamScore"),
+            opponent_score: optional_i64(last_round, "opponentScore"),
+            kills: player.and_then(|item| optional_i64(item, "kill")),
+            assists: player.and_then(|item| optional_i64(item, "assist")),
+            deaths: player.and_then(|item| optional_i64(item, "death")),
+            damage: player.and_then(|item| optional_i64(item, "heroDamage")),
+            healing: player.and_then(|item| optional_i64(item, "cure")),
+            mitigation: player.and_then(|item| optional_i64(item, "resistDamage")),
+            duration_sec: optional_i64(last_round, "gameTimeSec"),
+        },
+        map_preview_guid: string_field(last_round, "mapGuid"),
+        team_awards,
     })
-}
-
-pub(super) fn stadium_team_awards(
-    raw_detail_json: Option<&str>,
-    current_bnet: Option<&str>,
-) -> Vec<MatchPerformanceAward> {
-    let Some(detail) = raw_detail_json.and_then(|text| serde_json::from_str::<Value>(text).ok())
-    else {
-        return Vec::new();
-    };
-    let Some(round) = final_valid_arena_round(&detail) else {
-        return Vec::new();
-    };
-    let mut players = player_rows(round.get("teammateList"), "teammate", &HashMap::new());
-    let Some(current_index) = current_bnet.and_then(|current_bnet| {
-        players
-            .iter()
-            .position(|player| player.bnet_id == current_bnet)
-    }) else {
-        return Vec::new();
-    };
-    players.swap(0, current_index);
-    team_awards_from_players(&players)
 }
 
 fn final_valid_arena_round(detail: &Value) -> Option<&Value> {

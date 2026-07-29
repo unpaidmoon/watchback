@@ -174,7 +174,7 @@ fn upgrades_schema_v7_to_v8_without_losing_matches_and_repeat_initialize_is_idem
         |row| row.get(0),
     )?;
 
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
     assert_eq!(preserved_matches, 1);
     assert_eq!(table_count, 1);
     assert_eq!(index_count, 1);

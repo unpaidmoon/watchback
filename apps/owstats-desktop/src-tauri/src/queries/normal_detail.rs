@@ -142,35 +142,50 @@ pub(super) fn team_awards_from_match_players(
     conn: &rusqlite::Connection,
     match_id: &str,
 ) -> Result<Vec<MatchPerformanceAward>> {
+    Ok(team_awards_for_matches(conn, &[match_id.to_string()])?
+        .remove(match_id)
+        .unwrap_or_default())
+}
+
+pub(super) fn team_awards_for_matches(
+    conn: &rusqlite::Connection,
+    match_ids: &[String],
+) -> Result<HashMap<String, Vec<MatchPerformanceAward>>> {
+    if match_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = std::iter::repeat_n("?", match_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
     let mut stmt = conn.prepare(
-        r#"
-        SELECT side, player_name, bnet_id, hero_guid, hero_name, kill, assist, death,
+        &format!(r#"
+        SELECT match_id, side, player_name, bnet_id, hero_guid, hero_name, kill, assist, death,
                hero_damage, cure, resist_damage, final_hit, target_competing_time,
                healing_taken, damage_taken
         FROM match_players
-        WHERE match_id=? AND side='teammate'
-        ORDER BY is_current_player DESC, rowid ASC
-        "#,
+        WHERE match_id IN ({placeholders}) AND side='teammate'
+        ORDER BY match_id, is_current_player DESC, rowid ASC
+        "#),
     )?;
-    let rows = stmt.query_map(params![match_id], |row| {
-        Ok(PlayerRow {
-            side: row.get(0)?,
-            name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            bnet_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+    let rows = stmt.query_map(rusqlite::params_from_iter(match_ids), |row| {
+        Ok((row.get::<_, String>(0)?, PlayerRow {
+            side: row.get(1)?,
+            name: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            bnet_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             rank_label: None,
             rank_key: None,
-            hero_guid: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            hero_name: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            kills: row.get(5)?,
-            assists: row.get(6)?,
-            deaths: row.get(7)?,
-            damage: row.get(8)?,
-            healing: row.get(9)?,
-            mitigation: row.get(10)?,
-            final_hits: row.get(11)?,
-            target_time_sec: row.get(12)?,
-            healing_taken: row.get(13)?,
-            damage_taken: row.get(14)?,
+            hero_guid: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            hero_name: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            kills: row.get(6)?,
+            assists: row.get(7)?,
+            deaths: row.get(8)?,
+            damage: row.get(9)?,
+            healing: row.get(10)?,
+            mitigation: row.get(11)?,
+            final_hits: row.get(12)?,
+            target_time_sec: row.get(13)?,
+            healing_taken: row.get(14)?,
+            damage_taken: row.get(15)?,
             worth: None,
             end_worth: None,
             worth_max: false,
@@ -184,10 +199,17 @@ pub(super) fn team_awards_from_match_players(
             perks: Vec::new(),
             hero_stats: Vec::new(),
             party_group: None,
-        })
+        }))
     })?;
-    let players = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(team_awards_from_players(&players))
+    let mut players_by_match = HashMap::<String, Vec<PlayerRow>>::new();
+    for row in rows {
+        let (match_id, player) = row?;
+        players_by_match.entry(match_id).or_default().push(player);
+    }
+    Ok(players_by_match
+        .into_iter()
+        .map(|(match_id, players)| (match_id, team_awards_from_players(&players)))
+        .collect())
 }
 
 pub(super) fn team_awards_from_players(players: &[PlayerRow]) -> Vec<MatchPerformanceAward> {

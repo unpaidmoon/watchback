@@ -1,6 +1,5 @@
 import type { FilterOptions, MatchFilters } from "../../shared/types";
 import { modeLabel } from "../../shared/rankingUtils";
-import { preserveQaParam } from "../../shared/qaFeedback";
 
 export const advancedMatchFilterKeys = ["result", "primaryTag", "dateFrom", "dateTo", "favoriteOnly"] as const;
 export type VisibleMatchFilterKey = Exclude<keyof MatchFilters, "season">;
@@ -91,17 +90,6 @@ export function activeMatchFilterChips(filters: MatchFilters, options: FilterOpt
   if (filters.dateTo) chips.push({ key: "dateTo", label: `结束日期：${filters.dateTo}` });
   if (filters.favoriteOnly) chips.push({ key: "favoriteOnly", label: "收藏：仅看收藏" });
   return chips;
-}
-
-export function restoreRejectedMatchesSearchParams(
-  acceptedSearchParamsKey: string,
-  currentFilters: MatchFilters,
-  currentSelectedMatchId: string | null,
-) {
-  return preserveQaParam(
-    new URLSearchParams(acceptedSearchParamsKey),
-    paramsFromFilters(currentFilters, currentSelectedMatchId),
-  );
 }
 
 export function filterResultLabel(result: string) {

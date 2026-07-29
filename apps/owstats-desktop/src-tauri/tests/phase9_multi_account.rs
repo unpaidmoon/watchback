@@ -1947,6 +1947,7 @@ fn public_status_and_profile_serialization_hide_internal_role_ids_and_secrets() 
             endorsement_level: None,
             play_time_hours: None,
             title: None,
+            game_action: None,
             refreshed_at: None,
         }
     });

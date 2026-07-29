@@ -10,7 +10,6 @@ import {
   filtersFromParams,
   hasLoadedOptions,
   paramsFromFilters,
-  restoreRejectedMatchesSearchParams,
   validateFilters,
 } from "../features/matches/matchFilters";
 import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
@@ -37,10 +36,8 @@ import {
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
 import type { MatchesPageCache } from "../shared/matchesPageCache";
-import { QaRegion } from "../shared/QaFeedbackLayer";
 import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
 import { productErrorMessage } from "../shared/phase6Shell";
-import { preserveQaParam } from "../shared/qaFeedback";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
 import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, } from "../shared/types";
 
@@ -183,11 +180,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       },
       favoriteController.confirmDiscard,
     )) {
-      const restoredSearchParams = restoreRejectedMatchesSearchParams(
-        lastAcceptedSearchParamsKeyRef.current,
-        filters,
-        selectedMatchId,
-      );
+      const restoredSearchParams = paramsFromFilters(filters, selectedMatchId);
       const restoredSearchParamsKey = restoredSearchParams.toString();
       lastWrittenSearchParamsKeyRef.current = restoredSearchParamsKey;
       setSearchParams(restoredSearchParams, { replace: true });
@@ -200,7 +193,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
 
   useEffect(() => {
     rememberScroll();
-    const nextSearchParams = preserveQaParam(searchParams, paramsFromFilters(filters, selectedMatchId));
+    const nextSearchParams = paramsFromFilters(filters, selectedMatchId);
     const nextSearchParamsKey = nextSearchParams.toString();
     if (nextSearchParamsKey === searchParamsKey) return;
     lastWrittenSearchParamsKeyRef.current = nextSearchParamsKey;
@@ -528,7 +521,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
 
       <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${mobileDetailOpen ? "detailOpen" : ""}`}>
         <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={rememberScroll}>
-          <QaRegion id="MAT-LIST">
+          <div>
             {error ? (
               <PageErrorState message={error} actionLabel="重新加载" onRetry={retryMatches} />
             ) : busy ? (
@@ -547,7 +540,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
                 onSelect={selectMatch}
               />
             )}
-          </QaRegion>
+          </div>
         </div>
         <MatchDetailPane
           detail={selectedDetail?.matchId === selectedMatchId ? selectedDetail : null}

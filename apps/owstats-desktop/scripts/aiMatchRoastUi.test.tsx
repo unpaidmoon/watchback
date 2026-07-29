@@ -29,7 +29,6 @@ const settingsSource = readFileSync(
   new URL('../src/features/command-center/DeepSeekSettings.tsx', import.meta.url),
   'utf8',
 );
-const onboardingSource = readFileSync(new URL('../src/pages/OnboardingPage.tsx', import.meta.url), 'utf8');
 const commandCenterCssSource = readFileSync(
   new URL('../src/styles/features/command-center.css', import.meta.url),
   'utf8',
@@ -87,12 +86,6 @@ assert.match(settingsSource, /const trimmedApiKey = apiKey\.trim\(\)/);
 assert.match(settingsSource, /setApiKey\(nextDeepSeekKeyValue\(apiKey, true\)\)/);
 assert.doesNotMatch(settingsSource, /status\.message|console\.|apiKey[^\n]*(error|feedback|status)/i);
 assert.match(settingsSource, /aria-live=\x22polite\x22/);
-assert.match(onboardingSource, /import \{ DeepSeekSettings \} from \x22\.\.\/features\/command-center\/DeepSeekSettings\x22/);
-assert.match(
-  onboardingSource,
-  /accountStatus\.activeAccountId[\s\S]*?<\/QaRegion>[\s\S]*?<section className=\x22commandCenterTools\x22[\s\S]*?<DeepSeekSettings \/>[\s\S]*?<\/section>/s,
-  'DeepSeek settings must stay in the tools area outside account-only content',
-);
 assert.match(commandCenterCssSource, /\.deepSeekSettings[\s\S]*?border-radius:\s*12px/);
 assert.match(commandCenterCssSource, /\.deepSeekSettings[^}]*box-shadow:\s*none/);
 assert.match(commandCenterCssSource, /\.deepSeekSettings(?:Input|Submit)[\s\S]*?min-height:\s*44px/);

@@ -54,6 +54,7 @@ pub fn get_player_profile_for_path(path: &Path, role_id: Option<i64>) -> Result<
         endorsement_level: None,
         play_time_hours: None,
         title: None,
+        game_action: None,
         refreshed_at: None,
     });
     if profile.role_id.is_none() {
@@ -86,10 +87,12 @@ pub fn get_player_profile(
     path: &Path,
     role_id: Option<i64>,
 ) -> Result<PlayerProfile> {
-    if let Some(profile) = get_player_profile_from_db(db, role_id)? {
+    let cached_profile = get_player_profile_for_path(path, role_id)?;
+    if let Some(mut profile) = get_player_profile_from_db(db, role_id)? {
+        profile.game_action = cached_profile.game_action;
         return Ok(profile);
     }
-    get_player_profile_for_path(path, role_id)
+    Ok(cached_profile)
 }
 
 pub fn save_profile_card(
@@ -127,15 +130,26 @@ pub fn save_profile_card(
         ],
     )?;
 
-    let profile = profile_from_raw(
+    let mut profile = profile_from_raw(
         &persisted_raw,
         Some(role_id),
         Some(bnet_id),
         Some(display_name),
         Some(refreshed_at),
     );
+    profile.game_action = get_player_profile_for_path(path, Some(role_id))?.game_action;
     write_json(path, &profile)?;
     Ok(profile)
+}
+
+pub fn save_player_game_action(
+    path: &Path,
+    role_id: i64,
+    action: crate::models::PlayerGameAction,
+) -> Result<()> {
+    let mut profile = get_player_profile_for_path(path, Some(role_id))?;
+    profile.game_action = Some(action);
+    write_json(path, &profile)
 }
 
 fn get_player_profile_from_db(
@@ -287,6 +301,7 @@ fn profile_from_raw(
         endorsement_level: json_i64(raw, "level").or_else(|| json_i64(raw, "endorsementLevel")),
         play_time_hours: json_f64(raw, "gameTime").or_else(|| json_f64(raw, "playTimeHours")),
         title: json_string(raw, "title"),
+        game_action: None,
         refreshed_at,
     }
 }
@@ -498,6 +513,29 @@ mod tests {
             Some("https://example.test/refreshed.png")
         );
         assert!(profile_path.is_file());
+
+        let action = crate::models::PlayerGameAction {
+            comment: Some("良好".to_string()),
+            send_honors_cnt: Some(3),
+            get_honors_cnt: Some(2),
+            reported_cnt: Some(0),
+        };
+        save_player_game_action(&profile_path, 595945364, action.clone()).unwrap();
+        assert_eq!(
+            get_player_profile(&db, &profile_path, Some(595945364))
+                .unwrap()
+                .game_action,
+            Some(action.clone())
+        );
+
+        let refreshed = save_profile_card(
+            &db,
+            &profile_path,
+            595945364,
+            &serde_json::json!({"code": 0, "data": {"name": "风偏偏呢#5479"}}),
+        )
+        .unwrap();
+        assert_eq!(refreshed.game_action, Some(action));
     }
 
     #[test]

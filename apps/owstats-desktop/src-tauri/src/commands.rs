@@ -15,8 +15,8 @@ use crate::{
     AccountLoginResult, CareerAchievement, ClearPlayerTargetResult, CredentialLoginCancelResult,
     CredentialStatus, DeepSeekKeyStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters,
     FriendDetail, ImportSummary, LoginTargetStatus, MatchDetailView, MatchFavoriteRequest,
-    MatchFavoriteView, MatchFilters, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerGameAction, PlayerProfile,
+    MatchCursor, MatchFavoriteView, MatchFilters, MatchPage, MatchSummary, OnboardingStatus,
+    OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview, PlayerGameAction, PlayerProfile,
     PlayerSearchOption, PlayerTargetStatus, RankingResponse, SeasonAnalysis, SeasonSyncResult,
     SyncRequest, UpdateCheckResult, UserSettings,
 };
@@ -82,6 +82,17 @@ pub fn list_match_timeline(
 ) -> Result<Vec<MatchSummary>, String> {
     let account = active_account(&accounts)?;
     list_matches(&account.database(), filters).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn list_match_timeline_page(
+    accounts: State<'_, AccountContextManager>,
+    filters: MatchFilters,
+    cursor: Option<MatchCursor>,
+    limit: usize,
+) -> Result<MatchPage, String> {
+    let account = active_account(&accounts)?;
+    crate::list_matches_page(&account.database(), filters, cursor, limit).map_err(to_message)
 }
 
 #[tauri::command]

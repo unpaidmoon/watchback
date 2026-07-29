@@ -48,6 +48,11 @@ impl OwDatabase {
                 .map(|metadata| metadata.len() > 0)
                 .unwrap_or(false);
         let conn = self.connect()?;
+        let schema_version: i64 =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if schema_version == crate::database::migrations::CURRENT_SCHEMA_VERSION {
+            return Ok(());
+        }
         if database_preexisted {
             if let Some(backups) = self.backups.as_ref() {
                 crate::database::backup::backup_before_schema_migration(

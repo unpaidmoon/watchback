@@ -367,11 +367,6 @@ body:has(.matchesPage) {
   scrollbar-gutter: stable;
 }
 
-.matchListPane > .phase6QaRegion {
-  height: auto;
-  min-height: 100%;
-}
-
 .matchListPane .phase6Timeline,
 .matchDetailPane .phase6CompactDetailScroll {
   height: auto;

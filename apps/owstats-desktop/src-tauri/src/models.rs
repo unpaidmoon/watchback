@@ -227,6 +227,20 @@ pub struct MatchSummary {
     pub team_awards: Vec<MatchPerformanceAward>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchCursor {
+    pub begin_ts: i64,
+    pub match_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchPage {
+    pub matches: Vec<MatchSummary>,
+    pub next_cursor: Option<MatchCursor>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerRow {
@@ -942,6 +956,7 @@ pub struct PlayerProfile {
     pub endorsement_level: Option<i64>,
     pub play_time_hours: Option<f64>,
     pub title: Option<String>,
+    pub game_action: Option<PlayerGameAction>,
     pub refreshed_at: Option<String>,
 }
 

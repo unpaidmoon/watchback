@@ -46,7 +46,6 @@ import type { BusyAccountAction, DashboardSnapshot } from "../features/command-c
 import { summarizeCommandCenterSeasons } from "../features/command-center/commandCenterTotals";
 import { DataFact, formatTimestamp } from "../features/command-center/SeasonHealthPanel";
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
-import { QaRegion } from "../shared/QaFeedbackLayer";
 import { formatSyncNotice, hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
 import { clearMatchesPageCache, clearMatchesPageCacheForSeason } from "../shared/matchesPageCache";
@@ -233,9 +232,9 @@ export function OnboardingPage() {
   }, []);
 
   useEffect(() => {
-    setGameAction(null);
+    setGameAction(profile?.gameAction ?? null);
     setGameActionDialogOpen(false);
-  }, [accountStatus?.activeAccountId]);
+  }, [accountStatus?.activeAccountId, profile?.gameAction]);
 
   useEffect(() => {
     const seasons = status?.seasonStatuses.map((item) => item.season) ?? [];
@@ -775,82 +774,13 @@ export function OnboardingPage() {
         <DataFact label="最近同步" value={lastSync} tone={lastSync === "-" ? "warn" : "neutral"} />
       </div> : null}
 
-      <QaRegion id="CMD-PROFILE" className="phase6QaBlockRegion">
+      <div className="commandCenterAccountRegion">
         {accountStatus === null || accountContextInvalidated ? (
           <div className="seasonSyncWorkbenchLoading" role="status">
             {accountContextInvalidated ? "账号状态已更新，正在重新加载…" : "正在加载账号信息…"}
           </div>
         ) : accountStatus.activeAccountId ? <>
           <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
-          <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
-            <div className="commandCenterSectionHeading">
-              <div>
-                <span className="phase6Eyebrow">主要操作</span>
-                <h2 id="command-center-sync-title">赛季数据与同步</h2>
-              </div>
-              <strong>{readableSyncProgress(syncProgress)}</strong>
-            </div>
-              <section className="syncTargetStrip" aria-label="当前目标玩家">
-                <div className="phase8TargetPlayerSummary">
-                  <span className="phase6Eyebrow">当前目标玩家</span>
-                  <strong>{targetStatus?.currentBnet ?? targetStatus?.detectedBnet ?? "尚未识别账号"}</strong>
-                  {showDetectedLogin && (
-                    <div className="syncTargetComparison" aria-label="当前目标与检测到的登录账号">
-                      <span>当前目标 <strong>{targetStatus?.currentBnet}</strong></span>
-                      <span>检测到的登录账号 <strong>{targetStatus?.detectedBnet}</strong></span>
-                    </div>
-                  )}
-                  <p>{targetStatus?.message ?? status?.credentialStatus.message ?? "请登录网易大神并自动识别当前账号"}</p>
-                </div>
-                <div className="syncTargetDecision">
-                  {targetStatus?.state === "ready" && <span className="good">当前目标已确认，可同步</span>}
-                  {targetStatus?.state === "switchRequired" && (
-                    <>
-                      <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runConfirmTargetSwitch} disabled={accountOperationBusy || syncingSeason !== null || !targetStatus.canConfirmSwitch}>
-                        {targetAction === "confirm" ? "切换中…" : "切换到此账号"}
-                      </button>
-                      <button className="ghostButton" type="button" onClick={runKeepCurrentTarget} disabled={accountOperationBusy || syncingSeason !== null}>
-                        {targetAction === "keep" ? "保留中…" : "保留原目标"}
-                      </button>
-                    </>
-                  )}
-                  {targetStatus?.state === "bindFailed" && targetStatus.canRetry ? (
-                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={accountOperationBusy || syncingSeason !== null}>
-                      {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
-                    </button>
-                  ) : null}
-                  <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}>
-                    {targetAction === "clear" ? "清除中…" : "清除"}
-                  </button>
-                </div>
-              </section>
-              {status && selectedSeason !== null ? (
-                <SeasonSyncWorkbench
-                  selectedSeason={selectedSeason}
-                  minimumSyncSeason={status.minimumSyncSeason}
-                  seasonStatuses={status.seasonStatuses}
-                  credentialReady={credentialReady}
-                  targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
-                  accountOperationBusy={accountOperationBusy}
-                  syncingSeason={syncingSeason}
-                  syncingMode={syncingMode}
-                  progress={syncProgress}
-                  syncError={syncError}
-                  syncNotice={syncNotice}
-                  autoUpdateEnabled={userSettings?.autoUpdateSeason ?? true}
-                  autoUpdateSaving={autoUpdateSaving}
-                  backgroundStatuses={backgroundStatuses}
-                  onSelectSeason={selectSyncSeason}
-                  onFullFetch={(season) => void runSeasonSync(season, "fullFetch")}
-                  onQuickUpdate={(season) => void runSeasonSync(season, "quickUpdate")}
-                  onRetryBackground={(season) => void retryBackgroundSync(season)}
-                  onAutoUpdateChange={(enabled) => void changeAutoUpdate(enabled)}
-                />
-              ) : (
-                <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>
-              )}
-          </section>
-
           <aside className="commandCenterAccountPanel" aria-labelledby="command-center-account-title">
             <ProfileSummaryCard
               nameHeadingId="command-center-account-title"
@@ -922,7 +852,7 @@ export function OnboardingPage() {
         {gameActionDialogOpen && gameAction ? (
           <ProfileGameActionDialog action={gameAction} onClose={closeGameActionDialog} />
         ) : null}
-      </QaRegion>
+      </div>
 
       <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
         <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>

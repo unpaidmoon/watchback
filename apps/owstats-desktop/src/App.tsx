@@ -13,7 +13,6 @@ import { PlayerQueryMatchesPage } from "./pages/PlayerQueryMatchesPage";
 import { endPlayerQuery } from "./features/player-query/playerQueryApi";
 import { getUserSettings, listAccounts, saveUserSettings } from "./shared/api";
 import type { UserSettings } from "./shared/types";
-import { QaFeedbackProvider, QaRegion } from "./shared/QaFeedbackLayer";
 import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
 import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
@@ -167,7 +166,7 @@ export function App() {
     navigate("/player-query");
   }, [navigate]);
   return (
-    <QaFeedbackProvider>
+    <>
       <RouteFocusManager />
       <main className="appFrame appShell phase6ProductShell">
         <header className="appTopBar phase6ProductTopBar">
@@ -181,7 +180,7 @@ export function App() {
             </div>
           </div>
 
-          <QaRegion id="NAV-CAPSULE" className="phase6QaInlineRegion">
+          <div className="phase6NavRegion">
             <nav className="appNav phase6ProductNav" aria-label="主导航">
               {phase6NavItems.map((item) => (
                 <NavLink key={item.path} to={item.path} className={({ isActive }) => (isActive ? "appNavLink active" : "appNavLink")} title={item.title} onClick={guardNavigation}>
@@ -189,7 +188,7 @@ export function App() {
                 </NavLink>
               ))}
             </nav>
-          </QaRegion>
+          </div>
         </header>
 
         <div className="appCanvas phase6ProductSurface">
@@ -206,6 +205,6 @@ export function App() {
           </Routes>
         </div>
       </main>
-    </QaFeedbackProvider>
+    </>
   );
 }

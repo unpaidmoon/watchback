@@ -491,6 +491,7 @@ export const fixturePlayerProfile = {
   titleIconUrl: "https://invalid.example/title-icon.png",
   endorsementLevel: 3,
   playTimeHours: 128.5,
+  gameAction: null,
   title: "视觉验收示例",
   refreshedAt: "2026-07-14 08:20",
 } satisfies PlayerProfile;

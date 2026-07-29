@@ -33,9 +33,9 @@ assert.match(commandCenterStyles, /\.commandCenterProfileRefresh\s*\{[\s\S]*?pos
 assert.match(commandCenterStyles, /\.profileSummaryCard \.phase6ProfileAvatar\s*\{[\s\S]*?width:\s*80px;[\s\S]*?height:\s*80px;/);
 assert.match(commandCenterStyles, /\.commandCenterTitleIcon img\s*\{[\s\S]*?width:\s*100%;[\s\S]*?aspect-ratio:\s*5 \/ 1;[\s\S]*?object-fit:\s*cover;/);
 assert.match(typesSource, /titleIconUrl:\s*string \| null;/);
-assert.doesNotMatch(typesSource.match(/export type PlayerProfile\s*=\s*\{[\s\S]*?\};/)?.[0] ?? "", /gameAction/);
+assert.match(typesSource.match(/export type PlayerProfile\s*=\s*\{[\s\S]*?\};/)?.[0] ?? "", /gameAction:\s*PlayerGameAction \| null/);
 assert.match(modelsSource, /pub title_icon_url:\s*Option<String>/);
-assert.doesNotMatch(modelsSource.match(/pub struct PlayerProfile\s*\{[\s\S]*?\}/)?.[0] ?? "", /game_action/);
+assert.match(modelsSource.match(/pub struct PlayerProfile\s*\{[\s\S]*?\}/)?.[0] ?? "", /game_action:\s*Option<PlayerGameAction>/);
 assert.match(sharedProfileCardSource, /className="commandCenterTitleIcon"/);
 assert.match(sharedProfileCardSource, /className="phase6ProfileAvatar commandCenterProfileRefresh"[\s\S]*?onClick=\{avatarAction\.onClick\}/);
 assert.doesNotMatch(sharedProfileCardSource, /commandCenterAvatarActions/);
@@ -45,6 +45,8 @@ assert.doesNotMatch(commandCenterStyles.match(/\.commandCenterProfileTitle\s*\{[
 assert.match(commandCenterStyles, /\.commandCenterIdentityLine h2\s*\{[\s\S]*?flex:\s*0 1 auto;/);
 assert.match(sharedProfileCardSource, /本周表现：[\s\S]*?gameActionLoading[\s\S]*?profile\.gameAction\?\.comment/);
 assert.match(onboardingSource, /getPlayerGameAction\(\)[\s\S]*?setGameActionDialogOpen\(true\)/);
+assert.match(onboardingSource, /setGameAction\(profile\?\.gameAction \?\? null\)/);
+assert.match(profileCardSource, /save_player_game_action/);
 assert.match(sharedProfileCardSource, /称赞他人[\s\S]*?收到称赞[\s\S]*?被举报次数/);
 assert.match(sharedProfileCardSource, /role="dialog" aria-modal="true" aria-labelledby="game-action-dialog-title"/);
 assert.match(commandCenterStyles, /\.gameActionDialogBackdrop\s*\{[\s\S]*?background:\s*rgb\(0 0 0 \/ 0\.68\)/);

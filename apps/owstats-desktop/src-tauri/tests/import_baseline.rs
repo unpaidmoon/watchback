@@ -727,7 +727,7 @@ fn database_initialize_sets_schema_version_idempotently() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
     let roast_table_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='match_ai_roasts'",
@@ -736,6 +736,32 @@ fn database_initialize_sets_schema_version_idempotently() {
         )
         .unwrap();
     assert_eq!(roast_table_count, 1);
+}
+
+#[test]
+fn database_migration_removes_abandoned_rating_tables() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = OwDatabase::new(temp.path().join("owstats.db"));
+    db.initialize().unwrap();
+    let conn = db.connect().unwrap();
+    conn.execute("CREATE TABLE career_mmr_events (id INTEGER)", [])
+        .unwrap();
+    conn.execute("CREATE TABLE mmr_model_versions (id INTEGER)", [])
+        .unwrap();
+    conn.pragma_update(None, "user_version", 12_i64).unwrap();
+    drop(conn);
+
+    db.initialize().unwrap();
+
+    let conn = db.connect().unwrap();
+    let remaining: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('career_mmr_events', 'mmr_model_versions')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0);
 }
 
 #[test]
@@ -789,7 +815,7 @@ fn database_migration_backfills_umbrella_normal_match_modes() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
 }
 
 #[test]
@@ -896,7 +922,7 @@ fn database_migrates_legacy_match_players_role_type() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
     assert_eq!(role_type_columns, 1);
     assert_eq!(role_index_count, 1);
 }
@@ -1041,7 +1067,7 @@ fn database_migrates_v2_arena_player_index_idempotently() {
         )
         .unwrap();
 
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
     assert_eq!(arena_table_count, 1);
     assert_eq!(
         arena_columns,

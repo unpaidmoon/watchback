@@ -65,12 +65,6 @@ function statusText(state: QrLoginViewState, message: string | null) {
   }[state];
 }
 
-function createPngUrl(base64: string) {
-  const source = window.atob(base64);
-  const bytes = Uint8Array.from(source, (char) => char.charCodeAt(0));
-  return URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-}
-
 function StatusIcon({ state }: { state: QrLoginViewState }) {
   if (state === "ready") return <CheckCircle2 aria-hidden="true" size={20} />;
   if (state === "expired" || state === "failed") return <AlertCircle aria-hidden="true" size={20} />;
@@ -84,7 +78,6 @@ export function QrAccountLoginDialog({ open, onCancel, onCompleted, onUseExistin
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
-  const urlRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const revisionRef = useRef(-1);
   const stateRef = useRef(state);
@@ -95,8 +88,6 @@ export function QrAccountLoginDialog({ open, onCancel, onCompleted, onUseExistin
   pendingRef.current = actionPending;
 
   function clearImage() {
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    urlRef.current = null;
     setQrUrl(null);
   }
 
@@ -110,19 +101,11 @@ export function QrAccountLoginDialog({ open, onCancel, onCompleted, onUseExistin
 
   function acceptQr(payload: QrAccountLoginQrEvent) {
     if (payload.sessionId !== sessionIdRef.current || payload.revision <= revisionRef.current || payload.mimeType !== "image/png") return;
-    try {
-      const nextUrl = createPngUrl(payload.imageBase64);
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      urlRef.current = nextUrl;
-      revisionRef.current = payload.revision;
-      setQrUrl(nextUrl);
-      if (["starting", "loadingQr"].includes(stateRef.current)) {
-        setState("waitingForScan");
-        setMessage(null);
-      }
-    } catch {
-      setState("failed");
-      setMessage("\u4e8c\u7ef4\u7801\u6570\u636e\u65e0\u6548\uff0c\u8bf7\u5237\u65b0\u91cd\u8bd5\u6216\u4f7f\u7528\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f\u3002");
+    revisionRef.current = payload.revision;
+    setQrUrl(`data:image/png;base64,${payload.imageBase64}`);
+    if (["starting", "loadingQr"].includes(stateRef.current)) {
+      setState("waitingForScan");
+      setMessage(null);
     }
   }
 

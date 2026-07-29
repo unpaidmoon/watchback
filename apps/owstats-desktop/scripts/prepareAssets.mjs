@@ -297,7 +297,7 @@ export async function refreshAssetsInventory({ repoRoot, appRoot }) {
     .map((file) => file.slice("assets/".length));
   const uniqueSorted = [...new Set(files)].sort((left, right) => left.localeCompare(right));
   const inventoryFile = path.resolve(appRoot, "runtime-config", "assets-inventory.json");
-  await writeFile(inventoryFile, `${JSON.stringify({ version: 1, files: uniqueSorted }, null, 2)}\n`);
+  await writeFile(inventoryFile, `${JSON.stringify({ version: 1, files: uniqueSorted })}\n`);
   return { inventoryFile, fileCount: uniqueSorted.length };
 }
 

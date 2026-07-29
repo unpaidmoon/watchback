@@ -48,7 +48,7 @@ fn roast(match_id: &str, award: &str, commentary: &str) -> AiRoastRecord {
 }
 
 #[test]
-fn migrates_v10_through_v12_idempotently_and_preserves_matches() -> Result<()> {
+fn migrates_v10_through_current_idempotently_and_preserves_matches() -> Result<()> {
     let dir = tempdir()?;
     let db = OwDatabase::new(dir.path().join("migration.sqlite3"));
     db.initialize()?;
@@ -64,7 +64,7 @@ fn migrates_v10_through_v12_idempotently_and_preserves_matches() -> Result<()> {
 
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        12
+        13
     );
     assert_eq!(
         conn.query_row(
@@ -164,7 +164,7 @@ fn malicious_report_json_is_rejected_and_failed_replace_preserves_old_record() -
 }
 
 #[test]
-fn migrates_v11_to_v12_idempotently_without_rewriting_legacy_roasts() -> Result<()> {
+fn migrates_v11_to_current_idempotently_without_rewriting_legacy_roasts() -> Result<()> {
     let dir = tempdir()?;
     let db = OwDatabase::new(dir.path().join("v12.sqlite3"));
     db.initialize()?;
@@ -178,7 +178,7 @@ fn migrates_v11_to_v12_idempotently_without_rewriting_legacy_roasts() -> Result<
     let conn = db.connect()?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        12
+        13
     );
     let mut stmt = conn.prepare("PRAGMA table_info(match_ai_roasts)")?;
     let columns = stmt

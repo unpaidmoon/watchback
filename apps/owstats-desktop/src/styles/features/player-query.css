@@ -45,7 +45,6 @@
 .playerQueryCompactMatchRow:focus-visible { outline: 2px solid var(--data-primary); outline-offset: 2px; }
 .playerQueryFormHint,
 .playerQueryInlineError { margin: 0; font-size: 13px; }
-.playerQueryFormHint { color: var(--text-secondary); }
 .playerQueryInlineError { color: var(--status-danger); }
 .playerQueryGate,
 .playerQueryResourceState { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 72px; }

@@ -4,8 +4,9 @@ use crate::importer::{int_field, rebuild_match_players_from_existing_details, st
 use crate::match_favorites::favorite_for_match;
 use crate::models::{
     ArenaDetailSlice, ArenaMatchDetail, ComparisonMetrics, FilterOption, FilterOptions, HeroStat,
-    MatchDetailView, MatchEvaluationSummary, MatchFilters, MatchPerformanceAward, MatchSummary,
-    PlayerPerk, PlayerRow, PlayerSearchOption, SameRoleComparison,
+    MatchCursor, MatchDetailView, MatchEvaluationSummary, MatchFilters, MatchPage,
+    MatchPerformanceAward, MatchSummary, PlayerPerk, PlayerRow, PlayerSearchOption,
+    SameRoleComparison,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
@@ -26,7 +27,30 @@ use normal_detail::*;
 use party_groups::*;
 
 pub fn list_matches(db: &OwDatabase, filters: MatchFilters) -> Result<Vec<MatchSummary>> {
-    list_matches_impl(db, filters)
+    list_matches_impl(db, filters, None)
+}
+
+pub fn list_matches_page(
+    db: &OwDatabase,
+    filters: MatchFilters,
+    cursor: Option<MatchCursor>,
+    limit: usize,
+) -> Result<MatchPage> {
+    let limit = limit.clamp(1, 100);
+    let mut matches = list_matches_impl(db, filters, Some((cursor, limit + 1)))?;
+    let has_more = matches.len() > limit;
+    matches.truncate(limit);
+    let next_cursor = has_more.then(|| {
+        let last = matches.last().expect("a non-empty limited page");
+        MatchCursor {
+            begin_ts: last.begin_ts,
+            match_id: last.match_id.clone(),
+        }
+    });
+    Ok(MatchPage {
+        matches,
+        next_cursor,
+    })
 }
 
 pub fn list_filter_options(db: &OwDatabase) -> Result<FilterOptions> {

@@ -69,7 +69,13 @@ pub async fn fetch_game_action_for_account(
     if !business_succeeded(&payload) {
         return Err(anyhow!("读取本周表现返回业务错误"));
     }
-    game_action_from_payload(&payload).ok_or_else(|| anyhow!("本周表现数据不完整"))
+    let action = game_action_from_payload(&payload).ok_or_else(|| anyhow!("本周表现数据不完整"))?;
+    crate::settings::save_player_game_action(
+        &account.paths().player_profile(),
+        credentials.role_id,
+        action.clone(),
+    )?;
+    Ok(action)
 }
 
 fn game_action_from_payload(payload: &serde_json::Value) -> Option<PlayerGameAction> {

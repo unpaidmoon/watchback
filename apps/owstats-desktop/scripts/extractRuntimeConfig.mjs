@@ -42,5 +42,5 @@ const runtimeConfig = {
 
 const output = resolve(appRoot, "runtime-config/ow-lookups.json");
 await mkdir(dirname(output), { recursive: true });
-await writeFile(output, `${JSON.stringify(runtimeConfig, null, 2)}\n`, "utf8");
+await writeFile(output, `${JSON.stringify(runtimeConfig)}\n`, "utf8");
 console.log(`wrote ${output}`);

@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 12;
+pub const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 struct Migration {
     version: i64,
@@ -38,11 +38,6 @@ const MIGRATIONS: &[Migration] = &[
         apply: migrate_v5,
     },
     Migration {
-        version: 6,
-        name: "career role mmr",
-        apply: migrate_v6,
-    },
-    Migration {
         version: 7,
         name: "normal match mode normalization",
         apply: migrate_v7,
@@ -58,11 +53,6 @@ const MIGRATIONS: &[Migration] = &[
         apply: migrate_v9,
     },
     Migration {
-        version: 10,
-        name: "career mmr v3 performance artifact storage",
-        apply: migrate_v10,
-    },
-    Migration {
         version: 11,
         name: "permanent match AI roasts",
         apply: migrate_v11,
@@ -71,6 +61,16 @@ const MIGRATIONS: &[Migration] = &[
         version: 12,
         name: "structured AI roast reports",
         apply: migrate_v12,
+    },
+    Migration {
+        version: 13,
+        name: "remove abandoned rating prototype",
+        apply: migrate_v13,
+    },
+    Migration {
+        version: 14,
+        name: "match timeline index",
+        apply: migrate_v14,
     },
 ];
 
@@ -96,14 +96,6 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         transaction.pragma_update(None, "user_version", migration.version)?;
         transaction.commit()?;
     }
-    let transaction = conn.unchecked_transaction()?;
-    add_column_if_missing(
-        &transaction,
-        "career_role_mode_summary",
-        "draws",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
-    transaction.commit()?;
     Ok(())
 }
 
@@ -150,116 +142,6 @@ fn migrate_v4(transaction: &Transaction<'_>) -> Result<()> {
                 IFNULL(error_type, ''),
                 IFNULL(message, '')
             );
-        "#,
-    )?;
-    Ok(())
-}
-
-fn migrate_v6(transaction: &Transaction<'_>) -> Result<()> {
-    transaction.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS mmr_model_versions (
-            version INTEGER PRIMARY KEY,
-            algorithm TEXT NOT NULL,
-            config_json TEXT NOT NULL,
-            is_active INTEGER NOT NULL CHECK(is_active IN (0, 1)),
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS mmr_match_inputs (
-            match_id TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
-            role TEXT NOT NULL CHECK(role IN ('tank', 'damage', 'support')),
-            season INTEGER NOT NULL,
-            begin_ts INTEGER NOT NULL,
-            mode_family TEXT NOT NULL,
-            result REAL NOT NULL CHECK(result BETWEEN 0.0 AND 1.0),
-            duration_sec INTEGER NOT NULL,
-            role_share REAL NOT NULL CHECK(role_share > 0.0 AND role_share <= 1.0),
-            role_source TEXT NOT NULL,
-            data_quality REAL NOT NULL CHECK(data_quality BETWEEN 0.0 AND 1.0),
-            team_strength REAL,
-            opponent_strength REAL,
-            rank_coverage REAL NOT NULL CHECK(rank_coverage BETWEEN 0.0 AND 1.0),
-            performance_features_json TEXT NOT NULL DEFAULT '{}',
-            input_hash TEXT NOT NULL,
-            PRIMARY KEY (match_id, role)
-        );
-
-        CREATE TABLE IF NOT EXISTS career_mmr_events (
-            model_version INTEGER NOT NULL REFERENCES mmr_model_versions(version),
-            match_id TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
-            role TEXT NOT NULL CHECK(role IN ('tank', 'damage', 'support')),
-            season INTEGER NOT NULL,
-            begin_ts INTEGER NOT NULL,
-            mode_family TEXT NOT NULL,
-            role_share REAL NOT NULL CHECK(role_share > 0.0 AND role_share <= 1.0),
-            result REAL NOT NULL CHECK(result BETWEEN 0.0 AND 1.0),
-            expected_win_rate REAL NOT NULL CHECK(expected_win_rate BETWEEN 0.0 AND 1.0),
-            data_quality REAL NOT NULL CHECK(data_quality BETWEEN 0.0 AND 1.0),
-            performance_adjustment REAL NOT NULL DEFAULT 0.0,
-            mu_before REAL NOT NULL,
-            sigma_before REAL NOT NULL,
-            base_delta REAL NOT NULL,
-            final_delta REAL NOT NULL,
-            mu_after REAL NOT NULL,
-            sigma_after REAL NOT NULL,
-            confidence_after REAL NOT NULL CHECK(confidence_after BETWEEN 0.0 AND 1.0),
-            input_hash TEXT NOT NULL,
-            computed_at TEXT NOT NULL,
-            PRIMARY KEY (model_version, match_id, role)
-        );
-
-        CREATE TABLE IF NOT EXISTS career_role_mmr (
-            model_version INTEGER NOT NULL REFERENCES mmr_model_versions(version),
-            role TEXT NOT NULL CHECK(role IN ('tank', 'damage', 'support')),
-            mmr INTEGER NOT NULL,
-            mu REAL NOT NULL,
-            sigma REAL NOT NULL,
-            confidence REAL NOT NULL CHECK(confidence BETWEEN 0.0 AND 1.0),
-            effective_matches REAL NOT NULL,
-            effective_hours REAL NOT NULL,
-            peak_mmr INTEGER,
-            peak_at INTEGER,
-            last_played_at INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (model_version, role)
-        );
-
-        CREATE TABLE IF NOT EXISTS career_role_mode_summary (
-            model_version INTEGER NOT NULL REFERENCES mmr_model_versions(version),
-            role TEXT NOT NULL CHECK(role IN ('tank', 'damage', 'support')),
-            mode_family TEXT NOT NULL,
-            matches_count INTEGER NOT NULL,
-            duration_sec INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL DEFAULT 0,
-            cumulative_delta REAL NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (model_version, role, mode_family)
-        );
-
-        CREATE TABLE IF NOT EXISTS career_role_season_summary (
-            model_version INTEGER NOT NULL REFERENCES mmr_model_versions(version),
-            season INTEGER NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('tank', 'damage', 'support')),
-            matches_count INTEGER NOT NULL,
-            start_mmr INTEGER NOT NULL,
-            end_mmr INTEGER NOT NULL,
-            peak_mmr INTEGER NOT NULL,
-            net_delta REAL NOT NULL,
-            first_match_at INTEGER,
-            last_match_at INTEGER,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (model_version, season, role)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_mmr_match_inputs_replay
-            ON mmr_match_inputs(begin_ts, match_id);
-        CREATE INDEX IF NOT EXISTS idx_career_mmr_events_role_history
-            ON career_mmr_events(model_version, role, begin_ts);
-        CREATE INDEX IF NOT EXISTS idx_career_role_season_summary_lookup
-            ON career_role_season_summary(model_version, season, role);
         "#,
     )?;
     Ok(())
@@ -422,26 +304,6 @@ fn migrate_v9(transaction: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v10(transaction: &Transaction<'_>) -> Result<()> {
-    // Forward-compatible v3 launch surface: a nullable per-event performance
-    // tier plus a model-artifact table keyed by model version. Existing v2
-    // events are untouched (the column is nullable with no default), and the
-    // artifact table is created idempotently for pre-MMR, v1 and v2 databases.
-    add_column_if_missing(transaction, "career_mmr_events", "performance_tier", "TEXT")?;
-    transaction.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS career_mmr_model_artifacts (
-            model_version INTEGER PRIMARY KEY REFERENCES mmr_model_versions(version) ON DELETE CASCADE,
-            algorithm TEXT NOT NULL,
-            config_hash TEXT NOT NULL,
-            artifact_json TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        "#,
-    )?;
-    Ok(())
-}
-
 fn migrate_v11(transaction: &Transaction<'_>) -> Result<()> {
     transaction.execute_batch(
         r#"
@@ -480,6 +342,14 @@ fn migrate_v12(transaction: &Transaction<'_>) -> Result<()> {
         "match_ai_roasts",
         "knowledge_version",
         "INTEGER",
+    )?;
+    Ok(())
+}
+
+fn migrate_v14(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute(
+        "CREATE INDEX IF NOT EXISTS idx_matches_timeline ON matches(begin_ts DESC, match_id)",
+        [],
     )?;
     Ok(())
 }
@@ -546,5 +416,20 @@ fn add_column_if_missing(
             [],
         )?;
     }
+    Ok(())
+}
+
+fn migrate_v13(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS career_mmr_model_artifacts;
+        DROP TABLE IF EXISTS career_mmr_events;
+        DROP TABLE IF EXISTS career_role_mode_summary;
+        DROP TABLE IF EXISTS career_role_season_summary;
+        DROP TABLE IF EXISTS career_role_mmr;
+        DROP TABLE IF EXISTS mmr_match_inputs;
+        DROP TABLE IF EXISTS mmr_model_versions;
+        "#,
+    )?;
     Ok(())
 }

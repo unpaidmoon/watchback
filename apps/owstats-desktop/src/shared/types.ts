@@ -186,6 +186,7 @@ export type PlayerProfile = {
   endorsementLevel: number | null;
   playTimeHours: number | null;
   title: string | null;
+  gameAction: PlayerGameAction | null;
   refreshedAt: string | null;
 };
 

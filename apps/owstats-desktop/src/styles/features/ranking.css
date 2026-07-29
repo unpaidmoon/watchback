@@ -34,18 +34,6 @@
   color: var(--action-on-primary);
 }
 
-.phase6RankingSearch {
-  flex: 1 1 280px;
-  min-width: 180px;
-  border-color: var(--glass-border);
-  border-radius: var(--radius-control);
-  background: var(--glass-secondary);
-}
-
-.phase6RankingSearch input {
-  color: var(--text-primary);
-}
-
 .phase6RankingCount {
   margin-left: auto;
   color: var(--text-secondary);
