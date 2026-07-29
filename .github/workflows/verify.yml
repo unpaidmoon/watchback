@@ -47,6 +47,14 @@ jobs:
         working-directory: apps/owstats-desktop
         run: npm ci
 
+      - name: Configure stable test temp directory
+        shell: pwsh
+        run: |
+          $ciTemp = Join-Path $env:GITHUB_WORKSPACE ".ci-temp"
+          New-Item -ItemType Directory -Force -Path $ciTemp | Out-Null
+          "TEMP=$ciTemp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$ciTemp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run reproducible verification
         shell: pwsh
         run: ./scripts/verify.ps1 -SkipCheckout
