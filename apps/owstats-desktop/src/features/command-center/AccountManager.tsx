@@ -152,14 +152,12 @@ export function AccountManager({
         <h2 ref={managerHeadingRef} id="account-manager-title" tabIndex={-1}>
           账号管理
         </h2>
-        <p>每个账号的凭证和本地数据独立保存。</p>
       </div>
 
       <div className="accountManagerRows">
         <div className="accountManagerRow accountManagerAddRow">
           <div>
             <span className="accountManagerAccountName">添加或更新网易大神账号</span>
-            <span className="accountManagerAccountMeta">使用全新浏览器会话登录，不会继承上一次账号状态</span>
           </div>
           <button className="primaryButton" type="button" onClick={onAdd} disabled={isBusy}>
             {busyAction?.kind === "add" ? "正在添加…" : "添加账号"}

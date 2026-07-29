@@ -58,6 +58,8 @@ assert.doesNotMatch(css, /playerQueryForm > label/);
 assert.match(form, /aria-label="BattleTag"/, "the input keeps a stable accessible name without a hidden label");
 assert.doesNotMatch(css, /--accent|--surface,|--text-muted|--danger|--border,/);
 const hook = readFileSync(new URL("../src/features/player-query/usePlayerQuerySession.ts", import.meta.url), "utf8");
+assert.doesNotMatch(page, /<PageSeasonSelect[^>]*disabled=/, "season selection stays available before a query starts");
+assert.match(hook, /sessionId \? changePlayerQuerySeason\(current, season\) : \{ \.\.\.current, season \}/, "an idle season change is kept without loading session resources");
 assert.match(hook, /loadPlayerQueryModeHeroes/); assert.match(hook, /void loadMatches[\s\S]*void loadHeroes/); assert.doesNotMatch(hook, /data\.heroes/);
 assert.match(hook, /void loadCard\([\s\S]*void loadCardImages\(/, "card text and images start independently without awaiting either resource");
 console.log("player-query page tests passed");

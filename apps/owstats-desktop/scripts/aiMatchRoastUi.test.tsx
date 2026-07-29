@@ -66,8 +66,6 @@ assert.match(settingsMarkup, /<label[^>]*for=\x22deepseek-api-key\x22[^>]*>DeepS
 assert.match(settingsMarkup, /<input[^>]*id=\x22deepseek-api-key\x22[^>]*type=\x22password\x22/);
 assert.match(settingsMarkup, /autoComplete=\x22new-password\x22/);
 assert.match(settingsMarkup, new RegExp('<button[^>]*>\\u4fdd\\u5b58\\u5e76\\u9a8c\\u8bc1<\\/button>'));
-assert.match(settingsMarkup, new RegExp('\\u4ec5\\u53d1\\u9001\\u533f\\u540d\\u82f1\\u96c4\\u9635\\u5bb9\\u3001\\u8ba1\\u5206\\u677f\\u3001\\u6d3e\\u751f\\u6307\\u6807\\u4e0e\\u56de\\u5408\\u8d8b\\u52bf'));
-assert.match(settingsMarkup, new RegExp('\\u4e0d\\u4f1a\\u53d1\\u9001\\u73a9\\u5bb6\\u540d\\u79f0\\u3001\\u73a9\\u5bb6 ID\\u3001\\u7b14\\u8bb0\\u3001\\u539f\\u59cb JSON\\u3001\\u5bf9\\u5c40 ID \\u6216\\u51ed\\u636e'));
 assert.doesNotMatch(settingsMarkup, new RegExp('\\u5220\\u9664|\\u6a21\\u578b|\\u98ce\\u683c|Base URL|\\u6d4b\\u8bd5 Key|\\u5c3e\\u53f7|\\u7247\\u6bb5'));
 assert.equal(deepSeekStatusLabel({ state: 'ready', message: 'sk-test-fragment' }), '\u5df2\u914d\u7f6e\u5e76\u9a8c\u8bc1');
 assert.equal(deepSeekStatusLabel({ state: 'missing', message: 'anything' }), '\u672a\u914d\u7f6e');

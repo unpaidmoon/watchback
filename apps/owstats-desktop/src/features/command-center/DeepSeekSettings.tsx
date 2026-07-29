@@ -84,17 +84,11 @@ export function DeepSeekSettings() {
   }
 
   return (
-    <section className="deepSeekSettings" aria-labelledby="deepseek-settings-title">
+    <section className="deepSeekSettings" aria-label="AI 锐评">
       <div className="deepSeekSettingsHeading">
-        <div>
-          <span className="phase6Eyebrow">AI 锐评</span>
-          <h3 id="deepseek-settings-title">DeepSeek API Key</h3>
-        </div>
+        <span className="phase6Eyebrow">AI 锐评</span>
         <span className="deepSeekSettingsStatus">{deepSeekStatusLabel(status)}</span>
       </div>
-      <p className="deepSeekSettingsDisclosure">
-        仅发送匿名英雄阵容、计分板、派生指标与回合趋势；不会发送玩家名称、玩家 ID、笔记、原始 JSON、对局 ID 或凭据。
-      </p>
       <form className="deepSeekSettingsForm" onSubmit={(event) => void submit(event)}>
         <label htmlFor="deepseek-api-key">DeepSeek API Key</label>
         <div className="deepSeekSettingsControls">

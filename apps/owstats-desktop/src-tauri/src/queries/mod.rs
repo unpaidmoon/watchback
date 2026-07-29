@@ -37,6 +37,10 @@ pub fn list_matches_page(
     limit: usize,
 ) -> Result<MatchPage> {
     let limit = limit.clamp(1, 100);
+    let total = cursor
+        .is_none()
+        .then(|| count_matches_impl(db, &filters))
+        .transpose()?;
     let mut matches = list_matches_impl(db, filters, Some((cursor, limit + 1)))?;
     let has_more = matches.len() > limit;
     matches.truncate(limit);
@@ -50,6 +54,7 @@ pub fn list_matches_page(
     Ok(MatchPage {
         matches,
         next_cursor,
+        total,
     })
 }
 

@@ -754,7 +754,7 @@ export function OnboardingPage() {
     <section className="workspace onboardingWorkspace phase6CommandCenter">
       <PageHeader
         title="指挥台"
-        description="管理当前登录账号、赛季同步与本地数据状态"
+        description=""
       />
       {(error || notice) && (
         <div
@@ -781,6 +781,41 @@ export function OnboardingPage() {
           </div>
         ) : accountStatus.activeAccountId ? <>
           <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
+          <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
+            <div className="commandCenterSectionHeading">
+              <div>
+                <span className="phase6Eyebrow">主要操作</span>
+                <h2 id="command-center-sync-title">赛季数据与同步</h2>
+              </div>
+              <strong>{readableSyncProgress(syncProgress)}</strong>
+            </div>
+              {status && selectedSeason !== null ? (
+                <SeasonSyncWorkbench
+                  selectedSeason={selectedSeason}
+                  minimumSyncSeason={status.minimumSyncSeason}
+                  seasonStatuses={status.seasonStatuses}
+                  credentialReady={credentialReady}
+                  targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}
+                  accountOperationBusy={accountOperationBusy}
+                  syncingSeason={syncingSeason}
+                  syncingMode={syncingMode}
+                  progress={syncProgress}
+                  syncError={syncError}
+                  syncNotice={syncNotice}
+                  autoUpdateEnabled={userSettings?.autoUpdateSeason ?? true}
+                  autoUpdateSaving={autoUpdateSaving}
+                  backgroundStatuses={backgroundStatuses}
+                  onSelectSeason={selectSyncSeason}
+                  onFullFetch={(season) => void runSeasonSync(season, "fullFetch")}
+                  onQuickUpdate={(season) => void runSeasonSync(season, "quickUpdate")}
+                  onRetryBackground={(season) => void retryBackgroundSync(season)}
+                  onAutoUpdateChange={(enabled) => void changeAutoUpdate(enabled)}
+                />
+              ) : (
+                <div className="seasonSyncWorkbenchLoading" role="status">正在加载赛季数据…</div>
+              )}
+          </section>
+
           <aside className="commandCenterAccountPanel" aria-labelledby="command-center-account-title">
             <ProfileSummaryCard
               nameHeadingId="command-center-account-title"
@@ -824,24 +859,36 @@ export function OnboardingPage() {
           </section>
         )}
 
-        {accountStatus ? <div className="accountManagerPanel">
-          {busyAccountAction?.kind === "add" && (
-            <div className="accountManagerLoginProgress" role="status" aria-live="polite">
-              <span>{loginProgress?.message ?? "正在等待浏览器登录…"}</span>
-              <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
-                <X size={18} />
-                {cancellingLogin ? "取消中…" : "取消"}
-              </button>
+        <div className="commandCenterUtilityGrid">
+          {accountStatus ? <div className="accountManagerPanel">
+            {busyAccountAction?.kind === "add" && (
+              <div className="accountManagerLoginProgress" role="status" aria-live="polite">
+                <span>{loginProgress?.message ?? "正在等待浏览器登录…"}</span>
+                <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
+                  <X size={18} />
+                  {cancellingLogin ? "取消中…" : "取消"}
+                </button>
+              </div>
+            )}
+            <AccountManager
+              accounts={accountStatus?.accounts ?? []}
+              busyAction={qrLoginDialogOpen ? { kind: "add" } : busyAccountAction}
+              onAdd={openQrAccountLogin}
+              onSwitch={runSwitchAccount}
+              onRemove={runRemoveAccount}
+            />
+          </div> : null}
+          <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
+            <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>
+            <DeepSeekSettings />
+            <div className="phase6SettingsLauncherGrid syncSecondaryActions">
+              <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setVersionDialogOpen(true)} />
+              <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => void openSettingsDirectory("logs")} disabled={openingSupportDirectory !== null} />
+              <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => void openSettingsDirectory("data")} disabled={openingSupportDirectory !== null} />
+              <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => void openGithubRepository()} disabled={openingProjectRepository} />
             </div>
-          )}
-          <AccountManager
-            accounts={accountStatus?.accounts ?? []}
-            busyAction={qrLoginDialogOpen ? { kind: "add" } : busyAccountAction}
-            onAdd={openQrAccountLogin}
-            onSwitch={runSwitchAccount}
-            onRemove={runRemoveAccount}
-          />
-        </div> : null}
+          </section>
+        </div>
         <QrAccountLoginDialog
           open={qrLoginDialogOpen}
           onCancel={() => setQrLoginDialogOpen(false)}
@@ -854,16 +901,6 @@ export function OnboardingPage() {
         ) : null}
       </div>
 
-      <section className="commandCenterTools" aria-labelledby="command-center-tools-title">
-        <div><span className="phase6Eyebrow">应用工具</span><h2 id="command-center-tools-title">本地应用与支持</h2></div>
-        <DeepSeekSettings />
-        <div className="phase6SettingsLauncherGrid syncSecondaryActions">
-          <SettingsPlaceholder icon={<BadgeInfo size={17} />} label="版本号" onClick={() => setVersionDialogOpen(true)} />
-          <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => void openSettingsDirectory("logs")} disabled={openingSupportDirectory !== null} />
-          <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => void openSettingsDirectory("data")} disabled={openingSupportDirectory !== null} />
-          <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => void openGithubRepository()} disabled={openingProjectRepository} />
-        </div>
-      </section>
     </section>
   );
 }

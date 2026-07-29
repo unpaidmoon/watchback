@@ -281,6 +281,17 @@ export type MatchSummary = {
   isFavorite: boolean;
 };
 
+export type MatchCursor = {
+  beginTs: number;
+  matchId: string;
+};
+
+export type MatchPage = {
+  matches: MatchSummary[];
+  nextCursor: MatchCursor | null;
+  total: number | null;
+};
+
 export type PlayerRow = {
   side: "teammate" | "enemy";
   name: string;

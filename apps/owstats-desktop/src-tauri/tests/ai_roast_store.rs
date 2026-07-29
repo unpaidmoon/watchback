@@ -64,7 +64,7 @@ fn migrates_v10_through_current_idempotently_and_preserves_matches() -> Result<(
 
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        13
+        14
     );
     assert_eq!(
         conn.query_row(
@@ -178,7 +178,7 @@ fn migrates_v11_to_current_idempotently_without_rewriting_legacy_roasts() -> Res
     let conn = db.connect()?;
     assert_eq!(
         conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-        13
+        14
     );
     let mut stmt = conn.prepare("PRAGMA table_info(match_ai_roasts)")?;
     let columns = stmt

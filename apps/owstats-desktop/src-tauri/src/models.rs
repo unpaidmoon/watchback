@@ -239,6 +239,7 @@ pub struct MatchCursor {
 pub struct MatchPage {
     pub matches: Vec<MatchSummary>,
     pub next_cursor: Option<MatchCursor>,
+    pub total: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

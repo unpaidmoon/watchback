@@ -4,6 +4,7 @@ use crate::account_store::{
 use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::models::{AccountManagerStatus, AccountSummary, RemoveAccountResult};
 use anyhow::{anyhow, Context, Result};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 const NO_ACTIVE_ACCOUNT_MESSAGE: &str = "尚未添加可用账号，请先在指挥台添加账号。";
@@ -18,12 +19,14 @@ pub struct AccountContextManager {
     migration_lock: Arc<Mutex<()>>,
     login_lock: Arc<Mutex<()>>,
     deletion_recovery_required: Arc<RwLock<bool>>,
+    databases: Arc<Mutex<HashMap<AccountId, crate::OwDatabase>>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AccountContextSnapshot {
     account_id: AccountId,
     paths: AccountPaths,
+    database: crate::OwDatabase,
     _storage_lease: Arc<ActiveStorageLease>,
 }
 
@@ -57,6 +60,7 @@ impl AccountContextManager {
             migration_lock: Arc::new(Mutex::new(())),
             login_lock: Arc::new(Mutex::new(())),
             deletion_recovery_required: Arc::new(RwLock::new(false)),
+            databases: Arc::new(Mutex::new(HashMap::new())),
         };
         let registry = manager.registry_snapshot()?;
         if let Some(account_id) = registry.active_account_id.as_ref() {
@@ -79,9 +83,11 @@ impl AccountContextManager {
         let paths = self.shared.account(&account_id);
         let storage_lease =
             self.validate_account_storage(&registry, &account_id, "账号数据不完整，无法使用。")?;
+        let database = self.database_for(&account_id, &paths)?;
         Ok(AccountContextSnapshot {
             account_id,
             paths,
+            database,
             _storage_lease: storage_lease,
         })
     }
@@ -308,13 +314,26 @@ impl AccountContextManager {
 
     pub(crate) fn snapshot_for(&self, account_id: &AccountId) -> Result<AccountContextSnapshot> {
         let registry = self.registry_snapshot()?;
+        let paths = self.shared.account(account_id);
         let storage_lease =
             self.validate_account_storage(&registry, account_id, "账号数据不完整，无法使用。")?;
         Ok(AccountContextSnapshot {
             account_id: account_id.clone(),
-            paths: self.shared.account(account_id),
+            database: self.database_for(account_id, &paths)?,
+            paths,
             _storage_lease: storage_lease,
         })
+    }
+
+    fn database_for(&self, account_id: &AccountId, paths: &AccountPaths) -> Result<crate::OwDatabase> {
+        let mut databases = self
+            .databases
+            .lock()
+            .map_err(|_| anyhow!("账号数据库状态暂不可用，请重试。"))?;
+        Ok(databases
+            .entry(account_id.clone())
+            .or_insert_with(|| crate::OwDatabase::for_account(paths))
+            .clone())
     }
 
     fn validate_account_storage(
@@ -507,7 +526,7 @@ impl AccountContextSnapshot {
     }
 
     pub fn database(&self) -> crate::OwDatabase {
-        crate::OwDatabase::for_account(&self.paths)
+        self.database.clone()
     }
 }
 

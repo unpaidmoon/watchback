@@ -139,8 +139,11 @@ export function usePlayerQuerySession({ firstMode, api = defaultApi, onAuthentic
   }, [api, firstMode, invalidateAuthentication, loadCard, loadCardImages, loadHeroes, loadMatches, loadRanks, onSessionChange, set]);
 
   const changeSeason = useCallback((season: PlayerQuerySeason) => {
-    const sessionId = stateRef.current.search.data?.sessionId; if (!sessionId || stateRef.current.season === season) return;
-    const next = changePlayerQuerySeason(stateRef.current, season); stateRef.current = next; set(() => next);
+    const current = stateRef.current; if (current.season === season) return;
+    const sessionId = current.search.data?.sessionId;
+    const next = sessionId ? changePlayerQuerySeason(current, season) : { ...current, season };
+    stateRef.current = next; set(() => next);
+    if (!sessionId) return;
     void loadRanks(sessionId, season, next.generation);
     void loadMatches(sessionId, season, next.mode, next.listGeneration);
     void loadHeroes(sessionId, season, next.mode, next.heroGeneration);

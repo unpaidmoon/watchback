@@ -1,12 +1,14 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct OwDatabase {
     path: PathBuf,
     backups: Option<PathBuf>,
+    initialized: Option<Arc<Mutex<bool>>>,
 }
 
 impl OwDatabase {
@@ -14,6 +16,7 @@ impl OwDatabase {
         Self {
             path: path.as_ref().to_path_buf(),
             backups: None,
+            initialized: None,
         }
     }
 
@@ -21,6 +24,7 @@ impl OwDatabase {
         Self {
             path: paths.database(),
             backups: Some(paths.backups()),
+            initialized: Some(Arc::new(Mutex::new(false))),
         }
     }
 
@@ -43,6 +47,14 @@ impl OwDatabase {
     }
 
     pub fn initialize(&self) -> Result<()> {
+        let mut initialized = self
+            .initialized
+            .as_ref()
+            .map(|state| state.lock().map_err(|_| anyhow!("database initialization lock poisoned")))
+            .transpose()?;
+        if initialized.as_deref() == Some(&true) {
+            return Ok(());
+        }
         let database_preexisted = self.path.is_file()
             && std::fs::metadata(&self.path)
                 .map(|metadata| metadata.len() > 0)
@@ -51,6 +63,9 @@ impl OwDatabase {
         let schema_version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if schema_version == crate::database::migrations::CURRENT_SCHEMA_VERSION {
+            if let Some(state) = initialized.as_deref_mut() {
+                *state = true;
+            }
             return Ok(());
         }
         if database_preexisted {
@@ -71,6 +86,9 @@ impl OwDatabase {
             }
         }
         initialize_connection(&conn)?;
+        if let Some(state) = initialized.as_deref_mut() {
+            *state = true;
+        }
         Ok(())
     }
 }

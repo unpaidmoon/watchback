@@ -12,7 +12,7 @@ import {
   paramsFromFilters,
   validateFilters,
 } from "../features/matches/matchFilters";
-import { getMatchDetails, getOverview, listMatchFilters, listMatchTimeline, refreshMatchEvaluations } from "../shared/api";
+import { getMatchDetails, getOverview, listMatchFilters, listMatchTimelinePage, refreshMatchEvaluations } from "../shared/api";
 import {
   canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
@@ -39,7 +39,9 @@ import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
-import type { FilterOptions, ImportSummary, MatchDetailView, MatchFilters, MatchSummary, Overview, } from "../shared/types";
+import type { FilterOptions, ImportSummary, MatchCursor, MatchDetailView, MatchFilters, MatchPage, MatchSummary, Overview, } from "../shared/types";
+
+const MATCH_PAGE_SIZE = 50;
 
 const emptyOptions: FilterOptions = {
   seasons: [],
@@ -78,6 +80,13 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
   const [options, setOptions] = useState<FilterOptions>(canHydrateCache ? cachedPage?.options ?? emptyOptions : emptyOptions);
   const [filters, setFiltersState] = useState<MatchFilters>(initialFilters);
   const [matches, setMatches] = useState<MatchSummary[]>(canHydrateCache ? cachedPage?.matches ?? [] : []);
+  const matchesRef = useRef(matches);
+  const [nextCursor, setNextCursor] = useState<MatchCursor | null>(canHydrateCache ? cachedPage?.nextCursor ?? null : null);
+  const nextCursorRef = useRef(nextCursor);
+  const [totalMatches, setTotalMatches] = useState(canHydrateCache ? cachedPage?.totalMatches ?? matches.length : 0);
+  const loadingMoreRef = useRef(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() =>
     chooseInitialMatchId(searchParams.get("matchId"), cachedPage?.selectedMatchId, canHydrateCache),
   );
@@ -111,7 +120,9 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       }
       if (selectedFavoriteMatchId === null) return;
       setMatches((current) => {
-        return updateMatchFavoriteState(current, selectedFavoriteMatchId, favorite !== null);
+        const next = updateMatchFavoriteState(current, selectedFavoriteMatchId, favorite !== null);
+        matchesRef.current = next;
+        return next;
       });
     },
     [],
@@ -192,7 +203,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
   }, [searchParamsKey]);
 
   useEffect(() => {
-    rememberScroll();
+    rememberScrollWithAnchor();
     const nextSearchParams = paramsFromFilters(filters, selectedMatchId);
     const nextSearchParamsKey = nextSearchParams.toString();
     if (nextSearchParamsKey === searchParamsKey) return;
@@ -219,6 +230,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
 
   useEffect(() => {
     const isCurrentFilterLoaded = loadedFilterKeyRef.current === matchFiltersKey(filters);
+    if (selectedMatchId && nextCursorRef.current && !matches.some((match) => match.matchId === selectedMatchId)) return;
     const nextSelectedMatchId = chooseMatchIdForLoadedMatches(
       selectedMatchId,
       matches,
@@ -267,21 +279,31 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       options,
       filters,
       matches,
+      nextCursor,
+      totalMatches,
       selectedMatchId,
       loadedFilterKey: loadedFilterKeyRef.current,
       hasLoaded: pageDataReadyRef.current,
     });
-  }, [overview, summary, options, filters, matches, selectedMatchId]);
+  }, [overview, summary, options, filters, matches, nextCursor, totalMatches, selectedMatchId]);
 
   useEffect(() => {
-    window.addEventListener("scroll", rememberScroll, { passive: true });
-    window.addEventListener("pagehide", rememberScroll);
-    document.addEventListener("visibilitychange", rememberScroll);
-    return () => {
+    const onScroll = () => {
       rememberScroll();
-      window.removeEventListener("scroll", rememberScroll);
-      window.removeEventListener("pagehide", rememberScroll);
-      document.removeEventListener("visibilitychange", rememberScroll);
+      maybeLoadMore();
+    };
+    const onPageHide = () => rememberScrollWithAnchor();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") rememberScrollWithAnchor();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      rememberScrollWithAnchor();
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
@@ -307,7 +329,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     setError(null);
     try {
       const cache = await preloadMatchesPageCache(
-        { getOverview, listMatchFilters, listMatchTimeline },
+        { getOverview, listMatchFilters, listMatchTimeline: (filters) => listMatchTimelinePage(filters, null, MATCH_PAGE_SIZE) },
         nextFilters,
         { cacheResult: false },
       );
@@ -328,7 +350,11 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
         hydrationFilterKey,
         matchFiltersKey(currentFiltersRef.current),
       )) {
-        commitLoadedMatches(nextFilters, cache.matches, pageData);
+        commitLoadedMatches(nextFilters, {
+          matches: cache.matches,
+          nextCursor: cache.nextCursor,
+          total: cache.totalMatches,
+        }, pageData);
       }
       void refreshMatchEvaluations()
         .then(() => {
@@ -354,14 +380,14 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     setBusy(true);
     setError(null);
     try {
-      const nextMatches = await listMatchTimeline(nextFilters);
+      const page = await listMatchTimelinePage(nextFilters, null, MATCH_PAGE_SIZE);
       if (!canCommitMatchTimelineRequest(
         timelineRequestId,
         timelineRequestIdRef.current,
         timelineFilterKey,
         matchFiltersKey(currentFiltersRef.current),
       )) return;
-      commitLoadedMatches(nextFilters, nextMatches);
+      commitLoadedMatches(nextFilters, page);
     } catch (err) {
       if (canCommitMatchTimelineRequest(
         timelineRequestId,
@@ -383,6 +409,9 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
   function commitFilters(nextFilters: MatchFilters) {
     currentFiltersRef.current = nextFilters;
     if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
+      setSelectedMatchIdSafely(null);
+      nextCursorRef.current = null;
+      setNextCursor(null);
       setBusy(true);
       setError(null);
     }
@@ -404,19 +433,29 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
 
   function commitLoadedMatches(
     nextFilters: MatchFilters,
-    nextMatches: MatchSummary[],
+    page: MatchPage,
     pageData?: Pick<MatchesPageCache, "overview" | "summary" | "options">,
   ) {
+    const nextMatches = page.matches;
     const loadedFilterKey = matchFiltersKey(nextFilters);
     const cachePageData = pageData ?? (pageDataReadyRef.current ? pageDataRef.current : {});
-    const nextSelectedMatchId = chooseMatchIdForLoadedMatches(selectedMatchIdRef.current, nextMatches, true);
+    const selectedMatchId = selectedMatchIdRef.current;
+    const nextSelectedMatchId = selectedMatchId && page.nextCursor && !nextMatches.some((match) => match.matchId === selectedMatchId)
+      ? selectedMatchId
+      : chooseMatchIdForLoadedMatches(selectedMatchId, nextMatches, true);
     loadedFilterKeyRef.current = loadedFilterKey;
+    matchesRef.current = nextMatches;
+    nextCursorRef.current = page.nextCursor;
     setMatches(nextMatches);
+    setNextCursor(page.nextCursor);
+    setTotalMatches(page.total ?? nextMatches.length);
     setSelectedMatchIdSafely(nextSelectedMatchId);
     updateMatchesPageCache({
       ...cachePageData,
       filters: nextFilters,
       matches: nextMatches,
+      nextCursor: page.nextCursor,
+      totalMatches: page.total ?? nextMatches.length,
       selectedMatchId: nextSelectedMatchId,
       loadedFilterKey,
       hasLoaded: pageDataReadyRef.current,
@@ -426,7 +465,48 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
   }
 
   function rememberScroll() {
+    updateMatchesPageCache({ scrollTop: readMatchListScrollTop() });
+  }
+
+  function rememberScrollWithAnchor() {
     updateMatchesPageCache({ scrollTop: readMatchListScrollTop(), scrollAnchor: readMatchScrollAnchor() });
+  }
+
+  function maybeLoadMore() {
+    const container = timelineRef.current;
+    if (!container || !nextCursorRef.current || loadingMoreRef.current) return;
+    const scrollElement = isElementScrollable(container) ? container : document.scrollingElement;
+    if (scrollElement && scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight < 600) {
+      void loadMoreMatches();
+    }
+  }
+
+  async function loadMoreMatches() {
+    const cursor = nextCursorRef.current;
+    if (!cursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    const requestId = timelineRequestIdRef.current;
+    const filterKey = matchFiltersKey(currentFiltersRef.current);
+    try {
+      const page = await listMatchTimelinePage(currentFiltersRef.current, cursor, MATCH_PAGE_SIZE);
+      if (!canCommitMatchTimelineRequest(requestId, timelineRequestIdRef.current, filterKey, matchFiltersKey(currentFiltersRef.current))) return;
+      const seen = new Set(matchesRef.current.map((match) => match.matchId));
+      const nextMatches = [...matchesRef.current, ...page.matches.filter((match) => !seen.has(match.matchId))];
+      matchesRef.current = nextMatches;
+      nextCursorRef.current = page.nextCursor;
+      setMatches(nextMatches);
+      setNextCursor(page.nextCursor);
+      updateMatchesPageCache({ matches: nextMatches, nextCursor: page.nextCursor });
+    } catch (err) {
+      if (canCommitMatchTimelineRequest(requestId, timelineRequestIdRef.current, filterKey, matchFiltersKey(currentFiltersRef.current))) {
+        setLoadMoreError(productErrorMessage(err));
+      }
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
   }
 
   function readMatchListScrollTop() {
@@ -490,7 +570,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     ) {
       return;
     }
-    rememberScroll();
+    rememberScrollWithAnchor();
     setSelectedMatchIdSafely(matchId);
     setMobileDetailOpen(true);
   }
@@ -499,7 +579,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     <div className="matchesPage">
       <PageHeader
         title="对局记录"
-        description={`${matches.length} 场本地对局`}
+        description={`${totalMatches} 场本地对局`}
         actions={(
           <PageSeasonSelect
             value={filters.season}
@@ -520,7 +600,7 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       </div>
 
       <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${mobileDetailOpen ? "detailOpen" : ""}`}>
-        <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={rememberScroll}>
+        <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={() => { rememberScroll(); maybeLoadMore(); }}>
           <div>
             {error ? (
               <PageErrorState message={error} actionLabel="重新加载" onRetry={retryMatches} />
@@ -540,6 +620,8 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
                 onSelect={selectMatch}
               />
             )}
+            {nextCursor ? <button className="secondaryButton" type="button" disabled={loadingMore} onClick={() => void loadMoreMatches()}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
+            {loadMoreError ? <small role="status">{loadMoreError}</small> : null}
           </div>
         </div>
         <MatchDetailPane

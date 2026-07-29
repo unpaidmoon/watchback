@@ -1,4 +1,4 @@
-import type { FilterOptions, ImportSummary, MatchFilters, MatchSummary, Overview } from "./types";
+import type { FilterOptions, ImportSummary, MatchCursor, MatchFilters, MatchPage, MatchSummary, Overview } from "./types";
 
 export type MatchesPageCache = {
   overview: Overview | null;
@@ -6,6 +6,8 @@ export type MatchesPageCache = {
   options: FilterOptions;
   filters: MatchFilters;
   matches: MatchSummary[];
+  nextCursor: MatchCursor | null;
+  totalMatches: number;
   selectedMatchId: string | null;
   loadedFilterKey: string;
   scrollTop: number;
@@ -74,6 +76,8 @@ function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
     options: { seasons: [], heroes: [], maps: [], results: [], modes: [] },
     filters: {},
     matches: [],
+    nextCursor: null,
+    totalMatches: 0,
     selectedMatchId: null,
     loadedFilterKey: "",
     scrollTop: 0,
@@ -251,7 +255,7 @@ export function guardMatchesPageNavigation(
 export type MatchesPagePreloadLoaders = {
   getOverview: () => Promise<Overview>;
   listMatchFilters: () => Promise<FilterOptions>;
-  listMatchTimeline: (filters: MatchFilters) => Promise<MatchSummary[]>;
+  listMatchTimeline: (filters: MatchFilters) => Promise<MatchSummary[] | MatchPage>;
 };
 
 export function preloadMatchesPageCache(
@@ -272,13 +276,17 @@ export function preloadMatchesPageCache(
   const cacheWriteId = options.cacheResult === false ? null : ++latestCacheWriteId;
   let preloadPromise!: Promise<MatchesPageCache>;
   preloadPromise = Promise.all([loaders.getOverview(), loaders.listMatchFilters(), loaders.listMatchTimeline(filters)])
-    .then(([overview, filterOptions, matches]) => {
+    .then(([overview, filterOptions, result]) => {
+      const page = Array.isArray(result) ? null : result;
+      const matches = page?.matches ?? result as MatchSummary[];
       const snapshot = createMatchesPageCache({
         overview,
         summary: overview.importSummary,
         options: filterOptions,
         filters,
         matches,
+        nextCursor: page?.nextCursor ?? null,
+        totalMatches: page?.total ?? matches.length,
         loadedFilterKey: filterKey,
         hasLoaded: true,
       });

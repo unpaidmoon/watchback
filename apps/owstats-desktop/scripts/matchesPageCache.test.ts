@@ -450,6 +450,19 @@ assert.equal(preloaded.hasLoaded, true, "startup preload marks cache as loaded")
 assert.equal(preloaded.matches.length, 1, "startup preload stores match list");
 assert.equal(preloaded.loadedFilterKey, matchFiltersKey({}), "startup preload records loaded filter key");
 
+clearMatchesPageCache();
+const pagedPreload = await preloadMatchesPageCache({
+  getOverview: async () => overview,
+  listMatchFilters: async () => options,
+  listMatchTimeline: async () => ({
+    matches,
+    nextCursor: { beginTs: matches[0].beginTs, matchId: matches[0].matchId },
+    total: 3,
+  }),
+});
+assert.equal(pagedPreload.totalMatches, 3, "paged preload preserves the filtered total");
+assert.equal(pagedPreload.nextCursor?.matchId, matches[0].matchId, "paged preload preserves its continuation cursor");
+
 await preloadMatchesPageCache({
   getOverview: async () => overview,
   listMatchFilters: async () => options,

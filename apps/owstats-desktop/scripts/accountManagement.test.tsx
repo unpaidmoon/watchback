@@ -133,7 +133,6 @@ const html = renderToStaticMarkup(
 );
 
 assert.match(html, /添加或更新网易大神账号/);
-assert.match(html, /使用全新浏览器会话登录，不会继承上一次账号状态/);
 assert.match(html, /Tester#5479/);
 assert.match(html, /Second#2222/);
 assert.doesNotMatch(html, /重新登录|登录中/);

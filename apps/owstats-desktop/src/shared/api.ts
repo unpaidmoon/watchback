@@ -9,9 +9,11 @@ import type {
   FriendAnalyticsFilters,
   FriendDetail,
   MatchDetailView,
+  MatchCursor,
   MatchFavoriteRequest,
   MatchFavoriteView,
   MatchFilters,
+  MatchPage,
   MatchSummary,
   OnboardingStatus,
   Overview,
@@ -73,6 +75,10 @@ export function listMatchFilters() {
 
 export function listMatchTimeline(filters: MatchFilters) {
   return invoke<MatchSummary[]>("list_match_timeline", { filters });
+}
+
+export function listMatchTimelinePage(filters: MatchFilters, cursor: MatchCursor | null = null, limit = 50) {
+  return invoke<MatchPage>("list_match_timeline_page", { filters, cursor, limit });
 }
 
 export function searchMatchPlayerOptions(query: string) {

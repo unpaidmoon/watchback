@@ -1,5 +1,26 @@
 use super::*;
 
+pub(super) fn count_matches_impl(db: &OwDatabase, filters: &MatchFilters) -> Result<usize> {
+    db.initialize()?;
+    ensure_arena_player_index(db, filters.season)?;
+    let conn = db.connect()?;
+    let mut sql = String::from(
+        "SELECT COUNT(*) FROM matches m \
+         LEFT JOIN match_evaluations e ON e.match_id=m.match_id \
+         LEFT JOIN match_favorites f ON f.match_id=m.match_id \
+         WHERE (m.bucket='preset' OR m.match_kind='fight' OR m.game_mode IN ('LeisureFight','SportFight'))",
+    );
+    let mut owned: Vec<Box<dyn ToSql>> = Vec::new();
+    append_filters(&mut sql, &mut owned, filters);
+    let params = owned
+        .iter()
+        .map(|item| item.as_ref() as &dyn ToSql)
+        .collect::<Vec<_>>();
+    conn.query_row(&sql, params.as_slice(), |row| row.get::<_, i64>(0))
+        .map(|count| count as usize)
+        .map_err(Into::into)
+}
+
 pub(super) fn list_matches_impl(
     db: &OwDatabase,
     filters: MatchFilters,

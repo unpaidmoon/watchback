@@ -105,21 +105,13 @@
   gap: 12px;
 }
 
-.deepSeekSettingsHeading h3 {
-  margin: 4px 0 0;
-  font-size: 18px;
-  font-weight: 400;
-}
-
 .deepSeekSettingsStatus,
-.deepSeekSettingsDisclosure,
 .deepSeekSettingsFeedback {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
 }
 
-.deepSeekSettingsDisclosure,
 .deepSeekSettingsFeedback {
   margin: 0;
 }
@@ -663,6 +655,26 @@
   margin-top: var(--space-6);
 }
 
+.commandCenterUtilityGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+  align-items: stretch;
+}
+
+.phase6CommandCenter .commandCenterUtilityGrid > .accountManagerPanel,
+.phase6CommandCenter .commandCenterUtilityGrid > .commandCenterTools {
+  margin-top: 0;
+}
+
+.commandCenterUtilityGrid .commandCenterTools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  align-items: start;
+}
+
 .commandCenterTools > div:first-child {
   flex: 0 0 auto;
 }
@@ -923,6 +935,10 @@
     grid-template-columns: 1fr;
   }
 
+  .commandCenterUtilityGrid {
+    grid-template-columns: 1fr;
+  }
+
   .commandCenterTools {
     align-items: flex-start;
     flex-direction: column;
@@ -1025,7 +1041,6 @@
   font-weight: 400;
 }
 
-.phase6CommandCenter .accountManagerHeading p,
 .phase6CommandCenter .commandCenterAccountEmpty p {
   margin: 0;
   color: var(--text-secondary);

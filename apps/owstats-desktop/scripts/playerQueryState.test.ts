@@ -13,6 +13,7 @@ assert.equal(reorderedInitial.mode, "SportFight");
 assert.equal(reorderedInitial.listScopeKey, "arena:SportFight");
 assert.equal(alignIdlePlayerQueryMode({ ...reorderedInitial, search: { status: "success", data: { sessionId: "session", battleTag: "Player#123" }, error: null } }, "LeisurePreset").mode, "SportFight", "loaded settings must not replace an active query mode");
 const first = beginPlayerSearch(initial, "Player#123", "LeisurePreset"); assert.equal(first.season, 23);
+assert.equal(beginPlayerSearch({ ...initial, season: 20 }, "Player#123", "LeisurePreset").season, 20, "the first query uses the season selected while idle");
 const changed = changePlayerQueryMode(changePlayerQuerySeason({ ...first, battleTag: "Player#123" }, 20), "SportOpen");
 assert.equal(changed.matchesEndReached, false, "a new season/mode must discard the previous raw-page end marker");
 const refreshed = beginPlayerSearch(changed, "player#123", "LeisurePreset"); assert.equal(refreshed.season, 20); assert.equal(refreshed.mode, "SportOpen");

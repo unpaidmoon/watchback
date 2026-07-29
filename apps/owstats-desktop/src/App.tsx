@@ -1,15 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { FriendDetailPage } from "./pages/FriendDetailPage";
-import { MatchesPage } from "./pages/MatchesPage";
-import { OnboardingPage } from "./pages/OnboardingPage";
-import { PersonalReviewPage } from "./pages/PersonalReviewPage";
-import { AchievementsPage } from "./pages/AchievementsPage";
-import { RankingPage } from "./pages/RankingPage";
-import { PlayerQueryPage, type PlayerQueryHandoff } from "./pages/PlayerQueryPage";
-import { PlayerQueryMatchesPage } from "./pages/PlayerQueryMatchesPage";
+import type { PlayerQueryHandoff } from "./pages/PlayerQueryPage";
 import { endPlayerQuery } from "./features/player-query/playerQueryApi";
 import { getUserSettings, listAccounts, saveUserSettings } from "./shared/api";
 import type { UserSettings } from "./shared/types";
@@ -19,6 +12,14 @@ import { phase6NavItems } from "./shared/phase6Shell";
 import { buildReviewHref, legacyReviewRedirectHref, parsePositiveSeasonParam } from "./features/review/reviewNavigation";
 
 const watchbackMarkUrl = new URL("../assets/brand/watchback/watchback-mark.svg", import.meta.url).href;
+const FriendDetailPage = lazy(() => import("./pages/FriendDetailPage").then((module) => ({ default: module.FriendDetailPage })));
+const MatchesPage = lazy(() => import("./pages/MatchesPage").then((module) => ({ default: module.MatchesPage })));
+const OnboardingPage = lazy(() => import("./pages/OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
+const PersonalReviewPage = lazy(() => import("./pages/PersonalReviewPage").then((module) => ({ default: module.PersonalReviewPage })));
+const AchievementsPage = lazy(() => import("./pages/AchievementsPage").then((module) => ({ default: module.AchievementsPage })));
+const RankingPage = lazy(() => import("./pages/RankingPage").then((module) => ({ default: module.RankingPage })));
+const PlayerQueryPage = lazy(() => import("./pages/PlayerQueryPage").then((module) => ({ default: module.PlayerQueryPage })));
+const PlayerQueryMatchesPage = lazy(() => import("./pages/PlayerQueryMatchesPage").then((module) => ({ default: module.PlayerQueryMatchesPage })));
 
 function PersonalReviewRoute() {
   const [params] = useSearchParams();
@@ -192,17 +193,19 @@ export function App() {
         </header>
 
         <div className="appCanvas phase6ProductSurface">
-          <Routes>
-            <Route path="/" element={<StartupRoute />} />
-            <Route path="/onboarding" element={<OnboardingPage />} />
-            <Route path="/matches" element={<MatchesPage onQueryPlayer={queryPlayer} />} />
-            <Route path="/player-query/*" element={<PlayerQueryFeatureRoutes queryIntent={queryIntent} onQueryPlayer={queryPlayer} />} />
-            <Route path="/review" element={<PersonalReviewRoute />} />
-            <Route path="/achievements" element={<AchievementsPage />} />
-            <Route path="/ranking" element={<RankingPage />} />
-            <Route path="/analytics/friends" element={<FriendAnalyticsRoute />} />
-            <Route path="/analytics/friends/detail" element={<FriendDetailPage />} />
-          </Routes>
+          <Suspense fallback={<div role="status" aria-live="polite">正在加载...</div>}>
+            <Routes>
+              <Route path="/" element={<StartupRoute />} />
+              <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="/matches" element={<MatchesPage onQueryPlayer={queryPlayer} />} />
+              <Route path="/player-query/*" element={<PlayerQueryFeatureRoutes queryIntent={queryIntent} onQueryPlayer={queryPlayer} />} />
+              <Route path="/review" element={<PersonalReviewRoute />} />
+              <Route path="/achievements" element={<AchievementsPage />} />
+              <Route path="/ranking" element={<RankingPage />} />
+              <Route path="/analytics/friends" element={<FriendAnalyticsRoute />} />
+              <Route path="/analytics/friends/detail" element={<FriendDetailPage />} />
+            </Routes>
+          </Suspense>
         </div>
       </main>
     </>
