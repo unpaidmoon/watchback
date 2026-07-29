@@ -20,10 +20,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Install ripgrep
+        shell: pwsh
+        run: |
+          choco install ripgrep --yes --no-progress
+          if (-not (Get-Command rg -ErrorAction SilentlyContinue)) {
+            throw "ripgrep installation did not provide rg"
+          }
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
