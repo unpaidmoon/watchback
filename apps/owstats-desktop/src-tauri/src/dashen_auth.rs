@@ -283,8 +283,34 @@ pub fn build_collect_candidates_script() -> String {
   for (const storage of [localStorage, sessionStorage]) {
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index);
+      const value = storage.getItem(key);
       add(storageGroup, key);
-      add(storageGroup, storage.getItem(key));
+      add(storageGroup, value);
+      try {
+        const parsed = JSON.parse(value ?? '');
+        const roleId = parsed && (parsed.role_id ?? parsed.roleId);
+        if (String(roleId ?? '').match(/^[0-9]{5,}$/)) {
+          const visit = (item, depth = 0) => {
+            if (depth > 4 || item === undefined || item === null) return;
+            if (typeof item === 'string') {
+              if (/^[^\s#]+#[0-9]+$/.test(item)) {
+                add(battleTagGroup, item, MAX_BATTLETAG_CANDIDATES);
+              }
+              return;
+            }
+            if (Array.isArray(item)) {
+              for (const child of item) visit(child, depth + 1);
+              return;
+            }
+            if (typeof item === 'object') {
+              for (const child of Object.values(item)) visit(child, depth + 1);
+            }
+          };
+          visit(parsed);
+        }
+      } catch (_) {
+        // Non-JSON storage entries remain useful role evidence above.
+      }
     }
   }
   for (const entry of performance.getEntriesByType('resource')) {
@@ -316,6 +342,7 @@ pub fn build_get_report_token_script(role_id: &str, server: i64) -> String {
     format!(
         r#"
 (async () => {{
+  try {{
   const url = {url};
   const payload = {payload};
   function getCookie(name) {{
@@ -328,19 +355,27 @@ pub fn build_get_report_token_script(role_id: &str, server: i64) -> String {
         .join('=') || ''
     );
   }}
-  if (!window.sig || !window.sig.default) {{
-    return {{ ok: false, error: 'window.sig.default is not available on this page yet' }};
-  }}
-  const body = JSON.stringify(payload);
-  const sigMod = await window.sig.default();
-  const signRaw = sigMod.gen_sign(body);
-  const signObj = JSON.parse(signRaw);
   const xsrf = getCookie('GL-XSRF-TOKEN');
   const uid = getCookie('GOD_UUID');
   const deviceId =
     localStorage.getItem('ns-client-id') ||
     localStorage.getItem('ds-website-uuid') ||
     '';
+  const body = JSON.stringify(payload);
+  let signObj;
+  if (window.sig?.default && localStorage.getItem('cst') && localStorage.getItem('time_diff')) {{
+    const sigMod = await window.sig.default();
+    signObj = JSON.parse(sigMod.gen_sign(body));
+  }} else if (crypto?.subtle) {{
+    const bytes = new TextEncoder().encode(body + xsrf);
+    const digest = await crypto.subtle.digest('SHA-1', bytes);
+    const sign = [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+    signObj = {{ sign, timestamp: Date.now() }};
+  }} else {{
+    return {{ ok: false, error: 'window.sig.default is not available on this page yet' }};
+  }}
   const resp = await fetch(url, {{
     method: 'POST',
     credentials: 'include',
@@ -362,14 +397,42 @@ pub fn build_get_report_token_script(role_id: &str, server: i64) -> String {
   }} catch (error) {{
     return {{ ok: false, error: 'getReportToken returned non-JSON response', status: resp.status, text }};
   }}
-  const result = json && json.result ? json.result : {{}};
-  return {{
-    ok: Boolean(resp.ok && result.token),
-    status: resp.status,
-    role_id: String(result.roleId || payload.roleId || ''),
-    token: String(result.token || ''),
-    error: result.token ? '' : String(json.msg || json.message || 'token missing'),
+  const result = json && (json.result ?? json.data) ? (json.result ?? json.data) : {{}};
+  const tokenCandidates = new Set();
+  const collectTokens = (item, depth = 0) => {{
+    if (depth > 4 || !item || typeof item !== 'object') return;
+    for (const [key, value] of Object.entries(item)) {{
+      if (
+        (key === 'token' || key === 'reportToken') &&
+        typeof value === 'string' &&
+        value.trim()
+      ) {{
+        tokenCandidates.add(value.trim());
+      }} else if (value && typeof value === 'object') {{
+        collectTokens(value, depth + 1);
+      }}
+    }}
   }};
+  collectTokens(json);
+  if (typeof result === 'string' && result.trim()) tokenCandidates.add(result.trim());
+  const token = tokenCandidates.size === 1 ? [...tokenCandidates][0] : '';
+  const resultRoleId = typeof result === 'object' && result
+    ? (result.roleId || result.role_id || '')
+    : '';
+  return {{
+    ok: Boolean(resp.ok && token),
+    status: resp.status,
+    role_id: String(resultRoleId || payload.roleId || ''),
+    token,
+    error: token
+      ? ''
+      : String(json.errmsg || json.msg || json.message || `token missing (http=${{resp.status}}, top=${{Object.keys(json || {{}}).slice(0, 12).join('|')}}, payloadType=${{Array.isArray(result) ? 'array' : typeof result}}, payloadKeys=${{result && typeof result === 'object' && !Array.isArray(result) ? Object.keys(result).slice(0, 12).join('|') : ''}})`),
+  }};
+  }} catch (error) {{
+    const name = typeof error?.name === 'string' ? error.name : 'Error';
+    const message = typeof error?.message === 'string' ? error.message : 'unknown JavaScript error';
+    return {{ ok: false, error: `token flow exception: ${{name}}: ${{message}}` }};
+  }}
 }})()
 "#,
         url = serde_json::to_string(GET_REPORT_TOKEN_URL).unwrap(),

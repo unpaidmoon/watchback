@@ -201,7 +201,7 @@ fn classify(error: anyhow::Error) -> QueryError {
         || safe.contains("unauthorized")
         || safe.contains("forbidden")
     {
-        QueryError::SessionInvalid("登录凭证已失效，请重新登录".into())
+        QueryError::SessionInvalid("登录凭证已失效，请在指挥台添加账号以更新登录".into())
     } else {
         QueryError::Upstream("查询暂时失败，请重试".into())
     }

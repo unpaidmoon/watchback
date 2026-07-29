@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 static TARGET_TEMP_NONCE: AtomicU64 = AtomicU64::new(0);
 
 pub const SYNC_TARGET_CONFIRMATION_ERROR: &str =
-    "当前登录账号与同步目标尚未确认，请重新登录或确认切换";
+    "当前登录账号与同步目标尚未确认，请通过添加账号更新登录或确认切换";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetAction {
@@ -105,7 +105,7 @@ impl LoginTargetCoordinator {
                     "unidentified",
                     None,
                     None,
-                    "尚未识别当前登录账号，请重新登录后自动识别。",
+                    "尚未识别当前登录账号，请通过添加账号更新登录后自动识别。",
                     false,
                     false,
                     false,
@@ -127,7 +127,7 @@ impl LoginTargetCoordinator {
                 "unidentified",
                 None,
                 None,
-                "登录成功，但未能自动识别战网昵称。请进入显示“战网昵称”的页面后重新识别。",
+                "登录成功，但未能自动识别战网昵称。请通过添加账号重新完成识别。",
                 false,
                 false,
                 false,
@@ -263,14 +263,17 @@ impl LoginTargetCoordinator {
                 {
                     return session.status.clone();
                 }
-                return verification_status(None, "当前登录凭据与内存目标状态不匹配，请重新识别。");
+                return verification_status(
+                    None,
+                    "当前登录凭据与内存目标状态不匹配，请通过添加账号更新登录。",
+                );
             }
         }
 
         let Some(credentials) = credentials else {
             return verification_status(
                 persisted_display_bnet(target_path).as_deref(),
-                "请先登录并重新识别当前账号。",
+                "请先通过添加账号更新并识别当前账号。",
             );
         };
         let Ok(target) = read_player_target_for_path(target_path) else {
@@ -278,7 +281,7 @@ impl LoginTargetCoordinator {
                 account_id,
                 credentials.role_id,
                 None,
-                "当前目标尚未通过本次登录验证，请重新识别。",
+                "当前目标尚未通过本次登录验证，请通过添加账号更新登录。",
             );
         };
         let current_bnet = target_display_bnet(&target);
@@ -289,7 +292,7 @@ impl LoginTargetCoordinator {
                 account_id,
                 credentials.role_id,
                 Some(&current_bnet),
-                "当前目标与登录账号的关联尚未验证，请重新识别。",
+                "当前目标与登录账号的关联尚未验证，请通过添加账号更新登录。",
             )
         }
     }
@@ -627,7 +630,7 @@ pub async fn confirm_switch(
         }
         Err(_) => verification_status(
             persisted_display_bnet(target_path).as_deref(),
-            "本轮没有可用的待确认账号，请重新识别。",
+            "本轮没有可用的待确认账号，请通过添加账号更新登录。",
         ),
     }
 }
@@ -645,7 +648,7 @@ pub async fn retry_binding(
         }
         Err(_) => verification_status(
             persisted_display_bnet(target_path).as_deref(),
-            "本轮没有可重试的已识别账号，请重新识别。",
+            "本轮没有可重试的已识别账号，请通过添加账号更新登录。",
         ),
     }
 }
@@ -779,7 +782,7 @@ fn verification_status(current_bnet: Option<&str>, message: &str) -> LoginTarget
 fn stale_operation_status() -> LoginTargetStatus {
     verification_status(
         None,
-        "登录账号已发生变化，本次旧操作未提交。请使用当前账号重新识别。",
+        "登录账号已发生变化，本次旧操作未提交。请通过添加账号更新当前登录。",
     )
 }
 

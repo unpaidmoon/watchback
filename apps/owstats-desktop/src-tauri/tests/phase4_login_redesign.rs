@@ -86,8 +86,7 @@ fn product_login_handlers_only_expose_staged_account_flows() {
     assert!(!source.contains("pub fn logout("));
     assert!(source.contains("pub async fn add_account("));
     assert!(source.contains("capture_and_publish_add"));
-    assert!(source.contains("pub async fn relogin_account("));
-    assert!(source.contains("capture_and_publish_relogin"));
+    assert!(!source.contains("pub async fn relogin_account("));
 }
 
 #[test]
@@ -110,21 +109,10 @@ fn published_login_commands_reconcile_the_detected_sync_target() {
         .nth(1)
         .and_then(|body| body.split("#[tauri::command]").next())
         .expect("add account command should exist");
-    let relogin_command = source
-        .split("pub async fn relogin_account(")
-        .nth(1)
-        .and_then(|body| body.split("#[tauri::command]").next())
-        .expect("relogin account command should exist");
-
-    for (name, command) in [
-        ("add_account", add_command),
-        ("relogin_account", relogin_command),
-    ] {
-        assert!(
-            command.contains("reconcile_published_login_target"),
-            "{name} must reconcile the captured BattleTag into the account-scoped sync target"
-        );
-    }
+    assert!(
+        add_command.contains("reconcile_published_login_target"),
+        "add_account must reconcile the captured BattleTag into the account-scoped sync target"
+    );
 }
 
 #[test]

@@ -46,7 +46,7 @@ export function credentialLabel(state: string | null | undefined): string {
   }
 
   if (state === "failed" || state === "invalid") {
-    return "需重新登录";
+    return "登录已失效";
   }
 
   if (state === "currentPlayerMissing") {

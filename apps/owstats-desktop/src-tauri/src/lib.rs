@@ -26,6 +26,7 @@ mod match_favorites;
 mod models;
 pub mod player_query;
 pub mod player_target;
+pub mod qr_login;
 mod queries;
 pub mod ranking;
 mod review;
@@ -1046,6 +1047,7 @@ pub fn run() -> anyhow::Result<()> {
         .manage(sync_coordinator)
         .manage(ai_roast::coordinator::AiRoastCoordinator::default())
         .manage(login_target::LoginTargetCoordinator::default())
+        .manage(qr_login::QrLoginCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
             commands::list_match_filters,
@@ -1069,11 +1071,14 @@ pub fn run() -> anyhow::Result<()> {
             commands::save_user_settings,
             commands::check_app_update,
             commands::add_account,
-            commands::relogin_account,
+            commands::add_account_with_qr,
             commands::list_accounts,
             commands::switch_account,
             commands::remove_account,
             commands::cancel_dashen_login,
+            commands::refresh_dashen_login_qr,
+            commands::get_dashen_login_qr_snapshot,
+            commands::cancel_dashen_login_qr,
             commands::get_player_target_status,
             commands::get_login_target_status,
             commands::confirm_login_target_switch,

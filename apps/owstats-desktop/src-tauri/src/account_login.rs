@@ -461,7 +461,7 @@ pub fn publish_add_account(
             result.message = if result.kind == "newAccountAdded" {
                 "账号已添加，旧数据暂待恢复。".to_string()
             } else {
-                "账号登录已更新，旧数据暂待恢复。".to_string()
+                "账号已更新，旧数据暂待恢复。".to_string()
             };
         }
     }
@@ -520,6 +520,7 @@ pub fn publish_relogin_account(
     publish_relogin_account_inner(manager, expected_account_id, capture)
 }
 
+#[cfg(test)]
 pub(crate) async fn capture_and_publish_relogin<F, Fut, R, C>(
     manager: &AccountContextManager,
     expected_account_id: &AccountId,
@@ -678,7 +679,7 @@ fn publish_relogin_account_inner_with_fault(
                 kind: "differentExistingAccount".to_string(),
                 account_id: Some(other_id.as_str().to_string()),
                 battle_tag: Some(entry.battle_tag.clone()),
-                message: "检测到另一个已保存账号，可切换后重新登录。".to_string(),
+                message: "检测到另一个已保存账号，可切换或通过添加账号更新登录。".to_string(),
                 should_offer_switch: true,
             },
             fault,
@@ -842,7 +843,7 @@ fn update_existing(
         kind: "existingAccountUpdated".to_string(),
         account_id: Some(account_id.as_str().to_string()),
         battle_tag: Some(capture.battle_tag.clone()),
-        message: "账号登录已更新。".to_string(),
+        message: "账号已更新。".to_string(),
         should_offer_switch: registry.active_account_id.as_ref() != Some(account_id),
     };
     if pending

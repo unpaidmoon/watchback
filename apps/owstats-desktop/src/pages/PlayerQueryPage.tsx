@@ -58,7 +58,7 @@ export function PlayerQueryPage({ hasActiveAccount = false, syncActive = false, 
         <div className="playerQuerySearchArea"><PlayerQueryForm value={battleTagInput} onValueChange={setBattleTagInput} disabled={!modeOrderSynchronized || Boolean(gateMessage) || authenticationInvalid} searching={query.state.search.status === "loading"} trailingControl={<PageSeasonSelect label="选择赛季" value={query.state.season} seasons={PLAYER_QUERY_SEASONS} disabled={!session || authenticationInvalid} onChange={(season) => { if (season && PLAYER_QUERY_SEASONS.includes(season as PlayerQuerySeason)) query.changeSeason(season as PlayerQuerySeason); }} />} onSubmit={(value) => void query.startQuery(value)} /></div>
       </div>
       {gateMessage ? <div className="playerQueryGate" role="status"><span>{gateMessage}</span>{!hasActiveAccount && onOpenOnboarding ? <button type="button" className="secondaryButton" onClick={onOpenOnboarding}>前往指挥台</button> : null}</div> : null}
-      {authenticationInvalid ? <div className="playerQueryGate" role="alert"><span>登录已失效，请重新登录</span>{onOpenOnboarding ? <button type="button" className="secondaryButton" onClick={onOpenOnboarding}>前往指挥台</button> : null}</div> : null}
+      {authenticationInvalid ? <div className="playerQueryGate" role="alert"><span>登录已失效，请在指挥台添加账号以更新登录</span>{onOpenOnboarding ? <button type="button" className="secondaryButton" onClick={onOpenOnboarding}>前往指挥台</button> : null}</div> : null}
       {query.state.search.status === "error" ? <InlineError message={query.state.search.error} /> : null}
     </GlassPanel></div>
 

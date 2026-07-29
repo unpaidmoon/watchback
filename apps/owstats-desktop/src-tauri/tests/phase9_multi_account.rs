@@ -93,6 +93,7 @@ fn add_account_creates_new_or_updates_existing_role_without_duplicates() {
     )
     .unwrap();
     assert_eq!(updated.kind, "existingAccountUpdated");
+    assert_eq!(updated.message, "账号已更新。");
     assert_eq!(updated.account_id.as_deref(), Some(account_id.as_str()));
     assert_eq!(manager.registry_snapshot().unwrap().accounts.len(), 1);
     assert_eq!(
@@ -527,7 +528,7 @@ fn concurrent_add_same_role_never_creates_duplicate_accounts() {
 #[test]
 fn account_login_commands_acquire_account_operation_before_capture_and_are_registered() {
     let commands = include_str!("../src/commands.rs");
-    for command in ["add_account", "relogin_account"] {
+    for command in ["add_account"] {
         let function = command_source(commands, command);
         let permit = function.find("try_acquire_account_operation()").unwrap();
         let capture = function.find("capture_dashen_login(").unwrap();
@@ -538,7 +539,7 @@ fn account_login_commands_acquire_account_operation_before_capture_and_are_regis
     }
     let lib = include_str!("../src/lib.rs");
     assert!(lib.contains("commands::add_account"));
-    assert!(lib.contains("commands::relogin_account"));
+    assert!(!lib.contains("commands::relogin_account"));
 }
 
 fn login_operation_dir(shared: &SharedAppPaths, operation_id: &str) -> std::path::PathBuf {

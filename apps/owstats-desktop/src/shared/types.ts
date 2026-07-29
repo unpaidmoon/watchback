@@ -198,6 +198,49 @@ export type CredentialLoginProgress = {
   message: string;
 };
 
+export type QrLoginViewState =
+  | "starting"
+  | "loadingQr"
+  | "waitingForScan"
+  | "confirming"
+  | "capturing"
+  | "saving"
+  | "expired"
+  | "failed"
+  | "ready"
+  | "cancelling";
+
+export type QrAccountLoginStartResult = {
+  sessionId: string;
+};
+
+export type QrAccountLoginQrEvent = {
+  sessionId: string;
+  revision: number;
+  mimeType: "image/png";
+  imageBase64: string;
+};
+
+export type QrAccountLoginProgressEvent = {
+  sessionId: string;
+  phase: string;
+  message: string | null;
+};
+
+export type QrAccountLoginSnapshot = {
+  sessionId: string;
+  phase: string;
+  message: string;
+  revision: number;
+  imageBase64: string | null;
+  completion: {
+    sessionId: string;
+    result: AccountLoginResult | null;
+    message?: string | null;
+    cancelled: boolean;
+  } | null;
+};
+
 export type MatchSummary = {
   matchId: string;
   season: number;

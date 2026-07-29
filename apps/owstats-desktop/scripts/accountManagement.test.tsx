@@ -46,6 +46,11 @@ assert.doesNotMatch(tauriLibSource, /commands::logout\b/);
 assert.doesNotMatch(tauriLibSource, /commands::start_dashen_login\b/);
 assert.doesNotMatch(tauriCommandsSource, /pub (?:async )?fn (?:logout|start_dashen_login)\b/);
 assert.doesNotMatch(apiSource, /export function (?:logout|startDashenLogin)\b/);
+assert.doesNotMatch(onboardingSource, /runReloginAccount|reloginAccount|onRelogin/);
+assert.doesNotMatch(isolationSource, /runReloginAccountOperation|kind: "relogin"/);
+assert.doesNotMatch(apiSource, /reloginAccount|"relogin_account"/);
+assert.doesNotMatch(tauriCommandsSource, /pub async fn relogin_account\b/);
+assert.doesNotMatch(tauriLibSource, /commands::relogin_account\b/);
 assert.doesNotMatch(typesSource, /type (?:LogoutResult|CredentialLoginResult)\b/);
 const accountPublicContracts = typesSource.match(
   /export type AccountSummary[\s\S]*?export type RemoveAccountResult[\s\S]*?};/,
@@ -84,15 +89,15 @@ const html = renderToStaticMarkup(
     busyAction: null,
     onAdd: () => undefined,
     onSwitch: () => undefined,
-    onRelogin: () => undefined,
     onRemove: () => undefined,
   }),
 );
 
-assert.match(html, /添加新的网易大神账号/);
+assert.match(html, /添加或更新网易大神账号/);
+assert.match(html, /使用全新浏览器会话登录，不会继承上一次账号状态/);
 assert.match(html, /Tester#5479/);
 assert.match(html, /Second#2222/);
-assert.equal((html.match(/重新登录/g) ?? []).length, 2);
+assert.doesNotMatch(html, /重新登录|登录中/);
 assert.equal((html.match(/退出账号/g) ?? []).length, 2);
 assert.match(html, /disabled=""[^>]*>当前账号</);
 assert.match(html, />切换账号</);
@@ -103,7 +108,7 @@ assert.equal((html.match(/accountManagerAddRow/g) ?? []).length, 1, "添加账�
 const accountActionGroups = [...html.matchAll(/<div class="accountManagerActions" role="group"[^>]*>([\s\S]*?)<\/div>/g)];
 assert.equal(accountActionGroups.length, 2, "每个账号行都提供一个具名操作组");
 for (const group of accountActionGroups) {
-  assert.equal((group[1]?.match(/<button/g) ?? []).length, 3, "每个账号行始终保留三个操作位置");
+  assert.equal((group[1]?.match(/<button/g) ?? []).length, 2, "每个账号行只保留切换和退出操作");
   assert.match(group[0], /aria-label="[^"]+ 的账号操作"/);
 }
 

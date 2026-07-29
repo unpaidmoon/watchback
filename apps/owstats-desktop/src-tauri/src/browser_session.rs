@@ -2,8 +2,10 @@ use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserCandidate {
@@ -100,6 +102,8 @@ pub fn build_browser_command(
         format!("--remote-allow-origins=http://127.0.0.1:{port}"),
         "--no-first-run".to_string(),
         "--no-default-browser-check".to_string(),
+        "--new-window".to_string(),
+        "--disable-background-mode".to_string(),
     ];
     if let Some(user_data_dir) = user_data_dir {
         command.push(format!("--user-data-dir={}", user_data_dir.display()));
@@ -108,23 +112,117 @@ pub fn build_browser_command(
     command
 }
 
-pub fn launch_browser(
+pub struct BrowserLoginSession {
+    child: Option<Child>,
+    profile_dir: PathBuf,
+}
+
+impl BrowserLoginSession {
+    pub fn profile_dir(&self) -> &Path {
+        &self.profile_dir
+    }
+}
+
+impl Drop for BrowserLoginSession {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        for _ in 0..5 {
+            match cleanup_profile_dir(&self.profile_dir) {
+                Ok(()) => break,
+                Err(_) => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+    }
+}
+
+pub fn create_isolated_profile_dir(parent: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(parent)?;
+    for _ in 0..10 {
+        let profile_dir = parent.join(format!(".dashen-login-{}", Uuid::new_v4()));
+        match std::fs::create_dir(&profile_dir) {
+            Ok(()) => return Ok(profile_dir),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(anyhow!("无法创建独立登录会话目录。"))
+}
+
+pub fn cleanup_profile_dir(profile_dir: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(profile_dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn launch_isolated_browser(
     browser: &BrowserCandidate,
     login_url: &str,
     port: u16,
-    profile_dir: &Path,
-) -> Result<()> {
-    std::fs::create_dir_all(profile_dir)?;
+    profile_parent: &Path,
+) -> Result<BrowserLoginSession> {
+    let profile_dir = create_isolated_profile_dir(profile_parent)?;
     let command = build_browser_command(
         browser.path.to_string_lossy(),
         login_url,
         port,
-        Some(profile_dir),
+        Some(&profile_dir),
     );
     let mut process = std::process::Command::new(&command[0]);
     process.args(&command[1..]);
-    process.spawn()?;
-    Ok(())
+    match process.spawn() {
+        Ok(child) => Ok(BrowserLoginSession {
+            child: Some(child),
+            profile_dir,
+        }),
+        Err(error) => {
+            let _ = cleanup_profile_dir(&profile_dir);
+            Err(error.into())
+        }
+    }
+}
+
+/// Starts a fresh, non-visible Chromium session used only for QR login.
+/// Keeping this separate preserves the visible-browser login command unchanged.
+pub fn launch_isolated_hidden_browser(
+    browser: &BrowserCandidate,
+    login_url: &str,
+    port: u16,
+    profile_parent: &Path,
+) -> Result<BrowserLoginSession> {
+    let profile_dir = create_isolated_profile_dir(profile_parent)?;
+    let mut command = build_browser_command(
+        browser.path.to_string_lossy(),
+        login_url,
+        port,
+        Some(&profile_dir),
+    );
+    command.insert(1, "--headless=new".to_string());
+    command.insert(2, "--window-size=1280,900".to_string());
+    command.insert(3, "--hide-scrollbars".to_string());
+    command.retain(|argument| argument != "--new-window");
+    let mut process = std::process::Command::new(&command[0]);
+    process.args(&command[1..]);
+    match process.spawn() {
+        Ok(child) => Ok(BrowserLoginSession {
+            child: Some(child),
+            profile_dir,
+        }),
+        Err(error) => {
+            let _ = cleanup_profile_dir(&profile_dir);
+            Err(error.into())
+        }
+    }
+}
+
+/// Reserves an ephemeral loopback port for a QR browser debugging session.
+pub fn choose_available_qr_debug_port() -> Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    Ok(listener.local_addr()?.port())
 }
 
 pub async fn wait_for_debug_endpoint(port: u16, timeout: Duration) -> Result<()> {
@@ -155,6 +253,14 @@ pub async fn open_or_find_page(login_url: &str, port: u16) -> Result<String> {
     let pages = json_get(&client, &list_url).await?;
     find_login_websocket_url(&pages, login_url)
         .ok_or_else(|| anyhow!("未找到本次登录对应的浏览器页面。"))
+}
+
+/// Finds an already-open page without creating or navigating a target.
+pub async fn find_existing_page(page_url: &str, port: u16) -> Result<Option<String>> {
+    let client = reqwest::Client::new();
+    let list_url = format!("http://127.0.0.1:{port}/json/list");
+    let pages = json_get(&client, &list_url).await?;
+    Ok(find_login_websocket_url(&pages, page_url))
 }
 
 pub async fn open_new_page(page_url: &str, port: u16) -> Result<String> {
@@ -231,17 +337,18 @@ impl CdpPage {
         expression: &str,
         await_promise: bool,
     ) -> Result<serde_json::Value> {
+        self.evaluate_in_context(expression, None, await_promise)
+            .await
+    }
+
+    pub async fn call(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let message_id = self.next_id;
         self.next_id += 1;
-        let request = json!({
-            "id": message_id,
-            "method": "Runtime.evaluate",
-            "params": {
-                "expression": expression,
-                "awaitPromise": await_promise,
-                "returnByValue": true,
-            }
-        });
+        let request = json!({ "id": message_id, "method": method, "params": params });
         self.socket.send(Message::Text(request.to_string())).await?;
         while let Some(message) = self.socket.next().await {
             let message = message?;
@@ -252,51 +359,78 @@ impl CdpPage {
             if payload.get("id").and_then(|item| item.as_i64()) != Some(message_id) {
                 continue;
             }
-            if let Some(exception) = payload.get("exceptionDetails") {
+            if let Some(exception) = payload
+                .get("error")
+                .or_else(|| payload.get("exceptionDetails"))
+            {
                 return Err(anyhow!(exception.to_string()));
             }
             return Ok(payload
                 .get("result")
-                .and_then(|item| item.get("result"))
-                .and_then(|item| item.get("value"))
                 .cloned()
                 .unwrap_or(serde_json::Value::Null));
         }
         Err(anyhow!("浏览器调试连接已关闭。"))
     }
 
-    pub async fn add_script_to_evaluate_on_new_document(&mut self, source: &str) -> Result<()> {
-        let message_id = self.next_id;
-        self.next_id += 1;
-        let request = json!({
-            "id": message_id,
-            "method": "Page.addScriptToEvaluateOnNewDocument",
-            "params": {
-                "source": source
-            }
+    pub async fn evaluate_in_context(
+        &mut self,
+        expression: &str,
+        context_id: Option<i64>,
+        await_promise: bool,
+    ) -> Result<serde_json::Value> {
+        let mut params = json!({
+            "expression": expression,
+            "awaitPromise": await_promise,
+            "returnByValue": true,
         });
-        self.socket.send(Message::Text(request.to_string())).await?;
-        while let Some(message) = self.socket.next().await {
-            let message = message?;
-            let Message::Text(text) = message else {
-                continue;
-            };
-            let payload: serde_json::Value = serde_json::from_str(&text)?;
-            if payload.get("id").and_then(|item| item.as_i64()) != Some(message_id) {
-                continue;
-            }
-            if let Some(error) = payload.get("error") {
-                return Err(anyhow!("{}", error));
-            }
-            return Ok(());
+        if let Some(context_id) = context_id {
+            params["contextId"] = json!(context_id);
         }
-        Err(anyhow!("浏览器调试连接已关闭。"))
+        let result = self.call("Runtime.evaluate", params).await?;
+        if let Some(exception) = result.get("exceptionDetails") {
+            return Err(anyhow!(exception.to_string()));
+        }
+        Ok(result
+            .get("result")
+            .and_then(|item| item.get("value"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null))
+    }
+
+    pub async fn add_script_to_evaluate_on_new_document(&mut self, source: &str) -> Result<()> {
+        self.call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source }),
+        )
+        .await?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolated_login_profiles_are_unique_and_cleanup_removes_them() {
+        let parent = tempfile::tempdir().unwrap();
+        let first = create_isolated_profile_dir(parent.path()).unwrap();
+        let second = create_isolated_profile_dir(parent.path()).unwrap();
+
+        assert_ne!(first, second);
+        assert!(first.starts_with(parent.path()));
+        assert!(second.starts_with(parent.path()));
+        std::fs::write(first.join("synthetic-cookie"), b"old-session").unwrap();
+
+        drop(BrowserLoginSession {
+            child: None,
+            profile_dir: first.clone(),
+        });
+        cleanup_profile_dir(&second).unwrap();
+        assert!(!first.exists());
+        assert!(!second.exists());
+    }
 
     #[test]
     fn repeated_login_selects_the_new_login_page_instead_of_a_stale_dashen_tab() {

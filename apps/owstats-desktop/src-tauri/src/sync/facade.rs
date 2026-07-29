@@ -115,7 +115,7 @@ pub async fn sync_season_with_credentials_path_base_url(
     write_season_payload(&project_root.join("data").join("players"), season, &payload)?;
     if total == 0 {
         return Err(anyhow!(
-            "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后重新登录后再试。"
+            "未拉取到 S{season} 赛季对局；已保存本地 JSON，请确认该赛季有战绩，或稍后通过添加账号更新登录后再试。"
         ));
     }
     let entries = payload
@@ -311,7 +311,9 @@ pub async fn sync_season_with_current_account_credentials_path_output_dir_with_m
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("当前登录账号尚未识别，无法同步本人数据，请重新登录。"))?;
+        .ok_or_else(|| {
+            anyhow!("当前登录账号尚未识别，无法同步本人数据，请通过添加账号更新登录。")
+        })?;
     sync_account_season_with_request(
         db,
         season_output_dir,
@@ -410,7 +412,7 @@ async fn sync_account_season_with_request(
     };
     if mode == crate::models::SyncMode::FullFetch && fetch.entries == 0 {
         return Err(anyhow!(
-            "未拉取到 S{season} 赛季对局；未更新本地数据库或快照，请确认该赛季有战绩，或稍后重新登录后再试。"
+            "未拉取到 S{season} 赛季对局；未更新本地数据库或快照，请确认该赛季有战绩，或稍后通过添加账号更新登录后再试。"
         ));
     }
     let entries = fetch

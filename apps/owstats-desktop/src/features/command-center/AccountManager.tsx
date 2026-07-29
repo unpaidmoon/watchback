@@ -5,10 +5,9 @@ import { applyRemovalDecision } from "./accountOperationIsolation";
 
 export type AccountManagerProps = {
   accounts: AccountSummary[];
-  busyAction: { kind: "add" | "switch" | "relogin" | "remove"; accountId?: string } | null;
+  busyAction: { kind: "add" | "switch" | "remove"; accountId?: string } | null;
   onAdd: () => void;
   onSwitch: (account: AccountSummary) => void;
-  onRelogin: (account: AccountSummary) => void;
   onRemove: (account: AccountSummary) => void;
 };
 
@@ -132,7 +131,6 @@ export function AccountManager({
   busyAction,
   onAdd,
   onSwitch,
-  onRelogin,
   onRemove,
 }: AccountManagerProps) {
   const [pendingRemoval, setPendingRemoval] = useState<AccountSummary | null>(null);
@@ -160,8 +158,8 @@ export function AccountManager({
       <div className="accountManagerRows">
         <div className="accountManagerRow accountManagerAddRow">
           <div>
-            <span className="accountManagerAccountName">添加新的网易大神账号</span>
-            <span className="accountManagerAccountMeta">登录另一个账号并创建独立数据空间</span>
+            <span className="accountManagerAccountName">添加或更新网易大神账号</span>
+            <span className="accountManagerAccountMeta">使用全新浏览器会话登录，不会继承上一次账号状态</span>
           </div>
           <button className="primaryButton" type="button" onClick={onAdd} disabled={isBusy}>
             {busyAction?.kind === "add" ? "正在添加…" : "添加账号"}
@@ -187,9 +185,6 @@ export function AccountManager({
                     {isThisAccountBusy && busyAction?.kind === "switch" ? "正在切换…" : "切换账号"}
                   </button>
                 )}
-                <button type="button" onClick={() => onRelogin(account)} disabled={isBusy}>
-                  {isThisAccountBusy && busyAction?.kind === "relogin" ? "登录中…" : "重新登录"}
-                </button>
                 <button
                   className="dangerButton"
                   type="button"

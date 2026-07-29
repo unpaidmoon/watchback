@@ -56,7 +56,7 @@ export async function loadDashboardRequest(options: DashboardRequestOptions): Pr
 }
 
 export type BusyAccountAction = {
-  kind: "add" | "switch" | "relogin" | "remove";
+  kind: "add" | "switch" | "remove";
   accountId?: string;
 };
 
@@ -114,20 +114,6 @@ export function runAddAccountOperation(dependencies: LoginOperationDependencies)
     { kind: "add" },
     dependencies,
     "添加账号失败",
-    async () => {
-      const result = await dependencies.invoke();
-      await dependencies.refreshAccounts();
-      dependencies.setNotice(result.message);
-    },
-    true,
-  );
-}
-
-export function runReloginAccountOperation(account: AccountSummary, dependencies: LoginOperationDependencies) {
-  return runOperation(
-    { kind: "relogin", accountId: account.accountId },
-    dependencies,
-    "重新登录失败",
     async () => {
       const result = await dependencies.invoke();
       await dependencies.refreshAccounts();

@@ -3,7 +3,6 @@ import {
   applyRemovalDecision,
   loadDashboardRequest,
   runAddAccountOperation,
-  runReloginAccountOperation,
   runRemoveAccountOperation,
   runSwitchAccountOperation,
 } from "../src/features/command-center/accountOperationIsolation";
@@ -272,10 +271,6 @@ for (const run of [
   (harness: ReturnType<typeof operationHarness>) => runAddAccountOperation({
     ...harness.deps,
     invoke: async () => ({ kind: "differentExistingAccount", accountId: secondAccount.accountId, battleTag: secondAccount.battleTag, message: "检测到其他账号，请选择是否切换", shouldOfferSwitch: true }),
-  }),
-  (harness: ReturnType<typeof operationHarness>) => runReloginAccountOperation(firstAccount, {
-    ...harness.deps,
-    invoke: async () => ({ kind: "differentNewAccount", accountId: null, battleTag: secondAccount.battleTag, message: "登录账号不一致，当前账号未更改", shouldOfferSwitch: false }),
   }),
 ]) {
   const harness = operationHarness();

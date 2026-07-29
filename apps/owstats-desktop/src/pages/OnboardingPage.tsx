@@ -21,7 +21,6 @@ import {
   listAccounts,
   clearPlayerTarget,
   keepCurrentPlayerTarget,
-  reloginAccount,
   removeAccount,
   retryLoginTargetBinding,
   retrySeasonBackgroundSync,
@@ -30,10 +29,10 @@ import {
 } from "../shared/api";
 import { AccountManager } from "../features/command-center/AccountManager";
 import { DeepSeekSettings } from "../features/command-center/DeepSeekSettings";
+import { QrAccountLoginDialog } from "../features/command-center/QrAccountLoginDialog";
 import {
   loadDashboardRequest,
   runAddAccountOperation,
-  runReloginAccountOperation,
   runRemoveAccountOperation,
   runSwitchAccountOperation,
 } from "../features/command-center/accountOperationIsolation";
@@ -78,6 +77,7 @@ export function OnboardingPage() {
   const [syncingMode, setSyncingMode] = useState<SyncMode | null>(null);
   const [busyAccountAction, setBusyAccountAction] = useState<BusyAccountAction | null>(null);
   const [cancellingLogin, setCancellingLogin] = useState(false);
+  const [qrLoginDialogOpen, setQrLoginDialogOpen] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -333,7 +333,7 @@ export function OnboardingPage() {
       release: releaseOperationLock,
       setBusy: (action: BusyAccountAction | null) => {
         if (mountedRef.current) {
-          if (action?.kind === "add" || action?.kind === "relogin") {
+          if (action?.kind === "add") {
             setLoginProgress(null);
           }
           setBusyAccountAction(action);
@@ -364,15 +364,27 @@ export function OnboardingPage() {
     });
   }
 
-  function runReloginAccount(account: AccountSummary) {
+  function openQrAccountLogin() {
     if (!hasDesktopBackend()) {
       setError(browserPreviewLoginHint);
-      return Promise.resolve(false);
+      return;
     }
-    return runReloginAccountOperation(account, {
-      ...accountOperationLifecycle(),
-      invoke: () => reloginAccount(account.accountId),
-    });
+    setError(null);
+    setNotice(null);
+    setQrLoginDialogOpen(true);
+  }
+
+  async function completeQrAccountLogin(message: string | null) {
+    try {
+      await loadDashboard();
+      if (mountedRef.current) {
+        setNotice(message ?? "\u8d26\u53f7\u6dfb\u52a0\u6210\u529f\u3002");
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(`\u8d26\u53f7\u5df2\u6dfb\u52a0\uff0c\u4f46\u5237\u65b0\u8d26\u53f7\u5217\u8868\u5931\u8d25\uff1a${productErrorMessage(err)}\u3002\u8bf7\u91cd\u8bd5\u6216\u91cd\u542f\u3002`);
+      }
+    }
   }
 
   function runSwitchAccount(account: AccountSummary) {
@@ -494,7 +506,7 @@ export function OnboardingPage() {
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(`切换目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+        setError(`切换目标失败：${productErrorMessage(err)}。请重试或通过添加账号更新登录。`);
       }
     } finally {
       if (mountedRef.current) {
@@ -519,7 +531,7 @@ export function OnboardingPage() {
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(`保留原目标失败：${productErrorMessage(err)}。请重试或重新识别。`);
+        setError(`保留原目标失败：${productErrorMessage(err)}。请重试或通过添加账号更新登录。`);
       }
     } finally {
       if (mountedRef.current) {
@@ -544,7 +556,7 @@ export function OnboardingPage() {
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(`重新绑定失败：${productErrorMessage(err)}。请重试或重新识别。`);
+        setError(`重新绑定失败：${productErrorMessage(err)}。请重试或通过添加账号更新登录。`);
       }
     } finally {
       if (mountedRef.current) {
@@ -580,7 +592,7 @@ export function OnboardingPage() {
   }
 
   const credentialReady = status?.credentialStatus.state === "ready";
-  const accountOperationBusy = busyAccountAction !== null || targetAction !== null;
+  const accountOperationBusy = busyAccountAction !== null || targetAction !== null || qrLoginDialogOpen;
   const activeAccount = accountStatus?.accounts.find((account) => account.isActive) ?? null;
   const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
   const primaryTargetState = targetStatus && ["switchRequired", "bindFailed", "unidentified", "verificationRequired", "mismatchKept"].includes(targetStatus.state)
@@ -686,10 +698,6 @@ export function OnboardingPage() {
                     <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={runRetryTargetBinding} disabled={accountOperationBusy || syncingSeason !== null}>
                       {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
                     </button>
-                  ) : targetStatus && ["unidentified", "verificationRequired", "mismatchKept", "bindFailed"].includes(targetStatus.state) ? (
-                    <button ref={primaryTargetActionRef} className="primaryButton" type="button" onClick={() => activeAccount && runReloginAccount(activeAccount)} disabled={!activeAccount || accountOperationBusy || syncingSeason !== null}>
-                      {busyAccountAction?.kind === "relogin" ? "识别中…" : "重新识别"}
-                    </button>
                   ) : null}
                   <button className="ghostButton" type="button" onClick={runClearTarget} disabled={!hasCurrentTarget || accountOperationBusy || syncingSeason !== null}>
                     {targetAction === "clear" ? "清除中…" : "清除"}
@@ -759,7 +767,7 @@ export function OnboardingPage() {
         )}
 
         {accountStatus ? <div className="accountManagerPanel">
-          {(busyAccountAction?.kind === "add" || busyAccountAction?.kind === "relogin") && (
+          {busyAccountAction?.kind === "add" && (
             <div className="accountManagerLoginProgress" role="status" aria-live="polite">
               <span>{loginProgress?.message ?? "正在等待浏览器登录…"}</span>
               <button className="ghostButton" type="button" onClick={cancelLogin} disabled={cancellingLogin}>
@@ -770,13 +778,18 @@ export function OnboardingPage() {
           )}
           <AccountManager
             accounts={accountStatus?.accounts ?? []}
-            busyAction={busyAccountAction}
-            onAdd={runAddAccount}
+            busyAction={qrLoginDialogOpen ? { kind: "add" } : busyAccountAction}
+            onAdd={openQrAccountLogin}
             onSwitch={runSwitchAccount}
-            onRelogin={runReloginAccount}
             onRemove={runRemoveAccount}
           />
         </div> : null}
+        <QrAccountLoginDialog
+          open={qrLoginDialogOpen}
+          onCancel={() => setQrLoginDialogOpen(false)}
+          onCompleted={completeQrAccountLogin}
+          onUseExistingLogin={async () => { await runAddAccount(); }}
+        />
       </QaRegion>
 
       <section className="commandCenterTools" aria-labelledby="command-center-tools-title">

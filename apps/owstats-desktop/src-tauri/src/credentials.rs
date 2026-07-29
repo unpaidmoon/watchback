@@ -1,7 +1,7 @@
 use crate::app_paths::{AccountPaths, SharedAppPaths};
 use crate::browser_session::{
-    choose_debug_port, find_windows_browsers, launch_browser, open_new_page, open_or_find_page,
-    wait_for_debug_endpoint, CdpPage,
+    choose_debug_port, find_existing_page, find_windows_browsers, launch_isolated_browser,
+    open_new_page, open_or_find_page, wait_for_debug_endpoint, CdpPage,
 };
 use crate::dashen_auth::{
     build_collect_candidates_script, build_get_report_token_script, credentials_from_report_result,
@@ -191,10 +191,9 @@ pub(crate) async fn capture_dashen_login(
     );
     let browser = select_browser(find_windows_browsers())?;
     let port = choose_debug_port(std::process::id());
-    let profile_dir = shared_paths.browser_profile();
 
     emit_login_progress(&app, LoginPhase::OpeningBrowser, "正在打开网易大神登录页。");
-    launch_browser(&browser, LOGIN_URL, port, &profile_dir)
+    let browser_session = launch_isolated_browser(&browser, LOGIN_URL, port, shared_paths.root())
         .map_err(|error| anyhow!(error.to_string()))?;
 
     wait_for_debug_endpoint(port, Duration::from_secs(20)).await?;
@@ -204,7 +203,9 @@ pub(crate) async fn capture_dashen_login(
         "请在浏览器中完成登录，应用会自动识别登录状态。",
     );
 
-    capture_dashen_login_with(|| fetch_credentials_from_browser(&app, port)).await
+    let result = capture_dashen_login_with(|| fetch_credentials_from_browser(&app, port)).await;
+    drop(browser_session);
+    result
 }
 
 pub(crate) async fn capture_dashen_login_with<F, Fut>(runner: F) -> Result<BrowserLoginOutcome>
@@ -214,7 +215,7 @@ where
 {
     let outcome = runner().await.map_err(|error| anyhow!(error.to_string()))?;
     if outcome.credentials.role_id <= 0 || outcome.credentials.token.trim().is_empty() {
-        return Err(anyhow!("登录凭证不完整，请重新登录。"));
+        return Err(anyhow!("登录凭证不完整，请重新添加账号。"));
     }
     let battle_tag = outcome.detected_battle_tag.trim();
     let valid_battle_tag = battle_tag.split_once('#').is_some_and(|(name, suffix)| {
@@ -224,7 +225,7 @@ where
             && suffix.chars().all(|character| character.is_ascii_digit())
     });
     if !valid_battle_tag {
-        return Err(anyhow!("未能稳定识别 BattleTag，请重新登录。"));
+        return Err(anyhow!("未能稳定识别 BattleTag，请重新添加账号。"));
     }
     Ok(outcome)
 }
@@ -257,12 +258,27 @@ pub fn diagnostic_credentials(role_id: i64, token: String) -> DashenCredentials 
     }
 }
 
-async fn fetch_credentials_from_browser(
+pub(crate) async fn fetch_credentials_from_browser(
     progress: &impl LoginProgressReporter,
     port: u16,
 ) -> Result<BrowserLoginOutcome> {
-    let websocket_url = open_or_find_page(LOGIN_URL, port).await?;
-    let mut page = CdpPage::connect(&websocket_url).await?;
+    fetch_credentials_from_browser_with_cancel(progress, port, login_cancelled).await
+}
+
+pub(crate) async fn fetch_credentials_from_browser_with_cancel<C>(
+    progress: &impl LoginProgressReporter,
+    port: u16,
+    cancelled: C,
+) -> Result<BrowserLoginOutcome>
+where
+    C: Fn() -> bool,
+{
+    let websocket_url = open_or_find_page(LOGIN_URL, port)
+        .await
+        .map_err(|_| anyhow!("credential_login_target_failed"))?;
+    let mut page = CdpPage::connect(&websocket_url)
+        .await
+        .map_err(|_| anyhow!("credential_login_connect_failed"))?;
     page.add_script_to_evaluate_on_new_document(&build_collect_candidates_script())
         .await?;
     let deadline = Instant::now() + Duration::from_secs(LOGIN_TIMEOUT_SECONDS);
@@ -270,9 +286,10 @@ async fn fetch_credentials_from_browser(
     let mut locked_credential_role_id: Option<String> = None;
     let mut locked_paired_identity: Option<(String, String)> = None;
     let mut last_token_failure = "凭证接口请求未完成";
+    let mut reloaded_authenticated_login = false;
 
     while Instant::now() < deadline {
-        if LOGIN_CANCELLED.load(Ordering::SeqCst) {
+        if cancelled() {
             return Err(anyhow!("已取消登录等待。"));
         }
 
@@ -321,9 +338,13 @@ async fn fetch_credentials_from_browser(
                     .confirmed_pair()
                     .map(|(role_id, battle_tag)| (role_id.to_string(), battle_tag.to_string()))
             };
-            let result = page
-                .evaluate(&build_get_report_token_script(&role_id, SERVER_ID), true)
-                .await?;
+            let result = tokio::time::timeout(
+                Duration::from_secs(20),
+                page.evaluate(&build_get_report_token_script(&role_id, SERVER_ID), true),
+            )
+            .await
+            .map_err(|_| anyhow!("credential_token_request_timeout"))?
+            .map_err(|_| anyhow!("credential_token_evaluate_failed"))?;
             if let Some(credentials) = credentials_from_report_result(
                 &result,
                 &role_id,
@@ -371,8 +392,12 @@ async fn fetch_credentials_from_browser(
                         LoginPhase::LoadingSignPage,
                         "正在打开签名页面以完成凭证换取。",
                     );
-                    let websocket_url = open_new_page(SIGN_PAGE_URL, port).await?;
-                    page = CdpPage::connect(&websocket_url).await?;
+                    let websocket_url = open_new_page(SIGN_PAGE_URL, port)
+                        .await
+                        .map_err(|_| anyhow!("credential_sign_target_failed"))?;
+                    page = CdpPage::connect(&websocket_url)
+                        .await
+                        .map_err(|_| anyhow!("credential_sign_connect_failed"))?;
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 } else {
                     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -386,6 +411,26 @@ async fn fetch_credentials_from_browser(
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
         } else {
+            if !reloaded_authenticated_login {
+                if find_existing_page(SIGN_PAGE_URL, port)
+                    .await
+                    .map_err(|_| anyhow!("credential_auth_target_check_failed"))?
+                    .is_some()
+                {
+                    let login_url = serde_json::to_string(LOGIN_URL)
+                        .map_err(|_| anyhow!("credential_login_url_failed"))?;
+                    page.evaluate(&format!("location.replace({login_url})"), false)
+                        .await
+                        .map_err(|_| anyhow!("credential_login_reload_failed"))?;
+                    reloaded_authenticated_login = true;
+                    progress.report(
+                        LoginPhase::WaitingForLogin,
+                        "已确认扫码，正在识别登录账号。",
+                    );
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            }
             progress.report(
                 LoginPhase::WaitingForLogin,
                 "请完成登录并进入守望先锋相关页面。",

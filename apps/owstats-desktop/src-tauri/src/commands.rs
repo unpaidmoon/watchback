@@ -281,43 +281,48 @@ pub async fn add_account(
 }
 
 #[tauri::command]
-pub async fn relogin_account(
+pub fn add_account_with_qr(
     app: AppHandle,
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
+    qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-    account_id: String,
-) -> Result<AccountLoginResult, String> {
-    let _permit = operation_coordinator
+) -> Result<crate::qr_login::QrLoginStartResult, String> {
+    let permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
-    let account_id = crate::account_store::AccountId::parse(&account_id)
-        .map_err(|_| "账号标识无效。".to_string())?;
-    let shared = accounts.shared_paths().clone();
-    let capture_app = app.clone();
-    let result = crate::account_login::capture_and_publish_relogin(
-        &accounts,
-        &account_id,
-        &app,
-        move || async move {
-            let outcome = crate::credentials::capture_dashen_login(capture_app, &shared).await?;
-            Ok(crate::account_login::LoginCapture {
-                credentials: outcome.credentials,
-                battle_tag: outcome.detected_battle_tag,
-            })
-        },
-        crate::credentials::login_cancelled,
+    crate::qr_login::start_login(
+        app,
+        accounts.inner().clone(),
+        permit,
+        qr_coordinator.inner().clone(),
+        login_target_coordinator.inner().clone(),
     )
-    .await
-    .map_err(to_message)?;
-    reconcile_published_login_target(
-        &accounts,
-        login_target_coordinator.inner(),
-        &result,
-        DASHEN_ROOT_BASE,
-    )
-    .await?;
-    Ok(result)
+    .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn refresh_dashen_login_qr(
+    qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
+    session_id: String,
+) -> Result<crate::qr_login::QrLoginControlResult, String> {
+    crate::qr_login::refresh_login(qr_coordinator.inner(), session_id).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_dashen_login_qr_snapshot(
+    qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
+    session_id: String,
+) -> Result<crate::qr_login::QrLoginSnapshot, String> {
+    qr_coordinator.snapshot(&session_id).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn cancel_dashen_login_qr(
+    qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
+    session_id: String,
+) -> Result<crate::qr_login::QrLoginControlResult, String> {
+    crate::qr_login::cancel_login(qr_coordinator.inner(), session_id).map_err(to_message)
 }
 
 async fn reconcile_published_login_target(
@@ -720,7 +725,7 @@ pub async fn player_query_start(
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
         .map_err(|_| {
             crate::player_query::models::QueryError::SessionInvalid(
-                "登录凭证不可用，请重新登录".to_string(),
+                "登录凭证不可用，请在指挥台添加账号以更新登录".to_string(),
             )
         })?;
     let credentials = crate::dashen_client::DashenCredentials {

@@ -28,6 +28,8 @@ import type {
   PersonalSeasonReview,
   PlayerProfile,
   PlayerTargetStatus,
+  QrAccountLoginStartResult,
+  QrAccountLoginSnapshot,
   LoginTargetStatus,
   ClearPlayerTargetResult,
   PlayerSearchOption,
@@ -46,11 +48,20 @@ export const listAccounts = () => invoke<AccountManagerStatus>("list_accounts");
 
 export const addAccount = () => invoke<AccountLoginResult>("add_account");
 
+export const addAccountWithQr = () =>
+  invoke<QrAccountLoginStartResult>("add_account_with_qr");
+
+export const refreshQrAccountLogin = (sessionId: string) =>
+  invoke<void>("refresh_dashen_login_qr", { sessionId });
+
+export const getQrAccountLoginSnapshot = (sessionId: string) =>
+  invoke<QrAccountLoginSnapshot>("get_dashen_login_qr_snapshot", { sessionId });
+
+export const cancelQrAccountLogin = (sessionId: string) =>
+  invoke<void>("cancel_dashen_login_qr", { sessionId });
+
 export const switchAccount = (accountId: string) =>
   invoke<AccountManagerStatus>("switch_account", { accountId });
-
-export const reloginAccount = (accountId: string) =>
-  invoke<AccountLoginResult>("relogin_account", { accountId });
 
 export const removeAccount = (accountId: string) =>
   invoke<RemoveAccountResult>("remove_account", { accountId });

@@ -282,9 +282,10 @@ fn validate_legacy_identity(shared: &SharedAppPaths, account: &AccountPaths) -> 
 
 fn read_complete_credential_role(path: &Path) -> Result<i64> {
     require_safe_regular_file(path)?;
-    let bytes = fs::read(path).map_err(|_| anyhow!("账号凭据不完整，请重新登录后再迁移"))?;
+    let bytes = fs::read(path)
+        .map_err(|_| anyhow!("账号凭据不完整，请在指挥台添加账号以更新登录后再迁移"))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|_| anyhow!("账号凭据不完整，请重新登录后再迁移"))?;
+        .map_err(|_| anyhow!("账号凭据不完整，请在指挥台添加账号以更新登录后再迁移"))?;
     let role_id = value
         .get("role_id")
         .or_else(|| value.get("roleId"))
@@ -299,7 +300,7 @@ fn read_complete_credential_role(path: &Path) -> Result<i64> {
         .is_some_and(|token| !token.trim().is_empty());
     match (role_id, token_ready) {
         (Some(role_id), true) => Ok(role_id),
-        _ => bail!("账号凭据不完整，请重新登录后再迁移"),
+        _ => bail!("账号凭据不完整，请在指挥台添加账号以更新登录后再迁移"),
     }
 }
 

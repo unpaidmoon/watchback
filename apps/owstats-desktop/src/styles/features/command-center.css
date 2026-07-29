@@ -872,3 +872,168 @@
     justify-content: flex-start;
   }
 }
+
+.phase6CommandCenter .qrAccountLoginBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--text-primary) 42%, transparent);
+}
+
+.phase6CommandCenter .qrAccountLoginDialog {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: calc(100dvh - 48px);
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr);
+  overflow: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  background: var(--glass-primary);
+  color: var(--text-primary);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--text-primary) 20%, transparent);
+}
+
+.phase6CommandCenter .qrAccountLoginQrPane,
+.phase6CommandCenter .qrAccountLoginContent,
+.phase6CommandCenter .qrAccountLoginCopy,
+.phase6CommandCenter .qrAccountLoginActions {
+  display: grid;
+  gap: 16px;
+}
+
+.phase6CommandCenter .qrAccountLoginQrPane {
+  place-content: center;
+  justify-items: center;
+  min-height: 352px;
+  padding: 40px;
+  border-right: 1px solid var(--glass-border);
+}
+
+.phase6CommandCenter .qrAccountLoginQrPane p,
+.phase6CommandCenter .qrAccountLoginCopy h3,
+.phase6CommandCenter .qrAccountLoginCopy ol,
+.phase6CommandCenter .qrAccountLoginError {
+  margin: 0;
+}
+
+.phase6CommandCenter .qrAccountLoginQrPane p,
+.phase6CommandCenter .qrAccountLoginCopy ol {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.phase6CommandCenter .qrAccountLoginQrStage {
+  width: 256px;
+  height: 256px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: white;
+  color: var(--text-secondary);
+}
+
+.phase6CommandCenter .qrAccountLoginQrStage img {
+  display: block;
+  width: 256px;
+  height: 256px;
+  object-fit: contain;
+}
+
+.phase6CommandCenter .qrAccountLoginQrStage--confirming img {
+  opacity: 0.62;
+}
+
+.phase6CommandCenter .qrAccountLoginQrPlaceholder {
+  display: grid;
+  place-items: center;
+}
+
+.phase6CommandCenter .qrAccountLoginContent {
+  min-height: 352px;
+  padding: 40px 32px 24px;
+}
+
+.phase6CommandCenter .qrAccountLoginCopy {
+  align-content: start;
+}
+
+.phase6CommandCenter .qrAccountLoginCopy h3 {
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.phase6CommandCenter .qrAccountLoginCopy ol {
+  padding-left: 20px;
+}
+
+.phase6CommandCenter .qrAccountLoginStatus {
+  min-height: 54px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  color: var(--text-primary);
+  transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+.phase6CommandCenter .qrAccountLoginStatus--failed,
+.phase6CommandCenter .qrAccountLoginStatus--expired,
+.phase6CommandCenter .qrAccountLoginError {
+  color: var(--status-danger-strong);
+}
+
+.phase6CommandCenter .qrAccountLoginError {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.phase6CommandCenter .qrAccountLoginActions {
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-self: end;
+  margin-top: auto;
+}
+
+.phase6CommandCenter .qrAccountLoginActions button {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.phase6CommandCenter .qrAccountLoginClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.phase6CommandCenter .qrAccountLoginSpinner {
+  animation: qrAccountLoginSpin 900ms linear infinite;
+}
+
+@keyframes qrAccountLoginSpin { to { transform: rotate(360deg); } }
+
+@media (max-width: 680px) {
+  .phase6CommandCenter .qrAccountLoginDialog { grid-template-columns: 1fr; }
+  .phase6CommandCenter .qrAccountLoginQrPane { min-height: 280px; padding: 32px 24px; border-right: 0; border-bottom: 1px solid var(--glass-border); }
+  .phase6CommandCenter .qrAccountLoginQrStage,
+  .phase6CommandCenter .qrAccountLoginQrStage img { width: 212px; height: 212px; }
+  .phase6CommandCenter .qrAccountLoginContent { min-height: 0; padding: 28px 24px 24px; }
+}
+
+@media (max-width: 440px) {
+  .phase6CommandCenter .qrAccountLoginBackdrop { padding: 12px; }
+  .phase6CommandCenter .qrAccountLoginActions { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase6CommandCenter .qrAccountLoginSpinner { animation: none; }
+  .phase6CommandCenter .qrAccountLoginStatus { transition: none; }
+}

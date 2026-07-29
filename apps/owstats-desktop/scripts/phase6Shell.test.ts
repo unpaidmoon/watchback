@@ -223,7 +223,7 @@ assertEqual(onboardingSource.includes("runBindTarget"), false, "command center r
 assertEqual(onboardingSource.includes("切换到此账号"), true, "account mismatch offers an explicit switch action");
 assertEqual(onboardingSource.includes("保留原目标"), true, "account mismatch offers an explicit keep action");
 assertEqual(onboardingSource.includes("重新绑定"), true, "retryable binding failure offers a retry action");
-assertEqual(onboardingSource.includes("重新识别"), true, "unidentified account offers a fresh login identification action");
+assertEqual(onboardingSource.includes("重新识别"), false, "command center removes the relogin action");
 assertEqual(onboardingSource.includes("credentialReady={credentialReady}"), true, "season workbench receives the real credential state");
 assertEqual(onboardingSource.includes("targetSyncAllowed={Boolean(targetStatus?.syncAllowed)}"), true, "season workbench receives the backend target gate separately");
 assertEqual(onboardingSource.includes("accountOperationBusy={accountOperationBusy}"), true, "season workbench receives the account operation state separately");
@@ -469,10 +469,6 @@ assertEqual(
   true,
   "add-account browser preview selects its hint before invoking the backend",
 );
-assertEqual(
-  /function runReloginAccount\(account: AccountSummary\)\s*\{\s*if \(!hasDesktopBackend\(\)\) \{\s*setError\(browserPreviewLoginHint\);\s*return Promise\.resolve\(false\);\s*\}[\s\S]*?invoke: \(\) => reloginAccount\(account\.accountId\)/.test(onboardingSource),
-  true,
-  "relogin browser preview selects its hint before invoking the backend",
-);
+assertEqual(/runReloginAccount|reloginAccount|onRelogin/.test(onboardingSource), false, "command center exposes no relogin handler");
 assertEqual(hasDesktopBackend({}), false, "plain browser has no desktop backend");
 assertEqual(hasDesktopBackend({ __TAURI_INTERNALS__: {} }), true, "tauri internals indicate desktop backend");

@@ -78,7 +78,7 @@ assert.doesNotMatch(onboarding, /commandCenterSeasonSegments/, "fixed season seg
 assert.match(onboarding, /syncSecondaryActions/, "command center separates secondary actions");
 assert.doesNotMatch(onboarding, /同步全部/, "command center must not add sync-all");
 assert.doesNotMatch(onboarding, /aria-label="BattleTag"|placeholder="BattleTag|setBattleTag|bindPlayerTarget|runBindTarget/, "command center has no manual BattleTag input path");
-for (const label of ["切换到此账号", "保留原目标", "重新绑定", "重新识别"]) {
+for (const label of ["切换到此账号", "保留原目标", "重新绑定"]) {
   assert.match(onboarding, new RegExp(label), `command center exposes ${label}`);
 }
 assert.match(onboarding, /const showDetectedLogin = Boolean\(/, "target comparison is derived independently of the workflow state");
@@ -133,7 +133,7 @@ for (const command of [
 }
 assert.match(lib, /manage\(login_target::LoginTargetCoordinator::default\(\)\)/, "login target coordinator is managed state");
 assert.match(commands, /add_account[\s\S]*?capture_and_publish_add/, "add account uses the staged capture-and-publish flow");
-assert.match(commands, /relogin_account[\s\S]*?capture_and_publish_relogin/, "relogin uses the staged capture-and-publish flow");
+assert.doesNotMatch(commands, /pub async fn relogin_account\b/, "relogin command is removed");
 assert.match(
   commands,
   /sync_season[\s\S]*?ensure_sync_target_ready[\s\S]*?sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url/,
@@ -142,7 +142,6 @@ assert.match(
 
 for (const [commandName, firstSideEffect] of [
   ["add_account", "capture_and_publish_add"],
-  ["relogin_account", "capture_and_publish_relogin"],
   ["confirm_login_target_switch", "active_account(&accounts)"],
   ["keep_current_player_target", "active_account(&accounts)"],
   ["retry_login_target_binding", "active_account(&accounts)"],
