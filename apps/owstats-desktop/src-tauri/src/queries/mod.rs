@@ -55,6 +55,8 @@ pub fn list_matches_page(
         matches,
         next_cursor,
         total,
+        revision_token: String::new(),
+        account_scope: String::new(),
     })
 }
 

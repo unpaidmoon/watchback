@@ -1,6 +1,8 @@
 import type { FilterOptions, ImportSummary, MatchCursor, MatchFilters, MatchPage, MatchSummary, Overview } from "./types";
 
 export type MatchesPageCache = {
+  accountScope: string | null;
+  revisionToken: string | null;
   overview: Overview | null;
   summary: ImportSummary | null;
   options: FilterOptions;
@@ -71,6 +73,8 @@ export function updateMatchFavoriteState<T extends { matchId: string; isFavorite
 
 function createMatchesPageCache(patch: Partial<MatchesPageCache>) {
   return {
+    accountScope: null,
+    revisionToken: null,
     overview: null,
     summary: null,
     options: { seasons: [], heroes: [], maps: [], results: [], modes: [] },
@@ -92,14 +96,6 @@ export function clearMatchesPageCache() {
   cacheGeneration += 1;
   matchesPageCache = null;
   preloadPromises.clear();
-}
-
-export function clearMatchesPageCacheForSeason(_accountScope: string, season: number) {
-  if (!matchesPageCache) return;
-  const cachedSeason = matchesPageCache.filters.season;
-  if (cachedSeason === undefined || cachedSeason === season) {
-    clearMatchesPageCache();
-  }
 }
 
 export function hasExplicitMatchFilterParams(params: URLSearchParams) {
@@ -183,8 +179,14 @@ export function isValidMatchesPageCacheSnapshot(cache: MatchesPageCache | null):
   return cache !== null && cache.hasLoaded && cache.loadedFilterKey !== "" && cache.loadedFilterKey === matchFiltersKey(cache.filters);
 }
 
-export function canHydrateMatchesPageCache(cache: MatchesPageCache | null, filters: MatchFilters, hasExplicitFilters: boolean) {
+export function canHydrateMatchesPageCache(
+  cache: MatchesPageCache | null,
+  filters: MatchFilters,
+  hasExplicitFilters: boolean,
+  contract?: { accountScope: string | null; revisionToken: string | null },
+) {
   if (!isValidMatchesPageCacheSnapshot(cache)) return false;
+  if (contract && (cache.accountScope !== contract.accountScope || cache.revisionToken !== contract.revisionToken)) return false;
   if (!hasExplicitFilters) return true;
   return cache.loadedFilterKey === matchFiltersKey(filters);
 }
@@ -287,6 +289,8 @@ export function preloadMatchesPageCache(
         matches,
         nextCursor: page?.nextCursor ?? null,
         totalMatches: page?.total ?? matches.length,
+        accountScope: page?.accountScope ?? null,
+        revisionToken: page?.revisionToken ?? null,
         loadedFilterKey: filterKey,
         hasLoaded: true,
       });

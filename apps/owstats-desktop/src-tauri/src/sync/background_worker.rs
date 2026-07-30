@@ -23,10 +23,33 @@ pub struct BackgroundRunSummary {
     pub snapshot_stale: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DetailBatchCommit {
+    pub season: i64,
+    pub details_written: usize,
+    pub failed_details: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListPageCommit {
+    pub season: i64,
+    pub new_matches: usize,
+}
+
 pub async fn run_background_job_once(
     store: &SeasonSyncStore,
     request: &FullSeasonRequest,
     season_output_dir: &Path,
+) -> Result<BackgroundRunSummary> {
+    run_background_job_once_observed(store, request, season_output_dir, |_| {}, |_| {}).await
+}
+
+pub async fn run_background_job_once_observed(
+    store: &SeasonSyncStore,
+    request: &FullSeasonRequest,
+    season_output_dir: &Path,
+    mut on_list_commit: impl FnMut(ListPageCommit),
+    mut on_detail_commit: impl FnMut(DetailBatchCommit),
 ) -> Result<BackgroundRunSummary> {
     let Some(job) = store.claim_next(request.season)? else {
         return Ok(BackgroundRunSummary {
@@ -34,7 +57,16 @@ pub async fn run_background_job_once(
             ..Default::default()
         });
     };
-    match run_claimed_job(store, request, season_output_dir, &job).await {
+    match run_claimed_job(
+        store,
+        request,
+        season_output_dir,
+        &job,
+        &mut on_list_commit,
+        &mut on_detail_commit,
+    )
+    .await
+    {
         Ok(summary) => Ok(summary),
         Err(error) => {
             mark_job_retryable(store, &job.job_id, "background")?;
@@ -48,6 +80,8 @@ async fn run_claimed_job(
     request: &FullSeasonRequest,
     season_output_dir: &Path,
     job: &ClaimedSeasonJob,
+    on_list_commit: &mut impl FnMut(ListPageCommit),
+    on_detail_commit: &mut impl FnMut(DetailBatchCommit),
 ) -> Result<BackgroundRunSummary> {
     let client = DashenClient::new(
         request.credentials.clone(),
@@ -87,6 +121,12 @@ async fn run_claimed_job(
                 super::quick_list::commit_background_page(store, job, mode, page, payload)?;
             summary.pages_scanned += 1;
             summary.new_list_matches += committed.new_matches;
+            if committed.data_changed {
+                on_list_commit(ListPageCommit {
+                    season: job.season,
+                    new_matches: committed.new_matches,
+                });
+            }
             if committed.boundary_reached {
                 break;
             }
@@ -154,6 +194,11 @@ async fn run_claimed_job(
                 attempted,
             )?;
             update_detail_job_rows(store, &job.job_id, &details, &failures)?;
+            on_detail_commit(DetailBatchCommit {
+                season: job.season,
+                details_written: details.len(),
+                failed_details: failures.len(),
+            });
         }
         summary.details_written += details.len();
         summary.failed_details += failures.len();
@@ -289,7 +334,7 @@ fn update_detail_job_rows(
         |row| row.get(0),
     )?;
     tx.execute(
-        "UPDATE season_sync_state SET season_revision=season_revision+1, pending_detail_count=?2, updated_at=?3 WHERE season=?1",
+        "UPDATE season_sync_state SET pending_detail_count=?2, updated_at=?3 WHERE season=?1",
         params![season, pending, now],
     )?;
     tx.execute(

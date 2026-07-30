@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 const SYNC_IN_PROGRESS_MESSAGE: &str = "账号操作或赛季同步正在进行，请等待完成后再试";
 pub const QUERY_BLOCKS_SYNC_MESSAGE: &str = "请先退出玩家查询";
@@ -28,18 +29,21 @@ pub enum OperationStatus {
 #[derive(Clone)]
 pub struct SyncCoordinator {
     active: Arc<Mutex<ActiveOperation>>,
+    idle: Arc<Notify>,
 }
 
 impl Default for SyncCoordinator {
     fn default() -> Self {
         Self {
             active: Arc::new(Mutex::new(ActiveOperation::Idle)),
+            idle: Arc::new(Notify::new()),
         }
     }
 }
 
 pub struct OperationPermit {
     active: Arc<Mutex<ActiveOperation>>,
+    idle: Arc<Notify>,
 }
 
 pub struct BackgroundSyncPermit {
@@ -52,6 +56,18 @@ pub struct QuerySessionPermit {
 }
 
 impl SyncCoordinator {
+    /// Waits without polling until no account, query, or sync operation owns
+    /// the coordinator. The pre-registered notification avoids a lost wakeup.
+    pub async fn wait_until_idle(&self) {
+        loop {
+            let notified = self.idle.notified();
+            if self.status() == OperationStatus::Idle {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     pub fn status(&self) -> OperationStatus {
         let active = self
             .active
@@ -74,6 +90,17 @@ impl SyncCoordinator {
 
     pub fn try_acquire_sync(&self) -> Result<OperationPermit, &'static str> {
         self.try_acquire_sync_kind(ActiveOperation::ForegroundSync)
+    }
+
+    /// Notification-driven acquisition for automatic work. Unlike a fixed
+    /// retry loop, contention cannot make the refresh disappear.
+    pub async fn acquire_sync(&self) -> OperationPermit {
+        loop {
+            self.wait_until_idle().await;
+            if let Ok(permit) = self.try_acquire_sync() {
+                return permit;
+            }
+        }
     }
 
     /// Atomically reserves the coordinator before a background task is spawned.
@@ -120,6 +147,7 @@ impl SyncCoordinator {
         *active = operation;
         Ok(OperationPermit {
             active: Arc::clone(&self.active),
+            idle: Arc::clone(&self.idle),
         })
     }
 }
@@ -145,6 +173,8 @@ impl Drop for OperationPermit {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *active = ActiveOperation::Idle;
+        drop(active);
+        self.idle.notify_waiters();
     }
 }
 
@@ -259,5 +289,24 @@ mod tests {
         })
         .is_err());
         assert!(coordinator.try_acquire_query_session().is_ok());
+    }
+
+    #[tokio::test]
+    async fn idle_waiter_is_notified_when_the_active_permit_is_released() {
+        let coordinator = SyncCoordinator::default();
+        let permit = coordinator.try_acquire_query_session().unwrap();
+        let waiter = {
+            let coordinator = coordinator.clone();
+            tokio::spawn(async move { coordinator.wait_until_idle().await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+
+        drop(permit);
+
+        tokio::time::timeout(std::time::Duration::from_millis(100), waiter)
+            .await
+            .expect("permit release should wake queued automatic update")
+            .unwrap();
     }
 }

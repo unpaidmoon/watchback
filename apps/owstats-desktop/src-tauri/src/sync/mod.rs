@@ -77,10 +77,13 @@ use client::*;
 use fetch::*;
 use payload::*;
 
-pub use background_worker::{run_background_job_once, BackgroundRunSummary};
+pub use background_worker::{
+    run_background_job_once, run_background_job_once_observed, BackgroundRunSummary,
+};
 pub use facade::{
     dump_season_json, dump_season_json_with_base_url,
-    quick_list_update_with_credentials_and_target_paths_base_url, sync_season,
+    quick_list_update_with_credentials_and_target_paths_base_url,
+    quick_list_update_with_credentials_and_target_paths_base_url_observed, sync_season,
     sync_season_with_base_url, sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,

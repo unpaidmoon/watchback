@@ -1,7 +1,7 @@
 use crate::app_paths::AccountPaths;
 use crate::dashen_client::DashenCredentials;
 use crate::season_fetch::FullSeasonRequest;
-use crate::sync::{run_background_job_once, SeasonSyncStore};
+use crate::sync::{run_background_job_once_observed, SeasonSyncStore};
 use crate::OwDatabase;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -256,7 +256,14 @@ impl BackgroundSeasonSyncManager {
             }
         };
         let result = loop {
-            let result = run_background_job_once(&store, &request, &paths.seasons()).await;
+            let result = run_background_job_once_observed(
+                &store,
+                &request,
+                &paths.seasons(),
+                |batch| emit_revision(events, key, &store, "list", batch.new_matches, 0),
+                |batch| emit_revision(events, key, &store, "detail", 0, batch.failed_details),
+            )
+            .await;
             match &result {
                 Ok(summary) if summary.snapshot_stale => {
                     emit(
@@ -275,28 +282,6 @@ impl BackgroundSeasonSyncManager {
         };
         match result {
             Ok(summary) => {
-                if summary.new_list_matches > 0 {
-                    emit(
-                        events,
-                        "season-list-updated",
-                        key,
-                        "continuePages",
-                        "running",
-                        summary.new_list_matches,
-                        summary.details_written + summary.failed_details,
-                    );
-                }
-                if summary.details_written > 0 {
-                    emit(
-                        events,
-                        "season-detail-updated",
-                        key,
-                        "fetchDetails",
-                        "running",
-                        0,
-                        summary.failed_details,
-                    );
-                }
                 let persisted_status = store.season_status(key.season).ok();
                 if summary.failed_details > 0 {
                     emit(
@@ -469,6 +454,44 @@ fn emit(
         pending_details,
     }) {
         events(event, payload);
+    }
+}
+
+fn emit_revision(
+    events: Option<&BackgroundEventSink>,
+    key: &AccountSeasonKey,
+    store: &SeasonSyncStore,
+    phase: &str,
+    new_matches: usize,
+    failed_details: usize,
+) {
+    let Some(events) = events else {
+        return;
+    };
+    let Ok(revision) = crate::live_season_update::season_revision(store.database(), key.season)
+    else {
+        return;
+    };
+    let pending_details = store
+        .season_status(key.season)
+        .map(|status| status.pending_details)
+        .unwrap_or(failed_details);
+    let payload = crate::SeasonDataRevisionEvent {
+        account_scope: key.account_scope.clone(),
+        season: key.season,
+        revision,
+        phase: phase.to_string(),
+        new_matches,
+        pending_details,
+        status: if failed_details > 0 {
+            "partialFailure"
+        } else {
+            "running"
+        }
+        .to_string(),
+    };
+    if let Ok(payload) = serde_json::to_value(payload) {
+        events("season-data-revision", payload);
     }
 }
 

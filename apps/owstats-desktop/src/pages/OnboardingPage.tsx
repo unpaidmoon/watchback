@@ -48,8 +48,7 @@ import { DataFact, formatTimestamp } from "../features/command-center/SeasonHeal
 import { resolveCommandCenterSeason, SeasonSyncWorkbench } from "../features/command-center/SeasonSyncWorkbench";
 import { formatSyncNotice, hasDesktopBackend, productErrorMessage, readableSyncProgress } from "../shared/phase6Shell";
 import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFrontendCaches";
-import { clearMatchesPageCache, clearMatchesPageCacheForSeason } from "../shared/matchesPageCache";
-import { isCurrentSeasonEvent, quickListRefreshScope } from "../shared/seasonSyncEvents";
+import { isCurrentSeasonEvent } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerGameAction, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
 
@@ -187,8 +186,6 @@ export function OnboardingPage() {
     });
     for (const eventName of [
       "season-background-progress",
-      "season-list-updated",
-      "season-detail-updated",
       "season-background-completed",
     ]) {
       void listen<SeasonBackgroundEvent>(eventName, (event) => {
@@ -204,10 +201,6 @@ export function OnboardingPage() {
           updatedAt: new Date().toISOString(),
         };
         setBackgroundStatuses((current) => ({ ...current, [event.payload.season]: nextStatus }));
-        if (eventName === "season-list-updated") {
-          clearMatchesPageCacheForSeason(event.payload.accountScope, event.payload.season);
-          scheduleSeasonStatusRefresh(event.payload.season);
-        }
       }).then((handler) => {
         if (disposed) {
           handler();
@@ -501,13 +494,10 @@ export function OnboardingPage() {
     setSyncProgress(null);
     try {
       const summary = await syncSeason(season, mode);
-      const refreshScope = quickListRefreshScope(accountStatus?.activeAccountId, summary);
       if (summary.kind === "full") {
-        clearMatchesPageCache();
         await loadDashboard();
-      } else if (refreshScope) {
-        clearMatchesPageCacheForSeason(refreshScope.accountScope, refreshScope.season);
-        scheduleSeasonStatusRefresh(refreshScope.season);
+      } else if (summary.dataChanged) {
+        scheduleSeasonStatusRefresh(summary.season);
       }
       if (summary.kind === "quickList") {
         setBackgroundStatuses((current) => ({

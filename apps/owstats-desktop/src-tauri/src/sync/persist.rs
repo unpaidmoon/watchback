@@ -362,6 +362,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db = OwDatabase::new(temp.path().join("owstats.sqlite3"));
         seed_old_error(&db, "recovered");
+        db.connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO season_sync_state(season, season_revision, updated_at) VALUES(23, 7, 'before')",
+                [],
+            )
+            .unwrap();
 
         let summary = sync_import_incremental_parts(
             &db,
@@ -397,6 +404,14 @@ mod tests {
         assert_eq!(season_errors_count, 0);
         assert_eq!(summary.failed_details, 0);
         assert!(summary.latest_errors.is_empty());
+        let revision: i64 = conn
+            .query_row(
+                "SELECT season_revision FROM season_sync_state WHERE season=23",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revision, 8);
     }
 
     #[test]

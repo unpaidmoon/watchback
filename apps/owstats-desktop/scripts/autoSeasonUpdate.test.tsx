@@ -38,7 +38,9 @@ assert.match(onboardingSource, /saveUserSettings\(\{ \.\.\.previous, autoUpdateS
 assert.match(onboardingSource, /setUserSettings\(previous\)/, "failed saves restore the previous switch value");
 assert.match(backendSource, /SELECT MAX\(season\) FROM matches/);
 assert.match(backendSource, /quick_list_update_with_credentials_and_target_paths_base_url/);
-assert.match(backendSource, /active_job_count\(season\)/);
+assert.match(backendSource, /wait_for_idle\(account\.account_id\(\)\.as_str\(\), season\)/, "automatic refresh waits on a background completion notification");
+assert.match(backendSource, /operation_coordinator\.acquire_sync\(\)\.await/, "automatic refresh waits until it atomically acquires the sync permit");
+assert.doesNotMatch(backendSource, /sleep\(|for _attempt in 0\.\.3/, "automatic refresh does not poll or stop after a fixed retry count");
 assert.match(commandsSource, /switch_account[\s\S]*?auto_season_update::spawn/);
 assert.match(libSource, /\.setup\([\s\S]*?auto_season_update::spawn/);
 assert.match(commandCenterStyles, /\.seasonAutoUpdateToggle input\s*\{[\s\S]*?min-block-size:\s*20px !important;/, "switch track overrides the global 44px input minimum");

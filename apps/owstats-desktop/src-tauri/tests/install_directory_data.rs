@@ -2691,6 +2691,39 @@ fn delete_binary_removes_only_an_ordinary_authorized_data_tree() {
 
 #[cfg(windows)]
 #[test]
+fn delete_binary_retries_while_a_data_file_is_finishing_shutdown() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = copied_migration_binary(&temp);
+    let install = executable.parent().unwrap();
+    let data = install.join("data");
+    let database = data.join("owstats.sqlite3");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(&database, b"database").unwrap();
+
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&database)
+        .unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        drop(lock);
+    });
+
+    let output = Command::new(&executable)
+        .arg("--delete-install-data")
+        .arg(&data)
+        .output_with_deadline();
+    release.join().unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    assert!(!data.exists());
+}
+
+#[cfg(windows)]
+#[test]
 fn delete_binary_rejects_root_and_descendant_junctions_without_external_writes() {
     for descendant in [false, true] {
         let temp = tempfile::tempdir().unwrap();

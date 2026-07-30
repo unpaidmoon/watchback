@@ -9,7 +9,7 @@ use crate::PublishedInstallData;
 use crate::{
     get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
     get_match_detail, list_filter_options, list_matches,
-    quick_list_update_with_credentials_and_target_paths_base_url,
+    quick_list_update_with_credentials_and_target_paths_base_url_observed,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
     AccountLoginResult, CareerAchievement, ClearPlayerTargetResult, CredentialLoginCancelResult,
@@ -92,7 +92,18 @@ pub fn list_match_timeline_page(
     limit: usize,
 ) -> Result<MatchPage, String> {
     let account = active_account(&accounts)?;
-    crate::list_matches_page(&account.database(), filters, cursor, limit).map_err(to_message)
+    let database = account.database();
+    let season = filters.season;
+    // Read the token before the rows. If a writer commits between these reads,
+    // the page can contain data newer than its token (safe); it can never claim
+    // a newer token for an older snapshot and suppress a required refresh.
+    let revision_token =
+        crate::live_season_update::revision_token(&database, season).map_err(to_message)?;
+    let mut page =
+        crate::list_matches_page(&database, filters, cursor, limit).map_err(to_message)?;
+    page.revision_token = revision_token;
+    page.account_scope = account.account_id().as_str().to_string();
+    Ok(page)
 }
 
 #[tauri::command]
@@ -490,8 +501,13 @@ pub fn switch_account(
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
+    live_updates: State<'_, crate::live_season_update::LiveSeasonUpdateManager>,
     account_id: String,
 ) -> Result<crate::AccountManagerStatus, String> {
+    let previous_account = accounts
+        .active_snapshot()
+        .ok()
+        .map(|account| account.account_id().as_str().to_string());
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
@@ -500,6 +516,9 @@ pub fn switch_account(
     let status = accounts
         .switch_active(&account_id, &chrono::Utc::now().to_rfc3339())
         .map_err(to_message)?;
+    if let Some(previous_account) = previous_account.filter(|id| id != account_id.as_str()) {
+        live_updates.cancel_queued_account(&previous_account);
+    }
     drop(_permit);
     crate::auto_season_update::spawn(
         app,
@@ -507,6 +526,7 @@ pub fn switch_account(
         operation_coordinator.inner().clone(),
         login_target_coordinator.inner().clone(),
         background_sync.inner().clone(),
+        live_updates.inner().clone(),
     );
     Ok(status)
 }
@@ -678,10 +698,8 @@ pub async fn sync_season(
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
+    live_updates: State<'_, crate::live_season_update::LiveSeasonUpdateManager>,
 ) -> Result<SeasonSyncResult, String> {
-    let _permit = operation_coordinator
-        .try_acquire_sync()
-        .map_err(str::to_string)?;
     let account = active_account(&accounts)?;
     let root = account.paths().seasons();
     let credential_path = account.paths().credentials();
@@ -703,12 +721,35 @@ pub async fn sync_season(
     let emit_app = app.clone();
     match request.mode {
         crate::SyncMode::QuickUpdate => {
-            let summary = quick_list_update_with_credentials_and_target_paths_base_url(
+            let live_key = crate::live_season_update::LiveSeasonKey::new(
+                account.account_id().as_str(),
+                request.season,
+            );
+            let _live_run = live_updates
+                .admit(live_key.clone())
+                .await
+                .ok_or_else(|| "该账号和赛季已有更新在排队，请等待完成".to_string())?;
+            operation_coordinator.wait_until_idle().await;
+            let _permit = operation_coordinator
+                .try_acquire_sync()
+                .map_err(str::to_string)?;
+            let revision_db = db.clone();
+            let revision_app = app.clone();
+            let event_manager = live_updates.inner().clone();
+            let event_key = live_key.clone();
+            let summary = quick_list_update_with_credentials_and_target_paths_base_url_observed(
                 &db,
                 &credential_path,
                 &target_path,
                 request.season,
                 "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
+                move |commit| {
+                    if let Ok(Some(event)) =
+                        event_manager.list_commit_event(&revision_db, &event_key, commit)
+                    {
+                        let _ = revision_app.emit("season-data-revision", event);
+                    }
+                },
             )
             .await;
             let summary = accounts
@@ -728,6 +769,9 @@ pub async fn sync_season(
             Ok(SeasonSyncResult::QuickList(summary))
         }
         crate::SyncMode::FullFetch => {
+            let _permit = operation_coordinator
+                .try_acquire_sync()
+                .map_err(str::to_string)?;
             let result =
                 sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
                     &db,

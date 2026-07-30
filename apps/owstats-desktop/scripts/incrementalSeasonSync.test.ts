@@ -171,9 +171,11 @@ assert.match(
 );
 assert.match(
   onboardingSource,
-  /summary\.kind === "full"[\s\S]*?clearMatchesPageCache\(\);\s*await loadDashboard\(\);[\s\S]*?else if \(refreshScope\)[\s\S]*?clearMatchesPageCacheForSeason\(refreshScope\.accountScope, refreshScope\.season\);/s,
-  "full fetch keeps the full refresh while quick update targets one account and season",
+  /summary\.kind === "full"[\s\S]*?await loadDashboard\(\);[\s\S]*?else if \(summary\.dataChanged\)[\s\S]*?scheduleSeasonStatusRefresh\(summary\.season\);/s,
+  "full fetch refreshes dashboard while the global live timeline owns match cache invalidation",
 );
+assert.doesNotMatch(onboardingSource, /clearMatchesPageCache/, "command center does not own match-list cache invalidation");
+assert.doesNotMatch(onboardingSource, /"season-list-updated"|"season-detail-updated"/, "Onboarding no longer owns match timeline update listeners");
 assert.match(onboardingSource, /onFullFetch=\{\(season\) => void runSeasonSync\(season, "fullFetch"\)\}/, "full-fetch control passes the explicit mode");
 assert.match(onboardingSource, /onQuickUpdate=\{\(season\) => void runSeasonSync\(season, "quickUpdate"\)\}/, "row update passes the explicit quick mode");
 assert.match(workbenchSource, /backgroundBusy/, "season rows expose independent background processing state");

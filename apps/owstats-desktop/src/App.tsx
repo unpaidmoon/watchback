@@ -10,6 +10,7 @@ import { useUnsavedChangesGuard } from "./shared/UnsavedChangesGuard";
 import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
 import { buildReviewHref, legacyReviewRedirectHref, parsePositiveSeasonParam } from "./features/review/reviewNavigation";
+import { LiveMatchTimelineRoot } from "./features/matches/liveMatchTimelineEventAdapter";
 
 const watchbackMarkUrl = new URL("../assets/brand/watchback/watchback-mark.svg", import.meta.url).href;
 const FriendDetailPage = lazy(() => import("./pages/FriendDetailPage").then((module) => ({ default: module.FriendDetailPage })));
@@ -169,6 +170,7 @@ export function App() {
   return (
     <>
       <RouteFocusManager />
+      <LiveMatchTimelineRoot />
       <main className="appFrame appShell phase6ProductShell">
         <header className="appTopBar phase6ProductTopBar">
           <div className="appBrand phase6ProductBrand">

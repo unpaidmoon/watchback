@@ -1,5 +1,7 @@
 use crate::db::OwDatabase;
-use crate::match_evaluation::refresh_match_evaluations_conn;
+use crate::match_evaluation::{
+    refresh_match_evaluations_conn, refresh_match_evaluations_for_ids_conn,
+};
 use crate::models::ImportSummary;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -337,7 +339,20 @@ fn import_payload_value_with_lookups(
         [],
         |row| row.get(0),
     )?;
-    let _ = refresh_match_evaluations_conn(&tx);
+    match &behavior {
+        ImportBehavior::FullSnapshot => {
+            refresh_match_evaluations_conn(&tx)?;
+        }
+        ImportBehavior::Incremental {
+            attempted_detail_ids,
+        } => {
+            refresh_match_evaluations_for_ids_conn(&tx, attempted_detail_ids)?;
+            tx.execute(
+                "UPDATE season_sync_state SET season_revision=season_revision+1, updated_at=?2 WHERE season=?1",
+                params![season, now],
+            )?;
+        }
+    }
     tx.commit()?;
 
     let summary = ImportSummary {

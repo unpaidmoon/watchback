@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub(super) struct BackgroundPageCommit {
     pub new_matches: usize,
     pub boundary_reached: bool,
+    pub data_changed: bool,
 }
 
 pub fn commit_quick_list_probe(
@@ -26,6 +27,7 @@ pub fn commit_quick_list_probe(
 
     let mut results = Vec::with_capacity(probe.modes.len());
     let mut new_match_ids = Vec::new();
+    let mut rows_changed = false;
     let mut mode_work = Vec::new();
     let mut partial_failure = false;
 
@@ -37,12 +39,13 @@ pub fn commit_quick_list_probe(
             mode,
             &mut new_match_ids,
             &mut mode_work,
+            &mut rows_changed,
         )?;
         partial_failure |= matches!(result.outcome.as_str(), "failed" | "unsafe");
         results.push(result);
     }
 
-    let data_changed = !new_match_ids.is_empty();
+    let data_changed = rows_changed;
     if data_changed {
         tx.execute(
             r#"
@@ -107,6 +110,7 @@ fn commit_mode_page_one(
     mode: QuickListModeProbe,
     new_match_ids: &mut Vec<String>,
     mode_work: &mut Vec<super::ModeWork>,
+    rows_changed: &mut bool,
 ) -> Result<QuickModeResult> {
     let Some(payload) = mode.payload else {
         mode_work.push(super::ModeWork {
@@ -179,7 +183,7 @@ fn commit_mode_page_one(
             new_match_ids.push(match_id.clone());
             mode_new += 1;
         }
-        upsert_list_entry(tx, season, &mode.match_kind, entry, now)?;
+        *rows_changed |= upsert_list_entry(tx, season, &mode.match_kind, entry, now)?;
     }
 
     let (outcome, stop_reason, empty_confirmed) = match decision {
@@ -291,11 +295,46 @@ fn upsert_list_entry(
     match_kind: &str,
     entry: &Value,
     now: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let match_id = crate::importer::string_field(entry, "matchId").unwrap_or_default();
     let mode = crate::importer::normalized_game_mode(entry);
+    let bucket = crate::importer::bucket_for(&mode, match_kind);
+    let result = crate::importer::result_label(crate::importer::int_field(entry, "matchRet"));
     let map_guid = crate::importer::string_field(entry, "mapGuid").unwrap_or_default();
     let hero_guid = crate::importer::string_field(entry, "heroGuid").unwrap_or_default();
+    let begin_ts =
+        crate::importer::normalize_timestamp(crate::importer::int_field(entry, "beginTs"));
+    let incoming_display = serde_json::json!([
+        match_kind,
+        result,
+        map_guid,
+        hero_guid,
+        begin_ts,
+        crate::importer::int_field(entry, "teamScore"),
+        crate::importer::int_field(entry, "opponentScore"),
+        crate::importer::int_field(entry, "kill"),
+        crate::importer::int_field(entry, "assist"),
+        crate::importer::int_field(entry, "death"),
+        crate::importer::int_field(entry, "heroDamage"),
+        crate::importer::int_field(entry, "cure"),
+        crate::importer::int_field(entry, "resistDamage"),
+        crate::importer::int_field(entry, "totalWorth")
+    ]);
+    let previous = tx
+        .query_row(
+            r#"SELECT match_kind,result,map_guid,hero_guid,begin_ts,
+                      team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth
+               FROM matches WHERE match_id=?1"#,
+            [&match_id],
+            |row| Ok(serde_json::json!([
+                row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?, row.get::<_, i64>(7)?, row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?, row.get::<_, i64>(10)?, row.get::<_, i64>(11)?,
+                row.get::<_, i64>(12)?, row.get::<_, i64>(13)?
+            ])),
+        )
+        .optional()?;
     tx.execute(
         r#"
         INSERT INTO matches (
@@ -337,13 +376,13 @@ fn upsert_list_entry(
         params![
             match_id,
             season,
-            crate::importer::bucket_for(&mode, match_kind),
+            bucket,
             mode,
             match_kind,
-            crate::importer::result_label(crate::importer::int_field(entry, "matchRet")),
+            result,
             map_guid,
             hero_guid,
-            crate::importer::normalize_timestamp(crate::importer::int_field(entry, "beginTs")),
+            begin_ts,
             crate::importer::int_field(entry, "teamScore"),
             crate::importer::int_field(entry, "opponentScore"),
             crate::importer::int_field(entry, "kill"),
@@ -357,7 +396,7 @@ fn upsert_list_entry(
             now
         ],
     )?;
-    Ok(())
+    Ok(previous.as_ref() != Some(&incoming_display))
 }
 
 fn enqueue_background_job(
@@ -465,6 +504,7 @@ pub(super) fn commit_background_page(
         entry["_dashenSeason"] = Value::Number(job.season.into());
     }
     let mut new_ids = Vec::new();
+    let mut data_changed = false;
     let mut latest = None;
     for entry in &entries {
         let Some(match_id) = crate::importer::string_field(entry, "matchId") else {
@@ -476,9 +516,9 @@ pub(super) fn commit_background_page(
         if !known_ids.contains(&match_id) {
             new_ids.push(match_id.clone());
         }
-        upsert_list_entry(&tx, job.season, &mode.match_kind, entry, &now)?;
+        data_changed |= upsert_list_entry(&tx, job.season, &mode.match_kind, entry, &now)?;
     }
-    if !new_ids.is_empty() {
+    if data_changed {
         tx.execute(
             "UPDATE season_sync_state SET season_revision=season_revision+1, updated_at=?2 WHERE season=?1",
             params![job.season, now],
@@ -573,5 +613,6 @@ pub(super) fn commit_background_page(
     Ok(BackgroundPageCommit {
         new_matches: new_ids.len(),
         boundary_reached,
+        data_changed,
     })
 }

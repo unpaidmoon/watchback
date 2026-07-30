@@ -1,7 +1,7 @@
 use crate::account_context::AccountContextManager;
 use crate::background_sync::BackgroundSeasonSyncManager;
+use crate::live_season_update::{LiveSeasonKey, LiveSeasonUpdateManager};
 use crate::login_target::LoginTargetCoordinator;
-use crate::sync::SeasonSyncStore;
 use crate::sync_coordinator::SyncCoordinator;
 use crate::OwDatabase;
 use anyhow::Result;
@@ -9,14 +9,22 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 const DASHEN_CUSTOMER_BASE: &str = "https://datamsapi.ds.163.com/v1/a19ld5tool/customer";
-
 pub(crate) fn spawn(
     app: AppHandle,
     accounts: AccountContextManager,
     operation_coordinator: SyncCoordinator,
     login_target_coordinator: LoginTargetCoordinator,
     background_sync: BackgroundSeasonSyncManager,
+    live_updates: LiveSeasonUpdateManager,
 ) {
+    // Pin the trigger to the account that was active when it was requested.
+    // A later account switch creates another keyed request instead of replacing
+    // or retargeting this one.
+    let Ok(triggered_account) = accounts.active_snapshot() else {
+        return;
+    };
+    let triggered_account_id = triggered_account.account_id().clone();
+    drop(triggered_account);
     tauri::async_runtime::spawn(async move {
         let _ = run_once(
             &app,
@@ -24,6 +32,8 @@ pub(crate) fn spawn(
             &operation_coordinator,
             &login_target_coordinator,
             &background_sync,
+            &live_updates,
+            &triggered_account_id,
         )
         .await;
     });
@@ -35,11 +45,9 @@ async fn run_once(
     operation_coordinator: &SyncCoordinator,
     login_target_coordinator: &LoginTargetCoordinator,
     background_sync: &BackgroundSeasonSyncManager,
+    live_updates: &LiveSeasonUpdateManager,
+    triggered_account_id: &crate::account_store::AccountId,
 ) -> Result<bool> {
-    let _permit = match operation_coordinator.try_acquire_sync() {
-        Ok(permit) => permit,
-        Err(_) => return Ok(false),
-    };
     let settings =
         crate::settings::get_user_settings_for_path(&accounts.shared_paths().user_settings())?;
     if !settings.auto_update_season {
@@ -47,25 +55,33 @@ async fn run_once(
     }
 
     let account_status = accounts.status()?;
-    let Some(active_account_id) = account_status.active_account_id.as_deref() else {
-        return Ok(false);
-    };
     let credential_ready = account_status.accounts.iter().any(|account| {
-        account.account_id == active_account_id && account.credential_state == "ready"
+        account.account_id == triggered_account_id.as_str() && account.credential_state == "ready"
     });
     if !credential_ready {
         return Ok(false);
     }
 
-    let account = accounts.active_snapshot()?;
+    let account = accounts.snapshot_for(triggered_account_id)?;
     let db = account.database();
-    let Some(season) = latest_local_season(&db)? else {
+    let local_season = latest_local_season(&db)?;
+    // Dashen currently exposes no independently verified current-season metadata endpoint.
+    // Load the versioned packaged resource at runtime; if it is missing, malformed, or stale,
+    // the resolver safely limits automatic updates to the newest local season.
+    let runtime_config = crate::runtime_config::load_packaged_current_season_config(app).ok();
+    let resolution =
+        crate::runtime_config::resolve_current_season(None, runtime_config, local_season);
+    let Some(season) = resolution.season else {
         return Ok(false);
     };
-    let store = SeasonSyncStore::new(db.clone());
-    if store.active_job_count(season)? > 0 {
+    let live_key = LiveSeasonKey::new(account.account_id().as_str(), season);
+    let Some(_live_run) = live_updates.admit(live_key.clone()).await else {
         return Ok(false);
-    }
+    };
+    background_sync
+        .wait_for_idle(account.account_id().as_str(), season)
+        .await;
+    let _permit = operation_coordinator.acquire_sync().await;
 
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())?;
     let target_path = account.paths().player_target();
@@ -80,12 +96,23 @@ async fn run_once(
         return Ok(false);
     }
 
-    let update = crate::quick_list_update_with_credentials_and_target_paths_base_url(
+    let revision_db = db.clone();
+    let revision_app = app.clone();
+    let event_manager = live_updates.clone();
+    let event_key = live_key.clone();
+    let update = crate::quick_list_update_with_credentials_and_target_paths_base_url_observed(
         &db,
         &account.paths().credentials(),
         &target_path,
         season,
         DASHEN_CUSTOMER_BASE,
+        move |commit| {
+            if let Ok(Some(event)) =
+                event_manager.list_commit_event(&revision_db, &event_key, commit)
+            {
+                let _ = revision_app.emit("season-data-revision", event);
+            }
+        },
     )
     .await;
     if let Err(error) = update {

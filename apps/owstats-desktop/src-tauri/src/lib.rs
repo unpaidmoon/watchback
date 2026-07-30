@@ -25,6 +25,7 @@ mod db;
 pub mod deepseek_key;
 mod importer;
 pub mod install_data_migration;
+mod live_season_update;
 pub mod login_flow;
 pub mod login_target;
 mod match_evaluation;
@@ -37,6 +38,7 @@ pub mod qr_login;
 mod queries;
 pub mod ranking;
 mod review;
+pub mod runtime_config;
 pub mod season_fetch;
 mod settings;
 mod sync;
@@ -77,7 +79,8 @@ pub fn initialize_log_file(paths: &app_paths::SharedAppPaths) -> anyhow::Result<
 pub use sync::{
     build_page_diagnostics, classify_quick_page, commit_quick_list_probe, dump_season_json,
     dump_season_json_with_base_url, load_season_sync_inventory,
-    quick_list_update_with_credentials_and_target_paths_base_url, run_background_job_once,
+    quick_list_update_with_credentials_and_target_paths_base_url,
+    quick_list_update_with_credentials_and_target_paths_base_url_observed, run_background_job_once,
     select_detail_entries, sync_import_parts, sync_season, sync_season_with_base_url,
     sync_season_with_credentials_and_target_paths_base_url,
     sync_season_with_credentials_and_target_paths_output_dir_base_url,
@@ -1039,14 +1042,17 @@ pub fn run() -> anyhow::Result<()> {
     let sync_coordinator = sync_coordinator::SyncCoordinator::default();
     let background_manager =
         background_sync::BackgroundSeasonSyncManager::new(sync_coordinator.clone());
+    let live_update_manager = live_season_update::LiveSeasonUpdateManager::default();
     let player_query_service = player_query::PlayerQueryService::new(sync_coordinator.clone());
     let startup_sync_coordinator = sync_coordinator.clone();
     let startup_background_manager = background_manager.clone();
+    let startup_live_update_manager = live_update_manager.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(published_data)
         .manage(background_manager)
+        .manage(live_update_manager)
         .manage(player_query_service)
         .manage(login_target::LoginTargetCoordinator::default())
         .setup(move |app| {
@@ -1099,6 +1105,7 @@ pub fn run() -> anyhow::Result<()> {
                     .inner()
                     .clone(),
                 startup_background_manager.clone(),
+                startup_live_update_manager.clone(),
             );
             Ok(())
         })

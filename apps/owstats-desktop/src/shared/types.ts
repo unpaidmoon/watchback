@@ -323,6 +323,8 @@ export type MatchPage = {
   matches: MatchSummary[];
   nextCursor: MatchCursor | null;
   total: number | null;
+  revisionToken: string;
+  accountScope: string;
 };
 
 export type PlayerRow = {

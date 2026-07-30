@@ -240,6 +240,8 @@ pub struct MatchPage {
     pub matches: Vec<MatchSummary>,
     pub next_cursor: Option<MatchCursor>,
     pub total: Option<usize>,
+    pub revision_token: String,
+    pub account_scope: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -930,6 +932,18 @@ pub struct AccountLoginResult {
     pub should_offer_switch: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonDataRevisionEvent {
+    pub account_scope: String,
+    pub season: i64,
+    pub revision: i64,
+    pub phase: String,
+    pub new_matches: usize,
+    pub pending_details: usize,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

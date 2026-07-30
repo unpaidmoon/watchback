@@ -297,7 +297,8 @@ fn canonical_mode_history_supplies_quick_watermark_without_background_scan() -> 
             "normal",
             "leisure",
             serde_json::json!({"code":0,"data":{"matchList":[
-                {"matchId":"known-leisure","beginTs":1_780_000_000,"gameMode":"leisure","matchRet":1}
+                {"matchId":"known-leisure","beginTs":1_780_000_000,"gameMode":"leisure","matchRet":1,
+                 "mapGuid":"map","heroGuid":"hero","teamScore":1,"opponentScore":0}
             ]}}),
         )],
     };
@@ -308,6 +309,49 @@ fn canonical_mode_history_supplies_quick_watermark_without_background_scan() -> 
     assert_eq!(summary.background_status, "idle");
     assert_eq!(store_active_jobs(&db.connect()?, 23)?, 0);
     assert_eq!(summary.modes[0].outcome, "unchangedBoundary");
+    Ok(())
+}
+
+#[test]
+fn foreground_commit_revises_an_existing_row_when_visible_fields_change() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let db = OwDatabase::new(temp.path().join("existing-row-change.sqlite3"));
+    db.initialize()?;
+    insert_match(
+        &db.connect()?,
+        "known",
+        22,
+        "normal",
+        "sport",
+        1_720_000_000,
+    )?;
+    let summary = commit_quick_list_probe(
+        &db,
+        QuickListProbe {
+            season: 22,
+            list_duration_ms: 0,
+            modes: vec![quick_mode(
+                "normal",
+                "sport",
+                serde_json::json!({"code":0,"data":{"matchList":[{
+                    "matchId":"known","beginTs":1_720_000_000,"gameMode":"sport",
+                    "matchRet":-1,"mapGuid":"map","heroGuid":"hero",
+                    "teamScore":1,"opponentScore":0
+                }]}}),
+            )],
+        },
+    )?;
+
+    assert_eq!(summary.new_list_matches, 0);
+    assert!(summary.data_changed);
+    assert_eq!(
+        db.connect()?.query_row(
+            "SELECT season_revision FROM season_sync_state WHERE season=22",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?,
+        1
+    );
     Ok(())
 }
 

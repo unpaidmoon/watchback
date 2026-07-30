@@ -7,6 +7,25 @@ pub async fn quick_list_update_with_credentials_and_target_paths_base_url(
     season: i64,
     customer_base_url: &str,
 ) -> Result<crate::models::QuickListCommitSummary> {
+    quick_list_update_with_credentials_and_target_paths_base_url_observed(
+        db,
+        credential_path,
+        target_path,
+        season,
+        customer_base_url,
+        |_| {},
+    )
+    .await
+}
+
+pub async fn quick_list_update_with_credentials_and_target_paths_base_url_observed(
+    db: &OwDatabase,
+    credential_path: &Path,
+    target_path: &Path,
+    season: i64,
+    customer_base_url: &str,
+    mut on_commit: impl FnMut(&crate::models::QuickListCommitSummary),
+) -> Result<crate::models::QuickListCommitSummary> {
     let credentials = read_credentials(credential_path)?;
     let target = crate::player_target::read_player_target_for_path(target_path)?;
     if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
@@ -28,8 +47,39 @@ pub async fn quick_list_update_with_credentials_and_target_paths_base_url(
         detail_concurrency: 4,
         include_fight: true,
     };
-    let probe = crate::season_fetch::fetch_quick_list_pages(&request).await?;
-    super::commit_quick_list_probe(db, probe)
+    let mut commits = Vec::new();
+    crate::season_fetch::fetch_quick_list_pages_with_progress(&request, |mode| {
+        let commit = super::commit_quick_list_probe(
+            db,
+            crate::season_fetch::QuickListProbe {
+                season,
+                modes: vec![mode.clone()],
+                list_duration_ms: 0,
+            },
+        )?;
+        on_commit(&commit);
+        commits.push(commit);
+        Ok(())
+    })
+    .await?;
+    let checked_at = commits
+        .last()
+        .map_or_else(String::new, |c| c.checked_at.clone());
+    Ok(crate::models::QuickListCommitSummary {
+        season,
+        new_list_matches: commits.iter().map(|c| c.new_list_matches).sum(),
+        data_changed: commits.iter().any(|c| c.data_changed),
+        partial_failure: commits.iter().any(|c| c.partial_failure),
+        pending_details: commits.iter().map(|c| c.pending_details).sum(),
+        background_status: if commits.iter().any(|c| c.background_status == "queued") {
+            "queued"
+        } else {
+            "idle"
+        }
+        .to_string(),
+        checked_at,
+        modes: commits.into_iter().flat_map(|c| c.modes).collect(),
+    })
 }
 
 pub async fn sync_season(db: &OwDatabase, project_root: &Path, season: i64) -> Result<SyncSummary> {

@@ -26,6 +26,9 @@
   "bundle": {
     "active": true,
     "targets": "nsis",
+    "resources": {
+      "resources/current-season.json": "current-season.json"
+    },
     "icon": [
       "icons/icon.ico"
     ],

@@ -53,6 +53,13 @@ pub struct QuickListProbe {
 }
 
 pub async fn fetch_quick_list_pages(request: &FullSeasonRequest) -> Result<QuickListProbe> {
+    fetch_quick_list_pages_with_progress(request, |_| Ok(())).await
+}
+
+pub async fn fetch_quick_list_pages_with_progress(
+    request: &FullSeasonRequest,
+    mut on_mode: impl FnMut(&QuickListModeProbe) -> Result<()>,
+) -> Result<QuickListProbe> {
     if request.season <= 0 {
         return Err(anyhow!("season must be greater than 0"));
     }
@@ -108,12 +115,16 @@ pub async fn fetch_quick_list_pages(request: &FullSeasonRequest) -> Result<Quick
             }
         }
     }))
-    .buffer_unordered(5)
-    .collect::<Vec<_>>()
-    .await;
+    .buffer_unordered(5);
+    futures_util::pin_mut!(results);
+    let mut completed = Vec::with_capacity(5);
+    while let Some(mode) = results.next().await {
+        on_mode(&mode)?;
+        completed.push(mode);
+    }
     Ok(QuickListProbe {
         season: request.season,
-        modes: results,
+        modes: completed,
         list_duration_ms: started.elapsed().as_millis() as u64,
     })
 }

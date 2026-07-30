@@ -72,6 +72,30 @@ function createDeferred() {
 
 clearMatchesPageCache();
 
+updateMatchesPageCache({
+  accountScope: "account-a",
+  revisionToken: "23:4",
+  filters: { season: 23 },
+  loadedFilterKey: matchFiltersKey({ season: 23 }),
+  hasLoaded: true,
+});
+assert.equal(
+  canHydrateMatchesPageCache(getMatchesPageCache(), { season: 23 }, false, { accountScope: "account-a", revisionToken: "23:4" }),
+  true,
+  "cache hydrates only when account and revision contracts match",
+);
+assert.equal(
+  canHydrateMatchesPageCache(getMatchesPageCache(), { season: 23 }, false, { accountScope: "account-b", revisionToken: "23:4" }),
+  false,
+  "cache from another account cannot hydrate",
+);
+assert.equal(
+  canHydrateMatchesPageCache(getMatchesPageCache(), { season: 23 }, false, { accountScope: "account-a", revisionToken: "23:5" }),
+  false,
+  "an older revision snapshot cannot hydrate",
+);
+clearMatchesPageCache();
+
 const cachedFilters: MatchFilters = { hero: "ana", result: "win", dateFrom: "2026-06-01" };
 updateMatchesPageCache({ filters: cachedFilters, selectedMatchId: "cached-match", scrollTop: 420 });
 

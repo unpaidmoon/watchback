@@ -2819,7 +2819,7 @@ fn quick_scan_response(request_line: &str, scenario: QuickScanScenario) -> Strin
         .to_string();
     }
     format!(
-        r#"{{"code":0,"data":{{"matchList":[{{"matchId":"known-{mode}","beginTs":1700000000}}]}}}}"#
+        r#"{{"code":0,"data":{{"matchList":[{{"matchId":"known-{mode}","matchRet":1,"beginTs":1700000000}}]}}}}"#
     )
 }
 

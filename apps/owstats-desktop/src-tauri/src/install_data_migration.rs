@@ -24,6 +24,24 @@ pub(crate) const INSTALL_DATA_ROOT_MARKER: &str = ".watchback-data-root-v1";
 pub(crate) const INSTALL_DATA_ROOT_MARKER_CONTENTS: &[u8] = b"v1";
 pub(crate) const INSTALL_DATA_MIGRATION_MARKER: &str = ".install-data-migration-v1.json";
 const MAX_EXISTING_MARKER_BYTES: u64 = 4096;
+#[cfg(windows)]
+const DELETE_INSTALL_DATA_ATTEMPTS: usize = 51;
+#[cfg(windows)]
+const DELETE_INSTALL_DATA_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct DeleteSharingViolation;
+
+#[cfg(windows)]
+impl std::fmt::Display for DeleteSharingViolation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("安装数据文件仍被占用")
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for DeleteSharingViolation {}
 
 #[cfg(windows)]
 pub(crate) use windows_secure::InstallParentGuard;
@@ -79,7 +97,19 @@ pub(crate) fn prepare_install_data_in_install_parent(
 
 #[cfg(windows)]
 pub(crate) fn delete_install_data_in_install_parent(parent: &InstallParentGuard) -> Result<()> {
-    windows_secure::delete_install_data(parent)
+    for attempt in 0..DELETE_INSTALL_DATA_ATTEMPTS {
+        match windows_secure::delete_install_data(parent) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if error.downcast_ref::<DeleteSharingViolation>().is_some()
+                    && attempt + 1 < DELETE_INSTALL_DATA_ATTEMPTS =>
+            {
+                std::thread::sleep(DELETE_INSTALL_DATA_RETRY_DELAY);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the bounded delete retry loop always returns")
 }
 
 #[cfg(windows)]
@@ -702,7 +732,8 @@ mod windows_secure {
             Foundation::{
                 CloseHandle, LocalFree, ERROR_ACCESS_DENIED, ERROR_INVALID_HANDLE,
                 ERROR_INVALID_PARAMETER, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE,
-                STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND, UNICODE_STRING,
+                STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND,
+                STATUS_SHARING_VIOLATION, UNICODE_STRING,
             },
             Security::{
                 Authorization::{
@@ -733,9 +764,10 @@ mod windows_secure {
     };
 
     use super::{
-        InstallDataMigrationOutcome, MigrationMarker, WindowsCleanupLimits, WindowsCopyLimits,
-        WindowsMigrationHookPoint, WindowsValidationLimits, INSTALL_DATA_MIGRATION_MARKER,
-        INSTALL_DATA_ROOT_MARKER, INSTALL_DATA_ROOT_MARKER_CONTENTS, MAX_EXISTING_MARKER_BYTES,
+        DeleteSharingViolation, InstallDataMigrationOutcome, MigrationMarker, WindowsCleanupLimits,
+        WindowsCopyLimits, WindowsMigrationHookPoint, WindowsValidationLimits,
+        INSTALL_DATA_MIGRATION_MARKER, INSTALL_DATA_ROOT_MARKER, INSTALL_DATA_ROOT_MARKER_CONTENTS,
+        MAX_EXISTING_MARKER_BYTES,
     };
     use crate::account_store::{
         validate_manifest, validate_registry, AccountManifest, AccountRegistry,
@@ -2257,6 +2289,9 @@ mod windows_secure {
             }
             if result == STATUS_OBJECT_NAME_NOT_FOUND || result == STATUS_OBJECT_PATH_NOT_FOUND {
                 return Ok(None);
+            }
+            if result == STATUS_SHARING_VIOLATION {
+                return Err(DeleteSharingViolation.into());
             }
             return Err(anyhow!("无法安全打开迁移文件"));
         }

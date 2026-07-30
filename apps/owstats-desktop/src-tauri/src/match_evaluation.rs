@@ -1,9 +1,10 @@
 use crate::db::OwDatabase;
 use anyhow::Result;
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub const PHASE5_SCORING_RULE_VERSION: i64 = 1;
 
@@ -392,4 +393,124 @@ fn upsert_evaluation(conn: &Connection, evaluation: &MatchEvaluation) -> Result<
         ],
     )?;
     Ok(())
+}
+
+/// Recomputes only the explicitly affected matches. Missing or no-longer
+/// eligible matches have stale evaluations removed as part of the same call.
+pub(crate) fn refresh_match_evaluations_for_ids_conn(
+    conn: &Connection,
+    match_ids: &HashSet<String>,
+) -> Result<()> {
+    let mut statement = conn.prepare(
+        r#"
+        SELECT m.match_id, m.game_mode, m.result, d.raw_detail_json
+        FROM matches m
+        LEFT JOIN match_details d ON d.match_id=m.match_id
+        WHERE m.match_id=?1
+          AND ((m.bucket='preset' AND m.match_kind='normal')
+            OR (m.match_kind='fight' AND m.game_mode IN ('SportFight', 'LeisureFight', 'QuickFight')))
+        "#,
+    )?;
+    for match_id in match_ids {
+        let row = statement
+            .query_row([match_id], |row| {
+                Ok(MatchRow {
+                    match_id: row.get(0)?,
+                    mode: row.get(1)?,
+                    result: row.get(2)?,
+                    raw_detail_json: row.get(3)?,
+                })
+            })
+            .optional()?;
+        let Some(row) = row else {
+            conn.execute(
+                "DELETE FROM match_evaluations WHERE match_id=?1",
+                [match_id],
+            )?;
+            continue;
+        };
+        match evaluate_match(conn, &row) {
+            Ok(Some(evaluation)) => upsert_evaluation(conn, &evaluation)?,
+            Ok(None) | Err(_) => {
+                conn.execute(
+                    "DELETE FROM match_evaluations WHERE match_id=?1",
+                    [match_id],
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::refresh_match_evaluations_for_ids_conn;
+    use crate::OwDatabase;
+    use std::collections::HashSet;
+
+    #[test]
+    fn refreshing_selected_ids_does_not_recompute_unrelated_matches() {
+        let temporary = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temporary.path().join("owstats.sqlite3"));
+        db.initialize().unwrap();
+        let conn = db.connect().unwrap();
+        for match_id in ["selected", "unrelated"] {
+            conn.execute(
+                "INSERT INTO matches(match_id,season,bucket,game_mode,match_kind,result,map_guid,hero_guid,begin_ts,team_score,opponent_score,kills,assists,deaths,damage,healing,mitigation,total_worth,duration_sec,raw_entry_json,updated_at) VALUES(?1,23,'preset','SportPreset','normal','win','map','hero',1,0,0,0,0,0,0,0,0,0,1,'{}','now')",
+                [match_id],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO match_evaluations (match_id, mode, rule_version, grade, primary_tag, evidence_tags_json, reasons_json, confidence, computed_at) VALUES ('unrelated', 'sentinel', 99, 'S', 'sentinel', '[]', '[]', 1, 'never')",
+            [],
+        )
+        .unwrap();
+
+        refresh_match_evaluations_for_ids_conn(&conn, &HashSet::from(["selected".to_string()]))
+            .unwrap();
+
+        let unrelated: (String, i64, String) = conn
+            .query_row(
+                "SELECT mode, rule_version, computed_at FROM match_evaluations WHERE match_id='unrelated'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unrelated, ("sentinel".to_string(), 99, "never".to_string()));
+        let selected_grade: String = conn
+            .query_row(
+                "SELECT grade FROM match_evaluations WHERE match_id='selected'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(selected_grade, "B");
+    }
+
+    #[test]
+    fn refreshing_a_missing_selected_id_removes_its_stale_evaluation() {
+        let temporary = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temporary.path().join("owstats.sqlite3"));
+        db.initialize().unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("PRAGMA foreign_keys=OFF", []).unwrap();
+        conn.execute(
+            "INSERT INTO match_evaluations (match_id, mode, rule_version, grade, primary_tag, evidence_tags_json, reasons_json, confidence, computed_at) VALUES ('removed', 'sentinel', 99, 'S', 'sentinel', '[]', '[]', 1, 'never')",
+            [],
+        )
+        .unwrap();
+
+        refresh_match_evaluations_for_ids_conn(&conn, &HashSet::from(["removed".to_string()]))
+            .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM match_evaluations WHERE match_id='removed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }
