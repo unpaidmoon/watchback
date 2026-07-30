@@ -60,6 +60,19 @@ export type BusyAccountAction = {
   accountId?: string;
 };
 
+type ExistingLoginFallbackDependencies = {
+  settle: () => Promise<{ released: boolean }>;
+  addAccount: () => Promise<void>;
+};
+
+export async function runExistingLoginFallback(dependencies: ExistingLoginFallbackDependencies) {
+  const settled = await dependencies.settle();
+  if (!settled.released) {
+    throw new Error("二维码登录尚未释放账号操作，请重试。");
+  }
+  await dependencies.addAccount();
+}
+
 type OperationLifecycle = {
   begin: () => boolean;
   release: () => void;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   applyRemovalDecision,
   loadDashboardRequest,
+  runExistingLoginFallback,
   runAddAccountOperation,
   runRemoveAccountOperation,
   runSwitchAccountOperation,
@@ -16,6 +17,40 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
+}
+
+{
+  const settle = deferred<{ released: boolean }>();
+  const calls: string[] = [];
+  const fallback = runExistingLoginFallback({
+    settle: async () => {
+      calls.push("settle:start");
+      const result = await settle.promise;
+      calls.push("settle:done");
+      return result;
+    },
+    addAccount: async () => {
+      calls.push("addAccount");
+    },
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(calls, ["settle:start"], "settle 未完成前绝不能调用可见浏览器登录");
+  settle.resolve({ released: true });
+  await fallback;
+  assert.deepEqual(calls, ["settle:start", "settle:done", "addAccount"]);
+}
+
+{
+  let addCount = 0;
+  await assert.rejects(
+    runExistingLoginFallback({
+      settle: async () => ({ released: false }),
+      addAccount: async () => { addCount += 1; },
+    }),
+    /尚未释放/,
+  );
+  assert.equal(addCount, 0, "后端未确认 released 时必须阻断 addAccount");
 }
 
 const firstAccount: AccountSummary = {

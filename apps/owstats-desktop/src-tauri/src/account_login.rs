@@ -29,6 +29,121 @@ pub struct LoginCapture {
     pub battle_tag: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialProbeOutcome {
+    Authenticated { role_id: i64 },
+    Rejected,
+    TransientFailure,
+}
+
+pub const POST_COMMIT_REFRESH_WARNING: &str = "postCommitRefreshFailed";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedLogin {
+    pub result: AccountLoginResult,
+    pub warnings: Vec<String>,
+}
+
+/// Converts auxiliary work after the atomic publication point into a warning.
+/// The caller must invoke this only after `publish_*` has returned success.
+pub fn complete_committed_login(
+    mut result: AccountLoginResult,
+    auxiliary_refresh: Result<()>,
+) -> CommittedLogin {
+    if auxiliary_refresh.is_err() {
+        add_post_commit_warning(&mut result, POST_COMMIT_REFRESH_WARNING);
+    }
+    let warnings = result.warnings.clone();
+    CommittedLogin { result, warnings }
+}
+
+pub fn add_post_commit_warning(result: &mut AccountLoginResult, warning: &'static str) {
+    if !result.warnings.iter().any(|current| current == warning) {
+        result.warnings.push(warning.to_string());
+    }
+    result.message = "账号已安全保存，部分资料暂未刷新，可稍后重试。".to_string();
+}
+
+fn safe_login_failure_message(error: &anyhow::Error) -> String {
+    let raw = error.to_string();
+    let normalized = raw.to_ascii_lowercase();
+    if [
+        "token",
+        "customertoken",
+        "authorization",
+        "roleid",
+        "role_id",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        "登录暂时失败，请重试。".to_string()
+    } else {
+        raw
+    }
+}
+
+/// Verifies captured credentials at the upstream boundary before any formal
+/// account directory or registry entry can be written.
+pub async fn verify_and_publish_add<P, Fut>(
+    manager: &AccountContextManager,
+    capture: LoginCapture,
+    probe: P,
+) -> Result<AccountLoginResult>
+where
+    P: FnOnce(&LoginCapture) -> Fut,
+    Fut: std::future::Future<Output = Result<CredentialProbeOutcome>>,
+{
+    validate_capture(&capture)?;
+    let outcome = probe(&capture)
+        .await
+        .map_err(|_| anyhow!("credential verification is temporarily unavailable"))?;
+    match outcome {
+        CredentialProbeOutcome::Authenticated { role_id }
+            if role_id == capture.credentials.role_id =>
+        {
+            publish_add_account(manager, capture)
+        }
+        CredentialProbeOutcome::Authenticated { .. } => {
+            bail!("authenticated credential identity does not match captured account")
+        }
+        CredentialProbeOutcome::Rejected => bail!("captured credentials were rejected"),
+        CredentialProbeOutcome::TransientFailure => {
+            bail!("credential verification is temporarily unavailable")
+        }
+    }
+}
+
+pub async fn verify_and_publish_relogin<P, Fut>(
+    manager: &AccountContextManager,
+    expected_account_id: &AccountId,
+    capture: LoginCapture,
+    probe: P,
+) -> Result<AccountLoginResult>
+where
+    P: FnOnce(&LoginCapture) -> Fut,
+    Fut: std::future::Future<Output = Result<CredentialProbeOutcome>>,
+{
+    validate_capture(&capture)?;
+    let outcome = probe(&capture)
+        .await
+        .map_err(|_| anyhow!("credential verification is temporarily unavailable"))?;
+    match outcome {
+        CredentialProbeOutcome::Authenticated { role_id }
+            if role_id == capture.credentials.role_id =>
+        {
+            publish_relogin_account(manager, expected_account_id, capture)
+        }
+        CredentialProbeOutcome::Authenticated { .. } => {
+            bail!("authenticated credential identity does not match captured account")
+        }
+        CredentialProbeOutcome::Rejected => bail!("captured credentials were rejected"),
+        CredentialProbeOutcome::TransientFailure => {
+            bail!("credential verification is temporarily unavailable")
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum LoginOperationKind {
@@ -542,8 +657,9 @@ where
             bail!("登录已取消。")
         }
         Err(error) => {
-            progress.report(LoginPhase::Failed, &error.to_string());
-            return Err(error);
+            let safe = safe_login_failure_message(&error);
+            progress.report(LoginPhase::Failed, &safe);
+            return Err(anyhow!(safe));
         }
     };
     progress.report(LoginPhase::Saving, "正在安全保存账号登录信息。");
@@ -557,12 +673,14 @@ where
             Ok(result)
         }
         Err(error) => {
-            progress.report(LoginPhase::Failed, &error.to_string());
-            Err(error)
+            let safe = safe_login_failure_message(&error);
+            progress.report(LoginPhase::Failed, &safe);
+            Err(anyhow!(safe))
         }
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn capture_and_publish_add<F, Fut, R, C>(
     manager: &AccountContextManager,
     progress: &R,
@@ -583,8 +701,9 @@ where
             bail!("登录已取消。")
         }
         Err(error) => {
-            progress.report(LoginPhase::Failed, &error.to_string());
-            return Err(error);
+            let safe = safe_login_failure_message(&error);
+            progress.report(LoginPhase::Failed, &safe);
+            return Err(anyhow!(safe));
         }
     };
     progress.report(LoginPhase::Saving, "正在安全保存账号登录信息。");
@@ -594,8 +713,51 @@ where
             Ok(result)
         }
         Err(error) => {
-            progress.report(LoginPhase::Failed, &error.to_string());
-            Err(error)
+            let safe = safe_login_failure_message(&error);
+            progress.report(LoginPhase::Failed, &safe);
+            Err(anyhow!(safe))
+        }
+    }
+}
+
+pub(crate) async fn capture_verify_and_publish_add<F, CaptureFut, P, ProbeFut, R, C>(
+    manager: &AccountContextManager,
+    progress: &R,
+    capture: F,
+    was_cancelled: C,
+    probe: P,
+) -> Result<AccountLoginResult>
+where
+    F: FnOnce() -> CaptureFut,
+    CaptureFut: std::future::Future<Output = Result<LoginCapture>>,
+    P: FnOnce(&LoginCapture) -> ProbeFut,
+    ProbeFut: std::future::Future<Output = Result<CredentialProbeOutcome>>,
+    R: LoginProgressReporter,
+    C: FnOnce() -> bool,
+{
+    manager.prepare_login_capture()?;
+    let capture = match capture().await {
+        Ok(capture) => capture,
+        Err(_) if was_cancelled() => {
+            progress.report(LoginPhase::Cancelled, "登录已取消。");
+            bail!("登录已取消。")
+        }
+        Err(error) => {
+            let safe = safe_login_failure_message(&error);
+            progress.report(LoginPhase::Failed, &safe);
+            return Err(anyhow!(safe));
+        }
+    };
+    progress.report(LoginPhase::Saving, "正在验证并安全保存账号登录信息。");
+    match verify_and_publish_add(manager, capture, probe).await {
+        Ok(result) => {
+            progress.report(LoginPhase::Ready, "账号登录信息已保存。");
+            Ok(result)
+        }
+        Err(error) => {
+            let safe = safe_login_failure_message(&error);
+            progress.report(LoginPhase::Failed, &safe);
+            Err(anyhow!(safe))
         }
     }
 }
@@ -681,6 +843,7 @@ fn publish_relogin_account_inner_with_fault(
                 battle_tag: Some(entry.battle_tag.clone()),
                 message: "检测到另一个已保存账号，可切换或通过添加账号更新登录。".to_string(),
                 should_offer_switch: true,
+                warnings: Vec::new(),
             },
             fault,
         );
@@ -694,6 +857,7 @@ fn publish_relogin_account_inner_with_fault(
             battle_tag: Some(capture.battle_tag),
             message: "本次登录属于另一个新账号，未覆盖当前账号。".to_string(),
             should_offer_switch: false,
+            warnings: Vec::new(),
         },
         fault,
     )
@@ -765,6 +929,7 @@ fn add_new(
         battle_tag: Some(capture.battle_tag.clone()),
         message: "账号已添加。".to_string(),
         should_offer_switch: false,
+        warnings: Vec::new(),
     };
     if pending
         .advance(LoginOperationPhase::RegistryCommitted)
@@ -845,6 +1010,7 @@ fn update_existing(
         battle_tag: Some(capture.battle_tag.clone()),
         message: "账号已更新。".to_string(),
         should_offer_switch: registry.active_account_id.as_ref() != Some(account_id),
+        warnings: Vec::new(),
     };
     if pending
         .advance(LoginOperationPhase::RegistryCommitted)
@@ -1312,6 +1478,225 @@ mod tests {
             },
             battle_tag: battle_tag.to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn authenticated_probe_rejection_never_publishes_captured_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared.clone()).unwrap();
+
+        let error =
+            verify_and_publish_add(&manager, capture("Wrong#1001", "wrong-secret"), |_| async {
+                Ok(CredentialProbeOutcome::Rejected)
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "captured credentials were rejected");
+        assert!(manager.list_accounts().unwrap().is_empty());
+        assert!(
+            !shared.accounts_root().exists()
+                || !shared.accounts_root().read_dir().unwrap().any(|entry| {
+                    entry
+                        .ok()
+                        .is_some_and(|entry| entry.path().join("credentials.json").exists())
+                })
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_verify_publish_flow_reports_failure_before_disk_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+        let progress = RecordingProgress::default();
+
+        let error = capture_verify_and_publish_add(
+            &manager,
+            &progress,
+            || async { Ok(capture("Rejected#1001", "rejected-secret")) },
+            || false,
+            |_| async { Ok(CredentialProbeOutcome::Rejected) },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "captured credentials were rejected");
+        assert_eq!(
+            *progress.0.lock().unwrap(),
+            vec![LoginPhase::Saving, LoginPhase::Failed]
+        );
+        assert!(manager.list_accounts().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn visible_login_failure_does_not_expose_credentials_in_progress_or_result() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+        let progress = RecordingProgressMessages::default();
+
+        let error = capture_verify_and_publish_add(
+            &manager,
+            &progress,
+            || async { Err(anyhow!("Authorization token=do-not-expose")) },
+            || false,
+            |_| async { Ok(CredentialProbeOutcome::Rejected) },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "登录暂时失败，请重试。");
+        assert_eq!(
+            *progress.0.lock().unwrap(),
+            vec![(LoginPhase::Failed, "登录暂时失败，请重试。".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticated_probe_identity_mismatch_never_publishes() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+
+        let error =
+            verify_and_publish_add(&manager, capture("Wrong#1001", "wrong-secret"), |_| async {
+                Ok(CredentialProbeOutcome::Authenticated { role_id: 202202 })
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "authenticated credential identity does not match captured account"
+        );
+        assert!(manager.list_accounts().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn transient_probe_failure_never_publishes_or_marks_any_account_stale() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+
+        let error = verify_and_publish_add(
+            &manager,
+            capture("Offline#1001", "unverified-secret"),
+            |_| async { Ok(CredentialProbeOutcome::TransientFailure) },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "credential verification is temporarily unavailable"
+        );
+        assert!(manager.list_accounts().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn probe_transport_error_is_sanitized_and_never_publishes() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+
+        let error = verify_and_publish_add(
+            &manager,
+            capture("Offline#1001", "unverified-secret"),
+            |_| async {
+                Err(anyhow!(
+                    "upstream timed out with Authorization: unverified-secret"
+                ))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "credential verification is temporarily unavailable"
+        );
+        assert!(manager.list_accounts().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn authenticated_probe_success_publishes_ready_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+
+        let result =
+            verify_and_publish_add(&manager, capture("Valid#1001", "valid-secret"), |_| async {
+                Ok(CredentialProbeOutcome::Authenticated { role_id: 101101 })
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.kind, "newAccountAdded");
+        assert_eq!(
+            manager.list_accounts().unwrap()[0].credential_state,
+            "ready"
+        );
+    }
+
+    #[test]
+    fn post_commit_refresh_failure_remains_success_with_a_warning() {
+        let result = AccountLoginResult {
+            kind: "newAccountAdded".into(),
+            account_id: Some("11111111-1111-4111-8111-111111111111".into()),
+            battle_tag: Some("Valid#1001".into()),
+            message: "account added".into(),
+            should_offer_switch: false,
+            warnings: Vec::new(),
+        };
+
+        let committed =
+            complete_committed_login(result.clone(), Err(anyhow!("profile refresh failed")));
+
+        assert_eq!(committed.result.kind, result.kind);
+        assert_eq!(committed.result.account_id, result.account_id);
+        assert_eq!(committed.result.battle_tag, result.battle_tag);
+        assert_eq!(
+            committed.result.should_offer_switch,
+            result.should_offer_switch
+        );
+        assert_eq!(
+            committed.result.message,
+            "账号已安全保存，部分资料暂未刷新，可稍后重试。"
+        );
+        assert_eq!(committed.result.warnings, vec![POST_COMMIT_REFRESH_WARNING]);
+        assert_eq!(committed.warnings, vec![POST_COMMIT_REFRESH_WARNING]);
+    }
+
+    #[tokio::test]
+    async fn verified_relogin_restores_stale_credentials_to_ready() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = crate::app_paths::SharedAppPaths::from_app_data_dir(temp.path());
+        let manager = AccountContextManager::load(shared).unwrap();
+        let account_id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        install_existing(&manager, &account_id);
+        manager
+            .record_credential_use_failure(
+                &account_id,
+                crate::account_context::CredentialUseFailure::Forbidden,
+            )
+            .unwrap();
+
+        let result = verify_and_publish_relogin(
+            &manager,
+            &account_id,
+            capture("Old#1011", "renewed-secret"),
+            |_| async { Ok(CredentialProbeOutcome::Authenticated { role_id: 101101 }) },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.kind, "existingAccountUpdated");
+        assert_eq!(
+            manager.list_accounts().unwrap()[0].credential_state,
+            "ready"
+        );
     }
 
     #[derive(Default)]

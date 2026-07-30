@@ -1,68 +1,24 @@
 import { AlertCircle, CheckCircle2, LoaderCircle, RefreshCw, ScanLine, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { addAccountWithQr, cancelQrAccountLogin, getQrAccountLoginSnapshot, refreshQrAccountLogin } from "../../shared/api";
-import type { QrAccountLoginProgressEvent, QrAccountLoginQrEvent, QrLoginViewState } from "../../shared/types";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { addAccountWithQr, cancelQrAccountLogin, getAccountOperationStatus, getActiveQrAccountLogin, getQrAccountLoginSnapshot, refreshQrAccountLogin } from "../../shared/api";
+import type { QrAccountLoginSnapshot, QrLoginViewState } from "../../shared/types";
+import { createQrAccountLoginController, createQrLoginRequestId } from "./useQrAccountLogin";
+import type { QrAccountLoginControllerState } from "./useQrAccountLogin";
 
-type Props = {
-  open: boolean;
-  onCancel: () => void;
-  onCompleted: (message: string | null) => Promise<void>;
-  onUseExistingLogin: () => Promise<void>;
-};
-
-const text = {
-  close: "\u5173\u95ed\u4e8c\u7ef4\u7801\u767b\u5f55",
-  qrArea: "\u4e8c\u7ef4\u7801\u533a\u57df",
-  qrAlt: "\u7f51\u6613\u5927\u795e\u767b\u5f55\u4e8c\u7ef4\u7801",
-  qrHint: "\u4e8c\u7ef4\u7801\u4ec5\u7528\u4e8e\u672c\u6b21\u767b\u5f55",
-  title: "\u4f7f\u7528\u7f51\u6613\u5927\u795e\u626b\u7801\u767b\u5f55",
-  stepOne: "\u6253\u5f00\u7f51\u6613\u5927\u795e App",
-  stepTwo: "\u626b\u63cf\u5de6\u4fa7\u4e8c\u7ef4\u7801",
-  stepThree: "\u5728\u624b\u673a\u4e2d\u786e\u8ba4\u767b\u5f55",
-  refresh: "\u5237\u65b0",
-  cancel: "\u53d6\u6d88",
-  other: "\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f",
-};
-
-const cancellableStates = new Set<QrLoginViewState>(["starting", "loadingQr", "waitingForScan", "confirming", "expired", "failed"]);
+type Props = { open: boolean; onCancel: () => void; onCompleted: (message: string | null) => Promise<void>; onUseExistingLogin: () => Promise<void> };
+const cancellableStates = new Set<QrLoginViewState>(["starting", "loadingQr", "waitingForScan", "confirming", "capturing", "expired", "failed"]);
+const text = { close: "关闭二维码登录", qrArea: "二维码区域", qrAlt: "网易大神登录二维码", qrHint: "二维码仅用于本次登录", title: "使用网易大神扫码登录", stepOne: "打开网易大神 App", stepTwo: "扫描左侧二维码", stepThree: "在手机中确认登录", refresh: "刷新", cancel: "取消", other: "其他登录方式" };
+const imageStates = new Set<QrLoginViewState>(["waitingForScan", "confirming", "capturing"]);
 
 function asViewState(value: string): QrLoginViewState {
-  switch (value) {
-    case "starting":
-    case "openingLogin":
-    case "selectingQrMode":
-    case "acceptingPrivacy":
-      return "starting";
-    case "loadingQr":
-    case "waitingForScan":
-    case "confirming":
-    case "capturing":
-    case "saving":
-    case "expired":
-    case "ready":
-    case "cancelling":
-    case "failed":
-      return value;
-    case "cancelled":
-    default:
-      return "failed";
-  }
+  if (["openingLogin", "selectingQrMode", "acceptingPrivacy"].includes(value)) return "starting";
+  if (value === "recovering" || value === "cancelled") return "failed";
+  return value as QrLoginViewState;
 }
 
 function statusText(state: QrLoginViewState, message: string | null) {
   if (message) return message;
-  return {
-    starting: "\u6b63\u5728\u51c6\u5907\u5b89\u5168\u767b\u5f55\u73af\u5883\u2026",
-    loadingQr: "\u6b63\u5728\u83b7\u53d6\u4e8c\u7ef4\u7801\u2026",
-    waitingForScan: "\u7b49\u5f85\u626b\u7801",
-    confirming: "\u5df2\u626b\u7801\uff0c\u8bf7\u5728\u624b\u673a\u4e2d\u786e\u8ba4",
-    capturing: "\u767b\u5f55\u5df2\u786e\u8ba4\uff0c\u6b63\u5728\u8bc6\u522b\u8d26\u53f7\u2026",
-    saving: "\u6b63\u5728\u5b89\u5168\u4fdd\u5b58\u8d26\u53f7\u767b\u5f55\u4fe1\u606f\u2026",
-    expired: "\u4e8c\u7ef4\u7801\u5df2\u8fc7\u671f\uff0c\u8bf7\u5237\u65b0",
-    ready: "\u8d26\u53f7\u6dfb\u52a0\u6210\u529f",
-    cancelling: "\u6b63\u5728\u53d6\u6d88\u767b\u5f55\u2026",
-    failed: "\u4e8c\u7ef4\u7801\u767b\u5f55\u6682\u4e0d\u53ef\u7528\uff0c\u8bf7\u5237\u65b0\u91cd\u8bd5\u6216\u4f7f\u7528\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f",
-  }[state];
+  return { starting: "正在准备安全登录环境…", loadingQr: "正在获取二维码…", waitingForScan: "等待扫码", confirming: "已扫码，请在手机中确认", capturing: "登录已确认，正在识别账号…", saving: "正在安全保存账号登录信息…", expired: "二维码已过期，请刷新", ready: "账号添加成功", cancelling: "正在取消登录…", failed: "二维码登录暂不可用，请刷新重试或使用其他登录方式" }[state];
 }
 
 function StatusIcon({ state }: { state: QrLoginViewState }) {
@@ -72,216 +28,173 @@ function StatusIcon({ state }: { state: QrLoginViewState }) {
   return <LoaderCircle className="qrAccountLoginSpinner" aria-hidden="true" size={20} />;
 }
 
-export function QrAccountLoginDialog({ open, onCancel, onCompleted, onUseExistingLogin }: Props) {
-  const [state, setState] = useState<QrLoginViewState>("starting");
-  const [message, setMessage] = useState<string | null>(null);
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState(false);
-  const rootRef = useRef<HTMLElement>(null);
-  const sessionIdRef = useRef<string | null>(null);
-  const revisionRef = useRef(-1);
-  const stateRef = useRef(state);
-  const pendingRef = useRef(false);
-  const completedRef = useRef(false);
+export type QrAccountLoginDialogViewProps = {
+  current: QrAccountLoginControllerState;
+  imageUrl?: string | null;
+  rootRef: RefObject<HTMLElement>;
+  onDismiss: () => void;
+  onRefresh: () => void;
+  onUseExistingLogin: () => void;
+  onEndAndRetry: () => void;
+};
 
-  stateRef.current = state;
-  pendingRef.current = actionPending;
+type QrObjectUrlApi = {
+  decode: (base64: string) => Uint8Array;
+  createObjectUrl: (blob: Blob) => string;
+  revokeObjectUrl: (url: string) => void;
+};
 
-  function clearImage() {
-    setQrUrl(null);
-  }
+export function createQrImageObjectUrl(base64: string, api?: QrObjectUrlApi) {
+  const runtime = api ?? {
+    decode: (value: string) => Uint8Array.from(atob(value), (character) => character.charCodeAt(0)),
+    createObjectUrl: (blob: Blob) => URL.createObjectURL(blob),
+    revokeObjectUrl: (url: string) => URL.revokeObjectURL(url),
+  };
+  const decoded = runtime.decode(base64);
+  const bytes = new Uint8Array(decoded.byteLength);
+  bytes.set(decoded);
+  const url = runtime.createObjectUrl(new Blob([bytes.buffer], { type: "image/png" }));
+  return { url, revoke: () => runtime.revokeObjectUrl(url) };
+}
 
-  function cancelSession() {
-    const sessionId = sessionIdRef.current;
-    sessionIdRef.current = null;
-    revisionRef.current = -1;
-    clearImage();
-    return sessionId ? cancelQrAccountLogin(sessionId) : Promise.resolve();
-  }
-
-  function acceptQr(payload: QrAccountLoginQrEvent) {
-    if (payload.sessionId !== sessionIdRef.current || payload.revision <= revisionRef.current || payload.mimeType !== "image/png") return;
-    revisionRef.current = payload.revision;
-    setQrUrl(`data:image/png;base64,${payload.imageBase64}`);
-    if (["starting", "loadingQr"].includes(stateRef.current)) {
-      setState("waitingForScan");
-      setMessage(null);
-    }
-  }
-
-  function acceptProgress(payload: QrAccountLoginProgressEvent) {
-    if (payload.sessionId !== sessionIdRef.current) return;
-    setState(asViewState(payload.phase));
-    setMessage(payload.message);
-  }
-
-  function acceptResult(payload: { sessionId: string; result: unknown | null; message?: string | null; cancelled: boolean }) {
-    if (payload.sessionId !== sessionIdRef.current || completedRef.current) return;
-    if (!payload.result) {
-      if (!payload.cancelled) {
-        setState("failed");
-        setMessage(payload.message ?? null);
-      }
+function useQrImageUrl(imageBase64: string | null, visible: boolean) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageBase64 || !visible) {
+      setUrl(null);
       return;
     }
-    completedRef.current = true;
-    setState("ready");
-    setMessage(payload.message ?? null);
-    window.setTimeout(() => void onCompleted(payload.message ?? null).finally(onCancel), 700);
+    const objectUrl = createQrImageObjectUrl(imageBase64);
+    setUrl(objectUrl.url);
+    return objectUrl.revoke;
+  }, [imageBase64, visible]);
+  return url;
+}
+
+export function handleQrDialogKeyDown(
+  event: Pick<KeyboardEvent, "key" | "preventDefault"> & Partial<Pick<KeyboardEvent, "shiftKey">>,
+  canDismiss: boolean,
+  onDismiss: () => void,
+  focusable: readonly Pick<HTMLElement, "focus">[] = [],
+  activeElement: Pick<HTMLElement, "focus"> | null = null,
+) {
+  if (event.key === "Escape" && canDismiss) {
+    event.preventDefault();
+    onDismiss();
+    return;
   }
+  if (event.key !== "Tab" || focusable.length === 0) return;
+  const current = activeElement ? focusable.indexOf(activeElement) : -1;
+  const next = event.shiftKey
+    ? (current <= 0 ? focusable.length - 1 : current - 1)
+    : (current + 1) % focusable.length;
+  event.preventDefault();
+  focusable[next]?.focus();
+}
 
-  useEffect(() => {
-    if (!open) return;
-    let disposed = false;
-    completedRef.current = false;
-    setState("starting");
-    setMessage(null);
-    clearImage();
-    sessionIdRef.current = null;
-    revisionRef.current = -1;
-    let pollTimer: number | null = null;
+export function restoreQrDialogFocus(previous: Pick<HTMLElement, "isConnected" | "focus"> | null) {
+  if (previous?.isConnected) previous.focus();
+}
 
-    const poll = async (sessionId: string) => {
-      const snapshot = await getQrAccountLoginSnapshot(sessionId);
-      if (disposed || snapshot.sessionId !== sessionIdRef.current) return;
-      acceptProgress({ sessionId, phase: snapshot.phase, message: snapshot.message });
-      if (snapshot.imageBase64) {
-        acceptQr({ sessionId, revision: snapshot.revision, mimeType: "image/png", imageBase64: snapshot.imageBase64 });
-      }
-      if (snapshot.completion) acceptResult(snapshot.completion);
-    };
-
-    const start = async () => {
-      const { sessionId } = await addAccountWithQr();
-      if (disposed) {
-        void cancelQrAccountLogin(sessionId).catch(() => undefined);
-        return;
-      }
-      sessionIdRef.current = sessionId;
-      await poll(sessionId);
-      pollTimer = window.setInterval(() => {
-        void poll(sessionId).catch(() => undefined);
-      }, 300);
-    };
-    const startTimer = window.setTimeout(() => {
-      void start().catch(() => {
-        if (!disposed) {
-          setState("failed");
-          setMessage("\u65e0\u6cd5\u542f\u52a8\u4e8c\u7ef4\u7801\u767b\u5f55\uff0c\u8bf7\u5237\u65b0\u91cd\u8bd5\u6216\u4f7f\u7528\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f\u3002");
-        }
-      });
-    }, 0);
-    const watchdog = window.setTimeout(() => {
-      if (!disposed && !sessionIdRef.current) {
-        setState("failed");
-        setMessage("\u767b\u5f55\u73af\u5883\u542f\u52a8\u8d85\u65f6\uff0c\u8bf7\u53d6\u6d88\u540e\u91cd\u8bd5\u6216\u4f7f\u7528\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f\u3002");
-      }
-    }, 10_000);
-    return () => {
-      disposed = true;
-      window.clearTimeout(startTimer);
-      window.clearTimeout(watchdog);
-      if (pollTimer !== null) window.clearInterval(pollTimer);
-      void cancelSession().catch(() => undefined);
-    };
-  // One isolated QR-login backend session is created for every dialog opening.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    rootRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && cancellableStates.has(stateRef.current) && !pendingRef.current) {
-        event.preventDefault();
-        void requestCancel();
-      }
-      if (event.key === "Tab") {
-        const buttons = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
-        if (!buttons.length) return;
-        const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-        const next = event.shiftKey ? (current <= 0 ? buttons.length - 1 : current - 1) : (current + 1) % buttons.length;
-        event.preventDefault();
-        buttons[next]?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  // requestCancel is only called after the dialog has mounted.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  async function requestCancel() {
-    if (actionPending || !cancellableStates.has(state)) return;
-    setActionPending(true);
-    setState("cancelling");
-    try {
-      await cancelSession();
-      onCancel();
-    } catch {
-      setState("failed");
-      setMessage("\u53d6\u6d88\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5\u3002");
-    } finally {
-      setActionPending(false);
-    }
+export async function completeQrAccountLogin(
+  completion: NonNullable<QrAccountLoginSnapshot["completion"]>,
+  onCompleted: (message: string | null) => Promise<void>,
+  onClose: () => void,
+) {
+  try {
+    await onCompleted(completion.result?.message ?? completion.message ?? null);
+  } finally {
+    onClose();
   }
+}
 
-  async function requestRefresh() {
-    const sessionId = sessionIdRef.current;
-    if (!sessionId || actionPending || !["waitingForScan", "expired", "failed"].includes(state)) return;
-    setActionPending(true);
-    setState("loadingQr");
-    setMessage(null);
-    clearImage();
-    try {
-      await refreshQrAccountLogin(sessionId);
-    } catch {
-      setState("failed");
-      setMessage("\u5237\u65b0\u4e8c\u7ef4\u7801\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5\u6216\u4f7f\u7528\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f\u3002");
-    } finally {
-      setActionPending(false);
-    }
-  }
+export function QrAccountLoginDialogView({
+  current,
+  imageUrl = null,
+  rootRef,
+  onDismiss,
+  onRefresh,
+  onUseExistingLogin,
+  onEndAndRetry,
+}: QrAccountLoginDialogViewProps) {
+  const state = asViewState(current.phase);
+  const canRefresh = !current.actionPending && ["waitingForScan", "expired", "failed"].includes(state);
+  const canCancel = !current.actionPending && cancellableStates.has(state);
+  const qrUrl = current.imageBase64 && imageStates.has(state) ? imageUrl : null;
+  const failure = current.recoveryMessage ?? (state === "failed" ? statusText(state, current.message) : null);
 
-  async function requestExistingLogin() {
-    if (actionPending || !cancellableStates.has(state)) return;
-    setActionPending(true);
-    setState("cancelling");
-    try {
-      await cancelSession();
-      onCancel();
-      await onUseExistingLogin();
-    } catch {
-      setState("failed");
-      setMessage("\u65e0\u6cd5\u5207\u6362\u5230\u5176\u4ed6\u767b\u5f55\u65b9\u5f0f\uff0c\u8bf7\u91cd\u8bd5\u3002");
-    } finally {
-      setActionPending(false);
-    }
-  }
-
-  if (!open) return null;
-  const canRefresh = !actionPending && ["waitingForScan", "expired", "failed"].includes(state);
-  const canCancel = !actionPending && cancellableStates.has(state);
-  const canOther = !actionPending && cancellableStates.has(state);
-  const failure = state === "failed" ? statusText(state, message) : null;
-
-  return <div className="qrAccountLoginBackdrop" role="presentation" onMouseDown={canCancel ? () => void requestCancel() : undefined}>
+  return <div className="qrAccountLoginBackdrop" role="presentation" onMouseDown={canCancel ? onDismiss : undefined}>
     <section ref={rootRef} className="qrAccountLoginDialog" role="dialog" aria-modal="true" aria-labelledby="qr-account-login-title" aria-describedby="qr-account-login-description qr-account-login-status" onMouseDown={(event) => event.stopPropagation()}>
-      <button className="iconButton qrAccountLoginClose" type="button" aria-label={text.close} onClick={() => void requestCancel()} disabled={!canCancel}><X aria-hidden="true" size={20} /></button>
-      <div className="qrAccountLoginQrPane" aria-label={text.qrArea}>
-        <div className={`qrAccountLoginQrStage qrAccountLoginQrStage--${state}`}>
-          {qrUrl && state !== "ready" ? <img src={qrUrl} alt={text.qrAlt} width={256} height={256} /> : state === "ready" ? <CheckCircle2 aria-hidden="true" size={52} /> : <div className="qrAccountLoginQrPlaceholder" aria-hidden="true">{state === "failed" || state === "expired" ? <AlertCircle size={40} /> : <LoaderCircle className="qrAccountLoginSpinner" size={40} />}</div>}
-        </div>
-        <p>{text.qrHint}</p>
-      </div>
-      <div className="qrAccountLoginContent">
-        <div className="qrAccountLoginCopy"><h3 id="qr-account-login-title">{text.title}</h3><ol id="qr-account-login-description"><li>{text.stepOne}</li><li>{text.stepTwo}</li><li>{text.stepThree}</li></ol><div id="qr-account-login-status" className={`qrAccountLoginStatus qrAccountLoginStatus--${state}`} aria-live="polite"><StatusIcon state={state} /><span>{statusText(state, message)}</span></div>{failure ? <p className="qrAccountLoginError" role="alert">{failure}</p> : null}</div>
-        <div className="qrAccountLoginActions"><button className="ghostButton" type="button" onClick={() => void requestRefresh()} disabled={!canRefresh}><RefreshCw aria-hidden="true" size={18} />{text.refresh}</button><button className="ghostButton" type="button" onClick={() => void requestCancel()} disabled={!canCancel}>{text.cancel}</button><button className="primaryButton" type="button" onClick={() => void requestExistingLogin()} disabled={!canOther}>{text.other}</button></div>
-      </div>
+      <button className="iconButton qrAccountLoginClose" type="button" aria-label={text.close} onClick={onDismiss} disabled={!canCancel}><X aria-hidden="true" size={20} /></button>
+      <div className="qrAccountLoginQrPane" aria-label={text.qrArea}><div className={`qrAccountLoginQrStage qrAccountLoginQrStage--${state}`}>{qrUrl ? <img src={qrUrl} alt={text.qrAlt} width={256} height={256} /> : state === "ready" ? <CheckCircle2 aria-hidden="true" size={52} /> : <div className="qrAccountLoginQrPlaceholder" aria-hidden="true">{state === "failed" || state === "expired" ? <AlertCircle size={40} /> : <LoaderCircle className="qrAccountLoginSpinner" size={40} />}</div>}</div><p>{text.qrHint}</p></div>
+      <div className="qrAccountLoginContent"><div className="qrAccountLoginCopy"><h3 id="qr-account-login-title">{text.title}</h3><ol id="qr-account-login-description"><li>{text.stepOne}</li><li>{text.stepTwo}</li><li>{text.stepThree}</li></ol><div id="qr-account-login-status" className={`qrAccountLoginStatus qrAccountLoginStatus--${state}`} aria-live="polite"><StatusIcon state={state} /><span>{statusText(state, current.message)}</span></div>{failure ? <p className="qrAccountLoginError" role="alert">{failure}</p> : null}</div>
+        <div className="qrAccountLoginActions">{current.phase === "recovering" ? <button className="ghostButton" type="button" onClick={onEndAndRetry} disabled={current.actionPending}>结束并重试</button> : <button className="ghostButton" type="button" onClick={onRefresh} disabled={!canRefresh}><RefreshCw aria-hidden="true" size={18} />{text.refresh}</button>}<button className="ghostButton" type="button" onClick={onDismiss} disabled={!canCancel}>{text.cancel}</button><button className="primaryButton" type="button" onClick={onUseExistingLogin} disabled={!canCancel}>{text.other}</button></div></div>
     </section>
   </div>;
+}
+
+export function QrAccountLoginDialog({ open, onCancel, onCompleted, onUseExistingLogin }: Props) {
+  const rootRef = useRef<HTMLElement>(null);
+  const completedRef = useRef(false);
+  const controllerRef = useRef<ReturnType<typeof createQrAccountLoginController> | null>(null);
+  if (!controllerRef.current) controllerRef.current = createQrAccountLoginController({ createRequestId: createQrLoginRequestId, start: addAccountWithQr, snapshot: getQrAccountLoginSnapshot, cancel: cancelQrAccountLogin, refresh: refreshQrAccountLogin, active: getActiveQrAccountLogin, operationStatus: getAccountOperationStatus });
+  const controller = controllerRef.current;
+  const [current, setCurrent] = useState<QrAccountLoginControllerState>(controller.getState());
+  const state = asViewState(current.phase);
+  const imageUrl = useQrImageUrl(current.imageBase64, imageStates.has(state));
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  useEffect(() => {
+    if (!open) return;
+    completedRef.current = false;
+    const unsubscribe = controller.subscribe(setCurrent);
+    void controller.start().catch(() => undefined);
+    const timer = window.setInterval(() => void controller.poll(), 300);
+    return () => { unsubscribe(); window.clearInterval(timer); void controller.cancel().catch(() => undefined); };
+  }, [controller, open]);
+
+  useEffect(() => {
+    const completion = current.snapshot?.completion;
+    if (!open || !completion?.result || completedRef.current) return;
+    completedRef.current = true;
+    const timer = window.setTimeout(() => void completeQrAccountLogin(completion, onCompleted, onCancel), 700);
+    return () => window.clearTimeout(timer);
+  }, [current.snapshot, onCancel, onCompleted, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    rootRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    return () => restoreQrDialogFocus(previous);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const keydown = (event: KeyboardEvent) => handleQrDialogKeyDown(
+      event,
+      cancellableStates.has(stateRef.current) && !current.actionPending,
+      () => void requestCancel(),
+      Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []),
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+    document.addEventListener("keydown", keydown);
+    return () => document.removeEventListener("keydown", keydown);
+  }, [current.actionPending, open, state]);
+
+  async function requestCancel() { if (current.actionPending || !cancellableStates.has(state)) return; try { await controller.cancel(); onCancel(); } catch { /* Keep recovery actions visible. */ } }
+  async function requestRefresh() { if (current.actionPending || !["waitingForScan", "expired", "failed"].includes(state)) return; try { await controller.refresh(); } catch { /* Polling and fallback remain available. */ } }
+  async function requestExistingLogin() { if (current.actionPending || !cancellableStates.has(state)) return; try { await controller.useExistingLogin(async () => { onCancel(); await onUseExistingLogin(); }); } catch { /* Never fall through before released=true. */ } }
+  async function requestEndAndRetry() { if (current.actionPending) return; try { await controller.endAndRetry(); } catch { /* Recovery message remains visible. */ } }
+
+  if (!open) return null;
+  return <QrAccountLoginDialogView
+    current={current}
+    imageUrl={imageUrl}
+    rootRef={rootRef}
+    onDismiss={() => void requestCancel()}
+    onRefresh={() => void requestRefresh()}
+    onUseExistingLogin={() => void requestExistingLogin()}
+    onEndAndRetry={() => void requestEndAndRetry()}
+  />;
 }

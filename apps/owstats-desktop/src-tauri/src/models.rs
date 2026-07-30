@@ -928,6 +928,8 @@ pub struct AccountLoginResult {
     pub battle_tag: Option<String>,
     pub message: String,
     pub should_offer_switch: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

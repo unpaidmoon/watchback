@@ -439,6 +439,7 @@ fn rebuild_match_players_for_import(
     let current_bnet = payload
         .and_then(|item| item.pointer("/profile_card/data/bnetId"))
         .and_then(value_to_string)
+        .or(stored_current_bnet(tx)?)
         .or_else(|| infer_current_bnet(details))
         .unwrap_or_default();
 
@@ -695,6 +696,26 @@ fn current_player_friend_ids(value: Option<&Value>, current_bnet: &str) -> HashS
         .and_then(Value::as_array)
         .map(|items| items.iter().filter_map(value_to_string).collect())
         .unwrap_or_default()
+}
+
+fn stored_current_bnet(tx: &rusqlite::Transaction<'_>) -> Result<Option<String>> {
+    let profile_bnet = tx
+        .query_row(
+            "SELECT bnet_id FROM players WHERE TRIM(COALESCE(bnet_id, '')) <> '' ORDER BY updated_at DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if profile_bnet.is_some() {
+        return Ok(profile_bnet);
+    }
+    tx.query_row(
+        "SELECT bnet_id FROM match_players WHERE is_current_player=1 GROUP BY bnet_id ORDER BY COUNT(*) DESC, bnet_id LIMIT 1",
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 fn infer_current_bnet(details: &[Value]) -> Option<String> {
@@ -1044,7 +1065,13 @@ fn value_to_string(item: &Value) -> Option<String> {
 #[allow(clippy::items_after_test_module)] // Public importer helpers intentionally follow lookup unit tests.
 #[cfg(test)]
 mod portable_lookup_tests {
-    use super::load_embedded_lookup;
+    use super::{
+        import_incremental_payload_value_embedded, import_payload_value_embedded,
+        load_embedded_lookup,
+    };
+    use crate::OwDatabase;
+    use serde_json::json;
+    use std::collections::HashSet;
 
     #[test]
     fn embedded_lookup_resolves_known_hero_map_and_attribute_without_project_root() {
@@ -1060,6 +1087,81 @@ mod portable_lookup_tests {
         assert_eq!(
             lookup.attrs.get("603482350067646509").map(String::as_str),
             Some("单独消灭")
+        );
+    }
+
+    #[test]
+    fn incremental_detail_preserves_the_profile_player_as_current() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = OwDatabase::new(temp.path().join("owstats.db"));
+        import_payload_value_embedded(
+            &db,
+            &json!({
+                "season": 23,
+                "profile_card": { "data": { "bnetId": "zz-current", "name": "Current" } },
+                "matches": { "entries": [], "details": [], "detail_errors": [] }
+            }),
+        )
+        .unwrap();
+
+        let match_id = "automatic-update-match";
+        import_incremental_payload_value_embedded(
+            &db,
+            &json!({
+                "season": 23,
+                "matches": {
+                    "entries": [{
+                        "matchId": match_id,
+                        "gameMode": "SportPreset",
+                        "matchRet": 1,
+                        "beginTs": 1_700_000_000_000_i64
+                    }],
+                    "details": [{
+                        "match_id": match_id,
+                        "match_kind": "normal",
+                        "payload": {
+                            "code": 0,
+                            "data": {
+                                "totalCount": {
+                                    "teammateList": [
+                                        { "bnetId": "aa-other", "kill": 1, "assist": 1, "death": 9 },
+                                        { "bnetId": "zz-current", "kill": 20, "assist": 10, "death": 1 }
+                                    ],
+                                    "enemyList": []
+                                }
+                            }
+                        }
+                    }],
+                    "detail_errors": []
+                }
+            }),
+            HashSet::from([match_id.to_string()]),
+        )
+        .unwrap();
+
+        let current_bnet: String = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT bnet_id FROM match_players WHERE match_id=?1 AND is_current_player=1",
+                [match_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(current_bnet, "zz-current");
+
+        let grade: String = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT grade FROM match_evaluations WHERE match_id=?1",
+                [match_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            grade, "S",
+            "the match performance must be scored for the profile player"
         );
     }
 }

@@ -80,27 +80,46 @@ async fn run_once(
         return Ok(false);
     }
 
-    crate::quick_list_update_with_credentials_and_target_paths_base_url(
+    let update = crate::quick_list_update_with_credentials_and_target_paths_base_url(
         &db,
         &account.paths().credentials(),
         &target_path,
         season,
         DASHEN_CUSTOMER_BASE,
     )
-    .await?;
+    .await;
+    if let Err(error) = update {
+        let failure = crate::account_context::CredentialUseFailure::from_upstream_error(&error);
+        record_authenticated_failure(accounts, account.account_id(), failure)?;
+        return Err(error);
+    }
     drop(_permit);
 
     let event_app = app.clone();
     let events: crate::BackgroundEventSink = Arc::new(move |event, payload| {
         let _ = event_app.emit(event, payload);
     });
-    background_sync.wake(
+    let observed_accounts = accounts.clone();
+    let observed_account_id = account.account_id().clone();
+    background_sync.wake_observed(
         account.account_id().as_str(),
         account.paths().clone(),
         season,
         events,
+        Some(Arc::new(move |error| {
+            let failure = crate::account_context::CredentialUseFailure::from_upstream_error(error);
+            let _ = observed_accounts.record_credential_use_failure(&observed_account_id, failure);
+        })),
     );
     Ok(true)
+}
+
+fn record_authenticated_failure(
+    accounts: &AccountContextManager,
+    account_id: &crate::account_store::AccountId,
+    failure: crate::account_context::CredentialUseFailure,
+) -> Result<bool> {
+    accounts.record_credential_use_failure(account_id, failure)
 }
 
 pub(crate) fn latest_local_season(db: &OwDatabase) -> Result<Option<i64>> {
@@ -112,7 +131,13 @@ pub(crate) fn latest_local_season(db: &OwDatabase) -> Result<Option<i64>> {
 
 #[cfg(test)]
 mod tests {
-    use super::latest_local_season;
+    use super::{latest_local_season, record_authenticated_failure};
+    use crate::account_context::{AccountContextManager, CredentialUseFailure};
+    use crate::account_store::{
+        write_manifest_atomic, write_registry_atomic, AccountId, AccountManifest, AccountRegistry,
+        AccountRegistryEntry,
+    };
+    use crate::app_paths::SharedAppPaths;
     use crate::OwDatabase;
 
     #[test]
@@ -131,5 +156,54 @@ mod tests {
             .unwrap();
         }
         assert_eq!(latest_local_season(&db).unwrap(), Some(23));
+    }
+
+    #[test]
+    fn automatic_sync_only_stales_credentials_for_401_or_403() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let id = AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let paths = shared.account(&id);
+        std::fs::create_dir_all(paths.root()).unwrap();
+        write_manifest_atomic(
+            &paths.manifest(),
+            &AccountManifest {
+                version: 1,
+                account_id: id.clone(),
+                role_id: 101101,
+                battle_tag: "Synthetic#1000".into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        std::fs::write(paths.database(), b"synthetic-db").unwrap();
+        write_registry_atomic(
+            &shared.registry(),
+            &AccountRegistry {
+                version: 1,
+                active_account_id: Some(id.clone()),
+                accounts: vec![AccountRegistryEntry {
+                    account_id: id.clone(),
+                    battle_tag: "Synthetic#1000".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    last_used_at: "2026-01-01T00:00:00Z".into(),
+                    credential_state: "ready".into(),
+                }],
+            },
+        )
+        .unwrap();
+        let manager = AccountContextManager::load(shared).unwrap();
+
+        record_authenticated_failure(&manager, &id, CredentialUseFailure::Transient).unwrap();
+        assert_eq!(
+            manager.list_accounts().unwrap()[0].credential_state,
+            "ready"
+        );
+        record_authenticated_failure(&manager, &id, CredentialUseFailure::Forbidden).unwrap();
+        assert_eq!(
+            manager.list_accounts().unwrap()[0].credential_state,
+            "stale"
+        );
     }
 }

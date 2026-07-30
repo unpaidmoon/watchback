@@ -1,3 +1,5 @@
+use crate::account_context::CredentialUseFailure;
+use crate::account_login::CredentialProbeOutcome;
 use crate::account_store::AccountId;
 use crate::credential_store::DashenCredentials;
 use crate::dashen_client::{DashenClient, DashenCredentials as ClientCredentials};
@@ -406,8 +408,8 @@ impl LoginTargetCoordinator {
         if !self.ticket_matches(ticket, guard.get(&ticket.account_id)) {
             return stale_operation_status();
         }
-        if let Err(error) = save_target_atomic(target_path, target) {
-            let failed = bind_failed_status(&ticket.detected_bnet, &error.to_string());
+        if let Err(_error) = save_target_atomic(target_path, target) {
+            let failed = bind_failed_status(&ticket.detected_bnet, "目标保存失败，请重试。");
             let generation = self.next_generation();
             guard.insert(
                 ticket.account_id.clone(),
@@ -436,12 +438,12 @@ impl LoginTargetCoordinator {
         ready
     }
 
-    fn commit_failure(&self, ticket: &BindingTicket, error: &anyhow::Error) -> LoginTargetStatus {
+    fn commit_failure(&self, ticket: &BindingTicket, _error: &anyhow::Error) -> LoginTargetStatus {
         let mut guard = self.sessions.lock().expect("login target session poisoned");
         if !self.ticket_matches(ticket, guard.get(&ticket.account_id)) {
             return stale_operation_status();
         }
-        let failed = bind_failed_status(&ticket.detected_bnet, &error.to_string());
+        let failed = bind_failed_status(&ticket.detected_bnet, "上游身份验证暂时失败，请重试。");
         let generation = self.next_generation();
         guard.insert(
             ticket.account_id.clone(),
@@ -519,6 +521,89 @@ pub async fn bind_detected_target_with_base_url(
         resolve_detected_target_with_base_url(credentials, detected_bnet, root_base_url).await?;
     save_target_atomic(target_path, &target)?;
     player_target_status_for_path(target_path)
+}
+
+/// Performs the same authenticated search + profile-card identity check used
+/// for target binding, without writing a target or any captured credentials.
+pub async fn authenticated_probe_with_base_url(
+    credentials: &DashenCredentials,
+    detected_bnet: &str,
+    root_base_url: &str,
+) -> CredentialProbeOutcome {
+    let client = match DashenClient::new(
+        ClientCredentials {
+            role_id: credentials.role_id,
+            token: credentials.token.clone(),
+            dts: credentials
+                .dts
+                .as_deref()
+                .and_then(|value| value.parse().ok()),
+            server: credentials.server,
+        },
+        root_base_url.to_string(),
+    ) {
+        Ok(client) => client,
+        Err(_) => return CredentialProbeOutcome::TransientFailure,
+    };
+    let payload = match client.search_bnet_account(detected_bnet).await {
+        Ok(payload) => payload,
+        Err(error) => return probe_failure(&error),
+    };
+    if ensure_business_success(&payload, "verify captured account").is_err() {
+        return CredentialProbeOutcome::Rejected;
+    }
+    if payload_role_id(&payload).is_some_and(|role_id| role_id != credentials.role_id) {
+        return CredentialProbeOutcome::Rejected;
+    }
+    let target = match target_from_search_payload(
+        detected_bnet,
+        &payload,
+        credentials.role_id,
+        &Utc::now().to_rfc3339(),
+    ) {
+        Ok(target) => target,
+        Err(_) => return CredentialProbeOutcome::Rejected,
+    };
+    if target
+        .resolved_bnet
+        .as_deref()
+        .is_some_and(|resolved| !same_bnet(resolved, detected_bnet))
+    {
+        return CredentialProbeOutcome::Rejected;
+    }
+    let card = match client.query_card(&target.customer_token).await {
+        Ok(card) => card,
+        Err(error) => return probe_failure(&error),
+    };
+    if ensure_business_success(&card, "verify captured profile").is_err()
+        || ensure_card_identity_matches(&card, detected_bnet).is_err()
+        || payload_role_id(&card).is_some_and(|role_id| role_id != credentials.role_id)
+    {
+        return CredentialProbeOutcome::Rejected;
+    }
+    CredentialProbeOutcome::Authenticated {
+        role_id: credentials.role_id,
+    }
+}
+
+fn payload_role_id(payload: &serde_json::Value) -> Option<i64> {
+    ["roleId", "role_id"]
+        .into_iter()
+        .find_map(|key| payload.get("data")?.get(key))
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str()?.trim().parse().ok())
+        })
+}
+
+fn probe_failure(error: &anyhow::Error) -> CredentialProbeOutcome {
+    match CredentialUseFailure::from_upstream_error(error) {
+        CredentialUseFailure::Unauthorized | CredentialUseFailure::Forbidden => {
+            CredentialProbeOutcome::Rejected
+        }
+        CredentialUseFailure::Transient => CredentialProbeOutcome::TransientFailure,
+    }
 }
 
 async fn resolve_detected_target_with_base_url(
@@ -845,5 +930,18 @@ mod tests {
         assert_ne!(first, second);
         assert!(first.to_string_lossy().ends_with(".tmp"));
         assert!(second.to_string_lossy().ends_with(".tmp"));
+    }
+
+    #[test]
+    fn authenticated_probe_role_evidence_accepts_numeric_forms() {
+        assert_eq!(
+            payload_role_id(&serde_json::json!({ "data": { "roleId": 101101 } })),
+            Some(101101)
+        );
+        assert_eq!(
+            payload_role_id(&serde_json::json!({ "data": { "role_id": "202202" } })),
+            Some(202202)
+        );
+        assert_eq!(payload_role_id(&serde_json::json!({ "data": {} })), None);
     }
 }

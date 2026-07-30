@@ -23,12 +23,24 @@ impl PlayerQueryService {
         battle_tag: &str,
         upstream: Arc<dyn PlayerQueryUpstream>,
     ) -> QueryResult<SessionStart> {
+        self.start_query_with_auth_observer(battle_tag, upstream, Arc::new(|_| {}))
+            .await
+    }
+    pub async fn start_query_with_auth_observer(
+        &self,
+        battle_tag: &str,
+        upstream: Arc<dyn PlayerQueryUpstream>,
+        auth_failure_observer: Arc<dyn Fn(&anyhow::Error) + Send + Sync>,
+    ) -> QueryResult<SessionStart> {
         let normalized = normalize_battle_tag(battle_tag)?;
         let permit = self
             .coordinator
             .try_acquire_query_session()
             .map_err(|e| QueryError::Busy(e.into()))?;
-        let response = upstream.search(&normalized).await.map_err(classify)?;
+        let response = upstream.search(&normalized).await.map_err(|error| {
+            auth_failure_observer(&error);
+            classify(error)
+        })?;
         let (returned, token) = mapper::identity(&response)?;
         if let Some(returned) = returned {
             if normalize_battle_tag(&returned)? != normalized {
@@ -45,6 +57,7 @@ impl PlayerQueryService {
                 generation,
                 upstream,
                 card_response: Arc::new(tokio::sync::OnceCell::new()),
+                auth_failure_observer,
                 _permit: permit,
             },
         );
@@ -60,6 +73,9 @@ impl PlayerQueryService {
             u.card(&token).await.map_err(|error| self.error(id, error))
         });
         let (card_result, action_result) = tokio::join!(card_request, u.fight_count(&token, None),);
+        if let Err(error) = &action_result {
+            self.observe_auth_failure(id, error);
+        }
         let v = card_result?;
         let game_action = action_result.ok().as_ref().and_then(mapper::game_action);
         self.ensure_generation(id, g)?;
@@ -81,6 +97,12 @@ impl PlayerQueryService {
             u.count_info(&token, "sport", season.upstream()),
             u.fight_count(&token, season.upstream())
         );
+        if let Err(error) = &sport {
+            self.observe_auth_failure(id, error);
+        }
+        if let Err(error) = &fight {
+            self.observe_auth_failure(id, error);
+        }
         let competitive = sport
             .as_ref()
             .ok()
@@ -183,11 +205,17 @@ impl PlayerQueryService {
         }
     }
     fn error(&self, id: &str, e: anyhow::Error) -> QueryError {
+        self.observe_auth_failure(id, &e);
         let q = classify(e);
         if matches!(q, QueryError::SessionInvalid(_)) {
             self.sessions.remove(id)
         }
         q
+    }
+    fn observe_auth_failure(&self, id: &str, error: &anyhow::Error) {
+        if let Some(observer) = self.sessions.auth_failure_observer(id) {
+            observer(error);
+        }
     }
 }
 fn normalize_battle_tag(value: &str) -> QueryResult<String> {
@@ -235,11 +263,15 @@ mod tests {
         active_images: AtomicUsize,
         max_active_images: AtomicUsize,
         failed_count_mode: Option<&'static str>,
+        fail_search: bool,
     }
 
     impl PlayerQueryUpstream for CountingUpstream {
         fn search<'a>(&'a self, battle_tag: &'a str) -> UpstreamFuture<'a> {
             Box::pin(async move {
+                if self.fail_search {
+                    anyhow::bail!("synthetic authenticated search failure")
+                }
                 Ok(
                     json!({"code": 0, "data": {"battleTag": battle_tag, "accountKey": "memory-only"}}),
                 )
@@ -405,5 +437,26 @@ mod tests {
             assert_eq!(overview.open_competitive.is_empty(), failed == "sport");
             assert_eq!(overview.stadium.is_empty(), failed == "fight");
         }
+    }
+
+    #[tokio::test]
+    async fn authenticated_query_failures_reach_the_session_observer() {
+        let service = PlayerQueryService::new(crate::sync_coordinator::SyncCoordinator::default());
+        let observed = Arc::new(AtomicUsize::new(0));
+        let observer_count = Arc::clone(&observed);
+        let result = service
+            .start_query_with_auth_observer(
+                "Synthetic#1001",
+                Arc::new(CountingUpstream {
+                    fail_search: true,
+                    ..Default::default()
+                }),
+                Arc::new(move |_| {
+                    observer_count.fetch_add(1, Ordering::SeqCst);
+                }),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(observed.load(Ordering::SeqCst), 1);
     }
 }

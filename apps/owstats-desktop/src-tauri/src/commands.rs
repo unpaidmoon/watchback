@@ -292,7 +292,7 @@ pub async fn add_account(
         .map_err(str::to_string)?;
     let shared = accounts.shared_paths().clone();
     let capture_app = app.clone();
-    let result = crate::account_login::capture_and_publish_add(
+    let mut result = crate::account_login::capture_verify_and_publish_add(
         &accounts,
         &app,
         move || async move {
@@ -303,24 +303,34 @@ pub async fn add_account(
             })
         },
         crate::credentials::login_cancelled,
+        |capture| {
+            let credentials = capture.credentials.clone();
+            let battle_tag = capture.battle_tag.clone();
+            async move {
+                Ok(crate::login_target::authenticated_probe_with_base_url(
+                    &credentials,
+                    &battle_tag,
+                    DASHEN_ROOT_BASE,
+                )
+                .await)
+            }
+        },
     )
     .await
     .map_err(to_message)?;
-    reconcile_published_login_target(
+    if reconcile_published_login_target(
         &accounts,
         login_target_coordinator.inner(),
         &result,
         DASHEN_ROOT_BASE,
     )
-    .await?;
-    if let Some(account_id) = result
-        .account_id
-        .as_deref()
-        .and_then(|value| crate::account_store::AccountId::parse(value).ok())
+    .await
+    .is_err()
     {
-        if let Ok(account) = accounts.snapshot_for(&account_id) {
-            let _ = crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE).await;
-        }
+        crate::account_login::add_post_commit_warning(
+            &mut result,
+            crate::account_login::POST_COMMIT_REFRESH_WARNING,
+        );
     }
     Ok(result)
 }
@@ -332,18 +342,17 @@ pub fn add_account_with_qr(
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<crate::qr_login::QrLoginStartResult, String> {
-    let permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
+    request_id: String,
+) -> Result<crate::qr_login::QrLoginStartResult, crate::qr_login::QrLoginCommandError> {
     crate::qr_login::start_login(
         app,
         accounts.inner().clone(),
-        permit,
+        operation_coordinator.inner(),
         qr_coordinator.inner().clone(),
         login_target_coordinator.inner().clone(),
+        request_id,
     )
-    .map_err(to_message)
+    .map_err(crate::qr_login::QrLoginCommandError::from_error)
 }
 
 #[tauri::command]
@@ -355,9 +364,10 @@ pub async fn refresh_profile_card(
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
     let account = active_account(&accounts)?;
-    crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE)
-        .await
-        .map_err(to_message)
+    let result = crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE).await;
+    accounts
+        .observe_authenticated_result(account.account_id(), result)
+        .map_err(|_| authenticated_operation_error())
 }
 
 #[tauri::command]
@@ -369,33 +379,61 @@ pub async fn get_player_game_action(
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
     let account = active_account(&accounts)?;
-    crate::profile_card::fetch_game_action_for_account(&account, DASHEN_ROOT_BASE)
-        .await
-        .map_err(to_message)
+    let result =
+        crate::profile_card::fetch_game_action_for_account(&account, DASHEN_ROOT_BASE).await;
+    accounts
+        .observe_authenticated_result(account.account_id(), result)
+        .map_err(|_| authenticated_operation_error())
 }
 
 #[tauri::command]
-pub fn refresh_dashen_login_qr(
+pub async fn refresh_dashen_login_qr(
+    app: AppHandle,
+    accounts: State<'_, AccountContextManager>,
+    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
+    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     session_id: String,
-) -> Result<crate::qr_login::QrLoginControlResult, String> {
-    crate::qr_login::refresh_login(qr_coordinator.inner(), session_id).map_err(to_message)
+    _request_id: String,
+) -> Result<crate::qr_login::QrLoginStartResult, crate::qr_login::QrLoginCommandError> {
+    crate::qr_login::refresh_with_successor(
+        app,
+        accounts.inner().clone(),
+        operation_coordinator.inner(),
+        qr_coordinator.inner().clone(),
+        login_target_coordinator.inner().clone(),
+        session_id,
+    )
+    .await
+    .map_err(crate::qr_login::QrLoginCommandError::from_error)
 }
 
 #[tauri::command]
 pub fn get_dashen_login_qr_snapshot(
     qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
     session_id: String,
-) -> Result<crate::qr_login::QrLoginSnapshot, String> {
-    qr_coordinator.snapshot(&session_id).map_err(to_message)
+) -> Result<crate::qr_login::QrLoginSnapshot, crate::qr_login::QrLoginCommandError> {
+    qr_coordinator
+        .snapshot(&session_id)
+        .map_err(crate::qr_login::QrLoginCommandError::from_error)
 }
 
 #[tauri::command]
-pub fn cancel_dashen_login_qr(
+pub async fn cancel_dashen_login_qr(
     qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
     session_id: String,
-) -> Result<crate::qr_login::QrLoginControlResult, String> {
-    crate::qr_login::cancel_login(qr_coordinator.inner(), session_id).map_err(to_message)
+) -> Result<crate::qr_login::QrLoginSettleResult, crate::qr_login::QrLoginCommandError> {
+    crate::qr_login::cancel_login(qr_coordinator.inner(), session_id)
+        .await
+        .map_err(crate::qr_login::QrLoginCommandError::from_error)
+}
+
+#[tauri::command]
+pub fn get_active_dashen_login_qr(
+    qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
+    request_id: String,
+) -> Option<crate::qr_login::QrLoginSnapshot> {
+    qr_coordinator.active_for_request(&request_id)
 }
 
 async fn reconcile_published_login_target(
@@ -419,7 +457,7 @@ async fn reconcile_published_login_target(
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
         .map_err(to_message)?;
     let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    crate::login_target::reconcile_detected_target(
+    let status = crate::login_target::reconcile_detected_target(
         coordinator,
         account.account_id(),
         &credentials,
@@ -428,6 +466,13 @@ async fn reconcile_published_login_target(
         root_base_url,
     )
     .await;
+    if status.state != "ready" {
+        return Err("post-commit target reconciliation failed".to_string());
+    }
+    let profile = crate::profile_card::refresh_for_account(&account, root_base_url).await;
+    accounts
+        .observe_authenticated_result(account.account_id(), profile)
+        .map_err(|_| "post-commit profile refresh failed".to_string())?;
     Ok(())
 }
 
@@ -665,33 +710,42 @@ pub async fn sync_season(
                 request.season,
                 "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
             )
-            .await
-            .map_err(to_message)?;
+            .await;
+            let summary = accounts
+                .observe_authenticated_result(account.account_id(), summary)
+                .map_err(|_| authenticated_operation_error())?;
             drop(_permit);
-            background_sync.wake(
+            background_sync.wake_observed(
                 account.account_id().as_str(),
                 account.paths().clone(),
                 request.season,
                 background_event_sink(&app),
+                Some(background_auth_failure_observer(
+                    accounts.inner().clone(),
+                    account.account_id().clone(),
+                )),
             );
             Ok(SeasonSyncResult::QuickList(summary))
         }
         crate::SyncMode::FullFetch => {
-            sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
-                &db,
-                &root,
-                &credential_path,
-                &target_path,
-                request.season,
-                request.mode,
-                "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
-                move |progress| {
-                    let _ = emit_app.emit("sync-progress", progress);
-                },
-            )
-            .await
-            .map(SeasonSyncResult::Full)
-            .map_err(to_message)
+            let result =
+                sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url(
+                    &db,
+                    &root,
+                    &credential_path,
+                    &target_path,
+                    request.season,
+                    request.mode,
+                    "https://datamsapi.ds.163.com/v1/a19ld5tool/customer",
+                    move |progress| {
+                        let _ = emit_app.emit("sync-progress", progress);
+                    },
+                )
+                .await;
+            accounts
+                .observe_authenticated_result(account.account_id(), result)
+                .map(SeasonSyncResult::Full)
+                .map_err(|_| authenticated_operation_error())
         }
     }
 }
@@ -721,7 +775,19 @@ pub async fn player_query_start(
         .map_err(|_| {
             crate::player_query::models::QueryError::Upstream("无法初始化查询，请重试".to_string())
         })?;
-    service.start_query(&battle_tag, Arc::new(client)).await
+    let account_id = account.account_id().clone();
+    let account_manager = accounts.inner().clone();
+    service
+        .start_query_with_auth_observer(
+            &battle_tag,
+            Arc::new(client),
+            Arc::new(move |error| {
+                let failure =
+                    crate::account_context::CredentialUseFailure::from_upstream_error(error);
+                let _ = account_manager.record_credential_use_failure(&account_id, failure);
+            }),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -845,11 +911,15 @@ pub fn retry_season_background_sync(
 ) -> Result<bool, String> {
     let account = active_account(&accounts)?;
     let store = crate::SeasonSyncStore::new(account.database());
-    background_sync.wake_after_prepare(
+    background_sync.wake_after_prepare_observed(
         account.account_id().as_str(),
         account.paths().clone(),
         season,
         background_event_sink(&app),
+        Some(background_auth_failure_observer(
+            accounts.inner().clone(),
+            account.account_id().clone(),
+        )),
         || store.retry_season(season).map_err(to_message),
     )
 }
@@ -858,6 +928,20 @@ fn background_event_sink(app: &AppHandle) -> crate::BackgroundEventSink {
     let app = app.clone();
     Arc::new(move |event, payload| {
         let _ = app.emit(event, payload);
+    })
+}
+
+fn authenticated_operation_error() -> String {
+    "操作暂时失败，请重试。".to_string()
+}
+
+fn background_auth_failure_observer(
+    accounts: AccountContextManager,
+    account_id: crate::account_store::AccountId,
+) -> crate::background_sync::BackgroundAuthFailureObserver {
+    Arc::new(move |error| {
+        let failure = crate::account_context::CredentialUseFailure::from_upstream_error(error);
+        let _ = accounts.record_credential_use_failure(&account_id, failure);
     })
 }
 
@@ -919,9 +1003,11 @@ mod account_management_tests {
         .unwrap();
         let coordinator = crate::login_target::LoginTargetCoordinator::default();
 
-        reconcile_published_login_target(&manager, &coordinator, &result, "http://127.0.0.1:1")
-            .await
-            .unwrap();
+        let error =
+            reconcile_published_login_target(&manager, &coordinator, &result, "http://127.0.0.1:1")
+                .await
+                .unwrap_err();
+        assert_eq!(error, "post-commit profile refresh failed");
 
         let status = coordinator.status(&account_id).unwrap();
         assert_eq!(status.state, "ready");

@@ -34,6 +34,7 @@ pub struct BackgroundSeasonSyncManager {
 }
 
 pub type BackgroundEventSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+pub type BackgroundAuthFailureObserver = Arc<dyn Fn(&anyhow::Error) + Send + Sync>;
 
 impl BackgroundSeasonSyncManager {
     pub(crate) fn new(operation_coordinator: crate::sync_coordinator::SyncCoordinator) -> Self {
@@ -50,12 +51,24 @@ impl BackgroundSeasonSyncManager {
         season: i64,
         events: BackgroundEventSink,
     ) -> bool {
+        self.wake_observed(account_scope, paths, season, events, None)
+    }
+
+    pub fn wake_observed(
+        &self,
+        account_scope: &str,
+        paths: AccountPaths,
+        season: i64,
+        events: BackgroundEventSink,
+        auth_failure_observer: Option<BackgroundAuthFailureObserver>,
+    ) -> bool {
         self.wake_internal(
             account_scope,
             paths,
             season,
             DASHEN_CUSTOMER_BASE.to_string(),
             Some(events),
+            auth_failure_observer,
         )
     }
 
@@ -74,6 +87,21 @@ impl BackgroundSeasonSyncManager {
     where
         F: FnOnce() -> Result<bool, String>,
     {
+        self.wake_after_prepare_observed(account_scope, paths, season, events, None, prepare)
+    }
+
+    pub fn wake_after_prepare_observed<F>(
+        &self,
+        account_scope: &str,
+        paths: AccountPaths,
+        season: i64,
+        events: BackgroundEventSink,
+        auth_failure_observer: Option<BackgroundAuthFailureObserver>,
+        prepare: F,
+    ) -> Result<bool, String>
+    where
+        F: FnOnce() -> Result<bool, String>,
+    {
         let Some(background_permit) = self.reserve_after_prepare(prepare)? else {
             return Ok(false);
         };
@@ -83,6 +111,7 @@ impl BackgroundSeasonSyncManager {
             season,
             DASHEN_CUSTOMER_BASE.to_string(),
             Some(events),
+            auth_failure_observer,
             background_permit,
         ))
     }
@@ -113,7 +142,7 @@ impl BackgroundSeasonSyncManager {
         season: i64,
         customer_base_url: String,
     ) -> bool {
-        self.wake_internal(account_scope, paths, season, customer_base_url, None)
+        self.wake_internal(account_scope, paths, season, customer_base_url, None, None)
     }
 
     fn wake_internal(
@@ -123,6 +152,7 @@ impl BackgroundSeasonSyncManager {
         season: i64,
         customer_base_url: String,
         events: Option<BackgroundEventSink>,
+        auth_failure_observer: Option<BackgroundAuthFailureObserver>,
     ) -> bool {
         // Reserve the queued state before publishing/spawning the task. This closes
         // the window where a query session could start ahead of an already queued job.
@@ -136,6 +166,7 @@ impl BackgroundSeasonSyncManager {
             season,
             customer_base_url,
             events,
+            auth_failure_observer,
             background_permit,
         )
     }
@@ -147,6 +178,7 @@ impl BackgroundSeasonSyncManager {
         season: i64,
         customer_base_url: String,
         events: Option<BackgroundEventSink>,
+        auth_failure_observer: Option<BackgroundAuthFailureObserver>,
         background_permit: crate::sync_coordinator::BackgroundSyncPermit,
     ) -> bool {
         let key = AccountSeasonKey {
@@ -171,6 +203,7 @@ impl BackgroundSeasonSyncManager {
                     paths,
                     customer_base_url,
                     events.as_ref(),
+                    auth_failure_observer.as_ref(),
                     background_permit,
                 )
                 .await;
@@ -188,6 +221,7 @@ impl BackgroundSeasonSyncManager {
         paths: AccountPaths,
         customer_base_url: String,
         events: Option<&BackgroundEventSink>,
+        auth_failure_observer: Option<&BackgroundAuthFailureObserver>,
         mut background_permit: crate::sync_coordinator::BackgroundSyncPermit,
     ) {
         background_permit.mark_running();
@@ -308,18 +342,21 @@ impl BackgroundSeasonSyncManager {
                     );
                 }
             }
-            Err(_) => emit(
-                events,
-                "season-background-progress",
-                key,
-                "background",
-                "failed",
-                0,
-                store
-                    .season_status(key.season)
-                    .map(|status| status.pending_details)
-                    .unwrap_or(0),
-            ),
+            Err(error) => {
+                notify_auth_failure(auth_failure_observer, &error);
+                emit(
+                    events,
+                    "season-background-progress",
+                    key,
+                    "background",
+                    "failed",
+                    0,
+                    store
+                        .season_status(key.season)
+                        .map(|status| status.pending_details)
+                        .unwrap_or(0),
+                )
+            }
         }
     }
 
@@ -368,6 +405,12 @@ impl BackgroundSeasonSyncManager {
             .lock()
             .map(|running| running.len())
             .unwrap_or(0)
+    }
+}
+
+fn notify_auth_failure(observer: Option<&BackgroundAuthFailureObserver>, error: &anyhow::Error) {
+    if let Some(observer) = observer {
+        observer(error);
     }
 }
 
@@ -431,8 +474,12 @@ fn emit(
 
 #[cfg(test)]
 mod tests {
-    use super::{BackgroundEvent, BackgroundSeasonSyncManager};
+    use super::{
+        notify_auth_failure, BackgroundAuthFailureObserver, BackgroundEvent,
+        BackgroundSeasonSyncManager,
+    };
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn event_payloads_are_anonymous_and_bounded() {
@@ -491,5 +538,21 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!prepared.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn terminal_background_failure_reaches_the_auth_observer() {
+        let observed = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured = Arc::clone(&observed);
+        let observer: BackgroundAuthFailureObserver = Arc::new(move |error| {
+            captured.lock().unwrap().push(error.to_string());
+        });
+
+        notify_auth_failure(Some(&observer), &anyhow::anyhow!("HTTP 401 Unauthorized"));
+
+        assert_eq!(
+            observed.lock().unwrap().as_slice(),
+            ["HTTP 401 Unauthorized"]
+        );
     }
 }

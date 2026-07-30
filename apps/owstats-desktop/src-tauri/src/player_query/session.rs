@@ -14,6 +14,7 @@ pub(crate) struct Session {
     pub generation: u64,
     pub upstream: Arc<dyn PlayerQueryUpstream>,
     pub card_response: Arc<OnceCell<Value>>,
+    pub auth_failure_observer: Arc<dyn Fn(&anyhow::Error) + Send + Sync>,
     pub _permit: QuerySessionPermit,
 }
 pub(crate) struct Sessions {
@@ -86,6 +87,16 @@ impl Sessions {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(id);
+    }
+    pub fn auth_failure_observer(
+        &self,
+        id: &str,
+    ) -> Option<Arc<dyn Fn(&anyhow::Error) + Send + Sync>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .map(|session| Arc::clone(&session.auth_failure_observer))
     }
     pub fn clear_more(&self, id: &str) -> QueryResult<()> {
         self.snapshot(id).map(|_| ())

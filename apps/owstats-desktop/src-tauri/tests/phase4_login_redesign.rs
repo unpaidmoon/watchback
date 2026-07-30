@@ -85,7 +85,8 @@ fn product_login_handlers_only_expose_staged_account_flows() {
     assert!(!source.contains("pub async fn start_dashen_login("));
     assert!(!source.contains("pub fn logout("));
     assert!(source.contains("pub async fn add_account("));
-    assert!(source.contains("capture_and_publish_add"));
+    assert!(source.contains("capture_verify_and_publish_add"));
+    assert!(!source.contains("crate::account_login::capture_and_publish_add("));
     assert!(!source.contains("pub async fn relogin_account("));
 }
 

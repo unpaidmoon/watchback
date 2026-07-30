@@ -1,11 +1,25 @@
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Child;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
+
+const BROWSER_IO_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub(crate) async fn run_with_timeout<T>(
+    timeout: Duration,
+    operation: &str,
+    future: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    tokio::time::timeout(timeout, future)
+        .await
+        .map_err(|_| anyhow!("{operation} timed out after {} ms", timeout.as_millis()))?
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserCandidate {
@@ -117,9 +131,98 @@ pub struct BrowserLoginSession {
     profile_dir: PathBuf,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BrowserShutdownReport {
+    pub process_exited: bool,
+    pub process_killed: bool,
+    pub profile_removed: bool,
+}
+
 impl BrowserLoginSession {
     pub fn profile_dir(&self) -> &Path {
         &self.profile_dir
+    }
+
+    #[cfg(test)]
+    pub(crate) fn detached_for_test(profile_dir: PathBuf) -> Self {
+        Self {
+            child: None,
+            profile_dir,
+        }
+    }
+
+    /// Explicit bounded cleanup used by every normal/cancel/timeout terminal path.
+    /// `Drop` remains a synchronous last-resort fallback for abnormal unwinding.
+    pub async fn shutdown(&mut self, timeout: Duration) -> BrowserShutdownReport {
+        let mut report = BrowserShutdownReport::default();
+        if let Some(mut child) = self.child.take() {
+            let deadline = Instant::now() + timeout;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        report.process_exited = true;
+                        break;
+                    }
+                    Ok(None) if Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    _ => {
+                        report.process_killed = child.kill().is_ok();
+                        report.process_exited = child.wait().is_ok();
+                        break;
+                    }
+                }
+            }
+        } else {
+            report.process_exited = true;
+        }
+        report.profile_removed = cleanup_profile_dir(&self.profile_dir).is_ok();
+        report
+    }
+}
+
+/// Supervisor-visible ownership for a browser login process and its isolated
+/// profile. Registration is synchronous so there is no cancellation point
+/// between launching the process and transferring cleanup responsibility.
+#[derive(Clone, Default)]
+pub struct BrowserLoginSessionOwner {
+    session: Arc<Mutex<Option<BrowserLoginSession>>>,
+}
+
+impl BrowserLoginSessionOwner {
+    pub fn register(&self, session: BrowserLoginSession) -> Result<()> {
+        let mut current = self
+            .session
+            .lock()
+            .map_err(|_| anyhow!("browser cleanup owner is unavailable"))?;
+        if current.is_some() {
+            return Err(anyhow!("browser cleanup owner already has a session"));
+        }
+        *current = Some(session);
+        Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.session
+            .lock()
+            .map(|current| current.is_none())
+            .unwrap_or(false)
+    }
+
+    pub async fn shutdown(&self, timeout: Duration) -> BrowserShutdownReport {
+        let session = self
+            .session
+            .lock()
+            .ok()
+            .and_then(|mut current| current.take());
+        match session {
+            Some(mut session) => session.shutdown(timeout).await,
+            None => BrowserShutdownReport {
+                process_exited: true,
+                process_killed: false,
+                profile_removed: true,
+            },
+        }
     }
 }
 
@@ -157,6 +260,73 @@ pub fn cleanup_profile_dir(profile_dir: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StaleProfileCleanupReport {
+    pub removed: usize,
+    pub rejected: usize,
+    pub failed: usize,
+}
+
+pub fn cleanup_stale_login_profiles(root: &Path) -> Result<StaleProfileCleanupReport> {
+    let mut report = StaleProfileCleanupReport::default();
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                report.failed += 1;
+                continue;
+            }
+        };
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(suffix) = name.strip_prefix(".dashen-login-") else {
+            continue;
+        };
+        let Ok(id) = Uuid::parse_str(suffix) else {
+            continue;
+        };
+        if id.to_string() != suffix {
+            continue;
+        }
+        let metadata = match std::fs::symlink_metadata(entry.path()) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                report.failed += 1;
+                continue;
+            }
+        };
+        if !is_safe_ordinary_directory(&metadata) {
+            report.rejected += 1;
+            continue;
+        }
+        match std::fs::remove_dir_all(entry.path()) {
+            Ok(()) => report.removed += 1,
+            Err(_) => report.failed += 1,
+        }
+    }
+    Ok(report)
+}
+
+#[cfg(not(windows))]
+fn is_safe_ordinary_directory(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_dir() && !metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn is_safe_ordinary_directory(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.is_dir()
+        && !metadata.file_type().is_symlink()
+        && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
 }
 
 pub fn launch_isolated_browser(
@@ -204,6 +374,7 @@ pub fn launch_isolated_hidden_browser(
     command.insert(1, "--headless=new".to_string());
     command.insert(2, "--window-size=1280,900".to_string());
     command.insert(3, "--hide-scrollbars".to_string());
+    command.insert(4, "--disable-gpu".to_string());
     command.retain(|argument| argument != "--new-window");
     let mut process = std::process::Command::new(&command[0]);
     process.args(&command[1..]);
@@ -230,7 +401,15 @@ pub async fn wait_for_debug_endpoint(port: u16, timeout: Duration) -> Result<()>
     let version_url = format!("http://127.0.0.1:{port}/json/version");
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if client.get(&version_url).send().await.is_ok() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if run_with_timeout(
+            BROWSER_IO_TIMEOUT.min(remaining),
+            "DevTools endpoint",
+            async { Ok(client.get(&version_url).send().await?) },
+        )
+        .await
+        .is_ok()
+        {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -280,13 +459,19 @@ pub async fn open_new_page(page_url: &str, port: u16) -> Result<String> {
 }
 
 async fn json_get(client: &reqwest::Client, url: &str) -> Result<serde_json::Value> {
-    let response = client.get(url).send().await?.error_for_status()?;
-    Ok(response.json::<serde_json::Value>().await?)
+    run_with_timeout(BROWSER_IO_TIMEOUT, "DevTools HTTP GET", async {
+        let response = client.get(url).send().await?.error_for_status()?;
+        Ok(response.json::<serde_json::Value>().await?)
+    })
+    .await
 }
 
 async fn json_put(client: &reqwest::Client, url: &str) -> Result<serde_json::Value> {
-    let response = client.put(url).send().await?.error_for_status()?;
-    Ok(response.json::<serde_json::Value>().await?)
+    run_with_timeout(BROWSER_IO_TIMEOUT, "DevTools HTTP PUT", async {
+        let response = client.put(url).send().await?.error_for_status()?;
+        Ok(response.json::<serde_json::Value>().await?)
+    })
+    .await
 }
 
 fn find_login_websocket_url(pages: &serde_json::Value, login_url: &str) -> Option<String> {
@@ -326,10 +511,71 @@ pub struct CdpPage {
     next_id: i64,
 }
 
+/// Supervisor-visible ownership of the login page's DevTools connection.
+///
+/// The worker keeps the mutex guard while it uses the page. Aborting the worker
+/// drops that guard, after which the supervisor can take and explicitly close
+/// the connection before it publishes a terminal session state.
+#[derive(Clone, Default)]
+pub struct CdpPageOwner {
+    page: Arc<tokio::sync::Mutex<Option<CdpPage>>>,
+}
+
+impl CdpPageOwner {
+    /// Registration is deliberately synchronous. Once `CdpPage::connect`
+    /// returns there is no cancellation point before ownership is transferred.
+    pub fn register(&self, page: CdpPage) -> Result<()> {
+        let mut current = self
+            .page
+            .try_lock()
+            .map_err(|_| anyhow!("CDP cleanup owner is busy"))?;
+        if current.is_some() {
+            return Err(anyhow!("CDP cleanup owner already has a page"));
+        }
+        *current = Some(page);
+        Ok(())
+    }
+
+    pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, Option<CdpPage>> {
+        self.page.lock().await
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.page
+            .try_lock()
+            .map(|current| current.is_none())
+            .unwrap_or(false)
+    }
+
+    /// Takes ownership before awaiting the close handshake, making repeated
+    /// cleanup calls idempotent even if the first handshake times out.
+    pub async fn close(&self, timeout: Duration) -> Result<()> {
+        let page = {
+            let mut current = self.page.lock().await;
+            current.take()
+        };
+        if let Some(mut page) = page {
+            page.close(timeout).await?;
+        }
+        Ok(())
+    }
+}
+
 impl CdpPage {
     pub async fn connect(websocket_url: &str) -> Result<Self> {
-        let (socket, _) = tokio_tungstenite::connect_async(websocket_url).await?;
+        let (socket, _) = run_with_timeout(BROWSER_IO_TIMEOUT, "CDP websocket connect", async {
+            Ok(tokio_tungstenite::connect_async(websocket_url).await?)
+        })
+        .await?;
         Ok(Self { socket, next_id: 1 })
+    }
+
+    pub async fn close(&mut self, timeout: Duration) -> Result<()> {
+        run_with_timeout(timeout, "CDP websocket close", async {
+            self.socket.close(None).await?;
+            Ok(())
+        })
+        .await
     }
 
     pub async fn evaluate(
@@ -342,6 +588,27 @@ impl CdpPage {
     }
 
     pub async fn call(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        self.call_with_timeout(method, params, BROWSER_IO_TIMEOUT)
+            .await
+    }
+
+    pub async fn call_with_timeout(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<serde_json::Value> {
+        let operation = format!("CDP {method}");
+        tokio::time::timeout(timeout, self.call_unbounded(method, params))
+            .await
+            .map_err(|_| anyhow!("{operation} timed out after {} ms", timeout.as_millis()))?
+    }
+
+    async fn call_unbounded(
         &mut self,
         method: &str,
         params: serde_json::Value,
@@ -412,6 +679,213 @@ impl CdpPage {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn bounded_step_times_out_a_never_completing_cdp_operation() {
+        let started = Instant::now();
+        let error = run_with_timeout(
+            Duration::from_millis(20),
+            "synthetic CDP call",
+            std::future::pending::<Result<()>>(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("synthetic CDP call"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn explicit_shutdown_removes_profile_without_a_process() {
+        let parent = tempfile::tempdir().unwrap();
+        let profile = create_isolated_profile_dir(parent.path()).unwrap();
+        let mut session = BrowserLoginSession {
+            child: None,
+            profile_dir: profile.clone(),
+        };
+
+        let report = session.shutdown(Duration::from_millis(20)).await;
+
+        assert!(report.process_exited);
+        assert!(report.profile_removed);
+        assert!(!profile.exists());
+    }
+
+    #[tokio::test]
+    async fn shared_owner_releases_registered_session_before_reporting_empty() {
+        let parent = tempfile::tempdir().unwrap();
+        let profile = create_isolated_profile_dir(parent.path()).unwrap();
+        let owner = BrowserLoginSessionOwner::default();
+        owner
+            .register(BrowserLoginSession {
+                child: None,
+                profile_dir: profile.clone(),
+            })
+            .unwrap();
+
+        assert!(!owner.is_empty());
+        let report = owner.shutdown(Duration::from_millis(20)).await;
+
+        assert!(report.process_exited);
+        assert!(report.profile_removed);
+        assert!(owner.is_empty());
+        assert!(!profile.exists());
+    }
+
+    #[tokio::test]
+    async fn cdp_owner_close_is_explicit_idempotent_and_leaves_owner_empty() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(message) = socket.next().await {
+                if matches!(message.unwrap(), Message::Close(_)) {
+                    return true;
+                }
+            }
+            false
+        });
+        let owner = CdpPageOwner::default();
+        owner
+            .register(CdpPage::connect(&format!("ws://{address}")).await.unwrap())
+            .unwrap();
+
+        assert!(!owner.is_empty());
+        owner.close(Duration::from_secs(1)).await.unwrap();
+        owner.close(Duration::from_secs(1)).await.unwrap();
+
+        assert!(owner.is_empty());
+        assert!(tokio::time::timeout(Duration::from_secs(1), peer)
+            .await
+            .unwrap()
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn cdp_owner_can_close_and_empty_after_its_worker_is_aborted() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(message) = socket.next().await {
+                if matches!(message.unwrap(), Message::Close(_)) {
+                    return true;
+                }
+            }
+            false
+        });
+        let owner = CdpPageOwner::default();
+        owner
+            .register(CdpPage::connect(&format!("ws://{address}")).await.unwrap())
+            .unwrap();
+        let worker_owner = owner.clone();
+        let locked = Arc::new(tokio::sync::Notify::new());
+        let worker_locked = Arc::clone(&locked);
+        let worker = tokio::spawn(async move {
+            let _page = worker_owner.lock().await;
+            worker_locked.notify_one();
+            std::future::pending::<()>().await;
+        });
+        locked.notified().await;
+
+        worker.abort();
+        let _ = worker.await;
+        owner.close(Duration::from_secs(1)).await.unwrap();
+
+        assert!(owner.is_empty());
+        assert!(tokio::time::timeout(Duration::from_secs(1), peer)
+            .await
+            .unwrap()
+            .unwrap());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn explicit_shutdown_forces_a_hung_process_after_the_deadline() {
+        let parent = tempfile::tempdir().unwrap();
+        let profile = create_isolated_profile_dir(parent.path()).unwrap();
+        let child = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+            .spawn()
+            .unwrap();
+        let owner = BrowserLoginSessionOwner::default();
+        owner
+            .register(BrowserLoginSession {
+                child: Some(child),
+                profile_dir: profile.clone(),
+            })
+            .unwrap();
+
+        let report = owner.shutdown(Duration::from_millis(20)).await;
+
+        assert!(report.process_killed);
+        assert!(report.process_exited);
+        assert!(report.profile_removed);
+        assert!(owner.is_empty());
+        assert!(!profile.exists());
+    }
+
+    #[test]
+    fn startup_cleanup_removes_only_strict_login_profile_names() {
+        let root = tempfile::tempdir().unwrap();
+        let stale = root
+            .path()
+            .join(".dashen-login-11111111-1111-4111-8111-111111111111");
+        let near_matches = [
+            ".dashen-login-not-a-uuid",
+            ".dashen-login-11111111-1111-4111-8111-111111111111-extra",
+            "dashen-login-11111111-1111-4111-8111-111111111111",
+        ];
+        std::fs::create_dir(&stale).unwrap();
+        for name in near_matches {
+            std::fs::create_dir(root.path().join(name)).unwrap();
+        }
+
+        let report = cleanup_stale_login_profiles(root.path()).unwrap();
+
+        assert_eq!(report.removed, 1);
+        assert!(!stale.exists());
+        for name in near_matches {
+            assert!(root.path().join(name).exists(), "changed {name}");
+        }
+    }
+
+    #[test]
+    fn startup_cleanup_rejects_linked_profile_and_preserves_external_sentinel() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let sentinel = outside.path().join("do-not-change");
+        std::fs::write(&sentinel, b"sentinel").unwrap();
+        let linked = root
+            .path()
+            .join(".dashen-login-22222222-2222-4222-8222-222222222222");
+        create_directory_link(&linked, outside.path());
+
+        let report = cleanup_stale_login_profiles(root.path()).unwrap();
+
+        assert_eq!(report.removed, 0);
+        assert_eq!(report.rejected, 1);
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"sentinel");
+        assert!(std::fs::symlink_metadata(&linked).is_ok());
+    }
+
+    #[cfg(windows)]
+    fn create_directory_link(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    fn create_directory_link(link: &Path, target: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
     #[test]
     fn isolated_login_profiles_are_unique_and_cleanup_removes_them() {
         let parent = tempfile::tempdir().unwrap();
@@ -453,6 +927,41 @@ mod tests {
                 "https://pay.ds.163.com/activity/ld5?setId=synthetic"
             ),
             Some("ws://current-login".to_string())
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "launches locally installed Chrome/Edge; run as a release smoke test"]
+    async fn live_installed_browsers_start_devtools_and_cleanup_profile() {
+        let mut tested_kinds = std::collections::BTreeSet::new();
+        for browser in find_windows_browsers() {
+            if tested_kinds.contains(&browser.kind) {
+                continue;
+            }
+            let parent = tempfile::tempdir().unwrap();
+            let port = choose_available_qr_debug_port().unwrap();
+            let mut session =
+                launch_isolated_hidden_browser(&browser, "about:blank", port, parent.path())
+                    .unwrap_or_else(|error| panic!("{} failed to launch: {error}", browser.kind));
+            let profile = session.profile_dir().to_path_buf();
+
+            wait_for_debug_endpoint(port, Duration::from_secs(20))
+                .await
+                .unwrap_or_else(|error| panic!("{} DevTools unavailable: {error}", browser.kind));
+            open_or_find_page("about:blank", port)
+                .await
+                .unwrap_or_else(|error| panic!("{} page unavailable: {error}", browser.kind));
+
+            let report = session.shutdown(Duration::from_secs(2)).await;
+            assert!(report.process_exited, "{} did not exit", browser.kind);
+            assert!(report.profile_removed, "{} profile remained", browser.kind);
+            assert!(!profile.exists(), "{} profile path remained", browser.kind);
+            tested_kinds.insert(browser.kind);
+        }
+        assert!(
+            !tested_kinds.is_empty(),
+            "no supported browser was installed"
         );
     }
 }

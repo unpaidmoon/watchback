@@ -81,6 +81,7 @@ fn account_login_result_schema_has_no_credential_fields() {
         battle_tag: Some("Synthetic#1000".to_string()),
         message: "saved".to_string(),
         should_offer_switch: false,
+        warnings: Vec::new(),
     })
     .unwrap();
 

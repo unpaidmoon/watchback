@@ -21,6 +21,9 @@ import type {
   PlayerGameAction,
   PlayerProfile,
   QrAccountLoginStartResult,
+  QrAccountLoginSettleResult,
+  QrAccountLoginActiveResult,
+  AccountOperationStatus,
   QrAccountLoginSnapshot,
   LoginTargetStatus,
   ClearPlayerTargetResult,
@@ -39,17 +42,23 @@ export const listAccounts = () => invoke<AccountManagerStatus>("list_accounts");
 
 export const addAccount = () => invoke<AccountLoginResult>("add_account");
 
-export const addAccountWithQr = () =>
-  invoke<QrAccountLoginStartResult>("add_account_with_qr");
+export const addAccountWithQr = (requestId: string) =>
+  invoke<QrAccountLoginStartResult>("add_account_with_qr", { requestId });
 
-export const refreshQrAccountLogin = (sessionId: string) =>
-  invoke<void>("refresh_dashen_login_qr", { sessionId });
+export const refreshQrAccountLogin = (sessionId: string, requestId: string) =>
+  invoke<QrAccountLoginStartResult>("refresh_dashen_login_qr", { sessionId, requestId });
 
 export const getQrAccountLoginSnapshot = (sessionId: string) =>
   invoke<QrAccountLoginSnapshot>("get_dashen_login_qr_snapshot", { sessionId });
 
 export const cancelQrAccountLogin = (sessionId: string) =>
-  invoke<void>("cancel_dashen_login_qr", { sessionId });
+  invoke<QrAccountLoginSettleResult>("cancel_dashen_login_qr", { sessionId });
+
+export const getActiveQrAccountLogin = (requestId: string) =>
+  invoke<QrAccountLoginActiveResult | null>("get_active_dashen_login_qr", { requestId });
+
+export const getAccountOperationStatus = () =>
+  invoke<AccountOperationStatus>("get_operation_status");
 
 export const switchAccount = (accountId: string) =>
   invoke<AccountManagerStatus>("switch_account", { accountId });

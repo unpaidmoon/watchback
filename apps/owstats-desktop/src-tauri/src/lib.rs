@@ -1060,6 +1060,9 @@ pub fn run() -> anyhow::Result<()> {
             let manager = app.state::<background_sync::BackgroundSeasonSyncManager>();
             let registry = account_context.registry_snapshot()?;
             for entry in registry.accounts {
+                if entry.credential_state != "ready" {
+                    continue;
+                }
                 let paths = account_context.account_paths(&entry.account_id);
                 let store = sync::SeasonSyncStore::new(db::OwDatabase::for_account(&paths));
                 let _ = store.requeue_orphaned_running();
@@ -1072,7 +1075,20 @@ pub fn run() -> anyhow::Result<()> {
                         Arc::new(move |event, payload| {
                             let _ = event_app.emit(event, payload);
                         });
-                    manager.wake(entry.account_id.as_str(), paths.clone(), season, events);
+                    let observed_accounts = account_context.clone();
+                    let observed_account_id = entry.account_id.clone();
+                    manager.wake_observed(
+                        entry.account_id.as_str(),
+                        paths.clone(),
+                        season,
+                        events,
+                        Some(Arc::new(move |error| {
+                            let failure =
+                                account_context::CredentialUseFailure::from_upstream_error(error);
+                            let _ = observed_accounts
+                                .record_credential_use_failure(&observed_account_id, failure);
+                        })),
+                    );
                 }
             }
             auto_season_update::spawn(
@@ -1124,6 +1140,7 @@ pub fn run() -> anyhow::Result<()> {
             commands::cancel_dashen_login,
             commands::refresh_dashen_login_qr,
             commands::get_dashen_login_qr_snapshot,
+            commands::get_active_dashen_login_qr,
             commands::cancel_dashen_login_qr,
             commands::get_player_target_status,
             commands::get_login_target_status,

@@ -141,6 +141,7 @@ export type AccountLoginResult = {
   battleTag: string | null;
   message: string;
   shouldOfferSwitch: boolean;
+  warnings?: string[];
 };
 
 export type RemoveAccountResult = {
@@ -220,9 +221,36 @@ export type QrLoginViewState =
   | "ready"
   | "cancelling";
 
+export type QrLoginControllerPhase = QrLoginViewState | "recovering" | "cancelled";
+
 export type QrAccountLoginStartResult = {
+  requestId: string;
   sessionId: string;
+  reused: boolean;
 };
+
+export type QrAccountLoginSettleResult = {
+  sessionId: string;
+  terminalPhase: string;
+  released: boolean;
+};
+
+export type QrAccountLoginActiveResult = {
+  requestId: string;
+  sessionId: string;
+  generation: number;
+};
+
+export const ACCOUNT_OPERATION_STATUSES = [
+  "idle",
+  "account",
+  "foregroundSync",
+  "backgroundQueued",
+  "backgroundRunning",
+  "query",
+] as const;
+
+export type AccountOperationStatus = (typeof ACCOUNT_OPERATION_STATUSES)[number];
 
 export type QrAccountLoginQrEvent = {
   sessionId: string;
@@ -238,15 +266,20 @@ export type QrAccountLoginProgressEvent = {
 };
 
 export type QrAccountLoginSnapshot = {
+  requestId: string;
   sessionId: string;
+  generation: number;
   phase: string;
   message: string;
   revision: number;
   imageBase64: string | null;
+  settled: boolean;
+  released: boolean;
   completion: {
     sessionId: string;
     result: AccountLoginResult | null;
     message?: string | null;
+    errorCode?: string | null;
     cancelled: boolean;
   } | null;
 };

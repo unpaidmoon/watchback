@@ -36,8 +36,82 @@ struct ActiveStorageLease {
     _handles: Vec<std::fs::File>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialUseFailure {
+    Unauthorized,
+    Forbidden,
+    Transient,
+}
+
+impl CredentialUseFailure {
+    pub fn from_http_status(status: u16) -> Self {
+        match status {
+            401 => Self::Unauthorized,
+            403 => Self::Forbidden,
+            _ => Self::Transient,
+        }
+    }
+
+    pub fn from_upstream_error(error: &anyhow::Error) -> Self {
+        error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<reqwest::Error>())
+            .and_then(reqwest::Error::status)
+            .map(|status| Self::from_http_status(status.as_u16()))
+            .unwrap_or(Self::Transient)
+    }
+}
+
 impl AccountContextManager {
+    /// Records only authoritative authentication rejection. Transport errors,
+    /// timeouts and upstream 5xx failures must leave usable credentials alone.
+    pub fn record_credential_use_failure(
+        &self,
+        account_id: &AccountId,
+        failure: CredentialUseFailure,
+    ) -> Result<bool> {
+        if failure == CredentialUseFailure::Transient {
+            return Ok(false);
+        }
+        let _mutation = self.lock_login_publication()?;
+        let mut registry = self.registry_snapshot()?;
+        let entry = registry
+            .accounts
+            .iter_mut()
+            .find(|entry| &entry.account_id == account_id)
+            .ok_or_else(|| anyhow!("account is absent"))?;
+        if entry.credential_state == "stale" {
+            return Ok(false);
+        }
+        entry.credential_state = "stale".to_string();
+        self.replace_registry(registry)?;
+        Ok(true)
+    }
+
+    pub fn observe_authenticated_result<T>(
+        &self,
+        account_id: &AccountId,
+        result: Result<T>,
+    ) -> Result<T> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                let failure = CredentialUseFailure::from_upstream_error(&error);
+                self.record_credential_use_failure(account_id, failure)?;
+                Err(error)
+            }
+        }
+    }
+
     pub fn load(shared: SharedAppPaths) -> Result<Self> {
+        match crate::browser_session::cleanup_stale_login_profiles(shared.root()) {
+            Ok(report) if report.rejected > 0 || report.failed > 0 => eprintln!(
+                "QR profile recovery completed with rejected={} failed={}",
+                report.rejected, report.failed
+            ),
+            Err(_) => eprintln!("QR profile recovery scan failed"),
+            _ => {}
+        }
         crate::account_login::recover_pending_logins(&shared)
             .map_err(|_| anyhow!("账号登录恢复失败，请重试。"))?;
         crate::account_removal::recover_pending_removal(&shared)
@@ -543,6 +617,21 @@ mod tests {
     };
     use std::fs;
 
+    #[test]
+    fn load_recovers_stale_qr_profile_before_account_use() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = SharedAppPaths::from_app_data_dir(temp.path());
+        let stale = shared
+            .root()
+            .join(".dashen-login-33333333-3333-4333-8333-333333333333");
+        fs::create_dir_all(&stale).unwrap();
+        fs::write(stale.join("synthetic-cookie"), b"old-session").unwrap();
+
+        AccountContextManager::load(shared).unwrap();
+
+        assert!(!stale.exists());
+    }
+
     fn write_account_fixture(
         shared: &SharedAppPaths,
         id: &AccountId,
@@ -639,6 +728,47 @@ mod tests {
             })
             .unwrap();
         (temp, manager, id)
+    }
+
+    #[test]
+    fn only_explicit_authentication_failure_marks_credentials_stale() {
+        let (_temp, manager, id) = manager_fixture();
+
+        manager
+            .record_credential_use_failure(&id, CredentialUseFailure::Transient)
+            .unwrap();
+        assert_eq!(
+            manager.list_accounts().unwrap()[0].credential_state,
+            "ready"
+        );
+
+        manager
+            .record_credential_use_failure(&id, CredentialUseFailure::Unauthorized)
+            .unwrap();
+        assert_eq!(
+            manager.list_accounts().unwrap()[0].credential_state,
+            "stale"
+        );
+    }
+
+    #[test]
+    fn credential_failure_classification_does_not_treat_timeout_or_5xx_as_auth_rejection() {
+        assert_eq!(
+            CredentialUseFailure::from_http_status(401),
+            CredentialUseFailure::Unauthorized
+        );
+        assert_eq!(
+            CredentialUseFailure::from_http_status(403),
+            CredentialUseFailure::Forbidden
+        );
+        assert_eq!(
+            CredentialUseFailure::from_http_status(500),
+            CredentialUseFailure::Transient
+        );
+        assert_eq!(
+            CredentialUseFailure::from_http_status(408),
+            CredentialUseFailure::Transient
+        );
     }
 
     #[test]
