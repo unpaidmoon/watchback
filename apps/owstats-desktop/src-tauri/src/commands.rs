@@ -27,6 +27,21 @@ use tauri::{AppHandle, Emitter, State};
 const PROJECT_REPOSITORY_URL: &str = "https://github.com/fengpianpianne/watchback";
 
 #[tauri::command]
+pub fn record_frontend_diagnostic(kind: String, message: String) {
+    let kind = match kind.as_str() {
+        "windowError" => "window_error",
+        "unhandledRejection" => "unhandled_rejection",
+        _ => "unknown_error",
+    };
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Error,
+        "frontend",
+        kind,
+        &[("message", message)],
+    );
+}
+
+#[tauri::command]
 pub fn open_project_repository() -> Result<(), String> {
     tauri_plugin_opener::open_url(PROJECT_REPOSITORY_URL, None::<&str>).map_err(to_message)
 }
@@ -236,6 +251,12 @@ pub async fn generate_match_ai_roast(
     match_id: String,
     regenerate: bool,
 ) -> Result<AiRoastGenerationResult, String> {
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "ai_roast",
+        "generation_started",
+        &[("regenerate", regenerate.to_string())],
+    );
     let account = active_account(&accounts)?;
     let request = if regenerate {
         CapturedRoastRequest::regenerate(account.database(), match_id)?
@@ -245,7 +266,17 @@ pub async fn generate_match_ai_roast(
     let client = DeepSeekRoastClient::new().map_err(|_| {
         "\u{65e0}\u{6cd5}\u{521d}\u{59cb}\u{5316} DeepSeek \u{670d}\u{52a1}\u{3002}".to_string()
     })?;
-    coordinator.generate(request, &keys, &client).await
+    let result = coordinator.generate(request, &keys, &client).await;
+    match &result {
+        Ok(_) => crate::diagnostics::record(
+            crate::diagnostics::Level::Info,
+            "ai_roast",
+            "generation_completed",
+            &[],
+        ),
+        Err(error) => crate::diagnostics::record_error("ai_roast", "generation_failed", error, &[]),
+    }
+    result
 }
 
 #[tauri::command]
@@ -298,6 +329,12 @@ pub async fn add_account(
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<AccountLoginResult, String> {
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "account",
+        "login_started",
+        &[("method", "browser".to_string())],
+    );
     let _permit = operation_coordinator
         .try_acquire_account_operation()
         .map_err(str::to_string)?;
@@ -343,6 +380,16 @@ pub async fn add_account(
             crate::account_login::POST_COMMIT_REFRESH_WARNING,
         );
     }
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "account",
+        "login_completed",
+        &[
+            ("method", "browser".to_string()),
+            ("outcome", result.kind.clone()),
+            ("warnings", result.warnings.len().to_string()),
+        ],
+    );
     Ok(result)
 }
 
@@ -355,7 +402,13 @@ pub fn add_account_with_qr(
     login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     request_id: String,
 ) -> Result<crate::qr_login::QrLoginStartResult, crate::qr_login::QrLoginCommandError> {
-    crate::qr_login::start_login(
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "account",
+        "login_started",
+        &[("method", "qr".to_string())],
+    );
+    let result = crate::qr_login::start_login(
         app,
         accounts.inner().clone(),
         operation_coordinator.inner(),
@@ -363,7 +416,16 @@ pub fn add_account_with_qr(
         login_target_coordinator.inner().clone(),
         request_id,
     )
-    .map_err(crate::qr_login::QrLoginCommandError::from_error)
+    .map_err(crate::qr_login::QrLoginCommandError::from_error);
+    if result.is_err() {
+        crate::diagnostics::record(
+            crate::diagnostics::Level::Error,
+            "account",
+            "login_failed",
+            &[("method", "qr".to_string())],
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -528,6 +590,7 @@ pub fn switch_account(
         background_sync.inner().clone(),
         live_updates.inner().clone(),
     );
+    crate::diagnostics::record(crate::diagnostics::Level::Info, "account", "switched", &[]);
     Ok(status)
 }
 
@@ -549,6 +612,15 @@ pub async fn remove_account(
         .remove_account(&account_id, &chrono::Utc::now().to_rfc3339())
         .map_err(to_message)?;
     clear_removed_account_target(&login_target_coordinator, &account_id, &result);
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "account",
+        "removed",
+        &[
+            ("removed", result.removed.to_string()),
+            ("reloadRequired", result.reload_required.to_string()),
+        ],
+    );
     Ok(result)
 }
 
@@ -700,6 +772,19 @@ pub async fn sync_season(
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
     live_updates: State<'_, crate::live_season_update::LiveSeasonUpdateManager>,
 ) -> Result<SeasonSyncResult, String> {
+    let sync_mode = match request.mode {
+        crate::SyncMode::QuickUpdate => "quick",
+        crate::SyncMode::FullFetch => "full",
+    };
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "season_sync",
+        "started",
+        &[
+            ("season", request.season.to_string()),
+            ("mode", sync_mode.to_string()),
+        ],
+    );
     let account = active_account(&accounts)?;
     let root = account.paths().seasons();
     let credential_path = account.paths().credentials();
@@ -719,7 +804,7 @@ pub async fn sync_season(
         return Err("该赛季仍在后台处理中，请等待完成后再试。".to_string());
     }
     let emit_app = app.clone();
-    match request.mode {
+    let result = match request.mode {
         crate::SyncMode::QuickUpdate => {
             let live_key = crate::live_season_update::LiveSeasonKey::new(
                 account.account_id().as_str(),
@@ -791,7 +876,43 @@ pub async fn sync_season(
                 .map(SeasonSyncResult::Full)
                 .map_err(|_| authenticated_operation_error())
         }
+    };
+    match &result {
+        Ok(SeasonSyncResult::QuickList(summary)) => crate::diagnostics::record(
+            crate::diagnostics::Level::Info,
+            "season_sync",
+            "completed",
+            &[
+                ("season", request.season.to_string()),
+                ("mode", sync_mode.to_string()),
+                ("newMatches", summary.new_list_matches.to_string()),
+                ("pendingDetails", summary.pending_details.to_string()),
+                ("partialFailure", summary.partial_failure.to_string()),
+            ],
+        ),
+        Ok(SeasonSyncResult::Full(summary)) => crate::diagnostics::record(
+            crate::diagnostics::Level::Info,
+            "season_sync",
+            "completed",
+            &[
+                ("season", request.season.to_string()),
+                ("mode", sync_mode.to_string()),
+                ("importedMatches", summary.imported_matches.to_string()),
+                ("importedDetails", summary.imported_details.to_string()),
+                ("failedDetails", summary.failed_details.to_string()),
+            ],
+        ),
+        Err(error) => crate::diagnostics::record_error(
+            "season_sync",
+            "failed",
+            error,
+            &[
+                ("season", request.season.to_string()),
+                ("mode", sync_mode.to_string()),
+            ],
+        ),
     }
+    result
 }
 
 #[tauri::command]
@@ -800,6 +921,12 @@ pub async fn player_query_start(
     service: State<'_, crate::player_query::PlayerQueryService>,
     battle_tag: String,
 ) -> crate::player_query::models::QueryResult<crate::player_query::models::SessionStart> {
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "player_query",
+        "started",
+        &[],
+    );
     let account = active_account(&accounts)
         .map_err(crate::player_query::models::QueryError::SessionInvalid)?;
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
@@ -821,7 +948,7 @@ pub async fn player_query_start(
         })?;
     let account_id = account.account_id().clone();
     let account_manager = accounts.inner().clone();
-    service
+    let result = service
         .start_query_with_auth_observer(
             &battle_tag,
             Arc::new(client),
@@ -831,7 +958,22 @@ pub async fn player_query_start(
                 let _ = account_manager.record_credential_use_failure(&account_id, failure);
             }),
         )
-        .await
+        .await;
+    match &result {
+        Ok(_) => crate::diagnostics::record(
+            crate::diagnostics::Level::Info,
+            "player_query",
+            "session_ready",
+            &[],
+        ),
+        Err(error) => crate::diagnostics::record(
+            crate::diagnostics::Level::Error,
+            "player_query",
+            "start_failed",
+            &[("errorKind", query_error_kind(error).to_string())],
+        ),
+    }
+    result
 }
 
 #[tauri::command]
@@ -919,6 +1061,24 @@ pub fn player_query_end(
     session_id: String,
 ) {
     service.end_query(&session_id);
+    crate::diagnostics::record(
+        crate::diagnostics::Level::Info,
+        "player_query",
+        "ended",
+        &[],
+    );
+}
+
+fn query_error_kind(error: &crate::player_query::models::QueryError) -> &'static str {
+    use crate::player_query::models::QueryError;
+    match error {
+        QueryError::InvalidInput(_) => "invalidInput",
+        QueryError::Busy(_) => "busy",
+        QueryError::NotFound(_) => "notFound",
+        QueryError::SessionInvalid(_) => "sessionInvalid",
+        QueryError::Upstream(_) => "upstream",
+        QueryError::InvalidResponse(_) => "invalidResponse",
+    }
 }
 
 fn player_query_season_value(
@@ -999,7 +1159,19 @@ pub fn runtime_error_message(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+#[track_caller]
 fn to_message(error: impl std::fmt::Display) -> String {
+    let caller = std::panic::Location::caller();
+    let source = std::path::Path::new(caller.file())
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("unknown");
+    crate::diagnostics::record_error(
+        "command",
+        "failed",
+        &error,
+        &[("source", format!("{source}:{}", caller.line()))],
+    );
     runtime_error_message(error)
 }
 

@@ -23,6 +23,7 @@ pub mod dashen_client;
 mod database;
 mod db;
 pub mod deepseek_key;
+mod diagnostics;
 mod importer;
 pub mod install_data_migration;
 mod live_season_update;
@@ -69,12 +70,7 @@ pub use sync::{
 };
 
 pub fn initialize_log_file(paths: &app_paths::SharedAppPaths) -> anyhow::Result<()> {
-    std::fs::create_dir_all(paths.logs())?;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(paths.log_file())?;
-    Ok(())
+    diagnostics::ensure_log_file(&paths.log_file())
 }
 pub use sync::{
     build_page_diagnostics, classify_quick_page, commit_quick_list_probe, dump_season_json,
@@ -1020,7 +1016,6 @@ fn open_windows_published_install_data(
 }
 
 pub fn run() -> anyhow::Result<()> {
-    use std::io::Write;
     use std::sync::Arc;
     use tauri::{Emitter, Manager};
 
@@ -1028,17 +1023,26 @@ pub fn run() -> anyhow::Result<()> {
         .map_err(|_| anyhow::Error::new(StartupFailure::InvalidInstallData))?;
     let published_data = open_published_install_data(&executable)?;
     let shared = published_data.paths().clone();
-    initialize_log_file(&shared)?;
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .append(true)
-        .open(shared.log_file())
-    {
-        let _ = writeln!(
-            file,
-            "{} Watchback started",
-            chrono::Utc::now().to_rfc3339()
-        );
-    }
+    diagnostics::initialize(shared.log_file())?;
+    diagnostics::record(
+        diagnostics::Level::Info,
+        "application",
+        "started",
+        &[
+            ("version", env!("CARGO_PKG_VERSION").to_string()),
+            (
+                "build",
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                }
+                .to_string(),
+            ),
+            ("os", std::env::consts::OS.to_string()),
+            ("arch", std::env::consts::ARCH.to_string()),
+        ],
+    );
     let sync_coordinator = sync_coordinator::SyncCoordinator::default();
     let background_manager =
         background_sync::BackgroundSeasonSyncManager::new(sync_coordinator.clone());
@@ -1065,6 +1069,8 @@ pub fn run() -> anyhow::Result<()> {
             );
             let manager = app.state::<background_sync::BackgroundSeasonSyncManager>();
             let registry = account_context.registry_snapshot()?;
+            let account_count = registry.accounts.len();
+            let mut recovered_jobs = 0usize;
             for entry in registry.accounts {
                 if entry.credential_state != "ready" {
                     continue;
@@ -1076,6 +1082,7 @@ pub fn run() -> anyhow::Result<()> {
                     if store.active_job_count(season).unwrap_or(0) == 0 {
                         continue;
                     }
+                    recovered_jobs += 1;
                     let event_app = app.handle().clone();
                     let events: background_sync::BackgroundEventSink =
                         Arc::new(move |event, payload| {
@@ -1107,12 +1114,22 @@ pub fn run() -> anyhow::Result<()> {
                 startup_background_manager.clone(),
                 startup_live_update_manager.clone(),
             );
+            diagnostics::record(
+                diagnostics::Level::Info,
+                "application",
+                "ready",
+                &[
+                    ("accountCount", account_count.to_string()),
+                    ("recoveredBackgroundJobs", recovered_jobs.to_string()),
+                ],
+            );
             Ok(())
         })
         .manage(sync_coordinator)
         .manage(ai_roast::coordinator::AiRoastCoordinator::default())
         .manage(qr_login::QrLoginCoordinator::default())
         .invoke_handler(tauri::generate_handler![
+            commands::record_frontend_diagnostic,
             commands::get_overview,
             commands::open_project_repository,
             commands::open_support_directory,
@@ -1172,5 +1189,11 @@ pub fn run() -> anyhow::Result<()> {
             commands::player_query_end,
         ])
         .run(tauri::generate_context!())
-        .map_err(|_| anyhow::Error::new(StartupFailure::GenericStartup))
+        .map(|()| {
+            diagnostics::record(diagnostics::Level::Info, "application", "stopped", &[]);
+        })
+        .map_err(|error| {
+            diagnostics::record_error("application", "runtime_failed", &error, &[]);
+            anyhow::Error::new(StartupFailure::GenericStartup)
+        })
 }

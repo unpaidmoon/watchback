@@ -238,7 +238,7 @@ fn public_v2_constants_are_fixed() {
 }
 
 #[tokio::test]
-async fn request_v2_uses_thinking_contract_and_complete_snapshot() {
+async fn request_v2_disables_thinking_and_uses_complete_snapshot() {
     let valid = serde_json::to_string(&narrative()).unwrap();
     let (url, requests, handle) = server(vec![Reply {
         status: 200,
@@ -255,8 +255,11 @@ async fn request_v2_uses_thinking_contract_and_complete_snapshot() {
     handle.join();
     let request = body(&requests.lock().unwrap()[0]);
     assert_eq!(request["model"], "deepseek-v4-flash");
-    assert_eq!(request["thinking"]["type"], "enabled");
-    assert_eq!(request["reasoning_effort"], "high");
+    assert_eq!(request["thinking"]["type"], "disabled");
+    assert!(
+        request.get("reasoning_effort").is_none(),
+        "non-thinking requests must omit reasoning_effort"
+    );
     assert_eq!(request["temperature"], 0.8);
     assert_eq!(request["max_tokens"], 4000);
     assert_eq!(request["response_format"]["type"], "json_object");

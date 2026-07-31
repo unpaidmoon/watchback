@@ -283,7 +283,6 @@ struct ChatRequest {
     max_tokens: u32,
     temperature: f32,
     thinking: Thinking,
-    reasoning_effort: &'static str,
     response_format: ResponseFormat,
     stream: bool,
 }
@@ -342,7 +341,7 @@ fn build_request(snapshot: &RoastSnapshot) -> ChatRequest {
     let mut request = ChatRequest{
         model:MODEL,
         messages:vec![Message{role:"system",content:system_prompt().to_string()},Message{role:"user",content:format!("以下是匿名、结构化的完整对局快照，以及由同一快照生成的证据目录（路径映射到值和语义）。只依据这些内容生成五区块 JSON 报告；evidenceRefs 必须逐字选自目录键，正文数字必须与目录值一致，claimType 必须符合目录语义。{current_objective_requirement}凡使用最高、第一、最低、垫底、领先、落后、高于或低于，必须在同一条目的 evidenceRefs 中引用支持该比较的 rank、delta 或双方 raw_stat；拿不准就改写为不含比较词的事实描述。所有可见文本禁止出现击杀数量写法，包括“一杀”至“百杀”、“双杀”和任何其他中文数词加“杀”；只写击杀表现靠前、偏低或转化不足，并引用对应证据。不要使用因为……所以……、整局没打过、失职、拖累、背锅、免责、洗白等因果或归责套话。每条 commentary 写到六十至九十个汉字，完整报告目标三百五十至四百五十个可见字符。\n快照：{}\n证据目录（路径映射到值和语义）：{}",serde_json::to_string(snapshot).expect("snapshot serializes"),serde_json::to_string(&evidence_directory).expect("evidence directory serializes"))}],
-        max_tokens:MAX_TOKENS,temperature:0.8,thinking:Thinking{kind:"enabled"},reasoning_effort:"high",response_format:ResponseFormat{kind:"json_object"},stream:false,
+        max_tokens:MAX_TOKENS,temperature:0.8,thinking:Thinking{kind:"disabled"},response_format:ResponseFormat{kind:"json_object"},stream:false,
     };
     request.messages[1].content = format!(
         "以下是匿名完整对局快照及证据目录（路径映射到值和语义）。只依据它们生成 V3 JSON。evidenceRefs 必须逐字选自目录键；比较结论需引用 rank、delta 或双方原始统计；涉及英雄任务与克制关系时，必须同时引用 taskKnowledge/gameKnowledge 与相关统计。不得虚构站位、换人、技能使用、语音交流或具体击杀过程。\n快照：{}\n证据目录（路径映射到值和语义）：{}",

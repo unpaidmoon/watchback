@@ -46,6 +46,8 @@ Watchback 当前仅提供 Windows 桌面版，不提供 macOS、Linux 或网页�
 
 Watchback 在此基础上完成了 Windows 桌面端集成、本地数据存储和复盘分析界面。Watchback 与 Overstats 均为第三方项目，与暴雪娱乐、网易及网易大神不存在隶属或官方合作关系；上游接口发生变化时，登录或数据同步功能可能暂时不可用。
 
+第三方软件、服务、数据、游戏素材及其授权边界参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 ## 本地数据与隐私
 
 - Windows 安装版把 Watchback 自有的可写业务数据保存在安装目录下的 `data\`。账号凭据、对局数据、设置、同步状态、浏览器登录 profile、诊断和备份都位于此目录。
@@ -87,3 +89,15 @@ Watchback 会先更新对局列表，再在后台补全详情。请保持应用�
 ### 卸载应用会删除本地数据吗
 
 默认卸载会保留安装目录中的 `data\`，以免误删账号凭据、数据库、赛季数据、备份和浏览器登录状态。只有在卸载界面明确选择“同时删除本地数据”后才会删除该目录；保留数据时安装目录可能不会被完全移除。
+
+## 安全
+
+如果发现可能影响账号凭据、多账号隔离、本地数据、安装或卸载流程、网络请求、日志或构建产物的安全问题，请不要在公开 Issue 中披露漏洞细节或敏感数据。请按照 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 私密提交。
+
+报告前请移除网易大神 Cookie、token、浏览器登录 profile、BattleTag、玩家 ID、对局 ID、DeepSeek API Key、本地数据库和其他可识别信息。
+
+## 许可证
+
+Watchback 项目作者原创的源代码采用 [MIT License](LICENSE)。
+
+MIT License 不自动覆盖第三方开源组件、Overstats 上游内容、《守望先锋》相关商标和游戏素材、网易及网易大神内容、远端接口响应或来源未明确授权的数据。详细归属和发行注意事项参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

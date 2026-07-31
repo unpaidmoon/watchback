@@ -21,12 +21,24 @@ pub(crate) fn spawn(
     // A later account switch creates another keyed request instead of replacing
     // or retargeting this one.
     let Ok(triggered_account) = accounts.active_snapshot() else {
+        crate::diagnostics::record(
+            crate::diagnostics::Level::Warn,
+            "auto_update",
+            "skipped",
+            &[("reason", "noActiveAccount".to_string())],
+        );
         return;
     };
     let triggered_account_id = triggered_account.account_id().clone();
     drop(triggered_account);
     tauri::async_runtime::spawn(async move {
-        let _ = run_once(
+        crate::diagnostics::record(
+            crate::diagnostics::Level::Info,
+            "auto_update",
+            "check_started",
+            &[],
+        );
+        let result = run_once(
             &app,
             &accounts,
             &operation_coordinator,
@@ -36,6 +48,17 @@ pub(crate) fn spawn(
             &triggered_account_id,
         )
         .await;
+        match result {
+            Ok(started) => crate::diagnostics::record(
+                crate::diagnostics::Level::Info,
+                "auto_update",
+                "check_completed",
+                &[("updateStarted", started.to_string())],
+            ),
+            Err(error) => {
+                crate::diagnostics::record_error("auto_update", "check_failed", &error, &[])
+            }
+        }
     });
 }
 

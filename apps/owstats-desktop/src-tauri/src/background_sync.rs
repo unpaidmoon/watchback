@@ -225,6 +225,12 @@ impl BackgroundSeasonSyncManager {
         mut background_permit: crate::sync_coordinator::BackgroundSyncPermit,
     ) {
         background_permit.mark_running();
+        crate::diagnostics::record(
+            crate::diagnostics::Level::Info,
+            "background_sync",
+            "started",
+            &[("season", key.season.to_string())],
+        );
         let db = OwDatabase::for_account(&paths);
         let store = SeasonSyncStore::new(db);
         let _ = store.requeue_orphaned_running();
@@ -242,7 +248,13 @@ impl BackgroundSeasonSyncManager {
         );
         let request = match request_for_account(&paths, key.season, customer_base_url) {
             Ok(request) => request,
-            Err(_) => {
+            Err(error) => {
+                crate::diagnostics::record_error(
+                    "background_sync",
+                    "preparation_failed",
+                    &error,
+                    &[("season", key.season.to_string())],
+                );
                 emit(
                     events,
                     "season-background-progress",
@@ -282,6 +294,20 @@ impl BackgroundSeasonSyncManager {
         };
         match result {
             Ok(summary) => {
+                crate::diagnostics::record(
+                    if summary.failed_details > 0 {
+                        crate::diagnostics::Level::Warn
+                    } else {
+                        crate::diagnostics::Level::Info
+                    },
+                    "background_sync",
+                    "completed",
+                    &[
+                        ("season", key.season.to_string()),
+                        ("newMatches", summary.new_list_matches.to_string()),
+                        ("failedDetails", summary.failed_details.to_string()),
+                    ],
+                );
                 let persisted_status = store.season_status(key.season).ok();
                 if summary.failed_details > 0 {
                     emit(
@@ -328,6 +354,12 @@ impl BackgroundSeasonSyncManager {
                 }
             }
             Err(error) => {
+                crate::diagnostics::record_error(
+                    "background_sync",
+                    "failed",
+                    &error,
+                    &[("season", key.season.to_string())],
+                );
                 notify_auth_failure(auth_failure_observer, &error);
                 emit(
                     events,
