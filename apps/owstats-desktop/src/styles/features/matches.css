@@ -1331,6 +1331,26 @@ body:has(.matchesPage) {
   gap: var(--space-2);
 }
 
+.aiMatchRoastStreaming {
+  min-height: 78px;
+}
+
+.aiMatchRoastCursor {
+  width: 2px;
+  height: 1em;
+  display: inline-block;
+  margin-left: 3px;
+  vertical-align: -0.12em;
+  background: currentColor;
+  animation: aiMatchRoastCursorBlink 900ms steps(1, end) infinite;
+}
+
+@keyframes aiMatchRoastCursorBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .aiMatchRoastError {
   color: var(--status-danger-strong) !important;
 }
@@ -1361,8 +1381,10 @@ body:has(.matchesPage) {
 
 @media (prefers-reduced-motion: reduce) {
   .aiMatchRoast,
-  .aiMatchRoast button {
+  .aiMatchRoast button,
+  .aiMatchRoastCursor {
     transition: none;
+    animation: none;
   }
 }
 

@@ -53,11 +53,13 @@ assert.match(typesSource, /export type AiRoastReport\s*=\s*\{[\s\S]*?decisiveFac
 assert.match(typesSource, /export type AiMatchRoastView\s*=\s*\{\s*award:\s*string;\s*commentary:\s*string;\s*report:\s*AiRoastReport\s*\|\s*null;\s*\}/s);
 assert.match(typesSource, /export type DeepSeekKeyStatus\s*=\s*\{\s*state:\s*\x27ready\x27\s*\|\s*\x27missing\x27;\s*message:\s*string;\s*\}/s);
 assert.match(typesSource, /export type AiRoastGenerationResult\s*=\s*\{\s*aiRoast:\s*AiMatchRoastView;\s*\}/s);
+assert.match(typesSource, /export type AiRoastStreamEvent\s*=[\s\S]*?attemptStarted[\s\S]*?content[\s\S]*?title:\s*string;[\s\S]*?commentary:\s*string/);
 assert.match(typesSource, /export type MatchDetailView\s*=\s*\{[\s\S]*?aiRoast:\s*AiMatchRoastView\s*\|\s*null;/);
 
 assert.match(apiSource, /invoke<DeepSeekKeyStatus>\(\x22get_deepseek_key_status\x22\)/);
 assert.match(apiSource, /invoke<DeepSeekKeyStatus>\(\x22save_deepseek_key\x22,\s*\{\s*apiKey\s*\}\)/s);
-assert.match(apiSource, /invoke<AiRoastGenerationResult>\(\x22generate_match_ai_roast\x22,\s*\{\s*matchId,\s*regenerate,?\s*\}\)/s);
+assert.match(apiSource, /new Channel<AiRoastStreamEvent>\(onEvent\)/);
+assert.match(apiSource, /invoke<AiRoastGenerationResult>\(\x22generate_match_ai_roast\x22,\s*\{\s*matchId,\s*regenerate,\s*onEvent:\s*stream,?\s*\}\)/s);
 
 const settingsMarkup = renderToStaticMarkup(createElement(DeepSeekSettings));
 assert.match(settingsMarkup, new RegExp('AI \\u9510\\u8bc4'));
@@ -255,7 +257,10 @@ assert.match(
 assert.match(componentSource, /aria-live=\x22polite\x22/);
 assert.match(componentSource, /visuallyHidden/);
 assert.match(componentSource, /recoverable\s*&&[\s\S]*?>重试<\/button>/);
-assert.match(componentSource, /generateMatchAiRoast\(requestMatchId, regenerate\)/);
+assert.match(componentSource, /generateMatchAiRoast\(\s*requestMatchId,\s*regenerate,\s*receiveStreamEvent,?\s*\)/);
+assert.match(componentSource, /event\.type\s*===\s*\x22attemptStarted\x22/);
+assert.match(componentSource, /setStreamDraft\(\{[\s\S]*?title:\s*event\.title,[\s\S]*?commentary:\s*event\.commentary/);
+assert.match(componentSource, /hasStreamingContent[\s\S]*?<StreamingRoast draft=\{currentDraft\}/);
 assert.match(componentSource, /generateRoast\(true\)/);
 
 assert.match(compactMatchDetailSource, /import \{ AiMatchRoast \} from "\.\/AiMatchRoast"/);
@@ -284,6 +289,7 @@ assert.ok(roastEntryRule, 'report entries need a layout rule');
 assert.doesNotMatch(roastEntryRule, /background|box-shadow|border-radius/);
 assert.match(matchesCssSource, /\.aiMatchRoastEntry\s+p[^}]*\{[^}]*color:\s*var\(--text-secondary\)[^}]*font-size:\s*14px/s);
 assert.match(matchesCssSource, /\.aiMatchRoastError\s*\{[\s\S]*?var\(--status-danger-strong\)/);
+assert.match(matchesCssSource, /\.aiMatchRoastCursor\s*\{[\s\S]*?animation:\s*aiMatchRoastCursorBlink/);
 assert.match(matchesCssSource, /\.aiMatchRoast button\s*\{[\s\S]*?min-height:\s*44px/);
 assert.match(
   matchesCssSource,

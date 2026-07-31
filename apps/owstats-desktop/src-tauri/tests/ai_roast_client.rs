@@ -10,8 +10,8 @@ use std::{
 
 use owstats_desktop_lib::ai_roast::{
     client::{
-        system_prompt, DeepSeekRoastClient, DeepSeekRoastError, MAX_TOKENS, MODEL,
-        PRODUCTION_TIMEOUT, PROMPT_VERSION,
+        system_prompt, AiRoastStreamEvent, DeepSeekRoastClient, DeepSeekRoastError, MAX_TOKENS,
+        MODEL, PRODUCTION_TIMEOUT, PROMPT_VERSION,
     },
     knowledge::KnowledgeContext,
     report::{
@@ -116,8 +116,55 @@ fn narrative() -> AiRoastNarrative {
     }
 }
 
+fn sse_event(kind: &str, payload: Value) -> String {
+    format!("event: {kind}\ndata: {payload}\n\n")
+}
+
 fn completion(report: &str, finish: &str) -> String {
-    json!({"choices":[{"message":{"content":report},"finish_reason":finish}]}).to_string()
+    let mut body = sse_event(
+        "response.created",
+        json!({"type":"response.created","sequence_number":0}),
+    );
+    match finish {
+        "stop" => {
+            body.push_str(&sse_event(
+                "response.output_text.delta",
+                json!({"type":"response.output_text.delta","sequence_number":1,"delta":report}),
+            ));
+            body.push_str(&sse_event(
+                "response.completed",
+                json!({"type":"response.completed","sequence_number":2,"response":{"usage":{}}}),
+            ));
+        }
+        "length" => body.push_str(&sse_event(
+            "response.incomplete",
+            json!({"type":"response.incomplete","sequence_number":1,"response":{"incomplete_details":{"reason":"max_output_tokens"}}}),
+        )),
+        "content_filter" | "insufficient_system_resource" => body.push_str(&sse_event(
+            "response.failed",
+            json!({"type":"response.failed","sequence_number":1,"response":{"error":{"code":finish}}}),
+        )),
+        other => panic!("unsupported finish reason: {other}"),
+    }
+    body
+}
+
+fn streaming_completion(deltas: &[&str]) -> String {
+    let mut body = sse_event(
+        "response.created",
+        json!({"type":"response.created","sequence_number":0}),
+    );
+    for (index, delta) in deltas.iter().enumerate() {
+        body.push_str(&sse_event(
+            "response.output_text.delta",
+            json!({"type":"response.output_text.delta","sequence_number":index + 1,"delta":delta}),
+        ));
+    }
+    body.push_str(&sse_event(
+        "response.completed",
+        json!({"type":"response.completed","sequence_number":deltas.len() + 1,"response":{"usage":{}}}),
+    ));
+    body
 }
 
 #[derive(Clone)]
@@ -146,7 +193,7 @@ fn server(replies: Vec<Reply>) -> (String, Arc<Mutex<Vec<String>>>, Server) {
                 503 => "Service Unavailable",
                 _ => "Synthetic",
             };
-            let response=format!("HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",reply.status,reason,reply.body.len(),reply.body);
+            let response=format!("HTTP/1.1 {} {}\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",reply.status,reason,reply.body.len(),reply.body);
             let _ = stream.write_all(response.as_bytes());
         }
         let _ = tx.send(());
@@ -230,15 +277,15 @@ fn client(url: &str, timeout: Duration) -> DeepSeekRoastClient {
 }
 
 #[test]
-fn public_v2_constants_are_fixed() {
+fn public_v4_constants_are_fixed() {
     assert_eq!(MODEL, "deepseek-v4-flash");
-    assert_eq!(PROMPT_VERSION, 3);
+    assert_eq!(PROMPT_VERSION, 4);
     assert_eq!(MAX_TOKENS, 4000);
     assert_eq!(PRODUCTION_TIMEOUT, Duration::from_secs(60));
 }
 
 #[tokio::test]
-async fn request_v2_disables_thinking_and_uses_complete_snapshot() {
+async fn responses_request_streams_json_and_uses_complete_snapshot() {
     let valid = serde_json::to_string(&narrative()).unwrap();
     let (url, requests, handle) = server(vec![Reply {
         status: 200,
@@ -253,18 +300,21 @@ async fn request_v2_disables_thinking_and_uses_complete_snapshot() {
         narrative()
     );
     handle.join();
-    let request = body(&requests.lock().unwrap()[0]);
+    let captured = requests.lock().unwrap();
+    assert!(captured[0].starts_with("POST /responses HTTP/1.1"));
+    let request = body(&captured[0]);
     assert_eq!(request["model"], "deepseek-v4-flash");
-    assert_eq!(request["thinking"]["type"], "disabled");
-    assert!(
-        request.get("reasoning_effort").is_none(),
-        "non-thinking requests must omit reasoning_effort"
-    );
+    assert!(request.get("thinking").is_none());
+    assert_eq!(request["reasoning"]["effort"], "none");
     assert_eq!(request["temperature"], 0.8);
-    assert_eq!(request["max_tokens"], 4000);
-    assert_eq!(request["response_format"]["type"], "json_object");
-    assert_eq!(request["stream"], false);
-    let prompt = request["messages"][1]["content"].as_str().unwrap();
+    assert_eq!(request["max_output_tokens"], 4000);
+    assert_eq!(request["text"]["format"]["type"], "json_object");
+    assert_eq!(request["stream"], true);
+    assert!(request["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("严格按以下字段顺序"));
+    let prompt = request["input"][0]["content"].as_str().unwrap();
     for required in [
         "scoreboard",
         "team",
@@ -281,6 +331,52 @@ async fn request_v2_disables_thinking_and_uses_complete_snapshot() {
     assert!(prompt.contains("\"我方安娜.stats.healing\""));
     assert!(prompt.contains("\"value\":12000"));
     assert!(prompt.contains("\"semantic\":\"raw_stat\""));
+}
+
+#[tokio::test]
+async fn visible_title_and_commentary_are_emitted_incrementally() {
+    let expected = narrative();
+    let analysis = serde_json::to_string(&expected.analysis).unwrap();
+    let prefix = format!(
+        "{{\"title\":{},\"commentary\":\"{}",
+        serde_json::to_string(&expected.title).unwrap(),
+        "你的治疗确实撑住了场面，"
+    );
+    let suffix = format!(
+        "{}\",\"analysis\":{analysis}}}",
+        "至少不是站在后排看热闹；但敌方艾什的输出更有存在感，我方火力没把治疗创造的空间换成结果。这局输得像药箱准时到岗，扳机集体请假。"
+    );
+    let (url, _, handle) = server(vec![Reply {
+        status: 200,
+        body: streaming_completion(&[&prefix, &suffix]),
+        delay: Duration::ZERO,
+    }]);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&events);
+
+    let actual = client(&url, Duration::from_secs(2))
+        .generate_streaming("sk-synthetic", &snapshot(), move |event| {
+            captured.lock().unwrap().push(event);
+        })
+        .await
+        .unwrap();
+
+    handle.join();
+    assert_eq!(actual, expected);
+    let events = events.lock().unwrap();
+    assert_eq!(events.first(), Some(&AiRoastStreamEvent::AttemptStarted));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AiRoastStreamEvent::Content { title, commentary }
+            if title == &expected.title && commentary == "你的治疗确实撑住了场面，"
+    )));
+    assert_eq!(
+        events.last(),
+        Some(&AiRoastStreamEvent::Content {
+            title: expected.title,
+            commentary: expected.commentary,
+        })
+    );
 }
 
 #[test]
@@ -325,7 +421,7 @@ async fn invalid_output_gets_exactly_one_anonymous_correction() {
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     let retry = body(&requests[1]);
-    let correction = retry["messages"].as_array().unwrap().last().unwrap()["content"]
+    let correction = retry["input"].as_array().unwrap().last().unwrap()["content"]
         .as_str()
         .unwrap();
     assert!(correction.contains("校验失败"));

@@ -76,6 +76,10 @@ export type AiRoastGenerationResult = {
   aiRoast: AiMatchRoastView;
 };
 
+export type AiRoastStreamEvent =
+  | { type: "attemptStarted" }
+  | { type: "content"; title: string; commentary: string };
+
 export type MatchEvaluationSummary = {
   grade: string;
   primaryTag: string;

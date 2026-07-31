@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AccountLoginResult,
   AccountManagerStatus,
   AiRoastGenerationResult,
+  AiRoastStreamEvent,
   CareerAchievement,
   FilterOptions,
   DeepSeekKeyStatus,
@@ -106,10 +107,16 @@ export function saveDeepSeekKey(apiKey: string) {
   return invoke<DeepSeekKeyStatus>("save_deepseek_key", { apiKey });
 }
 
-export function generateMatchAiRoast(matchId: string, regenerate = false) {
+export function generateMatchAiRoast(
+  matchId: string,
+  regenerate = false,
+  onEvent?: (event: AiRoastStreamEvent) => void,
+) {
+  const stream = new Channel<AiRoastStreamEvent>(onEvent);
   return invoke<AiRoastGenerationResult>("generate_match_ai_roast", {
     matchId,
     regenerate,
+    onEvent: stream,
   });
 }
 

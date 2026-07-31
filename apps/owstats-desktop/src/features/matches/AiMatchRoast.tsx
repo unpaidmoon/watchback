@@ -3,7 +3,11 @@ import {
   generateMatchAiRoast,
   getDeepSeekKeyStatus,
 } from "../../shared/api";
-import type { AiMatchRoastView, AiRoastInsight } from "../../shared/types";
+import type {
+  AiMatchRoastView,
+  AiRoastInsight,
+  AiRoastStreamEvent,
+} from "../../shared/types";
 
 export const AI_ROAST_LOADING_PHRASES = [
   "正在翻阅本场数据…",
@@ -31,6 +35,11 @@ type AiMatchRoastProps = {
 type MatchScopedValue<T> = {
   matchId: string;
   value: T;
+};
+
+type AiRoastDraft = {
+  title: string;
+  commentary: string;
 };
 
 function RoastInsightEntry({ insight }: { insight: AiRoastInsight }) {
@@ -82,6 +91,18 @@ function RoastReport({ roast }: { roast: AiMatchRoastView }) {
         <h3>终审锐评</h3>
         <p className="aiMatchRoastClosing">{report.closingRoast}</p>
       </section>
+    </div>
+  );
+}
+
+function StreamingRoast({ draft }: { draft: AiRoastDraft }) {
+  return (
+    <div className="aiMatchRoastNarrative aiMatchRoastStreaming">
+      <h3>{draft.title || "正在拟定本场封号…"}</h3>
+      <p>
+        {draft.commentary || "正在组织锐评措辞…"}
+        <span className="aiMatchRoastCursor" aria-hidden="true" />
+      </p>
     </div>
   );
 }
@@ -192,6 +213,8 @@ export function AiMatchRoast({
   const [generatedRoast, setGeneratedRoast] =
     useState<MatchScopedValue<AiMatchRoastView> | null>(null);
   const [error, setError] = useState<MatchScopedValue<AiRoastError> | null>(null);
+  const [streamDraft, setStreamDraft] =
+    useState<MatchScopedValue<AiRoastDraft> | null>(null);
   const [busyMatchId, setBusyMatchId] = useState<string | null>(null);
   const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0);
   const requestTokenRef = useRef(0);
@@ -218,6 +241,12 @@ export function AiMatchRoast({
     generatedRoast?.matchId === matchId ? generatedRoast.value : initialRoast;
   const currentError = error?.matchId === matchId ? error.value : null;
   const busy = busyMatchId === matchId;
+  const currentDraft =
+    streamDraft?.matchId === matchId ? streamDraft.value : null;
+  const hasStreamingContent =
+    busy &&
+    currentDraft !== null &&
+    Boolean(currentDraft.title || currentDraft.commentary);
 
   async function generateRoast(regenerate = false) {
     if (!detailReady || busy || (roast && !regenerate)) {
@@ -228,6 +257,7 @@ export function AiMatchRoast({
     requestTokenRef.current = requestToken;
     const requestMatchId = matchIdRef.current;
     setError(null);
+    setStreamDraft(null);
     setBusyMatchId(requestMatchId);
     setLoadingPhraseIndex(0);
 
@@ -260,13 +290,41 @@ export function AiMatchRoast({
         return;
       }
 
-      const result = await generateMatchAiRoast(requestMatchId, regenerate);
+      const receiveStreamEvent = (event: AiRoastStreamEvent) => {
+        if (
+          !mountedRef.current ||
+          requestTokenRef.current !== requestToken ||
+          requestMatchId !== matchIdRef.current
+        ) {
+          return;
+        }
+        if (event.type === "attemptStarted") {
+          setStreamDraft({
+            matchId: requestMatchId,
+            value: { title: "", commentary: "" },
+          });
+          return;
+        }
+        setStreamDraft({
+          matchId: requestMatchId,
+          value: {
+            title: event.title,
+            commentary: event.commentary,
+          },
+        });
+      };
+      const result = await generateMatchAiRoast(
+        requestMatchId,
+        regenerate,
+        receiveStreamEvent,
+      );
       if (
         requestTokenRef.current !== requestToken ||
         requestMatchId !== matchIdRef.current
       ) {
         return;
       }
+      setStreamDraft(null);
       setGeneratedRoast({ matchId: requestMatchId, value: result.aiRoast });
       setError(null);
     } catch (requestError) {
@@ -276,6 +334,7 @@ export function AiMatchRoast({
       ) {
         return;
       }
+      setStreamDraft(null);
       setError({
         matchId: requestMatchId,
         value: classifyAiRoastError(requestError),
@@ -298,9 +357,13 @@ export function AiMatchRoast({
         {busy ? AI_ROAST_LIVE_MESSAGE : ""}
       </span>
 
-      {roast ? (
+      {roast || hasStreamingContent ? (
         <div className="aiMatchRoastResult">
-          <RoastReport roast={roast} />
+          {hasStreamingContent && currentDraft ? (
+            <StreamingRoast draft={currentDraft} />
+          ) : roast ? (
+            <RoastReport roast={roast} />
+          ) : null}
           {currentError ? (
             <p className="aiMatchRoastError" role="alert">
               {currentError.message}
@@ -311,7 +374,7 @@ export function AiMatchRoast({
             disabled={!detailReady || busy}
             onClick={() => void generateRoast(true)}
           >
-            {busy ? "正在重新生成…" : "重新生成"}
+            {busy ? (roast ? "正在重新生成…" : "正在生成…") : "重新生成"}
           </button>
         </div>
       ) : (

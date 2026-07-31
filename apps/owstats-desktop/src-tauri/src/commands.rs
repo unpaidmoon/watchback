@@ -1,5 +1,5 @@
 use crate::account_context::{AccountContextManager, AccountContextSnapshot};
-use crate::ai_roast::client::DeepSeekRoastClient;
+use crate::ai_roast::client::{AiRoastStreamEvent, DeepSeekRoastClient};
 use crate::ai_roast::coordinator::{
     AiRoastCoordinator, AiRoastGenerationResult, CapturedRoastRequest,
 };
@@ -22,7 +22,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{ipc::Channel, AppHandle, Emitter, State};
 
 const PROJECT_REPOSITORY_URL: &str = "https://github.com/fengpianpianne/watchback";
 
@@ -250,6 +250,7 @@ pub async fn generate_match_ai_roast(
     coordinator: State<'_, AiRoastCoordinator>,
     match_id: String,
     regenerate: bool,
+    on_event: Channel<AiRoastStreamEvent>,
 ) -> Result<AiRoastGenerationResult, String> {
     crate::diagnostics::record(
         crate::diagnostics::Level::Info,
@@ -266,7 +267,11 @@ pub async fn generate_match_ai_roast(
     let client = DeepSeekRoastClient::new().map_err(|_| {
         "\u{65e0}\u{6cd5}\u{521d}\u{59cb}\u{5316} DeepSeek \u{670d}\u{52a1}\u{3002}".to_string()
     })?;
-    let result = coordinator.generate(request, &keys, &client).await;
+    let result = coordinator
+        .generate_streaming(request, &keys, &client, move |event| {
+            let _ = on_event.send(event);
+        })
+        .await;
     match &result {
         Ok(_) => crate::diagnostics::record(
             crate::diagnostics::Level::Info,

@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +16,7 @@ use super::{
 };
 
 pub const MODEL: &str = "deepseek-v4-flash";
-pub const PROMPT_VERSION: i64 = 3;
+pub const PROMPT_VERSION: i64 = 4;
 pub const MAX_TOKENS: u32 = 4_000;
 pub const PRODUCTION_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -77,6 +78,13 @@ pub enum DeepSeekRoastError {
     InvalidOutput,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AiRoastStreamEvent {
+    AttemptStarted,
+    Content { title: String, commentary: String },
+}
+
 impl DeepSeekRoastClient {
     pub fn new() -> Result<Self, DeepSeekRoastError> {
         let client = Client::builder()
@@ -109,6 +117,18 @@ impl DeepSeekRoastClient {
         api_key: &str,
         snapshot: &RoastSnapshot,
     ) -> Result<AiRoastNarrative, DeepSeekRoastError> {
+        self.generate_streaming(api_key, snapshot, |_| {}).await
+    }
+
+    pub async fn generate_streaming<F>(
+        &self,
+        api_key: &str,
+        snapshot: &RoastSnapshot,
+        mut on_event: F,
+    ) -> Result<AiRoastNarrative, DeepSeekRoastError>
+    where
+        F: FnMut(AiRoastStreamEvent),
+    {
         LAST_VALIDATION_FAILURE.store(0, Ordering::Release);
         if api_key.trim().is_empty() {
             return Err(DeepSeekRoastError::InvalidKey);
@@ -116,22 +136,27 @@ impl DeepSeekRoastClient {
         let request = build_request(snapshot);
         tokio::time::timeout(
             self.timeout,
-            self.generate_with_correction(api_key, request, snapshot),
+            self.generate_with_correction(api_key, request, snapshot, &mut on_event),
         )
         .await
         .map_err(|_| DeepSeekRoastError::Timeout)?
     }
 
-    async fn generate_with_correction(
+    async fn generate_with_correction<F>(
         &self,
         api_key: &str,
-        mut request: ChatRequest,
+        mut request: ResponsesRequest,
         snapshot: &RoastSnapshot,
-    ) -> Result<AiRoastNarrative, DeepSeekRoastError> {
+        on_event: &mut F,
+    ) -> Result<AiRoastNarrative, DeepSeekRoastError>
+    where
+        F: FnMut(AiRoastStreamEvent),
+    {
         for attempt in 0..MAX_ATTEMPTS {
+            on_event(AiRoastStreamEvent::AttemptStarted);
             let response = self
                 .client
-                .post(format!("{}/chat/completions", self.base_url))
+                .post(format!("{}/responses", self.base_url))
                 .bearer_auth(api_key)
                 .timeout(self.timeout)
                 .json(&request)
@@ -142,32 +167,7 @@ impl DeepSeekRoastClient {
             if !status.is_success() {
                 return Err(map_status(status));
             }
-            let body = response.bytes().await.map_err(map_request_error)?;
-            let completion = serde_json::from_slice::<CompletionResponse>(&body).map_err(|_| {
-                LAST_VALIDATION_FAILURE.store(13, Ordering::Release);
-                DeepSeekRoastError::InvalidOutput
-            })?;
-            let choice = completion.choices.into_iter().next().ok_or_else(|| {
-                LAST_VALIDATION_FAILURE.store(13, Ordering::Release);
-                DeepSeekRoastError::InvalidOutput
-            })?;
-            match choice.finish_reason.as_deref() {
-                Some("stop") => {}
-                Some("length") => {
-                    LAST_VALIDATION_FAILURE.store(14, Ordering::Release);
-                    return Err(DeepSeekRoastError::Length);
-                }
-                Some("content_filter") => {
-                    LAST_VALIDATION_FAILURE.store(15, Ordering::Release);
-                    return Err(DeepSeekRoastError::ContentFilter);
-                }
-                Some("insufficient_system_resource") => return Err(DeepSeekRoastError::Busy),
-                _ => {
-                    LAST_VALIDATION_FAILURE.store(16, Ordering::Release);
-                    return Err(DeepSeekRoastError::InvalidOutput);
-                }
-            }
-            let content = choice.message.content.unwrap_or_default();
+            let content = read_streaming_response(response, on_event).await?;
             match parse_visible_narrative(&content) {
                 Ok(report) => return Ok(report),
                 Err(error) if attempt + 1 < MAX_ATTEMPTS => append_correction(&mut request, &error),
@@ -277,13 +277,14 @@ fn detailed_validation_failure_code(
 }
 
 #[derive(Serialize)]
-struct ChatRequest {
+struct ResponsesRequest {
     model: &'static str,
-    messages: Vec<Message>,
-    max_tokens: u32,
+    instructions: &'static str,
+    input: Vec<Message>,
+    max_output_tokens: u32,
     temperature: f32,
-    thinking: Thinking,
-    response_format: ResponseFormat,
+    reasoning: Reasoning,
+    text: ResponseText,
     stream: bool,
 }
 
@@ -293,9 +294,12 @@ struct Message {
     content: String,
 }
 #[derive(Serialize)]
-struct Thinking {
-    #[serde(rename = "type")]
-    kind: &'static str,
+struct Reasoning {
+    effort: &'static str,
+}
+#[derive(Serialize)]
+struct ResponseText {
+    format: ResponseFormat,
 }
 #[derive(Serialize)]
 struct ResponseFormat {
@@ -303,7 +307,7 @@ struct ResponseFormat {
     kind: &'static str,
 }
 
-fn build_request(snapshot: &RoastSnapshot) -> ChatRequest {
+fn build_request(snapshot: &RoastSnapshot) -> ResponsesRequest {
     let evidence_directory = evidence_catalog(snapshot)
         .into_iter()
         .map(|(path, entry)| {
@@ -324,34 +328,23 @@ fn build_request(snapshot: &RoastSnapshot) -> ChatRequest {
             (path, serde_json::json!({"value":value,"semantic":semantic}))
         })
         .collect::<std::collections::BTreeMap<_, _>>();
-    let current_objective_requirement = snapshot
-        .scoreboard
-        .team
-        .iter()
-        .find(|player| player.subject == snapshot.current_player)
-        .and_then(|player| {
-            (player.derived.team_objective_time_rank == Some(1)).then(|| {
-                format!(
-                    "currentPlayer.evidenceRefs 必须包含 {}.derived.teamObjectiveTimeRank。",
-                    player.subject
-                )
-            })
-        })
-        .unwrap_or_default();
-    let mut request = ChatRequest{
+    ResponsesRequest{
         model:MODEL,
-        messages:vec![Message{role:"system",content:system_prompt().to_string()},Message{role:"user",content:format!("以下是匿名、结构化的完整对局快照，以及由同一快照生成的证据目录（路径映射到值和语义）。只依据这些内容生成五区块 JSON 报告；evidenceRefs 必须逐字选自目录键，正文数字必须与目录值一致，claimType 必须符合目录语义。{current_objective_requirement}凡使用最高、第一、最低、垫底、领先、落后、高于或低于，必须在同一条目的 evidenceRefs 中引用支持该比较的 rank、delta 或双方 raw_stat；拿不准就改写为不含比较词的事实描述。所有可见文本禁止出现击杀数量写法，包括“一杀”至“百杀”、“双杀”和任何其他中文数词加“杀”；只写击杀表现靠前、偏低或转化不足，并引用对应证据。不要使用因为……所以……、整局没打过、失职、拖累、背锅、免责、洗白等因果或归责套话。每条 commentary 写到六十至九十个汉字，完整报告目标三百五十至四百五十个可见字符。\n快照：{}\n证据目录（路径映射到值和语义）：{}",serde_json::to_string(snapshot).expect("snapshot serializes"),serde_json::to_string(&evidence_directory).expect("evidence directory serializes"))}],
-        max_tokens:MAX_TOKENS,temperature:0.8,thinking:Thinking{kind:"disabled"},response_format:ResponseFormat{kind:"json_object"},stream:false,
-    };
-    request.messages[1].content = format!(
-        "以下是匿名完整对局快照及证据目录（路径映射到值和语义）。只依据它们生成 V3 JSON。evidenceRefs 必须逐字选自目录键；比较结论需引用 rank、delta 或双方原始统计；涉及英雄任务与克制关系时，必须同时引用 taskKnowledge/gameKnowledge 与相关统计。不得虚构站位、换人、技能使用、语音交流或具体击杀过程。\n快照：{}\n证据目录（路径映射到值和语义）：{}",
-        serde_json::to_string(snapshot).expect("snapshot serializes"),
-        serde_json::to_string(&evidence_directory).expect("evidence directory serializes")
-    );
-    request
+        instructions:system_prompt(),
+        input:vec![Message{role:"user",content:format!(
+            "以下是匿名完整对局快照及证据目录（路径映射到值和语义）。只依据它们生成 V3 JSON。evidenceRefs 必须逐字选自目录键；比较结论需引用 rank、delta 或双方原始统计；涉及英雄任务与克制关系时，必须同时引用 taskKnowledge/gameKnowledge 与相关统计。不得虚构站位、换人、技能使用、语音交流或具体击杀过程。\n快照：{}\n证据目录（路径映射到值和语义）：{}",
+            serde_json::to_string(snapshot).expect("snapshot serializes"),
+            serde_json::to_string(&evidence_directory).expect("evidence directory serializes")
+        )}],
+        max_output_tokens:MAX_TOKENS,
+        temperature:0.8,
+        reasoning:Reasoning{effort:"none"},
+        text:ResponseText{format:ResponseFormat{kind:"json_object"}},
+        stream:true,
+    }
 }
 
-fn append_correction(request: &mut ChatRequest, error: &RoastValidationError) {
+fn append_correction(request: &mut ResponsesRequest, error: &RoastValidationError) {
     let category = match error {
         RoastValidationError::UnknownEvidence => "evidenceRefs 中存在证据目录之外的路径",
         RoastValidationError::DuplicateEvidence => "同一条判断重复引用了证据",
@@ -363,10 +356,10 @@ fn append_correction(request: &mut ChatRequest, error: &RoastValidationError) {
         RoastValidationError::RealIdentity => "出现了真实身份或凭据内容",
         _ => "JSON 结构或必填字段无效",
     };
-    request.messages.push(Message {
+    request.input.push(Message {
         role: "user",
         content: format!(
-            "上一次 V3 锐评校验失败：{category}。只修正对应问题，并重新返回完整 JSON。严格照此骨架，不增加字段或外层文字：{{\"analysis\":{{\"matchThesis\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"currentPlayer\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"keyActors\":[],\"supportingFactors\":[]}},\"title\":\"\",\"commentary\":\"\"}}。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。保留一个主线，supportingFactors 最多两个，negative keyActors 最多两个。不要在 judgment、title、commentary 中书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。evidenceRefs 必须逐字取自原证据目录。不要复述上一次输出、输入数据、身份、路径或凭据。"
+            "上一次 V3 锐评校验失败：{category}。只修正对应问题，并重新返回完整 JSON。严格照此骨架和字段顺序，不增加字段或外层文字：{{\"title\":\"\",\"commentary\":\"\",\"analysis\":{{\"matchThesis\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"currentPlayer\":{{\"judgment\":\"\",\"claimType\":\"statistical_interpretation\",\"evidenceRefs\":[\"\"]}},\"keyActors\":[],\"supportingFactors\":[]}}}}。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。保留一个主线，supportingFactors 最多两个，negative keyActors 最多两个。不要在 judgment、title、commentary 中书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。evidenceRefs 必须逐字取自原证据目录。不要复述上一次输出、输入数据、身份、路径或凭据。"
         ),
     });
 }
@@ -376,22 +369,222 @@ pub fn system_prompt() -> &'static str {
 先在 analysis 中回答“如果只能告诉朋友一件事，这局最关键的是什么”，形成唯一 matchThesis；currentPlayer 判断用户真实亮点与责任；keyActors 只选真正带飞或最该背锅的人；supportingFactors 最多两个。优先追究任务的第一责任人，再考虑协助者。涉及法老之鹰、回声等空中威胁时，若我方存在主要对空职责英雄，应结合 taskKnowledge 与结果统计判断其任务是否完成。
 胜利时尽量夸用户，但只能夸证据支持的亮点，也要点名真正带飞的大爹。失败时先接住用户情绪，再根据证据找一至两位主要责任人；用户确实有锅也直说。可以口语化使用“坐牢”“头锅”“战犯”“大爹”“这把肯定是他的问题”，但只评价本局行为、数据与职责，不攻击人格、智力、身份或现实生活。
 最终可见输出只能是一个有趣的主标题和一篇连续正文，正文建议三百五十至五百个中文字符、硬上限六百五十；不要分节、列清单或套模板。judgment、title、commentary 不书写阿拉伯数字、百分比或比分，用有证据支持的定性比较表达。不得虚构站位、换英雄、技能命中、语音、故意送、具体击杀过程等快照没有的事件。
-只返回严格 JSON，不得增加字段或骨架外文字：{"analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]},"title":"","commentary":""}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。所有 evidenceRefs 必须逐字来自证据目录。"#
+只返回严格 JSON，并严格按以下字段顺序生成，以便标题和正文可以流式展示；不得增加字段或骨架外文字：{"title":"","commentary":"","analysis":{"matchThesis":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"currentPlayer":{"judgment":"","claimType":"statistical_interpretation","evidenceRefs":[""]},"keyActors":[],"supportingFactors":[]}}。keyActors 每项为 {"subject":"","impact":"positive|negative","judgment":"","claimType":"direct_fact|statistical_interpretation|game_context_inference","evidenceRefs":[""]}；其他 claim 同样使用 judgment、claimType、evidenceRefs。matchThesis 至少引用两条证据，并且来自两个不同玩家或不同维度；currentPlayer 至少引用一条以当前玩家 subject 开头的证据。凡 evidenceRefs 包含 taskKnowledge 或 gameKnowledge，claimType 必须是 game_context_inference 且还要引用至少一条玩家统计；不含知识引用时不要使用 game_context_inference。所有 evidenceRefs 必须逐字来自证据目录。"#
 }
 
 #[derive(Deserialize)]
-struct CompletionResponse {
-    #[serde(default)]
-    choices: Vec<Choice>,
+struct ResponsesStreamEvent {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    delta: Option<String>,
+    response: Option<StreamResponse>,
 }
+
 #[derive(Deserialize)]
-struct Choice {
-    message: CompletionMessage,
-    finish_reason: Option<String>,
+struct StreamResponse {
+    error: Option<StreamError>,
+    incomplete_details: Option<IncompleteDetails>,
 }
+
 #[derive(Deserialize)]
-struct CompletionMessage {
-    content: Option<String>,
+struct StreamError {
+    code: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct IncompleteDetails {
+    reason: Option<String>,
+}
+
+#[derive(Default)]
+struct VisibleNarrativeAccumulator {
+    raw: String,
+    last_title: String,
+    last_commentary: String,
+}
+
+impl VisibleNarrativeAccumulator {
+    fn push(&mut self, delta: &str) -> Option<AiRoastStreamEvent> {
+        self.raw.push_str(delta);
+        let title = extract_partial_json_string_field(&self.raw, "title");
+        let commentary = extract_partial_json_string_field(&self.raw, "commentary");
+        if title == self.last_title && commentary == self.last_commentary {
+            return None;
+        }
+        self.last_title = title.clone();
+        self.last_commentary = commentary.clone();
+        Some(AiRoastStreamEvent::Content { title, commentary })
+    }
+}
+
+async fn read_streaming_response<F>(
+    response: reqwest::Response,
+    on_event: &mut F,
+) -> Result<String, DeepSeekRoastError>
+where
+    F: FnMut(AiRoastStreamEvent),
+{
+    let mut stream = response.bytes_stream();
+    let mut sse_buffer = Vec::new();
+    let mut output = String::new();
+    let mut visible = VisibleNarrativeAccumulator::default();
+    let mut terminal = false;
+
+    while let Some(chunk) = stream.next().await {
+        sse_buffer.extend_from_slice(&chunk.map_err(map_request_error)?);
+        while let Some(frame) = take_sse_frame(&mut sse_buffer)? {
+            let (event_name, data) = parse_sse_frame(&frame);
+            if data.is_empty() {
+                continue;
+            }
+            let event = serde_json::from_str::<ResponsesStreamEvent>(&data).map_err(|_| {
+                LAST_VALIDATION_FAILURE.store(13, Ordering::Release);
+                DeepSeekRoastError::InvalidOutput
+            })?;
+            let kind = event
+                .kind
+                .as_deref()
+                .or(event_name.as_deref())
+                .unwrap_or("");
+            match kind {
+                "response.output_text.delta" => {
+                    let delta = event.delta.unwrap_or_default();
+                    output.push_str(&delta);
+                    if let Some(update) = visible.push(&delta) {
+                        on_event(update);
+                    }
+                }
+                "response.completed" => terminal = true,
+                "response.incomplete" => {
+                    LAST_VALIDATION_FAILURE.store(14, Ordering::Release);
+                    let _reason = event
+                        .response
+                        .and_then(|response| response.incomplete_details)
+                        .and_then(|details| details.reason);
+                    return Err(DeepSeekRoastError::Length);
+                }
+                "response.failed" => {
+                    let code = event
+                        .response
+                        .and_then(|response| response.error)
+                        .and_then(|error| error.code)
+                        .unwrap_or_default();
+                    return Err(map_stream_failure(&code));
+                }
+                "error" => return Err(DeepSeekRoastError::Transport),
+                _ => {}
+            }
+        }
+    }
+
+    if !terminal {
+        LAST_VALIDATION_FAILURE.store(16, Ordering::Release);
+        return Err(DeepSeekRoastError::InvalidOutput);
+    }
+    Ok(output)
+}
+
+fn map_stream_failure(code: &str) -> DeepSeekRoastError {
+    match code {
+        "content_filter" | "content_policy_violation" => {
+            LAST_VALIDATION_FAILURE.store(15, Ordering::Release);
+            DeepSeekRoastError::ContentFilter
+        }
+        "insufficient_system_resource" | "server_error" | "service_unavailable" => {
+            DeepSeekRoastError::Busy
+        }
+        "rate_limit_exceeded" => DeepSeekRoastError::TooFrequent,
+        _ => DeepSeekRoastError::Transport,
+    }
+}
+
+fn take_sse_frame(buffer: &mut Vec<u8>) -> Result<Option<String>, DeepSeekRoastError> {
+    let Some((position, delimiter_length)) = find_sse_delimiter(buffer) else {
+        return Ok(None);
+    };
+    let frame = String::from_utf8(buffer[..position].to_vec())
+        .map_err(|_| DeepSeekRoastError::InvalidOutput)?;
+    buffer.drain(..position + delimiter_length);
+    Ok(Some(frame))
+}
+
+fn find_sse_delimiter(buffer: &[u8]) -> Option<(usize, usize)> {
+    let crlf = buffer.windows(4).position(|bytes| bytes == b"\r\n\r\n");
+    let lf = buffer.windows(2).position(|bytes| bytes == b"\n\n");
+    match (crlf, lf) {
+        (Some(crlf), Some(lf)) if crlf <= lf => Some((crlf, 4)),
+        (Some(_), Some(lf)) => Some((lf, 2)),
+        (Some(crlf), None) => Some((crlf, 4)),
+        (None, Some(lf)) => Some((lf, 2)),
+        (None, None) => None,
+    }
+}
+
+fn parse_sse_frame(frame: &str) -> (Option<String>, String) {
+    let mut event_name = None;
+    let mut data = Vec::new();
+    for line in frame.lines() {
+        if let Some(value) = line.strip_prefix("event:") {
+            event_name = Some(value.trim().to_string());
+        } else if let Some(value) = line.strip_prefix("data:") {
+            data.push(value.trim_start());
+        }
+    }
+    (event_name, data.join("\n"))
+}
+
+fn extract_partial_json_string_field(input: &str, field: &str) -> String {
+    let marker = format!("\"{field}\"");
+    let Some(marker_start) = input.find(&marker) else {
+        return String::new();
+    };
+    let mut remainder = &input[marker_start + marker.len()..];
+    remainder = remainder.trim_start();
+    let Some(after_colon) = remainder.strip_prefix(':') else {
+        return String::new();
+    };
+    remainder = after_colon.trim_start();
+    let Some(value) = remainder.strip_prefix('"') else {
+        return String::new();
+    };
+    decode_partial_json_string(value)
+}
+
+fn decode_partial_json_string(input: &str) -> String {
+    let mut output = String::new();
+    let mut chars = input.chars();
+    while let Some(character) = chars.next() {
+        match character {
+            '"' => break,
+            '\\' => {
+                let Some(escaped) = chars.next() else {
+                    break;
+                };
+                match escaped {
+                    '"' | '\\' | '/' => output.push(escaped),
+                    'b' => output.push('\u{0008}'),
+                    'f' => output.push('\u{000c}'),
+                    'n' => output.push('\n'),
+                    'r' => output.push('\r'),
+                    't' => output.push('\t'),
+                    'u' => {
+                        let digits = chars.by_ref().take(4).collect::<String>();
+                        if digits.len() != 4 {
+                            break;
+                        }
+                        if let Ok(value) = u32::from_str_radix(&digits, 16) {
+                            if let Some(decoded) = char::from_u32(value) {
+                                output.push(decoded);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            other => output.push(other),
+        }
+    }
+    output
 }
 
 fn map_request_error(error: reqwest::Error) -> DeepSeekRoastError {

@@ -2,7 +2,9 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::client::{DeepSeekRoastClient, DeepSeekRoastError, MODEL, PROMPT_VERSION};
+use super::client::{
+    AiRoastStreamEvent, DeepSeekRoastClient, DeepSeekRoastError, MODEL, PROMPT_VERSION,
+};
 use super::knowledge::{embedded_knowledge, knowledge_for_match};
 use super::snapshot::{build_roast_snapshot, INPUT_SCHEMA_VERSION};
 use super::store::{replace_roast, roast_for_match, save_roast_once, AiRoastRecord};
@@ -106,17 +108,34 @@ impl AiRoastCoordinator {
         keys: &DeepSeekKeyManager,
         client: &DeepSeekRoastClient,
     ) -> Result<AiRoastGenerationResult, String> {
-        self.run(|| generate_captured(request, keys, client))
+        self.generate_streaming(request, keys, client, |_| {}).await
+    }
+
+    pub async fn generate_streaming<F>(
+        &self,
+        request: CapturedRoastRequest,
+        keys: &DeepSeekKeyManager,
+        client: &DeepSeekRoastClient,
+        on_event: F,
+    ) -> Result<AiRoastGenerationResult, String>
+    where
+        F: FnMut(AiRoastStreamEvent),
+    {
+        self.run(|| generate_captured(request, keys, client, on_event))
             .await
             .map_err(|error| error.to_string())?
     }
 }
 
-async fn generate_captured(
+async fn generate_captured<F>(
     request: CapturedRoastRequest,
     keys: &DeepSeekKeyManager,
     client: &DeepSeekRoastClient,
-) -> Result<AiRoastGenerationResult, String> {
+    on_event: F,
+) -> Result<AiRoastGenerationResult, String>
+where
+    F: FnMut(AiRoastStreamEvent),
+{
     request.database.initialize().map_err(|_| STORAGE_MESSAGE)?;
     let conn = request.database.connect().map_err(|_| STORAGE_MESSAGE)?;
     if !request.regenerate {
@@ -164,7 +183,7 @@ async fn generate_captured(
     drop(conn);
 
     let output = client
-        .generate(&api_key, &snapshot)
+        .generate_streaming(&api_key, &snapshot, on_event)
         .await
         .map_err(map_client_error)?;
     let conn = request.database.connect().map_err(|_| STORAGE_MESSAGE)?;

@@ -223,7 +223,13 @@ fn narrative(title: &str) -> AiRoastNarrative {
     }
 }
 fn completion(report: &AiRoastNarrative) -> String {
-    json!({"choices":[{"message":{"content":serde_json::to_string(report).unwrap()},"finish_reason":"stop"}]}).to_string()
+    let output = serde_json::to_string(report).unwrap();
+    format!(
+        "event: response.created\ndata: {}\n\nevent: response.output_text.delta\ndata: {}\n\nevent: response.completed\ndata: {}\n\n",
+        json!({"type":"response.created","sequence_number":0}),
+        json!({"type":"response.output_text.delta","sequence_number":1,"delta":output}),
+        json!({"type":"response.completed","sequence_number":2,"response":{"usage":{}}}),
+    )
 }
 fn legacy(match_id: &str) -> AiRoastRecord {
     AiRoastRecord {
@@ -253,7 +259,7 @@ fn server(status: u16, body: String, count: usize) -> (String, Arc<Mutex<Vec<Str
         for _ in 0..count {
             let (mut stream, _) = listener.accept().unwrap();
             capture.lock().unwrap().push(read(&mut stream));
-            let response=format!("HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+            let response=format!("HTTP/1.1 {status} X\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
             let _ = stream.write_all(response.as_bytes());
         }
         let _ = tx.send(());
@@ -368,7 +374,7 @@ async fn unified_standard_and_arena_requests_include_complete_context_and_versio
         assert_eq!(result.ai_roast.award, generated.title);
         assert_eq!(result.ai_roast.report, None);
         let request = request_body(&requests.lock().unwrap()[0]);
-        let prompt = request["messages"][1]["content"].as_str().unwrap();
+        let prompt = request["input"][0]["content"].as_str().unwrap();
         assert!(prompt.contains("scoreboard"));
         assert!(prompt.contains("opponent"));
         assert!(!prompt.contains("selectedFacts"));
@@ -464,5 +470,5 @@ async fn application_generation_lock_rejects_concurrent_work() {
 #[test]
 fn record_compatibility_constants_remain_expected() {
     assert_eq!(MODEL, "deepseek-v4-flash");
-    assert_eq!(PROMPT_VERSION, 3);
+    assert_eq!(PROMPT_VERSION, 4);
 }
