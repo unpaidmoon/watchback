@@ -143,8 +143,32 @@ export function classifyAiRoastError(error: unknown): AiRoastError {
   if (message.includes("生成超时")) {
     return { message: "锐评生成超时，请重试", recoverable: true };
   }
-  if (message.includes("安全素材")) {
+  if (message.includes("长度上限") || message.includes("超出长度限制")) {
+    return { message: "锐评输出未完整生成，请重试", recoverable: true };
+  }
+  if (message.includes("安全规则拦截")) {
+    return { message: "锐评内容被安全规则拦截，请重试", recoverable: true };
+  }
+  if (message.includes("安全素材") || message.includes("锐评格式无效")) {
     return { message: "锐评输出格式异常，请重试", recoverable: true };
+  }
+  if (message.includes("可核验数据")) {
+    return {
+      message: "这场对局缺少可核验数据，暂时无法生成锐评",
+      recoverable: false,
+    };
+  }
+  if (message.includes("详情尚未完整同步")) {
+    return {
+      message: "对局详情尚未完整同步，请先更新对局数据",
+      recoverable: false,
+    };
+  }
+  if (message.includes("锐评保存失败")) {
+    return {
+      message: "锐评保存失败，请检查数据目录后重试",
+      recoverable: true,
+    };
   }
 
   const recoverable = [

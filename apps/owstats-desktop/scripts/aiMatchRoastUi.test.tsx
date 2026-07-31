@@ -175,6 +175,30 @@ assert.deepEqual(classifyAiRoastError('这场对局暂时没有足够的安全�
   message: '锐评输出格式异常，请重试',
   recoverable: true,
 });
+assert.deepEqual(classifyAiRoastError('锐评输出达到长度上限，未能完整生成。'), {
+  message: '锐评输出未完整生成，请重试',
+  recoverable: true,
+});
+assert.deepEqual(classifyAiRoastError('锐评内容被 DeepSeek 安全规则拦截。'), {
+  message: '锐评内容被安全规则拦截，请重试',
+  recoverable: true,
+});
+assert.deepEqual(classifyAiRoastError('DeepSeek 返回的锐评格式无效。'), {
+  message: '锐评输出格式异常，请重试',
+  recoverable: true,
+});
+assert.deepEqual(classifyAiRoastError('这场对局暂时没有足够的可核验数据生成 AI 锐评。'), {
+  message: '这场对局缺少可核验数据，暂时无法生成锐评',
+  recoverable: false,
+});
+assert.deepEqual(classifyAiRoastError('对局详情尚未完整同步，暂时无法生成 AI 锐评。'), {
+  message: '对局详情尚未完整同步，请先更新对局数据',
+  recoverable: false,
+});
+assert.deepEqual(classifyAiRoastError('AI 锐评保存失败，请稍后再试。'), {
+  message: '锐评保存失败，请检查数据目录后重试',
+  recoverable: true,
+});
 assert.equal(classifyAiRoastError('对局标识无效。').recoverable, false);
 assert.deepEqual(classifyAiRoastError('C:\\private\\db.sqlite synthetic-secret'), {
   message: '锐评生成失败，请稍后重试',

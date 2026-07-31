@@ -20,6 +20,10 @@ const MISSING_KEY_MESSAGE: &str = "\u{8bf7}\u{5148}\u{914d}\u{7f6e} DeepSeek API
 const INCOMPLETE_DETAIL_MESSAGE: &str = "\u{5bf9}\u{5c40}\u{8be6}\u{60c5}\u{5c1a}\u{672a}\u{5b8c}\u{6574}\u{540c}\u{6b65}\u{ff0c}\u{6682}\u{65f6}\u{65e0}\u{6cd5}\u{751f}\u{6210} AI \u{9510}\u{8bc4}\u{3002}";
 const MATERIAL_MESSAGE: &str = "\u{8fd9}\u{573a}\u{5bf9}\u{5c40}\u{6682}\u{65f6}\u{6ca1}\u{6709}\u{8db3}\u{591f}\u{7684}\u{53ef}\u{6838}\u{9a8c}\u{6570}\u{636e}\u{751f}\u{6210} AI \u{9510}\u{8bc4}\u{3002}";
 const STORAGE_MESSAGE: &str = "AI \u{9510}\u{8bc4}\u{4fdd}\u{5b58}\u{5931}\u{8d25}\u{ff0c}\u{8bf7}\u{7a0d}\u{540e}\u{518d}\u{8bd5}\u{3002}";
+const LENGTH_MESSAGE: &str = "\u{9510}\u{8bc4}\u{8f93}\u{51fa}\u{8fbe}\u{5230}\u{957f}\u{5ea6}\u{4e0a}\u{9650}\u{ff0c}\u{672a}\u{80fd}\u{5b8c}\u{6574}\u{751f}\u{6210}\u{3002}";
+const CONTENT_FILTER_MESSAGE: &str = "\u{9510}\u{8bc4}\u{5185}\u{5bb9}\u{88ab} DeepSeek \u{5b89}\u{5168}\u{89c4}\u{5219}\u{62e6}\u{622a}\u{3002}";
+const INVALID_OUTPUT_MESSAGE: &str =
+    "DeepSeek \u{8fd4}\u{56de}\u{7684}\u{9510}\u{8bc4}\u{683c}\u{5f0f}\u{65e0}\u{6548}\u{3002}";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -208,9 +212,9 @@ fn map_client_error(error: DeepSeekRoastError) -> String {
         DeepSeekRoastError::Busy => "DeepSeek \u{670d}\u{52a1}\u{6682}\u{65f6}\u{7e41}\u{5fd9}\u{ff0c}\u{8bf7}\u{7a0d}\u{540e}\u{518d}\u{8bd5}\u{3002}",
         DeepSeekRoastError::Timeout => "\u{751f}\u{6210}\u{8d85}\u{65f6}\u{ff0c}\u{8bf7}\u{7a0d}\u{540e}\u{518d}\u{8bd5}\u{3002}",
         DeepSeekRoastError::Transport => "\u{65e0}\u{6cd5}\u{8fde}\u{63a5} DeepSeek \u{670d}\u{52a1}\u{ff0c}\u{8bf7}\u{7a0d}\u{540e}\u{518d}\u{8bd5}\u{3002}",
-        DeepSeekRoastError::Length
-        | DeepSeekRoastError::ContentFilter
-        | DeepSeekRoastError::InvalidOutput => MATERIAL_MESSAGE,
+        DeepSeekRoastError::Length => LENGTH_MESSAGE,
+        DeepSeekRoastError::ContentFilter => CONTENT_FILTER_MESSAGE,
+        DeepSeekRoastError::InvalidOutput => INVALID_OUTPUT_MESSAGE,
     }
     .to_string()
 }
@@ -271,5 +275,25 @@ mod tests {
         assert!(task.await.unwrap());
         assert!(!coordinator.is_active());
         assert!(coordinator.run(|| async { 4 }).await.is_ok());
+    }
+
+    #[test]
+    fn client_failures_keep_distinct_safe_messages() {
+        assert_eq!(
+            map_client_error(DeepSeekRoastError::InsufficientBalance),
+            "DeepSeek \u{4f59}\u{989d}\u{4e0d}\u{8db3}\u{3002}"
+        );
+        assert_eq!(
+            map_client_error(DeepSeekRoastError::Length),
+            "\u{9510}\u{8bc4}\u{8f93}\u{51fa}\u{8fbe}\u{5230}\u{957f}\u{5ea6}\u{4e0a}\u{9650}\u{ff0c}\u{672a}\u{80fd}\u{5b8c}\u{6574}\u{751f}\u{6210}\u{3002}"
+        );
+        assert_eq!(
+            map_client_error(DeepSeekRoastError::ContentFilter),
+            "\u{9510}\u{8bc4}\u{5185}\u{5bb9}\u{88ab} DeepSeek \u{5b89}\u{5168}\u{89c4}\u{5219}\u{62e6}\u{622a}\u{3002}"
+        );
+        assert_eq!(
+            map_client_error(DeepSeekRoastError::InvalidOutput),
+            "DeepSeek \u{8fd4}\u{56de}\u{7684}\u{9510}\u{8bc4}\u{683c}\u{5f0f}\u{65e0}\u{6548}\u{3002}"
+        );
     }
 }
