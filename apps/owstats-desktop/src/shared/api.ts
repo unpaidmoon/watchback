@@ -79,6 +79,10 @@ export function openProjectRepository() {
   return invoke<void>("open_project_repository");
 }
 
+export function openProductFeedback() {
+  return invoke<void>("open_product_feedback");
+}
+
 export function listMatchFilters() {
   return invoke<FilterOptions>("list_match_filters");
 }

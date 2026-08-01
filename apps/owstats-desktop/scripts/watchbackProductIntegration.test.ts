@@ -25,6 +25,9 @@ const tauriLibrary = source("src-tauri/src/lib.rs");
 const tauriMain = source("src-tauri/src/main.rs");
 const readme = repositorySource("README.md");
 const cargoManifest = source("src-tauri/Cargo.toml");
+const commands = source("src-tauri/src/commands.rs");
+const frontendApi = source("src/shared/api.ts");
+const onboarding = source("src/pages/OnboardingPage.tsx");
 
 assert.equal(tauriConfig.productName, "Watchback");
 assert.equal(tauriConfig.app.windows[0]?.title, "Watchback");
@@ -50,6 +53,12 @@ assert.match(readme, /^# Watchback$/m);
 assert.match(readme, /^Watchback 是一款面向 Windows 的《守望先锋》本地战绩与复盘工具/m);
 assert.match(cargoManifest, /description = "Watchback desktop app"/);
 assert.match(cargoManifest, /authors = \["Watchback"\]/);
+assert.match(commands, /const PRODUCT_FEEDBACK_URL: &str = "https:\/\/support\.qq\.com\/product\/801522";/);
+assert.match(commands, /pub fn open_product_feedback\(\) -> Result<\(\), String>/);
+assert.match(tauriLibrary, /commands::open_product_feedback/);
+assert.match(frontendApi, /invoke<void>\("open_product_feedback"\)/);
+assert.match(onboarding, /label="意见反馈"/);
+assert.match(onboarding, /openProductFeedback\(\)/);
 assert.match(databaseMigrations, /请升级 Watchback 后再打开此数据/);
 assert.match(
   tauriMain,

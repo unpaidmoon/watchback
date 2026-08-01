@@ -1131,6 +1131,7 @@ pub fn run() -> anyhow::Result<()> {
         .invoke_handler(tauri::generate_handler![
             commands::record_frontend_diagnostic,
             commands::get_overview,
+            commands::open_product_feedback,
             commands::open_project_repository,
             commands::open_support_directory,
             commands::list_match_filters,

@@ -25,6 +25,7 @@ use std::sync::Arc;
 use tauri::{ipc::Channel, AppHandle, Emitter, State};
 
 const PROJECT_REPOSITORY_URL: &str = "https://github.com/fengpianpianne/watchback";
+const PRODUCT_FEEDBACK_URL: &str = "https://support.qq.com/product/801522";
 
 #[tauri::command]
 pub fn record_frontend_diagnostic(kind: String, message: String) {
@@ -44,6 +45,11 @@ pub fn record_frontend_diagnostic(kind: String, message: String) {
 #[tauri::command]
 pub fn open_project_repository() -> Result<(), String> {
     tauri_plugin_opener::open_url(PROJECT_REPOSITORY_URL, None::<&str>).map_err(to_message)
+}
+
+#[tauri::command]
+pub fn open_product_feedback() -> Result<(), String> {
+    tauri_plugin_opener::open_url(PRODUCT_FEEDBACK_URL, None::<&str>).map_err(to_message)
 }
 
 #[tauri::command]

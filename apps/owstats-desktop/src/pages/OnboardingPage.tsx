@@ -6,6 +6,7 @@ import {
   FileText,
   FolderOpen,
   Github,
+  MessageSquareText,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,6 +25,7 @@ import {
   keepCurrentPlayerTarget,
   removeAccount,
   openSupportDirectory,
+  openProductFeedback,
   openProjectRepository,
   retryLoginTargetBinding,
   retrySeasonBackgroundSync,
@@ -91,6 +93,7 @@ export function OnboardingPage() {
   const [gameActionLoading, setGameActionLoading] = useState(false);
   const [openingSupportDirectory, setOpeningSupportDirectory] = useState<"logs" | "data" | null>(null);
   const [openingProjectRepository, setOpeningProjectRepository] = useState(false);
+  const [openingProductFeedback, setOpeningProductFeedback] = useState(false);
   const [targetAction, setTargetAction] = useState<TargetAction | null>(null);
   const [profileRefreshing, setProfileRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -137,6 +140,23 @@ export function OnboardingPage() {
       setError(`打开 Github 地址失败：${productErrorMessage(err)}`);
     } finally {
       setOpeningProjectRepository(false);
+    }
+  }
+
+  async function openFeedbackCenter() {
+    if (openingProductFeedback) return;
+    if (!hasDesktopBackend()) {
+      setNotice("请在安装版 Watchback 中打开意见反馈");
+      return;
+    }
+    setOpeningProductFeedback(true);
+    setError(null);
+    try {
+      await openProductFeedback();
+    } catch (err) {
+      setError(`打开意见反馈失败：${productErrorMessage(err)}`);
+    } finally {
+      setOpeningProductFeedback(false);
     }
   }
 
@@ -876,6 +896,7 @@ export function OnboardingPage() {
               <SettingsPlaceholder icon={<FileText size={17} />} label="日志文件" onClick={() => void openSettingsDirectory("logs")} disabled={openingSupportDirectory !== null} />
               <SettingsPlaceholder icon={<FolderOpen size={17} />} label="数据存放路径" onClick={() => void openSettingsDirectory("data")} disabled={openingSupportDirectory !== null} />
               <SettingsPlaceholder icon={<Github size={17} />} label="Github地址" onClick={() => void openGithubRepository()} disabled={openingProjectRepository} />
+              <SettingsPlaceholder icon={<MessageSquareText size={17} />} label="意见反馈" onClick={() => void openFeedbackCenter()} disabled={openingProductFeedback} />
             </div>
           </section>
         </div>
