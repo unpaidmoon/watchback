@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".mjs", ".svg", ".txt", ".xml"]);
+const maxJavaScriptBytes = 500_000;
+const maxPhase6ComponentsBytes = 250_000;
 
 async function collectFiles(root) {
   const files = [];
@@ -25,9 +27,19 @@ export async function verifyDistPaths(distRoot, { repoRoot = path.resolve(distRo
 
   for (const file of await collectFiles(distRoot)) {
     if (!textExtensions.has(path.extname(file).toLowerCase())) continue;
-    const content = (await readFile(file)).toString("utf8");
+    const data = await readFile(file);
+    const relativeFile = path.relative(distRoot, file);
+    if (path.extname(file).toLowerCase() === ".js") {
+      const limit = path.basename(file).startsWith("phase6Components-")
+        ? maxPhase6ComponentsBytes
+        : maxJavaScriptBytes;
+      if (data.byteLength > limit) {
+        throw new Error(`${relativeFile}: JavaScript 分块 ${data.byteLength} B 超过预算 ${limit} B`);
+      }
+    }
+    const content = data.toString("utf8");
     const match = forbidden.find(({ pattern }) => pattern.test(content));
-    if (match) throw new Error(`${path.relative(distRoot, file)}: 构建产物包含禁用路径 ${match.label}`);
+    if (match) throw new Error(`${relativeFile}: 构建产物包含禁用路径 ${match.label}`);
   }
 }
 

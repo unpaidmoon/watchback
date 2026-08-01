@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { formatArenaRankTierLabel } from "../../shared/arenaDetailFormat";
-import { arenaRankAssetUrl, competitiveRankAssetUrl, resolvePerkInfo } from "../../shared/assets";
+import { competitiveRankAssetUrl, resolvePerkInfo } from "../../shared/assets";
+import { arenaRankAssetUrl } from "../../shared/stadiumAssets";
 import { playerHighlightMap, playerKeyFor, type HighlightMetric } from "../../shared/playerHighlights";
 import { HeroAvatar } from "../../shared/phase6Components";
 import type { PlayerRow } from "../../shared/types";

@@ -201,13 +201,6 @@ export type UserSettings = {
   playerQueryModeOrder: import("../features/player-query/playerQueryTypes").PlayerQueryMode[];
 };
 
-export type UpdateCheckResult = {
-  status: string;
-  currentVersion: string;
-  latestVersion: string | null;
-  message: string;
-};
-
 export type CredentialLoginProgress = {
   phase: string;
   message: string;

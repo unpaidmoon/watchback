@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ArenaPlayerRoundSummaryDialog } from "../src/features/matches/ArenaPlayerRoundSummaryDialog";
+import { MatchTeamTable } from "../src/features/matches/MatchTeamTable";
 import type { ArenaDetailSlice, PlayerRow } from "../src/shared/types";
 import { buildArenaPlayerRoundSummary } from "../src/features/matches/arenaPlayerRoundSummary";
 
@@ -122,24 +122,13 @@ assert.equal((dialogMarkup.match(/phase7SummaryTraitSlot/g) ?? []).length, rows.
 assert.equal((dialogMarkup.match(/phase7SummaryModSlot/g) ?? []).length, rows.length * 6);
 assert.doesNotMatch(dialogMarkup, /phase6PerkTooltipPanel/);
 
-const compactSource = readFileSync(new URL("../src/features/matches/MatchDetailContent.tsx", import.meta.url), "utf8");
-const tableSource = readFileSync(new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url), "utf8");
-
-assert.match(compactSource, /onSelectPlayerSummary=\{selected\.key === "summary" \?/);
-assert.match(compactSource, /buildArenaPlayerRoundSummary\(summaryTarget\.player, arena\.rounds\)/);
-assert.match(tableSource, /onSelectPlayerSummary\?: \(player: PlayerRow, trigger: HTMLButtonElement\) => void/);
-assert.match(tableSource, /aria-label=\{`查看\$\{player\.name\}的汇总卡片`\}/);
-assert.match(tableSource, /className="phase7CompactPlayerRowToggle"/);
-assert.match(tableSource, /className="phase6CompactAvatarPlate phase7CompactAvatarSummaryButton"/);
-
-const styles = readFileSync(new URL("../src/styles/features/matches.css", import.meta.url), "utf8");
-assert.match(styles, /\.phase7SummaryDialogBackdrop\s*\{[^}]*position:\s*fixed/s);
-assert.match(styles, /\.phase7SummaryDialog\s*\{[^}]*max-height:\s*min\(760px,\s*calc\(100dvh - 48px\)\)/s);
-assert.match(styles, /\.phase7SummaryDialog\s*\{[^}]*background:\s*#f4f6f0/s);
-assert.match(styles, /\.phase7SummaryRound\s*\{[^}]*grid-template-columns:/s);
-assert.match(styles, /\.phase7SummarySlots\.trait\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*44px\)/s);
-assert.match(styles, /\.phase7SummarySlots\.mod\s*\{[^}]*grid-template-columns:\s*repeat\(6,/s);
-assert.match(styles, /\.phase7SummaryTraitSlot,[\s\S]*?height:\s*44px/s);
-assert.match(styles, /\.phase7SummaryModSlot\s*\{[^}]*border-radius:\s*999px/s);
-assert.match(styles, /@media\s*\(max-width:\s*900px\)/s);
-assert.doesNotMatch(styles, /\.phase7SummaryDialog[\s\S]*overflow-x:\s*(auto|scroll)/s);
+const selectableTeamMarkup = renderToStaticMarkup(createElement(MatchTeamTable, {
+  title: "我方",
+  tone: "team",
+  players: [target],
+  showPerks: false,
+  onTogglePlayer: () => undefined,
+  onSelectPlayerSummary: () => undefined,
+}));
+assert.ok(selectableTeamMarkup.includes('aria-label="查看测试玩家的汇总卡片"'));
+assert.ok(selectableTeamMarkup.includes("phase7CompactPlayerRowToggle"));

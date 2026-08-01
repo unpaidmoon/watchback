@@ -13,6 +13,22 @@ try {
   await writeFile(path.join(dist, "binary.png"), Buffer.from([0, 255, ...Buffer.from("E:/outside-repository/file.png")]));
   await verifyDistPaths(dist, { repoRoot: root });
 
+  await writeFile(path.join(dist, "oversized.js"), "x".repeat(500_001));
+  await assert.rejects(
+    () => verifyDistPaths(dist, { repoRoot: root }),
+    /oversized\.js.*500001 B.*500000 B/,
+    "scanner rejects an oversized production JavaScript chunk",
+  );
+  await rm(path.join(dist, "oversized.js"));
+
+  await writeFile(path.join(dist, "phase6Components-test.js"), "x".repeat(250_001));
+  await assert.rejects(
+    () => verifyDistPaths(dist, { repoRoot: root }),
+    /phase6Components-test\.js.*250001 B.*250000 B/,
+    "scanner enforces the tighter shared component budget",
+  );
+  await rm(path.join(dist, "phase6Components-test.js"));
+
   for (const forbidden of [
     "/@fs/D:/repo/file.png",
     "D:/Codex/OW_data/file.png",

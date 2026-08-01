@@ -8,7 +8,7 @@ Watchback 当前处于 Beta 阶段。安全修复只会提供给仍在维护的�
 
 | 版本 | 安全更新 |
 | --- | --- |
-| 0.3.x Beta 的最新版本 | 支持 |
+| 0.4.x Beta 的最新版本 | 支持 |
 | 更早版本 | 不支持 |
 
 发现安全问题后，请先升级到 GitHub Releases 中提供的最新版本并确认问题是否仍然存在。
@@ -66,6 +66,21 @@ Watchback 当前处于 Beta 阶段。安全修复只会提供给仍在维护的�
 - 第三方素材的权利归属或授权问题。
 
 如果不确定问题是否属于安全漏洞，请仍然优先通过私密渠道报告。
+
+## 依赖安全审查
+
+依赖扫描告警需要结合项目实际使用方式判断，不能直接使用会跨主版本升级的
+`npm audit fix --force`。
+
+当前临时例外：
+
+| 公告 | 当前依赖 | 适用性 | 处置与复查 |
+| --- | --- | --- | --- |
+| [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2) | `react-router-dom` 7.18.x | 公告只影响 unstable RSC API；Watchback 是 Tauri SPA，源码、构建配置和依赖中均未使用 RSC 入口 | 暂不强制升级。React Router 8.3.0 同时要求 React 19.2.7+、Vite 7+、Node 22.22+，应作为独立平台升级验证；最迟 2026-09-02 复查 |
+
+若项目引入 React Server Components、`entry.rsc`、RSC 路由函数或服务端 action，
+此例外立即失效，必须先升级到已修复版本。依赖例外只解释扫描结果，不允许跳过
+`npm audit --omit=dev` 的人工审查，也不适用于后续出现的其他公告。
 
 ## 响应与披露
 

@@ -1,28 +1,45 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import type { ReactElement } from "react";
+import { PlayerQueryMatchList } from "../src/features/player-query/PlayerQueryMatchList";
+import type { PlayerQueryMatchRow } from "../src/features/player-query/playerQueryTypes";
 import { phase6NavItems } from "../src/shared/phase6Shell";
 
-const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-const hook = readFileSync(new URL("../src/features/player-query/usePlayerQuerySession.ts", import.meta.url), "utf8");
-const coordinator = readFileSync(new URL("../src-tauri/src/sync_coordinator.rs", import.meta.url), "utf8");
+assert.deepEqual(
+  phase6NavItems.slice(0, 3).map(({ label, path }) => ({ label, path })),
+  [
+    { label: "对局", path: "/matches" },
+    { label: "查询", path: "/player-query" },
+    { label: "战报", path: "/review" },
+  ],
+);
+assert.equal(new Set(phase6NavItems.map((item) => item.path)).size, phase6NavItems.length, "主导航路径不得重复");
+assert.equal(phase6NavItems.find((item) => item.path === "/player-query")?.title, "即时查询玩家数据");
 
-assert.deepEqual(phase6NavItems.slice(0, 3).map((item) => item.label), ["对局", "查询", "战报"]);
-assert.match(app, /path="\/player-query\/\*"/);
-assert.match(app, /location\.pathname === "\/player-query\/matches"/);
-assert.doesNotMatch(app, /player-query\?[^"\s]*/);
-assert.match(app, /if \(location\.pathname === "\/player-query\/matches" && !handoff\)/);
-assert.match(app, /<div hidden=\{isMore\}>\s*<PlayerQueryPage/s, "returning from more matches must reveal the same live query page instance");
-assert.match(app, /sessionRef\.current = null;[\s\S]*endPlayerQuery/);
-assert.match(app, /const navigateRef = useRef\(navigate\)/);
-assert.match(app, /navigateRef\.current\("\/player-query", \{ replace: true \}\)/);
-assert.match(app, /const refreshRuntime = useCallback\([\s\S]*?\}, \[\]\);/, "internal query routes must not recreate the runtime effect and end the live session");
-assert.match(app, /get_operation_status/);
-assert.match(app, /credentialState === "ready"/);
-assert.match(app, /getUserSettings/);
-assert.match(app, /playerQueryModeOrder: \[\.\.\.order\]/);
-assert.match(hook, /onSessionChange\?\.\(session\.sessionId\)/);
-assert.match(hook, /onSessionChange\?\.\(null\)/);
-assert.match(coordinator, /pub fn status\(&self\) -> OperationStatus/);
-assert.doesNotMatch(coordinator, /token|customerToken/i);
+const match: PlayerQueryMatchRow = {
+  matchId: "match-1",
+  matchKind: "normal",
+  result: "win",
+  score: "3-1",
+  mapName: "国王大道",
+  heroName: "安娜",
+  playedAt: "2026-01-01T00:00:00+08:00",
+  kills: 10,
+  assists: 8,
+  deaths: 2,
+};
+const selected: string[] = [];
+let openMoreCount = 0;
+const list = PlayerQueryMatchList({
+  matches: [match],
+  onOpenMatch: (row) => selected.push(row.matchId),
+  onOpenMore: () => { openMoreCount += 1; },
+});
+const [rows, moreButton] = list.props.children as ReactElement[];
+const rowChildren = rows.props.children as ReactElement | ReactElement[];
+const row = Array.isArray(rowChildren) ? rowChildren[0] : rowChildren;
+(row.props as { onSelect: () => void }).onSelect();
+(moreButton.props as { onClick: () => void }).onClick();
+assert.deepEqual(selected, ["match-1"], "选择预览行时导航使用该行的 matchId");
+assert.equal(openMoreCount, 1, "更多对局动作只触发一次导航回调");
 
 console.log("player query navigation tests passed");

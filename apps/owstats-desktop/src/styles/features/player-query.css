@@ -43,7 +43,6 @@
 .playerQueryFormControls input:focus-visible,
 .playerQueryModeTabWrap button:focus-visible,
 .playerQueryCompactMatchRow:focus-visible { outline: 2px solid var(--data-primary); outline-offset: 2px; }
-.playerQueryFormHint,
 .playerQueryInlineError { margin: 0; font-size: 13px; }
 .playerQueryInlineError { color: var(--status-danger); }
 .playerQueryGate,

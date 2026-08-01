@@ -1,17 +1,9 @@
-import type { OnboardingStatus, SeasonSyncResult, SyncProgress } from "./types";
-
-export type StatusTone = "neutral" | "good" | "warn" | "bad";
+import type { SeasonSyncResult, SyncProgress } from "./types";
 
 export type Phase6NavItem = {
   label: string;
   path: string;
   title: string;
-};
-
-export type CommandMetric = {
-  label: string;
-  value: string;
-  meta: string;
 };
 
 export const phase6NavItems: Phase6NavItem[] = [
@@ -22,38 +14,6 @@ export const phase6NavItems: Phase6NavItem[] = [
   { label: "排行", path: "/ranking", title: "英雄与地图排行" },
   { label: "指挥台", path: "/onboarding", title: "登录、同步与数据状态" },
 ];
-
-export function credentialTone(state: string | null | undefined): StatusTone {
-  if (state === "ready") {
-    return "good";
-  }
-
-  if (state === "failed" || state === "invalid") {
-    return "bad";
-  }
-
-  if (state === "missing" || state === "not_found" || state === "incomplete" || state === "currentPlayerMissing") {
-    return "warn";
-  }
-
-  return "neutral";
-}
-
-export function credentialLabel(state: string | null | undefined): string {
-  if (state === "ready") {
-    return "已登录";
-  }
-
-  if (state === "failed" || state === "invalid") {
-    return "登录已失效";
-  }
-
-  if (state === "currentPlayerMissing") {
-    return "待识别账号";
-  }
-
-  return "未登录";
-}
 
 export function readableSyncProgress(progress: SyncProgress | null): string {
   if (!progress) {
@@ -100,31 +60,6 @@ export function formatSyncNotice(season: number, result: SeasonSyncResult): stri
   }
 
   return `S${season} 更新完成：新增 ${summary.newMatches} 场，当前赛季共 ${summary.databaseMatches} 场。`;
-}
-
-export function commandCenterMetrics(status: OnboardingStatus | null): CommandMetric[] {
-  return [
-    {
-      label: "登录状态",
-      value: credentialLabel(status?.credentialStatus.state),
-      meta: status?.credentialStatus.savedAt ? `保存于 ${status.credentialStatus.savedAt}` : "用于读取赛季报告",
-    },
-    {
-      label: "本地赛季",
-      value: status?.selectedSeason ? `S${status.selectedSeason}` : "-",
-      meta: status?.availableSeasons.length ? `本地已有 ${status.availableSeasons.length} 个赛季` : "等待同步",
-    },
-    {
-      label: "本地对局",
-      value: String(status?.localData.presetMatches ?? 0),
-      meta: "预设 / 开放模式",
-    },
-    {
-      label: "可复盘详情",
-      value: String(status?.localData.detailMatches ?? 0),
-      meta: status?.localData.lastSyncedOrImportedAt ?? "暂无最近同步时间",
-    },
-  ];
 }
 
 export function productErrorMessage(error: unknown): string {

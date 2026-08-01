@@ -1,4 +1,5 @@
-import { arenaRankAssetUrl, rankAssetUrl } from "../../shared/assets";
+import { rankAssetUrl } from "../../shared/assets";
+import { arenaRankAssetUrl } from "../../shared/stadiumAssets";
 import { formatWinRate } from "../../shared/rankingUtils";
 
 export type RoleRankOverviewEntry = {

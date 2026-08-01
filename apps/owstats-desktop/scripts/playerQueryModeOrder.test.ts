@@ -1,17 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   PLAYER_QUERY_MODES,
   normalizeModeOrder,
   reorderModesForDrop,
   saveModeOrderAfterDrop,
 } from "../src/features/player-query/modeOrder";
-
-const tabsSource = readFileSync(new URL("../src/features/player-query/PlayerQueryModeTabs.tsx", import.meta.url), "utf8");
-assert.doesNotMatch(tabsSource, /\bdraggable\b|onDragStart|onDrop=/, "Tauri mode sorting must not depend on HTML5 drag-and-drop");
-assert.match(tabsSource, /onPointerDown=.*beginMouseDrag/s);
-assert.match(tabsSource, /onPointerEnter=.*moveAcross/s);
-assert.match(tabsSource, /event\.pointerType !== "mouse"/, "mode sorting remains mouse-only");
 
 assert.deepEqual(normalizeModeOrder(undefined), [...PLAYER_QUERY_MODES]);
 assert.deepEqual(

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   filtersFromParams,
   validateFilters,
@@ -716,7 +715,6 @@ assert.deepEqual(
   "a late older default preload cannot overwrite the later-started filter snapshot",
 );
 
-const matchesPageSource = readFileSync(new URL("../src/pages/MatchesPage.tsx", import.meta.url), "utf8");
 let sameFilterConfirmCount = 0;
 assert.equal(
   guardMatchFilterChange(

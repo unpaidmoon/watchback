@@ -1,5 +1,5 @@
 use crate::db::OwDatabase;
-use crate::models::{PlayerProfile, UpdateCheckResult, UserSettings};
+use crate::models::{PlayerProfile, UserSettings};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -344,15 +344,6 @@ pub fn save_user_settings_for_path(path: &Path, settings: UserSettings) -> Resul
     };
     write_json(path, &normalized)?;
     Ok(normalized)
-}
-
-pub fn check_app_update_result(current_version: &str) -> UpdateCheckResult {
-    UpdateCheckResult {
-        status: "notConfigured".to_string(),
-        current_version: current_version.to_string(),
-        latest_version: None,
-        message: "版本检查接口已预留，更新源尚未接入。".to_string(),
-    }
 }
 
 fn normalize_theme(theme: &str) -> &str {

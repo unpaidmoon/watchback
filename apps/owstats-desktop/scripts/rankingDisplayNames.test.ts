@@ -1,19 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { resolveHeroDisplayName, resolveMapDisplayName } from "../src/shared/assets";
-
-const rankingPage = await readFile(new URL("../src/pages/RankingPage.tsx", import.meta.url), "utf8");
-
-assert.equal(
-  rankingPage.includes("resolveHeroDisplayName"),
-  true,
-  "ranking rows should resolve legacy hero GUIDs to bundled display names",
-);
-assert.equal(
-  rankingPage.includes("resolveMapDisplayName"),
-  true,
-  "ranking rows should resolve legacy map GUIDs to bundled display names",
-);
 
 assert.equal(resolveHeroDisplayName("207165582859042819", "207165582859042819"), "猎空");
 assert.equal(resolveHeroDisplayName("207165582859042938", "207165582859042938"), "D.Va");

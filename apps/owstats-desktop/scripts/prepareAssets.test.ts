@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { prepareAssets, replaceDirectoryAtomically } from "./prepareAssets.mjs";
+import {
+  prepareAssets,
+  projectStadiumRuntimeManifest,
+  refreshStadiumRuntimeManifest,
+  replaceDirectoryAtomically,
+} from "./prepareAssets.mjs";
 
 type Fixture = {
   appRoot: string;
@@ -43,14 +48,28 @@ async function makeFixture(): Promise<Fixture> {
     ranks: [{ file: "bronze.png", wideFile: "open-wide/bronze.png" }],
     openWideFiles: ["open-wide/c1.png"],
   });
-  await writeJson(path.join(repoRoot, "assets", "stadium", "manifest.json"), {
+  const stadiumManifest = {
     fightRanks: [{
+      key: "Bronze",
       localPath: "assets/stadium/ranks/fight/bronze.png",
       pureLocalPath: "assets/stadium/ranks/fight/bronze-pure.png",
     }],
-    modTrait: [],
-  });
+    modTrait: [{
+      id: "0x0000000000000001",
+      decimalId: "1",
+      name: "测试异能",
+      description: "测试说明",
+      localPath: "assets/stadium/ranks/fight/bronze.png",
+      category: "异能",
+      sourceUrl: "https://example.invalid/source.png",
+    }],
+  };
+  await writeJson(path.join(repoRoot, "assets", "stadium", "manifest.json"), stadiumManifest);
   await writeJson(path.join(appRoot, "runtime-config", "ow-lookups.json"), runtimeConfig);
+  await writeJson(
+    path.join(appRoot, "runtime-config", "stadium-assets.json"),
+    projectStadiumRuntimeManifest(stadiumManifest),
+  );
   const inventory = {
     version: 1,
     files: [
@@ -121,6 +140,36 @@ await withFixture(async ({ appRoot, repoRoot }) => {
   const second = await outputSnapshot(path.join(appRoot, "public", "assets"));
   assert.deepEqual(second, first);
 });
+
+await withFixture(async ({ appRoot, repoRoot }) => {
+  const runtimeFile = path.join(appRoot, "runtime-config", "stadium-assets.json");
+  const runtime = JSON.parse(await readFile(runtimeFile, "utf8"));
+  runtime.modTrait[0].name = "漂移内容";
+  await writeJson(runtimeFile, runtime);
+  await assert.rejects(
+    prepareAssets({ appRoot, repoRoot }),
+    /stadium-assets\.json.*不同步.*--refresh-stadium-runtime/i,
+  );
+
+  const refreshed = await refreshStadiumRuntimeManifest({ appRoot, repoRoot });
+  assert.equal(refreshed.fightRankCount, 1);
+  assert.equal(refreshed.modTraitCount, 1);
+  const first = await readFile(runtimeFile, "utf8");
+  await refreshStadiumRuntimeManifest({ appRoot, repoRoot });
+  assert.equal(await readFile(runtimeFile, "utf8"), first, "stadium runtime projection is deterministic");
+  assert.equal(first.includes("sourceUrl"), false, "runtime projection excludes source-only metadata");
+  assert.equal(first.includes("pureLocalPath"), false, "runtime projection keeps only the selected fight rank path");
+  await prepareAssets({ appRoot, repoRoot });
+});
+
+assert.equal(
+  projectStadiumRuntimeManifest({
+    fightRanks: [{ key: "Bronze", pureLocalPath: "assets/stadium/ranks/fight/bronze-pure.png" }],
+    modTrait: [{ id: "legacy", description: " ", desc: "旧版说明" }],
+  }).modTrait[0].description,
+  "旧版说明",
+  "runtime projection preserves the legacy description fallback",
+);
 
 await withFixture(async ({ appRoot, repoRoot, inventory }) => {
   const outsideDir = path.join(repoRoot, "outside-assets");
@@ -283,13 +332,19 @@ await withFixture(async ({ appRoot, repoRoot }) => {
 });
 
 await withFixture(async ({ appRoot, repoRoot }) => {
-  await writeJson(path.join(repoRoot, "assets", "stadium", "manifest.json"), {
+  const stadiumManifest = {
     fightRanks: [{
+      key: "Bronze",
       localPath: "assets/stadium/ranks/fight/bronze.png",
       pureLocalPath: "assets/stadium/ranks/fight/missing-pure.png",
     }],
     modTrait: [],
-  });
+  };
+  await writeJson(path.join(repoRoot, "assets", "stadium", "manifest.json"), stadiumManifest);
+  await writeJson(
+    path.join(appRoot, "runtime-config", "stadium-assets.json"),
+    projectStadiumRuntimeManifest(stadiumManifest),
+  );
   await assert.rejects(
     prepareAssets({ appRoot, repoRoot }),
     /assets\/stadium\/manifest\.json.*pureLocalPath.*missing-pure\.png/i,

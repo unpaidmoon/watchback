@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createQrAccountLoginController, createQrLoginRequestId, qrLoginErrorMessage } from "../src/features/command-center/useQrAccountLogin";
 import type { QrAccountLoginSnapshot } from "../src/shared/types";
 
@@ -43,9 +42,6 @@ const activeSnapshot = (
   assert.equal(createQrLoginRequestId(() => "stable-request"), "stable-request");
   assert.equal(qrLoginErrorMessage("qr_browser_not_found", "fallback"), "未找到 Chrome 或 Edge，请安装受支持的浏览器或使用其他登录方式。");
   assert.equal(qrLoginErrorMessage("unknown_code", "固定安全回退文案"), "固定安全回退文案");
-  const dialog = readFileSync(new URL("../src/features/command-center/QrAccountLoginDialog.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /createQrAccountLoginController\(/, "生产弹窗必须由已测试控制器驱动");
-  assert.match(dialog, /controller\.useExistingLogin/, "生产回退必须经过控制器的 settle-and-wait 路径");
 }
 
 {

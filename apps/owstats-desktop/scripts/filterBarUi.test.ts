@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ActiveFilterChips } from "../src/features/matches/ActiveFilterChips.tsx";
+import { AdvancedMatchFilters } from "../src/features/matches/AdvancedMatchFilters.tsx";
+import { FilterBar } from "../src/features/matches/FilterBar.tsx";
+import { MatchFilterToolbar } from "../src/features/matches/MatchFilterToolbar.tsx";
 import {
   activeMatchFilterChips,
   clearVisibleMatchFilters,
@@ -8,28 +13,75 @@ import {
   paramsFromFilters,
   removeMatchFilter,
 } from "../src/features/matches/matchFilters.ts";
+import type { FilterOptions } from "../src/shared/types.ts";
 
-const source = readFileSync(new URL("../src/features/matches/FilterBar.tsx", import.meta.url), "utf8");
-const toolbarSource = readFileSync(new URL("../src/features/matches/MatchFilterToolbar.tsx", import.meta.url), "utf8");
-const advancedSource = readFileSync(new URL("../src/features/matches/AdvancedMatchFilters.tsx", import.meta.url), "utf8");
-const chipsSource = readFileSync(new URL("../src/features/matches/ActiveFilterChips.tsx", import.meta.url), "utf8");
+const options: FilterOptions = {
+  seasons: [23],
+  heroes: [{ id: "ana", label: "安娜" }],
+  maps: [{ id: "ilios", label: "伊利奥斯" }],
+  results: ["win"],
+  modes: ["QuickPlay"],
+};
+const noop = () => undefined;
+const filterBarMarkup = renderToStaticMarkup(createElement(FilterBar, {
+  filters: {},
+  options,
+  onChange: noop,
+}));
+assert.ok(filterBarMarkup.includes('aria-label="对局筛选"'));
+assert.ok(!filterBarMarkup.includes("开始日期"), "advanced filters stay collapsed initially");
 
-assert.equal(source.includes("filterActions"), false, "FilterBar should not render date preset action buttons");
-assert.equal(source.includes("shortcut("), false, "FilterBar should not keep date shortcut handlers");
-assert.match(source, /<MatchFilterToolbar/);
-assert.match(source, /<AdvancedMatchFilters/);
-assert.match(source, /<ActiveFilterChips/);
-assert.match(toolbarSource, />\s*地图\s*</, "地图筛选应显示在第一行");
-assert.doesNotMatch(advancedSource, />\s*地图\s*</, "地图筛选不应继续显示在更多筛选中");
-assert.ok(toolbarSource.indexOf("英雄") < toolbarSource.indexOf("地图"), "地图筛选应位于英雄右侧");
-assert.ok(toolbarSource.indexOf("地图") < toolbarSource.indexOf("玩家名称"), "玩家名称应位于地图右侧");
-for (const label of ["模式", "英雄", "地图", "玩家名称", "更多筛选", "清除"]) assert.match(toolbarSource, new RegExp(label));
-for (const label of ["胜负", "复盘标签", "开始日期", "结束日期"]) assert.match(advancedSource, new RegExp(label));
-for (const label of ["收藏状态", "仅看收藏"]) assert.match(advancedSource, new RegExp(label));
-assert.doesNotMatch(toolbarSource, />\s*(胜负|复盘标签|开始日期|结束日期)\s*</);
-assert.doesNotMatch(advancedSource, />\s*英雄\s*</);
-assert.match(chipsSource, /aria-label="有效筛选"/);
-assert.match(chipsSource, /aria-label=\{`移除\$\{chip\.label\}`\}/);
+const toolbarMarkup = renderToStaticMarkup(createElement(MatchFilterToolbar, {
+  filters: {},
+  options,
+  playerQuery: "",
+  playerOptions: [],
+  playerSearchOpen: false,
+  playerSearchLoading: false,
+  advancedCount: 0,
+  advancedOpen: false,
+  hasVisibleFilters: false,
+  onPatch: noop,
+  onPlayerQueryChange: noop,
+  onPlayerFocus: noop,
+  onPlayerBlur: noop,
+  onPlayerKeyDown: noop,
+  onPlayerSelect: noop,
+  onPlayerClear: noop,
+  onToggleAdvanced: noop,
+  onClear: noop,
+}));
+for (const label of ["模式", "英雄", "地图", "玩家名称", "更多筛选", "清除"]) {
+  assert.ok(toolbarMarkup.includes(label), `toolbar renders ${label}`);
+}
+assert.ok(toolbarMarkup.indexOf("英雄") < toolbarMarkup.indexOf("地图"));
+assert.ok(toolbarMarkup.indexOf("地图") < toolbarMarkup.indexOf("玩家名称"));
+assert.ok(!toolbarMarkup.includes("胜负"));
+assert.ok(toolbarMarkup.includes('aria-expanded="false"'));
+assert.ok(toolbarMarkup.includes('disabled=""'), "clear is disabled without visible filters");
+
+const advancedMarkup = renderToStaticMarkup(createElement(AdvancedMatchFilters, {
+  filters: { favoriteOnly: true },
+  options,
+  dateFrom: "2026-07-01",
+  dateTo: "2026-07-16",
+  onPatch: noop,
+  onDateFromChange: noop,
+  onDateToChange: noop,
+  onCommitDates: noop,
+}));
+for (const label of ["胜负", "复盘标签", "收藏状态", "仅看收藏", "开始日期", "结束日期"]) {
+  assert.ok(advancedMarkup.includes(label), `advanced filters render ${label}`);
+}
+assert.ok(!advancedMarkup.includes("英雄"));
+assert.ok(!advancedMarkup.includes("地图"));
+
+const chipsMarkup = renderToStaticMarkup(createElement(ActiveFilterChips, {
+  chips: [{ key: "hero", label: "英雄：安娜" }],
+  onRemove: noop,
+}));
+assert.ok(chipsMarkup.includes('aria-label="有效筛选"'));
+assert.ok(chipsMarkup.includes('aria-label="移除英雄：安娜"'));
 
 assert.equal(countAdvancedMatchFilters({ hero: "ana" }), 0);
 assert.equal(countAdvancedMatchFilters({ result: "win" }), 1);

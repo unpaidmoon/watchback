@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { formatSyncNotice } from "../src/shared/phase6Shell.ts";
 import { quickListRefreshScope } from "../src/shared/seasonSyncEvents.ts";
 import type { QuickListCommitSummary, SeasonSyncResult, SyncSummary } from "../src/shared/types.ts";
@@ -146,56 +145,4 @@ assert.deepEqual(
 assert.equal(
   formatSyncNotice(22, changedQuick),
   "S22 已新增 3 场对局，详情正在后台处理中。",
-);
-
-const onboardingSource = readFileSync(new URL("../src/pages/OnboardingPage.tsx", import.meta.url), "utf8");
-const apiSource = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
-const typesSource = readFileSync(new URL("../src/shared/types.ts", import.meta.url), "utf8");
-const workbenchSource = readFileSync(new URL("../src/features/command-center/SeasonSyncWorkbench.tsx", import.meta.url), "utf8");
-const seasonFetchSource = readFileSync(new URL("../src-tauri/src/season_fetch.rs", import.meta.url), "utf8");
-
-assert.match(
-  typesSource,
-  /export\s+type\s+SyncMode\s*=\s*"quickUpdate"\s*\|\s*"fullFetch"\s*;/,
-  "shared types expose the explicit season sync modes",
-);
-assert.match(
-  apiSource,
-  /export\s+function\s+syncSeason\s*\(\s*season\s*:\s*number\s*,\s*mode\s*:\s*SyncMode\s*\)/,
-  "syncSeason requires an explicit sync mode",
-);
-assert.match(
-  apiSource,
-  /invoke\s*<\s*SeasonSyncResult\s*>\s*\(\s*"sync_season"\s*,\s*\{\s*request\s*:\s*\{\s*season\s*,\s*mode\s*\}\s*\}\s*\)/,
-  "syncSeason forwards season and mode in the invoke request",
-);
-assert.match(
-  onboardingSource,
-  /summary\.kind === "full"[\s\S]*?await loadDashboard\(\);[\s\S]*?else if \(summary\.dataChanged\)[\s\S]*?scheduleSeasonStatusRefresh\(summary\.season\);/s,
-  "full fetch refreshes dashboard while the global live timeline owns match cache invalidation",
-);
-assert.doesNotMatch(onboardingSource, /clearMatchesPageCache/, "command center does not own match-list cache invalidation");
-assert.doesNotMatch(onboardingSource, /"season-list-updated"|"season-detail-updated"/, "Onboarding no longer owns match timeline update listeners");
-assert.match(onboardingSource, /onFullFetch=\{\(season\) => void runSeasonSync\(season, "fullFetch"\)\}/, "full-fetch control passes the explicit mode");
-assert.match(onboardingSource, /onQuickUpdate=\{\(season\) => void runSeasonSync\(season, "quickUpdate"\)\}/, "row update passes the explicit quick mode");
-assert.match(workbenchSource, /backgroundBusy/, "season rows expose independent background processing state");
-assert.match(
-  onboardingSource,
-  /setSyncNotice\(formatSyncNotice\(season, summary\)\);/,
-  "Onboarding delegates incremental result copy to formatSyncNotice",
-);
-assert.match(
-  seasonFetchSource,
-  /pub const QUICK_UPDATE_MAX_PAGES_PER_MODE: i64 = 5;/,
-  "quick update keeps a hard five-page budget per mode",
-);
-assert.match(
-  seasonFetchSource,
-  /const NORMAL_MODES: &\[&str\] = &\["sport", "leisure"\];/,
-  "quick request ledger includes both canonical normal modes",
-);
-assert.match(
-  seasonFetchSource,
-  /const FIGHT_MODES: &\[&str\] = &\["QuickFight", "LeisureFight", "SportFight"\];/,
-  "quick request ledger includes all canonical fight modes",
 );

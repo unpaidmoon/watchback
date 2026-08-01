@@ -35,7 +35,6 @@ import type {
   SyncMode,
   SeasonBackgroundStatus,
   SeasonSyncResult,
-  UpdateCheckResult,
   UserSettings,
 } from "./types";
 
@@ -184,10 +183,6 @@ export function saveUserSettings(settings: UserSettings) {
   return invoke<UserSettings>("save_user_settings", { settings });
 }
 
-export function checkAppUpdate() {
-  return invoke<UpdateCheckResult>("check_app_update");
-}
-
 export function cancelDashenLogin() {
   return invoke<{ cancelled: boolean; message: string }>("cancel_dashen_login");
 }
@@ -210,6 +205,21 @@ export function retryLoginTargetBinding() {
 
 export function clearPlayerTarget() {
   return invoke<ClearPlayerTargetResult>("clear_player_target");
+}
+
+export type LoginTargetRecoveryAction = "confirm" | "keep" | "retry" | "clear";
+
+export async function recoverLoginTarget(action: LoginTargetRecoveryAction): Promise<LoginTargetStatus> {
+  switch (action) {
+    case "confirm":
+      return confirmLoginTargetSwitch();
+    case "keep":
+      return keepCurrentPlayerTarget();
+    case "retry":
+      return retryLoginTargetBinding();
+    case "clear":
+      return (await clearPlayerTarget()).target;
+  }
 }
 
 export function getRankings(season?: number) {

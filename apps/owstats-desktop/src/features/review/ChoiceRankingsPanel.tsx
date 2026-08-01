@@ -1,4 +1,5 @@
-import { resolveArenaModTraitInfo, resolvePerkInfo } from "../../shared/assets";
+import { resolvePerkInfo } from "../../shared/assets";
+import { resolveArenaModTraitInfo } from "../../shared/stadiumAssets";
 import { formatWinRate } from "../../shared/rankingUtils";
 import type { ChoiceRankingEntry, ChoiceRankings } from "../../shared/types";
 

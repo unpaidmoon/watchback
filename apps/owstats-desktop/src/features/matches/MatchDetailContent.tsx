@@ -1,7 +1,7 @@
 import { CircleDollarSign } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { arenaHeaderTitle, formatArenaScore, formatArenaTabLabel } from "../../shared/arenaDetailFormat";
-import { resolveArenaModTraitInfo } from "../../shared/assets";
+import { resolveArenaModTraitInfo } from "../../shared/stadiumAssets";
 import { formatDetailDuration, formatDetailStartTime, formatFinalScore } from "../../shared/matchDetailHeaderFormat";
 import { PageErrorState, PageLoadingState } from "../../shared/page-shell";
 import type { MatchDetailView, PlayerRow } from "../../shared/types";

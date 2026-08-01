@@ -1000,6 +1000,19 @@
   min-height: 44px;
 }
 
+.syncTargetDecision > span {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.syncTargetDecision > span.good {
+  color: var(--status-success);
+}
+
+.syncTargetDecision > span.warn {
+  color: var(--status-warning);
+}
+
 .syncTargetComparison {
   min-width: 0;
   display: flex;

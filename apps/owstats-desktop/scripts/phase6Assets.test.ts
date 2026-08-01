@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
-import { arenaRankAssetUrl, heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, normalizeStadiumAssetPath, rankAssetUrl, resolveArenaModTraitInfo } from "../src/shared/assets.ts";
+import { heroAssetUrl, heroAssetUrls, mapAssetUrl, mapAssetUrls, normalizeAssetKey, rankAssetUrl } from "../src/shared/assets.ts";
+import { arenaRankAssetUrl, normalizeStadiumAssetPath, resolveArenaModTraitInfo } from "../src/shared/stadiumAssets.ts";
 
 function assertEqual<T>(actual: T, expected: T, message: string) {
   if (actual !== expected) {
@@ -170,6 +171,17 @@ assertEqual(
 
 assertEqual(normalizeStadiumAssetPath("assets/stadium/mod-trait/icon.png"), "/assets/stadium/mod-trait/icon.png", "stadium path maps to the stable asset root");
 assertEqual(resolveArenaModTraitInfo("0x0CC800000000FFFF"), null, "unmapped arena id remains unresolved for the UI fallback");
+const reaperTrait = resolveArenaModTraitInfo("0x0CC800000000099B");
+assertEqual(reaperTrait?.id, "0x0CC800000000099B", "arena trait keeps the canonical id");
+assertEqual(reaperTrait?.name, "邪恶飞翼", "arena trait keeps its localized name");
+assertEqual(reaperTrait?.description, "[幽灵形态]激活时可以自由飞行在空中时,按[跳跃]可以滑翔", "arena trait keeps its description");
+assertEqual(reaperTrait?.iconUrl, "/assets/stadium/mod-trait/survival/0x0CC800000000099B.webp", "arena trait maps its local icon");
+assertEqual(reaperTrait?.category, "生存", "arena trait keeps its category");
+assertEqual(
+  resolveArenaModTraitInfo("920986123797268891")?.id,
+  reaperTrait?.id,
+  "arena trait decimal ids resolve to the same record as hexadecimal ids",
+);
 for (const unsafePath of [
   "/@fs/D:/repo/assets/stadium/icon.png",
   "D:/repo/assets/stadium/icon.png",

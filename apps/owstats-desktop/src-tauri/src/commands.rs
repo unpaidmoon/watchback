@@ -7,18 +7,17 @@ use crate::deepseek_key::DeepSeekKeyManager;
 use crate::importer::existing_import_summary;
 use crate::PublishedInstallData;
 use crate::{
-    get_friend_analytics as query_friend_analytics, get_friend_detail as query_friend_detail,
-    get_match_detail, list_filter_options, list_matches,
+    get_friend_detail as query_friend_detail, get_match_detail, list_filter_options, list_matches,
     quick_list_update_with_credentials_and_target_paths_base_url_observed,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
     AccountLoginResult, CareerAchievement, ClearPlayerTargetResult, CredentialLoginCancelResult,
-    CredentialStatus, DeepSeekKeyStatus, FilterOptions, FriendAnalytics, FriendAnalyticsFilters,
-    FriendDetail, ImportSummary, LoginTargetStatus, MatchCursor, MatchDetailView,
-    MatchFavoriteRequest, MatchFavoriteView, MatchFilters, MatchPage, MatchSummary,
-    OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest, PersonalSeasonReview,
-    PlayerGameAction, PlayerProfile, PlayerSearchOption, PlayerTargetStatus, RankingResponse,
-    SeasonAnalysis, SeasonSyncResult, SyncRequest, UpdateCheckResult, UserSettings,
+    DeepSeekKeyStatus, FilterOptions, FriendAnalyticsFilters, FriendDetail, ImportSummary,
+    LoginTargetStatus, MatchCursor, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView,
+    MatchFilters, MatchPage, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
+    PersonalReviewRequest, PersonalSeasonReview, PlayerGameAction, PlayerProfile,
+    PlayerSearchOption, RankingResponse, SeasonAnalysis, SeasonSyncResult, SyncRequest,
+    UserSettings,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -176,15 +175,6 @@ pub fn refresh_match_evaluations(
     refresh_evaluations(&account.database()).map_err(to_message)
 }
 
-#[tauri::command]
-pub fn get_friend_analytics(
-    accounts: State<'_, AccountContextManager>,
-    filters: FriendAnalyticsFilters,
-) -> Result<FriendAnalytics, String> {
-    let account = active_account(&accounts)?;
-    query_friend_analytics(&account.database(), filters).map_err(to_message)
-}
-
 #[tauri::command(async)]
 pub fn get_friend_details(
     accounts: State<'_, AccountContextManager>,
@@ -224,14 +214,6 @@ pub fn get_career_achievements(
 ) -> Result<Vec<CareerAchievement>, String> {
     let account = active_account(&accounts)?;
     crate::get_career_achievements(&account.database()).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_credential_status(
-    accounts: State<'_, AccountContextManager>,
-) -> Result<CredentialStatus, String> {
-    let account = active_account(&accounts)?;
-    crate::credentials::get_credential_status_for_account(account.paths()).map_err(to_message)
 }
 
 #[tauri::command]
@@ -321,16 +303,6 @@ pub fn save_user_settings(
 ) -> Result<UserSettings, String> {
     crate::settings::save_user_settings_for_path(&accounts.shared_paths().user_settings(), settings)
         .map_err(to_message)
-}
-
-#[tauri::command]
-pub fn check_app_update(
-    accounts: State<'_, AccountContextManager>,
-) -> Result<UpdateCheckResult, String> {
-    let _shared = accounts.shared_paths();
-    Ok(crate::settings::check_app_update_result(env!(
-        "CARGO_PKG_VERSION"
-    )))
 }
 
 #[tauri::command]
@@ -648,14 +620,6 @@ fn clear_removed_account_target(
 #[tauri::command]
 pub fn cancel_dashen_login(app: AppHandle) -> Result<CredentialLoginCancelResult, String> {
     crate::credentials::cancel_dashen_login(app).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_player_target_status(
-    accounts: State<'_, AccountContextManager>,
-) -> Result<PlayerTargetStatus, String> {
-    let account = active_account(&accounts)?;
-    crate::player_target::get_player_target_status_for_account(account.paths()).map_err(to_message)
 }
 
 #[tauri::command]

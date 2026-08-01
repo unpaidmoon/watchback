@@ -1,22 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { activeBadgeLevel, formatAchievementUnlockDate } from "../src/shared/reviewAchievements.ts";
 import type { CareerAchievement } from "../src/shared/types.ts";
 
 const achievement: CareerAchievement = { key: "win-streak", title: "常胜将军", detail: "连续表现奖章", currentLevel: 2, tiers: [] };
 assert.equal(activeBadgeLevel(achievement), 2);
+assert.equal(activeBadgeLevel({ ...achievement, currentLevel: 0 }), 1);
+assert.equal(activeBadgeLevel({ ...achievement, currentLevel: 1 }), 1);
+assert.equal(activeBadgeLevel({ ...achievement, currentLevel: 3 }), 3);
+assert.equal(activeBadgeLevel({ ...achievement, currentLevel: 99 }), 3);
 assert.equal(formatAchievementUnlockDate(null), null);
 assert.equal(formatAchievementUnlockDate(Number.NaN), null);
-const api = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
-const page = readFileSync(new URL("../src/pages/AchievementsPage.tsx", import.meta.url), "utf8");
-const wall = readFileSync(new URL("../src/features/review/AchievementWall.tsx", import.meta.url), "utf8");
-const assetTest = readFileSync(new URL("./phase6Assets.test.ts", import.meta.url), "utf8");
-const visualFixture = readFileSync(new URL("./uiVisualAcceptance.fixture.ts", import.meta.url), "utf8");
-assert.match(api, /invoke<CareerAchievement\[\]>\("get_career_achievements"\)/);
-assert.doesNotMatch(api, /get_career_achievements",\s*\{/);
-assert.match(page, /description="生涯成就与进度"/);
-assert.match(wall, /achievementTier\.level <= achievement\.currentLevel/);
-assert.match(wall, /unlockDate \?/);
-assert.doesNotMatch(assetTest, /"win-rate"/);
-assert.doesNotMatch(visualFixture, /"win-rate"/);
-for (const removed of ["PageSeasonSelect", "parseReviewSeasonParam", "usePersonalSeasonReview"]) assert.equal(page.includes(removed), false);
+const localUnlockTimestamp = new Date(2026, 0, 2, 12).getTime() / 1000;
+assert.equal(formatAchievementUnlockDate(localUnlockTimestamp), "2026.01.02 解锁");

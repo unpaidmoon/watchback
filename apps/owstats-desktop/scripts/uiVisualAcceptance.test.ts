@@ -165,7 +165,6 @@ for (const command of [
   "get_rankings",
   "get_onboarding_status",
   "get_player_profile",
-  "get_player_target_status",
 ] as const) {
   assert.equal(command in visualInvokeResponses, true, `visual invoke map includes ${command}`);
 }

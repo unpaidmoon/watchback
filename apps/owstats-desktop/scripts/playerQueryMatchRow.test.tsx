@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MatchListCard, type PlayerQueryMatchRowView } from "../src/features/matches/MatchListCard";
+import { PlayerQueryMatchList } from "../src/features/player-query/PlayerQueryMatchList";
 import { formatPlayerQueryDate, formatPlayerQueryScoreLine } from "../src/shared/matchListFormat";
 
 const normalRow: PlayerQueryMatchRowView = {
@@ -115,9 +115,20 @@ assert.equal(formatPlayerQueryScoreLine("0-0"), "0-0");
 assert.equal(formatPlayerQueryDate("2026-01-01T00:00:00+08:00"), "01-01");
 assert.equal(formatPlayerQueryDate(null), "-");
 
-const source = readFileSync(new URL("../src/features/matches/MatchListCard.tsx", import.meta.url), "utf8");
-assert.match(source, /props\.variant === "playerQuery"/);
-assert.match(source, /src="\/assets\/maps\/stadium\.png"/);
+const homeListMarkup = renderToStaticMarkup(createElement(PlayerQueryMatchList, {
+  matches: Array.from({ length: 13 }, (_, index) => ({ ...normalRow, matchId: `home-${index}`, mapName: `地图-${index}` })),
+  onOpenMatch: () => undefined,
+  onOpenMore: () => undefined,
+}));
+assert.equal(homeListMarkup.split("playerQueryCompactMatchRow").length - 1, 12, "query home renders at most 12 compact rows");
+assert.equal(homeListMarkup.includes("更多对局"), true);
+assert.equal(homeListMarkup.includes("地图-11"), true);
+assert.equal(homeListMarkup.includes("地图-12"), false, "the thirteenth match stays outside the home preview");
 
-const homeListSource = readFileSync(new URL("../src/features/player-query/PlayerQueryMatchList.tsx", import.meta.url), "utf8");
-assert.match(homeListSource, /variant="playerQuery" compact/);
+const emptyListMarkup = renderToStaticMarkup(createElement(PlayerQueryMatchList, {
+  matches: [],
+  onOpenMatch: () => undefined,
+  onOpenMore: () => undefined,
+}));
+assert.equal(emptyListMarkup.includes("该赛季该模式暂无对局"), true);
+assert.equal(emptyListMarkup.includes("更多对局"), false);

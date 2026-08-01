@@ -258,6 +258,7 @@ export async function prepareAssets({ repoRoot, appRoot } = {}) {
   const stadiumManifestFile = path.join(assetsRoot, "stadium", "manifest.json");
   const runtimeRoot = path.resolve(appRoot, "runtime-config");
   const runtimeFile = path.join(runtimeRoot, "ow-lookups.json");
+  const stadiumRuntimeFile = path.join(runtimeRoot, "stadium-assets.json");
   const inventoryFile = path.join(runtimeRoot, "assets-inventory.json");
 
   await assertSafeSourceRoot(assetsRoot, repoRoot, "assets");
@@ -266,15 +267,18 @@ export async function prepareAssets({ repoRoot, appRoot } = {}) {
   await assertSafeSourceFile(ranksManifestFile, assetsRoot, "assets/ranks/manifest.json");
   await assertSafeSourceFile(stadiumManifestFile, assetsRoot, "assets/stadium/manifest.json");
   await assertSafeSourceFile(runtimeFile, runtimeRoot, "runtime-config/ow-lookups.json");
+  await assertSafeSourceFile(stadiumRuntimeFile, runtimeRoot, "runtime-config/stadium-assets.json");
   await assertSafeSourceFile(inventoryFile, runtimeRoot, "runtime-config/assets-inventory.json");
   const rootManifest = await readJson(rootManifestFile, "assets/manifest.json");
   const ranksManifest = await readJson(ranksManifestFile, "assets/ranks/manifest.json");
   const stadiumManifest = await readJson(stadiumManifestFile, "assets/stadium/manifest.json");
   const runtimeConfig = await readJson(runtimeFile, "runtime-config/ow-lookups.json");
+  const stadiumRuntime = await readJson(stadiumRuntimeFile, "runtime-config/stadium-assets.json");
   const inventory = await readJson(inventoryFile, "runtime-config/assets-inventory.json");
   assertNoSensitiveKeys(runtimeConfig, "runtime-config/ow-lookups.json");
   const inventoryFiles = validateInventory(inventory);
   await validateManifests({ rootManifest, ranksManifest, stadiumManifest, assetsRoot, inventoryFiles });
+  assertStadiumRuntimeCurrent(stadiumManifest, stadiumRuntime);
 
   await mkdir(stagingRoot, { recursive: true });
   try {
@@ -285,6 +289,57 @@ export async function prepareAssets({ repoRoot, appRoot } = {}) {
     throw error;
   }
   return { outputRoot, fileCount: (await collectFiles(outputRoot)).length };
+}
+
+export function projectStadiumRuntimeManifest(stadiumManifest) {
+  assertObject(stadiumManifest, "assets/stadium/manifest.json");
+  for (const field of ["fightRanks", "modTrait"]) {
+    assertArrayField(stadiumManifest, field, "assets/stadium/manifest.json");
+    assertObjectEntries(stadiumManifest[field], field, "assets/stadium/manifest.json");
+  }
+
+  return {
+    version: 1,
+    fightRanks: stadiumManifest.fightRanks.map((entry) => ({
+      key: entry.key,
+      localPath: entry.localPath ?? entry.pureLocalPath,
+    })),
+    modTrait: stadiumManifest.modTrait.map((entry) => ({
+      id: entry.id,
+      decimalId: entry.decimalId,
+      hexId: entry.hexId,
+      name: entry.name,
+      description: entry.description?.trim() ? entry.description : entry.desc,
+      localPath: entry.localPath,
+      category: entry.category,
+    })),
+  };
+}
+
+function assertStadiumRuntimeCurrent(stadiumManifest, stadiumRuntime) {
+  const expected = JSON.stringify(projectStadiumRuntimeManifest(stadiumManifest));
+  if (JSON.stringify(stadiumRuntime) !== expected) {
+    throw new Error(
+      "runtime-config/stadium-assets.json 与 assets/stadium/manifest.json 不同步；请显式运行 node scripts/prepareAssets.mjs --refresh-stadium-runtime",
+    );
+  }
+}
+
+export async function refreshStadiumRuntimeManifest({ repoRoot, appRoot }) {
+  const assetsRoot = path.resolve(repoRoot, "assets");
+  const runtimeRoot = path.resolve(appRoot, "runtime-config");
+  const stadiumManifestFile = path.join(assetsRoot, "stadium", "manifest.json");
+  const stadiumRuntimeFile = path.join(runtimeRoot, "stadium-assets.json");
+  await assertSafeSourceRoot(assetsRoot, repoRoot, "assets");
+  await assertSafeSourceRoot(runtimeRoot, appRoot, "runtime-config");
+  await assertSafeSourceFile(stadiumManifestFile, assetsRoot, "assets/stadium/manifest.json");
+  if (await pathExistsWith({ lstat }, stadiumRuntimeFile)) {
+    await assertSafeSourceFile(stadiumRuntimeFile, runtimeRoot, "runtime-config/stadium-assets.json");
+  }
+  const stadiumManifest = await readJson(stadiumManifestFile, "assets/stadium/manifest.json");
+  const projection = projectStadiumRuntimeManifest(stadiumManifest);
+  await writeFile(stadiumRuntimeFile, `${JSON.stringify(projection, null, 2)}\n`);
+  return { stadiumRuntimeFile, fightRankCount: projection.fightRanks.length, modTraitCount: projection.modTrait.length };
 }
 
 export async function refreshAssetsInventory({ repoRoot, appRoot }) {
@@ -318,7 +373,16 @@ const scriptPath = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   const appRoot = path.resolve(path.dirname(scriptPath), "..");
   const repoRoot = path.resolve(appRoot, "..", "..");
-  if (process.argv.includes("--refresh-inventory")) {
+  if (process.argv.includes("--refresh-stadium-runtime")) {
+    refreshStadiumRuntimeManifest({ repoRoot, appRoot })
+      .then(({ stadiumRuntimeFile, fightRankCount, modTraitCount }) => {
+        console.log(`已刷新 ${fightRankCount} 个竞技段位和 ${modTraitCount} 个异能/装备：${stadiumRuntimeFile}`);
+      })
+      .catch((error) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      });
+  } else if (process.argv.includes("--refresh-inventory")) {
     refreshAssetsInventory({ repoRoot, appRoot })
       .then(({ inventoryFile, fileCount }) => console.log(`已刷新 ${fileCount} 个 tracked assets：${inventoryFile}`))
       .catch((error) => {

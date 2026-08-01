@@ -153,6 +153,7 @@ function Invoke-TrackedCheckout {
 }
 
 Invoke-VerifyStep '敏感信息与绝对路径扫描' { node (Join-Path $repoRoot 'scripts\verify-sensitive-paths.mjs') --root $repoRoot }
+Invoke-VerifyStep '验证流程契约' { node (Join-Path $repoRoot 'scripts\verify-workflow.test.mjs') }
 Write-Host '[验证] 开始：安装目录数据发布边界'
 try {
   $runtimeSource = Join-Path $tauriRoot 'src'
@@ -169,7 +170,6 @@ Write-Host '[验证] 通过：安装目录数据发布边界'
 
 Push-Location $desktopRoot
 try {
-  Invoke-VerifyStep '资源准备' { npm run prepare:assets }
   Invoke-VerifyStep '前端分层测试' { npm test }
   if ($SkipBuild) {
     Skip-VerifyStep '前端构建'
@@ -184,7 +184,6 @@ try {
   Invoke-VerifyStep 'Rust 格式检查' { cargo fmt --check }
   if ($SkipClippy) { Skip-VerifyStep 'Rust Clippy' } else { Invoke-VerifyStep 'Rust Clippy' { cargo clippy --all-targets -- -D warnings } }
   Invoke-VerifyStep 'Rust 全量测试' { cargo test --tests }
-  Invoke-VerifyStep 'STAB-005/006 契约测试' { cargo test --test stab005_database_runtime; if ($LASTEXITCODE -eq 0) { cargo test --test stab006_contracts } }
 } finally { Pop-Location }
 
 Invoke-VerifyStep 'Git diff 检查' { git -C $repoRoot diff --check }

@@ -1010,15 +1010,6 @@ impl Default for UserSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateCheckResult {
-    pub status: String,
-    pub current_version: String,
-    pub latest_version: Option<String>,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct LocalDataStatus {
     pub data_source: String,
     pub season: Option<i64>,

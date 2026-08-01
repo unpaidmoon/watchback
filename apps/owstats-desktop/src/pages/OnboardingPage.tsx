@@ -10,10 +10,10 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Ref } from "react";
 import {
   addAccount,
   cancelDashenLogin,
-  confirmLoginTargetSwitch,
   getOnboardingStatus,
   getUserSettings,
   getSeasonSyncStatus,
@@ -21,19 +21,18 @@ import {
   getPlayerGameAction,
   getLoginTargetStatus,
   listAccounts,
-  clearPlayerTarget,
-  keepCurrentPlayerTarget,
   removeAccount,
   openSupportDirectory,
   openProductFeedback,
   openProjectRepository,
-  retryLoginTargetBinding,
+  recoverLoginTarget,
   retrySeasonBackgroundSync,
   refreshProfileCard,
   switchAccount,
   syncSeason,
   saveUserSettings,
 } from "../shared/api";
+import type { LoginTargetRecoveryAction } from "../shared/api";
 import { AccountManager } from "../features/command-center/AccountManager";
 import { DeepSeekSettings } from "../features/command-center/DeepSeekSettings";
 import { QrAccountLoginDialog } from "../features/command-center/QrAccountLoginDialog";
@@ -54,7 +53,18 @@ import { isCurrentSeasonEvent } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, LoginTargetStatus, OnboardingStatus, PlayerGameAction, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
 
-type TargetAction = "confirm" | "keep" | "retry" | "clear";
+type TargetAction = LoginTargetRecoveryAction;
+type TargetRecoveryPanelProps = {
+  targetStatus: LoginTargetStatus | null;
+  fallbackMessage: string;
+  targetAction: TargetAction | null;
+  disabled: boolean;
+  primaryActionRef: Ref<HTMLButtonElement>;
+  onConfirmSwitch: () => void;
+  onKeepCurrent: () => void;
+  onRetryBinding: () => void;
+  onClear: () => void;
+};
 const APP_VERSION = "0.4.0";
 const browserPreviewLoginHint = "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
 
@@ -66,6 +76,90 @@ export function normalizeLoginTargetName(value: string) {
 
 export function isCurrentDashboardRequest(requestGeneration: number, currentGeneration: number, mounted: boolean) {
   return mounted && requestGeneration === currentGeneration;
+}
+
+export function TargetRecoveryPanel({
+  targetStatus,
+  fallbackMessage,
+  targetAction,
+  disabled,
+  primaryActionRef,
+  onConfirmSwitch,
+  onKeepCurrent,
+  onRetryBinding,
+  onClear,
+}: TargetRecoveryPanelProps) {
+  const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
+  const showDetectedLogin = Boolean(
+    targetStatus?.currentBnet &&
+    targetStatus.detectedBnet &&
+    normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
+  );
+  const actionPending = targetAction !== null;
+
+  return (
+    <section
+      className="syncTargetStrip"
+      aria-labelledby="sync-target-title"
+      aria-describedby="sync-target-message"
+      aria-busy={actionPending}
+    >
+      <div className="phase8TargetPlayerSummary">
+        <span className="phase6Eyebrow" id="sync-target-title">当前目标玩家</span>
+        <strong>{targetStatus?.currentBnet ?? targetStatus?.detectedBnet ?? "尚未识别账号"}</strong>
+        {showDetectedLogin && (
+          <div className="syncTargetComparison" aria-label="当前目标与检测到的登录账号">
+            <span>当前目标 <strong>{targetStatus?.currentBnet}</strong></span>
+            <span>检测到的登录账号 <strong>{targetStatus?.detectedBnet}</strong></span>
+          </div>
+        )}
+        <p id="sync-target-message" aria-live="polite">
+          {targetStatus?.message ?? fallbackMessage}
+        </p>
+      </div>
+      <div className="syncTargetDecision" role="group" aria-label="目标玩家操作">
+        {!targetStatus ? <span className="warn" role="status">正在确认目标状态…</span> : null}
+        {targetStatus?.state === "ready" ? <span className="good" role="status">当前目标已确认，可同步</span> : null}
+        {targetStatus?.state === "switchRequired" ? (
+          <span className="warn" role="status">检测到其他登录账号，请选择目标</span>
+        ) : null}
+        {targetStatus?.state === "bindFailed" ? <span className="warn" role="status">目标绑定失败</span> : null}
+        {targetStatus && !targetStatus.syncAllowed && targetStatus.state !== "switchRequired" && targetStatus.state !== "bindFailed" ? (
+          <span className="warn" role="status">同步前需要处理目标状态</span>
+        ) : null}
+        {targetStatus?.state === "switchRequired" ? (
+          <>
+            <button
+              ref={primaryActionRef}
+              className="primaryButton"
+              type="button"
+              onClick={onConfirmSwitch}
+              disabled={disabled || !targetStatus.canConfirmSwitch}
+            >
+              {targetAction === "confirm" ? "切换中…" : "切换到此账号"}
+            </button>
+            <button className="ghostButton" type="button" onClick={onKeepCurrent} disabled={disabled}>
+              {targetAction === "keep" ? "保留中…" : "保留原目标"}
+            </button>
+          </>
+        ) : null}
+        {targetStatus?.state === "bindFailed" && targetStatus.canRetry ? (
+          <button
+            ref={primaryActionRef}
+            className="primaryButton"
+            type="button"
+            onClick={onRetryBinding}
+            disabled={disabled}
+          >
+            {targetAction === "retry" ? "重新绑定中…" : "重新绑定"}
+          </button>
+        ) : null}
+        <button className="ghostButton" type="button" onClick={onClear} disabled={!hasCurrentTarget || disabled}>
+          {targetAction === "clear" ? "清除中…" : "清除"}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 export function OnboardingPage() {
@@ -620,97 +714,29 @@ export function OnboardingPage() {
     setSelectedSeason(season);
   }
 
-  async function runConfirmTargetSwitch() {
+  async function runTargetRecovery(action: TargetAction) {
     if (!beginAccountOperation()) {
       return;
     }
-    setTargetAction("confirm");
+    setTargetAction(action);
     setError(null);
     setNotice(null);
     try {
-      const nextTarget = await confirmLoginTargetSwitch();
+      const nextTarget = await recoverLoginTarget(action);
       if (mountedRef.current) {
         setTargetStatus(nextTarget);
         setNotice(nextTarget.message);
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(`切换目标失败：${productErrorMessage(err)}。请重试或通过添加账号更新登录。`);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setTargetAction(null);
-      }
-      releaseOperationLock();
-    }
-  }
-
-  async function runKeepCurrentTarget() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setTargetAction("keep");
-    setError(null);
-    setNotice(null);
-    try {
-      const nextTarget = await keepCurrentPlayerTarget();
-      if (mountedRef.current) {
-        setTargetStatus(nextTarget);
-        setNotice(nextTarget.message);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`保留原目标失败：${productErrorMessage(err)}。请重试或通过添加账号更新登录。`);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setTargetAction(null);
-      }
-      releaseOperationLock();
-    }
-  }
-
-  async function runRetryTargetBinding() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setTargetAction("retry");
-    setError(null);
-    setNotice(null);
-    try {
-      const nextTarget = await retryLoginTargetBinding();
-      if (mountedRef.current) {
-        setTargetStatus(nextTarget);
-        setNotice(nextTarget.message);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`重新绑定失败：${productErrorMessage(err)}。请重试或通过添加账号更新登录。`);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setTargetAction(null);
-      }
-      releaseOperationLock();
-    }
-  }
-
-  async function runClearTarget() {
-    if (!beginAccountOperation()) {
-      return;
-    }
-    setTargetAction("clear");
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await clearPlayerTarget();
-      if (mountedRef.current) {
-        setTargetStatus(result.target);
-        setNotice(result.target.message);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(`清除目标失败：${productErrorMessage(err)}。请重试。`);
+        const actionLabel = {
+          confirm: "切换目标",
+          keep: "保留原目标",
+          retry: "重新绑定",
+          clear: "清除目标",
+        }[action];
+        const recoveryHint = action === "clear" ? "请重试。" : "请重试或通过添加账号更新登录。";
+        setError(`${actionLabel}失败：${productErrorMessage(err)}。${recoveryHint}`);
       }
     } finally {
       if (mountedRef.current) {
@@ -723,15 +749,9 @@ export function OnboardingPage() {
   const credentialReady = status?.credentialStatus.state === "ready";
   const accountOperationBusy = busyAccountAction !== null || targetAction !== null || qrLoginDialogOpen;
   const activeAccount = accountStatus?.accounts.find((account) => account.isActive) ?? null;
-  const hasCurrentTarget = Boolean(targetStatus?.currentBnet);
   const primaryTargetState = targetStatus && ["switchRequired", "bindFailed", "unidentified", "verificationRequired", "mismatchKept"].includes(targetStatus.state)
     ? targetStatus.state
     : null;
-  const showDetectedLogin = Boolean(
-    targetStatus?.currentBnet &&
-    targetStatus.detectedBnet &&
-    normalizeLoginTargetName(targetStatus.currentBnet) !== normalizeLoginTargetName(targetStatus.detectedBnet),
-  );
   const warnings = status?.health.warnings ?? [];
   const displayName = profile?.playerId ?? activeAccount?.battleTag ?? "未登录玩家";
   const lastSync = formatTimestamp(status?.localData.lastSyncedOrImportedAt);
@@ -791,14 +811,25 @@ export function OnboardingPage() {
           </div>
         ) : accountStatus.activeAccountId ? <>
           <div className="commandCenterMainGrid" id="local-data" tabIndex={-1}>
-          <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
-            <div className="commandCenterSectionHeading">
-              <div>
-                <span className="phase6Eyebrow">主要操作</span>
-                <h2 id="command-center-sync-title">赛季数据与同步</h2>
+            <section className="commandCenterSyncPanel" aria-labelledby="command-center-sync-title">
+              <div className="commandCenterSectionHeading">
+                <div>
+                  <span className="phase6Eyebrow">主要操作</span>
+                  <h2 id="command-center-sync-title">赛季数据与同步</h2>
+                </div>
+                <strong>{readableSyncProgress(syncProgress)}</strong>
               </div>
-              <strong>{readableSyncProgress(syncProgress)}</strong>
-            </div>
+              <TargetRecoveryPanel
+                targetStatus={targetStatus}
+                fallbackMessage={status?.credentialStatus.message ?? "请登录网易大神并自动识别当前账号"}
+                targetAction={targetAction}
+                disabled={accountOperationBusy || syncingSeason !== null}
+                primaryActionRef={primaryTargetActionRef}
+                onConfirmSwitch={() => void runTargetRecovery("confirm")}
+                onKeepCurrent={() => void runTargetRecovery("keep")}
+                onRetryBinding={() => void runTargetRecovery("retry")}
+                onClear={() => void runTargetRecovery("clear")}
+              />
               {status && selectedSeason !== null ? (
                 <SeasonSyncWorkbench
                   selectedSeason={selectedSeason}

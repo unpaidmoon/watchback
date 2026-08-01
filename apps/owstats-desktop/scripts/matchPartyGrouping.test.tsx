@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import type { ReactElement, ReactNode } from "react";
 import type { PlayerRow } from "../src/shared/types";
 import { MatchTeamTable } from "../src/features/matches/MatchTeamTable";
@@ -71,27 +70,12 @@ assert.equal(findByClass(tree, "matchTeamPartyGroup").length, 2);
 assert.equal(findByClass(tree, "matchTeamPartyRail").length, 2);
 assert.equal(findByClass(tree, "matchTeamSoloPlayer").length, 1);
 
-const tableSource = readFileSync(
-  new URL("../src/features/matches/MatchTeamTable.tsx", import.meta.url),
-  "utf8",
-);
-const helperSource = readFileSync(
-  new URL("../src/features/matches/partyGroups.ts", import.meta.url),
-  "utf8",
-);
-const styleSource = readFileSync(
-  new URL("../src/styles/features/matches.css", import.meta.url),
-  "utf8",
-);
-assert.doesNotMatch(tableSource, /matchTeamTableMarker/);
-assert.doesNotMatch(helperSource, /\.at\(/, "party grouping must stay compatible with the ES2020 target");
-assert.match(
-  styleSource,
-  /\.matchTeamPartyRail\s*\{[^}]*background:\s*var\(--data-secondary\)/s,
-);
-assert.match(
-  styleSource,
-  /\.matchTeamTable\.enemy \.matchTeamPartyRail\s*\{[^}]*background:\s*var\(--status-danger\)/s,
+assert.deepEqual(partyModule.playerPartyBlocks([]), []);
+assert.deepEqual(
+  partyModule.playerPartyBlocks([player("甲", 7), player("单排", null), player("乙", 7)])
+    .map((block) => [block.partyGroup, block.players.map((item) => item.name)]),
+  [[7, ["甲"]], [null, ["单排"]], [7, ["乙"]]],
+  "only adjacent players in the same party form one visual block",
 );
 
 function findByClass(node: ReactNode, className: string): ReactElement[] {

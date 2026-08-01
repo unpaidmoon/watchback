@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   buildFriendDetailState,
   buildAchievementsHref,
@@ -10,19 +9,6 @@ import {
   reviewScrollKey,
   scheduleReviewScrollRestore,
 } from "../src/features/review/reviewNavigation";
-
-const reviewPageSource = readFileSync(new URL("../src/pages/PersonalReviewPage.tsx", import.meta.url), "utf8");
-assert.match(reviewPageSource, /if \(!Number\.isFinite\(scrollY\)\) \{ sessionStorage\.removeItem\(reviewScrollKey\(href\)\); return; \}/, "invalid persisted review scroll values must be cleared");
-assert.match(
-  reviewPageSource,
-  /requestFrame:\s*\(callback\)\s*=>\s*requestAnimationFrame\(callback\)/,
-  "原生 requestAnimationFrame 必须通过闭包调用，避免 WebView2 中因 this 绑定错误触发 Illegal invocation 白屏",
-);
-assert.match(
-  reviewPageSource,
-  /cancelFrame:\s*\(frame\)\s*=>\s*cancelAnimationFrame\(frame\)/,
-  "原生 cancelAnimationFrame 必须通过闭包调用，避免 WebView2 中因 this 绑定错误触发 Illegal invocation",
-);
 
 assert.equal(buildReviewHref(23), "/review?season=23");
 assert.equal(buildAchievementsHref(23), "/achievements");
@@ -79,3 +65,26 @@ scheduled.shift()?.();
 assert.equal(scrollY, 120, "异步内容挂载后应恢复原滚动位置");
 assert.equal(removed, true, "成功恢复后应清除一次性记录");
 cancelRestore();
+
+const cancelledCallbacks: Array<() => void> = [];
+let cancelledFrame = 0;
+let cancelledScrollCalls = 0;
+const stopBeforeRestore = scheduleReviewScrollRestore(80, {
+  requestFrame(callback) {
+    cancelledCallbacks.push(callback);
+    return 17;
+  },
+  cancelFrame(frame) {
+    cancelledFrame = frame;
+  },
+  scrollTo() {
+    cancelledScrollCalls += 1;
+  },
+  readScrollY: () => 0,
+  readMaxScrollY: () => 0,
+  removeStored() {},
+});
+stopBeforeRestore();
+cancelledCallbacks.shift()?.();
+assert.equal(cancelledFrame, 17, "cancelling restoration cancels the scheduled animation frame");
+assert.equal(cancelledScrollCalls, 0, "a cancelled restoration cannot scroll when a queued frame runs late");

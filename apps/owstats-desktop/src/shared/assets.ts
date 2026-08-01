@@ -1,12 +1,10 @@
 import assetManifest from "../../../../assets/manifest.json";
 import rankManifest from "../../../../assets/ranks/manifest.json";
-import stadiumManifest from "../../../../assets/stadium/manifest.json";
 import runtimeLookups from "../../runtime-config/ow-lookups.json";
 
 const repoAssetRoot = "/assets";
 const rankAssetRoot = `${repoAssetRoot}/ranks`;
 const achievementAssetRoot = `${repoAssetRoot}/achievements/token-style`;
-const stadiumAssetRoot = `${repoAssetRoot}/stadium`;
 
 type ManifestEntry = {
   key: string;
@@ -27,40 +25,9 @@ type RankManifest = {
   ranks: { key: string; file: string | null }[];
 };
 
-type StadiumManifest = {
-  fightRanks?: StadiumRankEntry[];
-  modTrait?: StadiumModTraitEntry[];
-};
-
-type StadiumRankEntry = {
-  key: string;
-  localPath?: string;
-  pureLocalPath?: string;
-};
-
-type StadiumModTraitEntry = {
-  id?: string;
-  decimalId?: string;
-  hexId?: string;
-  name?: string;
-  desc?: string;
-  description?: string;
-  localPath?: string;
-  category?: string;
-};
-
 const manifest = assetManifest as AssetManifest;
 const ranks = rankManifest as RankManifest;
-const stadium = stadiumManifest as StadiumManifest;
 const rankFiles = new Map(ranks.ranks.filter((rank) => rank.file).map((rank) => [rank.key, rank.file as string]));
-const arenaRankFiles = new Map(
-  (stadium.fightRanks ?? []).flatMap((rank) => {
-    const key = normalizeAssetKey(rank.key);
-    const file = rank.localPath ?? rank.pureLocalPath;
-    const url = normalizeStadiumAssetPath(file);
-    return key && url ? [[key, url] as const] : [];
-  }),
-);
 
 type QueryToolPerk = {
   id?: string;
@@ -75,11 +42,6 @@ type QueryToolConfig = {
   maps?: Record<string, { name?: string }>;
   heroPerkList?: Record<string, QueryToolPerk[]>;
   perkList?: QueryToolPerk[];
-  heroAttrList?: QueryToolHeroAttr[];
-};
-
-type OwConfigCache = {
-  attrs?: Record<string, { text?: string; type?: string }>;
 };
 
 export type PerkInfo = {
@@ -90,22 +52,7 @@ export type PerkInfo = {
   iconUrl: string | null;
 };
 
-type QueryToolHeroAttr = {
-  heroGuid?: string;
-  heroName?: string;
-  valueGuid?: string;
-  valueText?: string;
-  valueType?: string;
-};
-
-export type HeroStatInfo = {
-  guid: string;
-  label: string;
-  type: string | null;
-};
-
 const queryTool = runtimeLookups as QueryToolConfig;
-const owConfig = runtimeLookups as OwConfigCache;
 
 const localizedMapAliases: Record<string, string> = {
   阿特利斯: "aatlis",
@@ -226,8 +173,6 @@ for (const [guid, map] of Object.entries(queryTool.maps ?? {})) {
 }
 const perkIconLookup = buildPerkIconLookup(manifest.perks ?? []);
 const perkLookup = buildPerkLookup(queryTool, perkIconLookup);
-const heroStatLookup = buildHeroStatLookup(queryTool, owConfig);
-const arenaModTraitLookup = buildArenaModTraitLookup(stadium.modTrait ?? []);
 
 export function normalizeAssetKey(value: string | null | undefined): string | null {
   const normalized = value
@@ -264,21 +209,6 @@ export function resolveHeroDisplayName(heroKey: string | null | undefined, name?
 
 export function resolveMapDisplayName(mapKey: string | null | undefined, name?: string | null): string {
   return resolveDisplayName(mapKey, name, mapDisplayNames, "未知地图");
-}
-
-export function normalizeStadiumAssetPath(value: string | null | undefined): string | null {
-  const raw = value?.trim();
-  if (!raw) return null;
-  if (raw.includes("\\") || raw.includes("%") || raw.includes(":") || /[\u0000-\u001f\u007f]/.test(raw)) {
-    return null;
-  }
-  const prefix = "assets/stadium/";
-  if (!raw.startsWith(prefix)) return null;
-  const relative = raw.slice(prefix.length);
-  const segments = relative.split("/");
-  return segments.length > 0 && segments.every((segment) => segment !== "" && segment !== "." && segment !== "..")
-    ? `${stadiumAssetRoot}/${relative}`
-    : null;
 }
 
 function assetKey(value: string | null | undefined, lookup: Map<string, string>): string | null {
@@ -335,13 +265,6 @@ export function competitiveRankAssetUrl(rankKey: string | null | undefined): str
   return file ? `${rankAssetRoot}/${file}` : null;
 }
 
-export function arenaRankAssetUrl(rankKey: string | null | undefined): string | null {
-  const key = normalizeAssetKey(rankKey);
-  if (!key) return null;
-  const file = arenaRankFiles.get(key);
-  return file ?? null;
-}
-
 export function achievementBadgeUrl(achievementKey: string, level: 1 | 2 | 3): string {
   return `${achievementAssetRoot}/${achievementKey}-token-tier-${level}.png`;
 }
@@ -353,66 +276,6 @@ export function resolvePerkInfo(rawGuid: string | number | null | undefined): Pe
     if (perk) return perk;
   }
   return null;
-}
-
-export function perkAssetUrls(values: Array<string | number | null | undefined>): string[] {
-  const seen = new Set<string>();
-  const urls: string[] = [];
-  for (const value of values) {
-    const iconUrl = resolvePerkInfo(value)?.iconUrl;
-    if (!iconUrl || seen.has(iconUrl)) continue;
-    seen.add(iconUrl);
-    urls.push(iconUrl);
-  }
-  return urls;
-}
-
-export function resolveHeroStatInfo(guid: string | number | null | undefined): HeroStatInfo | null {
-  const key = guid == null ? "" : String(guid).trim();
-  if (!key) return null;
-  return heroStatLookup.get(key) ?? null;
-}
-
-export type ArenaModTraitInfo = {
-  id: string;
-  name: string;
-  description: string | null;
-  iconUrl: string | null;
-  category: string | null;
-};
-
-export function resolveArenaModTraitInfo(rawGuid: string | number | null | undefined): ArenaModTraitInfo | null {
-  const key = rawGuid == null ? "" : String(rawGuid).trim();
-  if (!key) return null;
-  return arenaModTraitLookup.get(key) ?? arenaModTraitLookup.get(decimalToHexKey(key)) ?? null;
-}
-
-function buildArenaModTraitLookup(entries: StadiumModTraitEntry[]) {
-  const lookup = new Map<string, ArenaModTraitInfo>();
-  for (const entry of entries) {
-    const keys = [entry.id, entry.decimalId, entry.hexId].filter((value): value is string => Boolean(value?.trim()));
-    if (keys.length === 0) continue;
-    const iconUrl = normalizeStadiumAssetPath(entry.localPath);
-    const firstKey = keys[0];
-    const info: ArenaModTraitInfo = {
-      id: firstKey,
-      name: entry.name?.trim() || "待补充映射",
-      description: entry.description?.trim() || entry.desc?.trim() || null,
-      iconUrl,
-      category: entry.category ?? null,
-    };
-    for (const key of keys) lookup.set(key, info);
-  }
-  return lookup;
-}
-
-function decimalToHexKey(value: string): string {
-  if (!/^\d+$/.test(value)) return value;
-  try {
-    return `0x${BigInt(value).toString(16).toUpperCase().padStart(16, "0")}`;
-  } catch {
-    return value;
-  }
 }
 
 function buildPerkLookup(config: QueryToolConfig, iconLookup: Map<string, string>) {
@@ -438,32 +301,6 @@ function buildPerkLookup(config: QueryToolConfig, iconLookup: Map<string, string
     for (const perk of perks) addPerk(perk);
   }
   for (const perk of config.perkList ?? []) addPerk(perk);
-  return lookup;
-}
-
-function buildHeroStatLookup(config: QueryToolConfig, cache: OwConfigCache) {
-  const lookup = new Map<string, HeroStatInfo>();
-  for (const [guid, item] of Object.entries(cache.attrs ?? {})) {
-    const label = item.text?.trim();
-    if (!guid || !label) continue;
-    lookup.set(guid, {
-      guid,
-      label,
-      type: item.type?.trim() || null,
-    });
-  }
-  for (const item of config.heroAttrList ?? []) {
-    const guid = item.valueGuid?.trim();
-    const label = item.valueText?.trim();
-    if (!guid || !label) continue;
-    if (!lookup.has(guid)) {
-      lookup.set(guid, {
-        guid,
-        label,
-        type: item.valueType?.trim() || null,
-      });
-    }
-  }
   return lookup;
 }
 

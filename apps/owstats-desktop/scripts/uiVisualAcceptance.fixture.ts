@@ -688,9 +688,7 @@ export const visualInvokeResponses: Record<string, unknown> = {
     getHonorsCnt: 27,
     reportedCnt: 0,
   },
-  get_player_target_status: fixturePlayerTargetStatus,
   get_user_settings: { theme: "system" },
-  check_app_update: { status: "current", currentVersion: "0.1.0", latestVersion: "0.1.0", message: "当前已是合成验收版本" },
 };
 
 export type VisualInvokePlan = {

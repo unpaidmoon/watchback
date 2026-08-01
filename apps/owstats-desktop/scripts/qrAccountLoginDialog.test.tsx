@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -59,7 +58,6 @@ function walk(node: ReactNode, visit: (element: ReactElement<Record<string, unkn
   visit(element);
   walk(element.props.children as ReactNode, visit);
 }
-
 function findElement(root: ReactElement, predicate: (props: Record<string, unknown>) => boolean) {
   let match: ReactElement<Record<string, unknown>> | null = null;
   walk(root, (element) => {
@@ -171,8 +169,6 @@ function findElement(root: ReactElement, predicate: (props: Record<string, unkno
   assert.deepEqual(ACCOUNT_OPERATION_STATUSES, expected, "TS fixture must match get_operation_status camelCase strings exactly");
   const exhaustiveFixture: readonly AccountOperationStatus[] = expected;
   assert.equal(exhaustiveFixture.length, 6);
-  const api = readFileSync(new URL("../src/shared/api.ts", import.meta.url), "utf8");
-  assert.match(api, /invoke<AccountOperationStatus>\("get_operation_status"\)/);
 }
 
 {
@@ -197,11 +193,4 @@ function findElement(root: ReactElement, predicate: (props: Record<string, unkno
     () => sequence.push("close-after-refresh-error"),
   ));
   assert.equal(sequence.at(-1), "close-after-refresh-error", "账号列表刷新异常也不能把用户困在完成弹窗");
-}
-
-{
-  const css = readFileSync(new URL("../src/styles/features/command-center.css", import.meta.url), "utf8");
-  assert.match(css, /\.qrAccountLoginQrStage\s*\{[\s\S]*?width:\s*256px;[\s\S]*?height:\s*256px;/, "二维码占位和图片必须共享固定舞台，状态切换不能跳动");
-  assert.match(css, /@media \(max-width: 680px\)[\s\S]*?\.qrAccountLoginDialog\s*\{\s*grid-template-columns:\s*1fr;/, "窄屏弹窗必须切换单列布局");
-  assert.match(css, /\.qrAccountLoginDialog\s*\{[\s\S]*?width:\s*min\(760px, 100%\);[\s\S]*?overflow:\s*auto;/, "弹窗不得制造横向溢出且须允许视口内滚动");
 }

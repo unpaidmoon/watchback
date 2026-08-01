@@ -1,6 +1,6 @@
 import { CircleDollarSign, X } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { resolveArenaModTraitInfo } from "../../shared/assets";
+import { resolveArenaModTraitInfo } from "../../shared/stadiumAssets";
 import { HeroAvatar } from "../../shared/phase6Components";
 import type { PlayerRow } from "../../shared/types";
 import type { ArenaPlayerRoundSummaryRow } from "./arenaPlayerRoundSummary";
