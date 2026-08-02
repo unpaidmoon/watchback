@@ -25,7 +25,7 @@ use std::sync::Arc;
 use tauri::{ipc::Channel, AppHandle, Emitter, State};
 
 const PROJECT_REPOSITORY_URL: &str = "https://github.com/fengpianpianne/watchback";
-const PRODUCT_FEEDBACK_URL: &str = "https://support.qq.com/product/801522";
+const PRODUCT_FEEDBACK_URL: &str = "https://watchback.featurebase.app/zh-CN";
 
 #[tauri::command]
 pub fn record_frontend_diagnostic(kind: String, message: String) {
@@ -78,6 +78,13 @@ pub struct Overview {
     pub import_summary: Option<ImportSummary>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchTimelineRevision {
+    pub account_scope: String,
+    pub revision_token: String,
+}
+
 #[tauri::command]
 pub fn get_overview(accounts: State<'_, AccountContextManager>) -> Result<Overview, String> {
     let account = active_account(&accounts)?;
@@ -125,6 +132,25 @@ pub fn list_match_timeline_page(
     page.revision_token = revision_token;
     page.account_scope = account.account_id().as_str().to_string();
     Ok(page)
+}
+
+fn match_timeline_revision_for(
+    account: &AccountContextSnapshot,
+    season: Option<i64>,
+) -> anyhow::Result<MatchTimelineRevision> {
+    Ok(MatchTimelineRevision {
+        account_scope: account.account_id().as_str().to_string(),
+        revision_token: crate::live_season_update::revision_token(&account.database(), season)?,
+    })
+}
+
+#[tauri::command]
+pub fn get_match_timeline_revision(
+    accounts: State<'_, AccountContextManager>,
+    season: Option<i64>,
+) -> Result<MatchTimelineRevision, String> {
+    let account = active_account(&accounts)?;
+    match_timeline_revision_for(&account, season).map_err(to_message)
 }
 
 #[tauri::command]
@@ -1190,6 +1216,50 @@ fn to_message(error: impl std::fmt::Display) -> String {
 mod account_management_tests {
     use super::*;
     use crate::app_paths::SharedAppPaths;
+
+    #[test]
+    fn match_timeline_revision_reports_active_account_scope_and_selected_season_token() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager =
+            AccountContextManager::load(<SharedAppPaths>::from_app_data_dir(temp.path())).unwrap();
+        let result = crate::account_login::publish_add_account(
+            &manager,
+            crate::account_login::LoginCapture {
+                credentials: crate::credential_store::DashenCredentials {
+                    role_id: 404404,
+                    token: "synthetic-revision-token".to_string(),
+                    customer_token: None,
+                    dts: None,
+                    server: 1,
+                    saved_at: "2026-08-02T00:00:00Z".to_string(),
+                },
+                battle_tag: "Revision#4044".to_string(),
+            },
+        )
+        .unwrap();
+        let account_id = result.account_id.unwrap();
+        let account = manager.active_snapshot().unwrap();
+        let database = account.database();
+        database.initialize().unwrap();
+        database
+            .connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO season_sync_state(season, season_revision, snapshot_revision, background_status, updated_at) VALUES(22, 7, 0, 'idle', 'now')",
+                [],
+            )
+            .unwrap();
+
+        let revision = match_timeline_revision_for(&account, Some(22)).unwrap();
+
+        assert_eq!(
+            serde_json::to_value(revision).unwrap(),
+            serde_json::json!({
+                "accountScope": account_id,
+                "revisionToken": "22:7",
+            })
+        );
+    }
 
     #[tokio::test]
     async fn published_login_updates_the_account_scoped_target_session() {

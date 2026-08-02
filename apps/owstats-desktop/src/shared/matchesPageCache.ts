@@ -153,6 +153,17 @@ export function chooseMatchIdForLoadedMatches(
   return matches[0].matchId;
 }
 
+export function chooseMatchIdForTimelineCommit(
+  selectedMatchId: string | null,
+  matches: Array<{ matchId: string }>,
+  nextCursor: unknown | null,
+) {
+  if (selectedMatchId && nextCursor && !matches.some((match) => match.matchId === selectedMatchId)) {
+    return selectedMatchId;
+  }
+  return chooseMatchIdForLoadedMatches(selectedMatchId, matches, true);
+}
+
 export function isLatestMatchRequest(requestId: number, latestRequestId: number) {
   return requestId === latestRequestId;
 }
@@ -164,6 +175,56 @@ export function canCommitMatchTimelineRequest(
   currentFilterKey: string,
 ) {
   return isLatestMatchRequest(requestId, latestRequestId) && requestedFilterKey === currentFilterKey;
+}
+
+export function canAcknowledgeMatchTimelineRevision({
+  requestIsCurrent,
+  pageIsActive,
+  requestedRevisionGeneration,
+  pendingRevisionGeneration,
+}: {
+  requestIsCurrent: boolean;
+  pageIsActive: boolean;
+  requestedRevisionGeneration: number;
+  pendingRevisionGeneration: number;
+}) {
+  return requestIsCurrent && pageIsActive && requestedRevisionGeneration === pendingRevisionGeneration;
+}
+
+export function classifyMatchTimelineRevisionPage(
+  current: Array<{ matchId: string }>,
+  incoming: Array<{ matchId: string }>,
+) {
+  const currentIds = new Set(current.map((match) => match.matchId));
+  const newMatches = incoming.reduce(
+    (count, match) => count + (currentIds.has(match.matchId) ? 0 : 1),
+    0,
+  );
+  return { requiresListMerge: newMatches > 0, newMatches };
+}
+
+export function shouldProbeMatchTimelineRevision(
+  current: { accountScope: string | null; revisionToken: string | null },
+  incoming: { accountScope: string; revisionToken: string },
+) {
+  return current.accountScope !== incoming.accountScope
+    || current.revisionToken !== incoming.revisionToken;
+}
+
+export function summarizeMatchTimelineInvalidations(
+  invalidations: Array<{ requiresListMerge: boolean; newMatches: number }>,
+) {
+  return {
+    requiresListMerge: invalidations.some((invalidation) => invalidation.requiresListMerge),
+    newMatches: invalidations.reduce((total, invalidation) => total + invalidation.newMatches, 0),
+  };
+}
+
+export function shouldAcceptMatchTimelineEvent(
+  currentAccountScope: string | null,
+  eventAccountScope: string,
+) {
+  return currentAccountScope === null || currentAccountScope === eventAccountScope;
 }
 
 export function shouldLoadMatchesForFilter(

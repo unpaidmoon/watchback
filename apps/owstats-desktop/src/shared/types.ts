@@ -331,6 +331,11 @@ export type MatchPage = {
   accountScope: string;
 };
 
+export type MatchTimelineRevision = {
+  accountScope: string;
+  revisionToken: string;
+};
+
 export type PlayerRow = {
   side: "teammate" | "enemy";
   name: string;
