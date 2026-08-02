@@ -4,8 +4,13 @@ import { FilterBar } from "../features/matches/FilterBar";
 import { MatchDetailPane } from "../features/matches/MatchDetailPane";
 import { useMatchFavoriteEditor } from "../features/matches/useMatchFavoriteEditor";
 import { MatchTimeline } from "../features/matches/MatchTimeline";
-import { getLiveMatchTimelineHandshake, getLiveMatchTimelineRevisionToken, subscribeLiveMatchTimeline } from "../features/matches/liveMatchTimelineEventAdapter";
-import { chooseLiveTimelineRefresh, mergeLiveTimelinePage, type SeasonDataRevisionEvent } from "../features/matches/liveMatchTimeline";
+import { subscribeLiveMatchTimeline } from "../features/matches/liveMatchTimelineEventAdapter";
+import {
+  chooseLiveTimelineRefresh,
+  coalesceLiveTimelineRevision,
+  reconcileLiveTimelinePage,
+  type LiveTimelineInvalidation,
+} from "../features/matches/liveMatchTimeline";
 import {
   activeMatchFilterChips,
   clearVisibleMatchFilters,
@@ -14,13 +19,16 @@ import {
   paramsFromFilters,
   validateFilters,
 } from "../features/matches/matchFilters";
-import { getMatchDetails, getOverview, listMatchFilters, listMatchTimelinePage, refreshMatchEvaluations } from "../shared/api";
+import { getMatchDetails, getMatchTimelineRevision, getOverview, listMatchFilters, listMatchTimelinePage, refreshMatchEvaluations } from "../shared/api";
 import {
+  canAcknowledgeMatchTimelineRevision,
   canCommitMatchTimelineRequest,
   canHydrateMatchesPageCache,
+  classifyMatchTimelineRevisionPage,
   chooseInitialMatchId,
   chooseInitialMatchFilters,
   chooseMatchIdForLoadedMatches,
+  chooseMatchIdForTimelineCommit,
   chooseMatchesPageNavigationState,
   computeMatchAnchorScrollTop,
   consumeMatchesSearchParamsNavigation,
@@ -33,7 +41,10 @@ import {
   matchFiltersKey,
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
+  shouldAcceptMatchTimelineEvent,
   shouldLoadMatchesForFilter,
+  shouldProbeMatchTimelineRevision,
+  summarizeMatchTimelineInvalidations,
   updateMatchFavoriteState,
   updateMatchesPageCache,
 } from "../shared/matchesPageCache";
@@ -41,9 +52,16 @@ import type { MatchesPageCache } from "../shared/matchesPageCache";
 import { useUnsavedChangesGuard } from "../shared/UnsavedChangesGuard";
 import { productErrorMessage } from "../shared/phase6Shell";
 import { PageEmptyState, PageErrorState, PageHeader, PageLoadingState, PageSeasonSelect } from "../shared/page-shell";
-import type { FilterOptions, ImportSummary, MatchCursor, MatchDetailView, MatchFilters, MatchPage, MatchSummary, Overview, } from "../shared/types";
+import type { FilterOptions, ImportSummary, MatchCursor, MatchDetailView, MatchFilters, MatchPage, MatchSummary, MatchTimelineRevision, Overview, } from "../shared/types";
 
 const MATCH_PAGE_SIZE = 50;
+const MATCH_REVISION_PROBE_INTERVAL_MS = 15_000;
+
+type TimelineCommitContext = {
+  invalidation: Pick<LiveTimelineInvalidation, "requiresListMerge"> | null;
+  pendingRevisionGeneration: number;
+  pendingRevisionKeys: string[];
+};
 
 const emptyOptions: FilterOptions = {
   seasons: [],
@@ -103,15 +121,29 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
   const [busy, setBusy] = useState(!canHydrateCache);
   const [error, setError] = useState<string | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
-  const [pendingNewMatches, setPendingNewMatches] = useState(0);
   const accountScopeRef = useRef(cachedPage?.accountScope ?? null);
   const revisionTokenRef = useRef(cachedPage?.revisionToken ?? null);
-  const pendingRevisionEventRef = useRef<SeasonDataRevisionEvent | null>(null);
-  const atTimelineTopRef = useRef(true);
+  const pendingRevisionEventsRef = useRef(new Map<string, LiveTimelineInvalidation>());
+  const pendingRevisionGenerationRef = useRef(0);
+  const revisionProbeRequestIdRef = useRef(0);
+  const revisionProbeInFlightRef = useRef(false);
   const hasVisibleFilters = activeMatchFilterChips(filters, options).length > 0;
   const { register } = useUnsavedChangesGuard();
   const loadMatchesRef = useRef(loadMatches);
   loadMatchesRef.current = loadMatches;
+
+  function relevantPendingRevisionEvents() {
+    const selectedSeason = currentFiltersRef.current.season;
+    return [...pendingRevisionEventsRef.current.values()].filter((event) =>
+      selectedSeason === undefined || event.season === selectedSeason,
+    );
+  }
+
+  function pendingTimelineInvalidation() {
+    const events = relevantPendingRevisionEvents();
+    if (events.length === 0) return null;
+    return summarizeMatchTimelineInvalidations(events);
+  }
   const handleFavoritePersisted = useCallback(
     async (favorite: MatchDetailView["favorite"]) => {
       if (!pageLifetimeRef.current.isActive()) return;
@@ -160,53 +192,61 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       pageLifetimeRef.current.deactivate();
       pageDataRequestIdRef.current += 1;
       timelineRequestIdRef.current += 1;
+      revisionProbeRequestIdRef.current += 1;
     };
   }, []);
 
   useEffect(() => {
     let disposed = false;
-    const appliesToCurrentFilters = (event: SeasonDataRevisionEvent) =>
-      chooseLiveTimelineRefresh(event, currentFiltersRef.current.season, atTimelineTopRef.current) !== "ignore";
-    const accept = (event: SeasonDataRevisionEvent) => {
-      if (disposed || !appliesToCurrentFilters(event)) return;
-      const decision = chooseLiveTimelineRefresh(event, currentFiltersRef.current.season, atTimelineTopRef.current);
-      if (decision === "queue") {
-        pendingRevisionEventRef.current = event;
-        setPendingNewMatches((current) => current + event.newMatches);
+    const accept = (event: LiveTimelineInvalidation) => {
+      if (disposed) return;
+      if (currentFiltersRef.current.season !== undefined && currentFiltersRef.current.season !== event.season) return;
+      if (!shouldAcceptMatchTimelineEvent(accountScopeRef.current, event.accountScope)) {
+        void verifyMatchTimelineRevision();
         return;
       }
-      if (decision === "statusOnly") {
-        accountScopeRef.current = event.accountScope;
-        revisionTokenRef.current = getLiveMatchTimelineRevisionToken(event.accountScope, currentFiltersRef.current.season);
-        updateMatchesPageCache({ accountScope: accountScopeRef.current, revisionToken: revisionTokenRef.current });
+      const key = `${event.accountScope}:${event.season}`;
+      const previous = pendingRevisionEventsRef.current.get(key) ?? null;
+      const next = coalesceLiveTimelineRevision(previous, event);
+      pendingRevisionEventsRef.current.set(key, next);
+      const relevant = relevantPendingRevisionEvents();
+      const combined = { ...next, ...summarizeMatchTimelineInvalidations(relevant) };
+      const decision = chooseLiveTimelineRefresh(combined, currentFiltersRef.current.season);
+      if (decision === "ignore") return;
+      pendingRevisionGenerationRef.current += 1;
+      if (decision === "statusOnly" && previous === null) {
+        pendingRevisionEventsRef.current.delete(key);
+        pendingRevisionGenerationRef.current += 1;
+        void verifyMatchTimelineRevision();
         return;
       }
-      pendingRevisionEventRef.current = event;
-      void loadMatchesRef.current(currentFiltersRef.current, { silent: true });
+      void loadMatchesRef.current(currentFiltersRef.current, {
+        silent: true,
+        classifyListChanges: combined.requiresListMerge,
+      });
     };
     const unsubscribe = subscribeLiveMatchTimeline(accept);
-    void getLiveMatchTimelineHandshake().then(({ accountScope, events }) => {
-      if (disposed) return;
-      accountScopeRef.current = accountScope;
-      const relevant = events.filter(appliesToCurrentFilters).sort((left, right) => right.revision - left.revision)[0];
-      if (!relevant) return;
-      const token = getLiveMatchTimelineRevisionToken(accountScope ?? relevant.accountScope, currentFiltersRef.current.season);
-      if (token !== revisionTokenRef.current) accept(relevant);
-    }).catch(() => undefined);
     return () => { disposed = true; unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    const probeWhenVisible = () => {
+      if (document.visibilityState === "visible") void verifyMatchTimelineRevision();
+    };
+    window.addEventListener("focus", probeWhenVisible);
+    document.addEventListener("visibilitychange", probeWhenVisible);
+    const timer = window.setInterval(probeWhenVisible, MATCH_REVISION_PROBE_INTERVAL_MS);
+    probeWhenVisible();
+    return () => {
+      window.removeEventListener("focus", probeWhenVisible);
+      document.removeEventListener("visibilitychange", probeWhenVisible);
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
     if (canHydrateCache) return;
     void hydrateInitialMatches(filters);
-  }, []);
-
-  // Render a valid local snapshot immediately, then perform a database-backed
-  // revision handshake so updates missed before the global listener existed
-  // are still recovered without a route change.
-  useEffect(() => {
-    if (!canHydrateCache) return;
-    void loadMatches(currentFiltersRef.current, { silent: true });
   }, []);
 
   useEffect(() => {
@@ -369,6 +409,38 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     options,
   ]);
 
+  async function verifyMatchTimelineRevision() {
+    if (
+      revisionProbeInFlightRef.current
+      || !pageLifetimeRef.current.isActive()
+      || document.visibilityState !== "visible"
+    ) return;
+    const nextFilters = currentFiltersRef.current;
+    const filterKey = matchFiltersKey(nextFilters);
+    const requestId = ++revisionProbeRequestIdRef.current;
+    revisionProbeInFlightRef.current = true;
+    try {
+      const revision = await getMatchTimelineRevision(nextFilters.season);
+      if (
+        requestId !== revisionProbeRequestIdRef.current
+        || !pageLifetimeRef.current.isActive()
+        || filterKey !== matchFiltersKey(currentFiltersRef.current)
+      ) return;
+      const knownRevision = { accountScope: accountScopeRef.current, revisionToken: revisionTokenRef.current };
+      if (!shouldProbeMatchTimelineRevision(knownRevision, revision)) return;
+      await loadMatchesRef.current(nextFilters, {
+        silent: true,
+        classifyListChanges: true,
+        revisionProbe: revision,
+      });
+    } catch {
+      // The next focus/visibility/interval probe retries without invalidating
+      // the last successfully committed page revision.
+    } finally {
+      revisionProbeInFlightRef.current = false;
+    }
+  }
+
   async function hydrateInitialMatches(nextFilters: MatchFilters) {
     const pageDataRequestId = ++pageDataRequestIdRef.current;
     const timelineRequestId = ++timelineRequestIdRef.current;
@@ -424,11 +496,19 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     }
   }
 
-  async function loadMatches(nextFilters: MatchFilters, options: { silent?: boolean } = {}) {
+  async function loadMatches(
+    nextFilters: MatchFilters,
+    options: { silent?: boolean; classifyListChanges?: boolean; revisionProbe?: MatchTimelineRevision } = {},
+  ) {
     const timelineRequestId = ++timelineRequestIdRef.current;
     const timelineFilterKey = matchFiltersKey(nextFilters);
-    if (!options.silent) setBusy(true);
-    setError(null);
+    const requestedRevisionGeneration = pendingRevisionGenerationRef.current;
+    const requestedRevisionKeys = relevantPendingRevisionEvents().map((event) => `${event.accountScope}:${event.season}`);
+    const requestedInvalidation = pendingTimelineInvalidation();
+    if (!options.silent) {
+      setBusy(true);
+      setError(null);
+    }
     try {
       const page = await listMatchTimelinePage(nextFilters, null, MATCH_PAGE_SIZE);
       if (!canCommitMatchTimelineRequest(
@@ -437,9 +517,25 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
         timelineFilterKey,
         matchFiltersKey(currentFiltersRef.current),
       )) return;
-      commitLoadedMatches(nextFilters, page);
+      const accountChanged = accountScopeRef.current !== null && page.accountScope !== accountScopeRef.current;
+      const shouldClassifyListChanges = Boolean(
+        options.classifyListChanges
+        || options.revisionProbe
+        || requestedInvalidation?.requiresListMerge,
+      );
+      const classifiedInvalidation = shouldClassifyListChanges
+        ? classifyMatchTimelineRevisionPage(matchesRef.current, page.matches)
+        : null;
+      setError(null);
+      commitLoadedMatches(nextFilters, page, undefined, {
+        invalidation: accountChanged
+          ? { requiresListMerge: true }
+          : classifiedInvalidation ?? requestedInvalidation,
+        pendingRevisionGeneration: requestedRevisionGeneration,
+        pendingRevisionKeys: requestedRevisionKeys,
+      });
     } catch (err) {
-      if (canCommitMatchTimelineRequest(
+      if (!options.silent && canCommitMatchTimelineRequest(
         timelineRequestId,
         timelineRequestIdRef.current,
         timelineFilterKey,
@@ -458,8 +554,9 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
 
   function commitFilters(nextFilters: MatchFilters) {
     currentFiltersRef.current = nextFilters;
-    pendingRevisionEventRef.current = null;
-    setPendingNewMatches(0);
+    pendingRevisionEventsRef.current.clear();
+    pendingRevisionGenerationRef.current += 1;
+    revisionProbeRequestIdRef.current += 1;
     if (matchFiltersKey(nextFilters) !== loadedFilterKeyRef.current) {
       setSelectedMatchIdSafely(null);
       nextCursorRef.current = null;
@@ -487,27 +584,33 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     nextFilters: MatchFilters,
     page: MatchPage,
     pageData?: Pick<MatchesPageCache, "overview" | "summary" | "options">,
+    revisionContext?: TimelineCommitContext,
   ) {
-    const appliedRevision = pendingRevisionEventRef.current;
-    if (appliedRevision && (nextFilters.season === undefined || nextFilters.season === appliedRevision.season)) {
-      accountScopeRef.current = appliedRevision.accountScope;
-      revisionTokenRef.current = getLiveMatchTimelineRevisionToken(appliedRevision.accountScope, nextFilters.season);
-      pendingRevisionEventRef.current = null;
-      setPendingNewMatches(0);
-    }
-    const preservesLoadedTail = Boolean(appliedRevision) && matchesRef.current.length > page.matches.length;
-    const nextMatches = appliedRevision
-      ? mergeLiveTimelinePage(matchesRef.current, page.matches, appliedRevision.phase)
-      : page.matches;
-    const nextPageCursor = preservesLoadedTail ? nextCursorRef.current : page.nextCursor;
+    const appliedRevision = revisionContext?.invalidation ?? null;
+    const accountChanged = accountScopeRef.current !== null && page.accountScope !== accountScopeRef.current;
+    const timelineCommit = !accountChanged && appliedRevision
+      ? reconcileLiveTimelinePage(
+          { matches: matchesRef.current, nextCursor: nextCursorRef.current },
+          { matches: page.matches, nextCursor: page.nextCursor },
+          appliedRevision,
+        )
+      : {
+          matches: page.matches,
+          nextCursor: page.nextCursor,
+          resetViewport: accountChanged,
+        };
+    const nextMatches = timelineCommit.matches;
+    const nextPageCursor = timelineCommit.nextCursor;
     if (page.accountScope) accountScopeRef.current = page.accountScope;
     if (page.revisionToken) revisionTokenRef.current = page.revisionToken;
     const loadedFilterKey = matchFiltersKey(nextFilters);
     const cachePageData = pageData ?? (pageDataReadyRef.current ? pageDataRef.current : {});
-    const selectedMatchId = selectedMatchIdRef.current;
-    const nextSelectedMatchId = selectedMatchId && nextPageCursor && !nextMatches.some((match) => match.matchId === selectedMatchId)
-      ? selectedMatchId
-      : chooseMatchIdForLoadedMatches(selectedMatchId, nextMatches, true);
+    const selectedMatchId = accountChanged ? null : selectedMatchIdRef.current;
+    const nextSelectedMatchId = chooseMatchIdForTimelineCommit(
+      selectedMatchId,
+      nextMatches,
+      nextPageCursor,
+    );
     loadedFilterKeyRef.current = loadedFilterKey;
     matchesRef.current = nextMatches;
     nextCursorRef.current = nextPageCursor;
@@ -515,6 +618,14 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
     setNextCursor(nextPageCursor);
     setTotalMatches(page.total ?? nextMatches.length);
     setSelectedMatchIdSafely(nextSelectedMatchId);
+    if (timelineCommit.resetViewport) {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      setLoadMoreError(null);
+      const container = timelineRef.current;
+      if (container && isElementScrollable(container)) container.scrollTop = 0;
+      else if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    }
     updateMatchesPageCache({
       ...cachePageData,
       filters: nextFilters,
@@ -526,13 +637,20 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       revisionToken: revisionTokenRef.current,
       loadedFilterKey,
       hasLoaded: pageDataReadyRef.current,
-      scrollTop: readMatchListScrollTop(),
-      scrollAnchor: readMatchScrollAnchor(),
+      scrollTop: timelineCommit.resetViewport ? 0 : readMatchListScrollTop(),
+      scrollAnchor: timelineCommit.resetViewport ? null : readMatchScrollAnchor(),
     });
+    if (revisionContext && canAcknowledgeMatchTimelineRevision({
+      requestIsCurrent: true,
+      pageIsActive: pageLifetimeRef.current.isActive(),
+      requestedRevisionGeneration: revisionContext.pendingRevisionGeneration,
+      pendingRevisionGeneration: pendingRevisionGenerationRef.current,
+    })) {
+      revisionContext.pendingRevisionKeys.forEach((key) => pendingRevisionEventsRef.current.delete(key));
+    }
   }
 
   function rememberScroll() {
-    atTimelineTopRef.current = readMatchListScrollTop() <= 24;
     updateMatchesPageCache({ scrollTop: readMatchListScrollTop() });
   }
 
@@ -670,16 +788,6 @@ export function MatchesPage({ onQueryPlayer }: { onQueryPlayer?: (battleTag: str
       <section className={`matchesWorkbench workspace listWorkspace phase6ListWorkspace phase6MatchWorkbench ${mobileDetailOpen ? "detailOpen" : ""}`}>
         <div ref={timelineRef} className="matchListPane phase6WorkbenchList" onScroll={() => { rememberScroll(); maybeLoadMore(); }}>
           <div>
-            {pendingNewMatches > 0 ? (
-              <button className="secondaryButton" type="button" onClick={() => {
-                setPendingNewMatches(0);
-                atTimelineTopRef.current = true;
-                const container = timelineRef.current;
-                if (container && isElementScrollable(container)) container.scrollTop = 0;
-                else if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
-                void loadMatches(currentFiltersRef.current, { silent: true });
-              }}>发现 {pendingNewMatches} 场新对局</button>
-            ) : null}
             {error ? (
               <PageErrorState message={error} actionLabel="重新加载" onRetry={retryMatches} />
             ) : busy ? (

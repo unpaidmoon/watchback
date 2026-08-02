@@ -1133,6 +1133,7 @@ pub fn run() -> anyhow::Result<()> {
             commands::list_match_filters,
             commands::list_match_timeline,
             commands::list_match_timeline_page,
+            commands::get_match_timeline_revision,
             commands::search_match_player_options,
             commands::get_match_details,
             commands::save_match_favorite,

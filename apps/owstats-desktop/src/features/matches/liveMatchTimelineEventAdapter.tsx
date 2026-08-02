@@ -2,7 +2,11 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import { listAccounts } from "../../shared/api";
 import { hasDesktopBackend } from "../../shared/phase6Shell";
-import { createLiveMatchTimelineController, type SeasonDataRevisionEvent } from "./liveMatchTimeline";
+import {
+  createLiveMatchTimelineController,
+  type LiveTimelineInvalidation,
+  type SeasonDataRevisionEvent,
+} from "./liveMatchTimeline";
 
 let activeAccountScope: string | null = null;
 async function resolveActiveAccountScope() {
@@ -28,15 +32,6 @@ export function LiveMatchTimelineRoot() {
   return null;
 }
 
-export function subscribeLiveMatchTimeline(listener: (event: SeasonDataRevisionEvent) => void) {
+export function subscribeLiveMatchTimeline(listener: (event: LiveTimelineInvalidation) => void) {
   return controller.subscribe(listener);
-}
-
-export async function getLiveMatchTimelineHandshake() {
-  const accountScope = activeAccountScope ?? await resolveActiveAccountScope();
-  return { accountScope, events: accountScope ? controller.getLatestEvents(accountScope) : [] };
-}
-
-export function getLiveMatchTimelineRevisionToken(accountScope: string, selectedSeason?: number) {
-  return controller.getRevisionToken(accountScope, selectedSeason);
 }

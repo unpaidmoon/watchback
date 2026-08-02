@@ -6,10 +6,13 @@ import {
 import * as matchesPageCacheModule from "../src/shared/matchesPageCache.ts";
 import {
   canCommitMatchTimelineRequest,
+  canAcknowledgeMatchTimelineRevision,
   canHydrateMatchesPageCache,
+  classifyMatchTimelineRevisionPage,
   chooseInitialMatchId,
   chooseInitialMatchFilters,
   chooseMatchIdForLoadedMatches,
+  chooseMatchIdForTimelineCommit,
   chooseMatchesPageNavigationState,
   clearMatchesPageCache,
   consumeMatchesSearchParamsNavigation,
@@ -23,6 +26,9 @@ import {
   preloadMatchesPageCache,
   selectMatchScrollAnchor,
   shouldLoadMatchesForFilter,
+  shouldAcceptMatchTimelineEvent,
+  shouldProbeMatchTimelineRevision,
+  summarizeMatchTimelineInvalidations,
   updateMatchesPageCache,
 } from "../src/shared/matchesPageCache.ts";
 import type { FilterOptions, MatchFilters, MatchSummary, Overview } from "../src/shared/types.ts";
@@ -114,6 +120,15 @@ assert.equal(
 );
 assert.equal(chooseMatchIdForLoadedMatches("url-match", [], true), null, "a loaded empty list clears selection");
 assert.equal(
+  chooseMatchIdForTimelineCommit(
+    "selected-old-match",
+    [{ matchId: "fresh-head-match" }],
+    { beginTs: 100, matchId: "fresh-head-match" },
+  ),
+  "selected-old-match",
+  "a fresh first-page reset keeps the selected detail reachable through the remaining pagination cursor",
+);
+assert.equal(
   chooseMatchIdForLoadedMatches("selected-match", loadedMatchIds, true),
   "selected-match",
   "a loaded list preserves a selection it contains",
@@ -146,6 +161,86 @@ assert.equal(missingFavoriteRows[1], favoriteRows[1], "missing-id updates preser
 
 assert.equal(isLatestMatchRequest(1, 2), false, "an older match-list request cannot apply after a newer request starts");
 assert.equal(isLatestMatchRequest(2, 2), true, "the latest match-list request may apply its result");
+
+assert.equal(
+  canAcknowledgeMatchTimelineRevision({
+    requestIsCurrent: true,
+    pageIsActive: true,
+    requestedRevisionGeneration: 4,
+    pendingRevisionGeneration: 4,
+  }),
+  true,
+  "a successful current request may acknowledge the exact pending revision generation it loaded",
+);
+for (const blocked of [
+  { requestIsCurrent: false, pageIsActive: true, requestedRevisionGeneration: 4, pendingRevisionGeneration: 4 },
+  { requestIsCurrent: true, pageIsActive: false, requestedRevisionGeneration: 4, pendingRevisionGeneration: 4 },
+  { requestIsCurrent: true, pageIsActive: true, requestedRevisionGeneration: 4, pendingRevisionGeneration: 5 },
+]) {
+  assert.equal(
+    canAcknowledgeMatchTimelineRevision(blocked),
+    false,
+    "obsolete, unmounted, and superseded requests must leave pending revisions queued",
+  );
+}
+
+assert.deepEqual(
+  classifyMatchTimelineRevisionPage(
+    [{ matchId: "loaded-newest" }, { matchId: "loaded-tail" }],
+    [{ matchId: "database-new" }, { matchId: "loaded-newest" }],
+  ),
+  { requiresListMerge: true, newMatches: 1 },
+  "a revision probe detects unseen database rows as a list invalidation",
+);
+assert.deepEqual(
+  classifyMatchTimelineRevisionPage(
+    [{ matchId: "loaded-newest" }, { matchId: "loaded-tail" }],
+    [{ matchId: "loaded-newest" }],
+  ),
+  { requiresListMerge: false, newMatches: 0 },
+  "a revision probe with only known rows is a detail invalidation and must preserve the loaded tail",
+);
+
+assert.equal(
+  shouldProbeMatchTimelineRevision(
+    { accountScope: "account-a", revisionToken: "23:4" },
+    { accountScope: "account-a", revisionToken: "23:5" },
+  ),
+  true,
+  "a changed database revision token reloads the visible first page",
+);
+assert.equal(
+  shouldProbeMatchTimelineRevision(
+    { accountScope: "account-a", revisionToken: "23:4" },
+    { accountScope: "account-b", revisionToken: "23:4" },
+  ),
+  true,
+  "a different account scope invalidates the cached list even when the token text matches",
+);
+assert.equal(
+  shouldProbeMatchTimelineRevision(
+    { accountScope: "account-a", revisionToken: "23:4" },
+    { accountScope: "account-a", revisionToken: "23:4" },
+  ),
+  false,
+  "an unchanged account-scoped database revision avoids a redundant first-page load",
+);
+assert.deepEqual(
+  summarizeMatchTimelineInvalidations([
+    { requiresListMerge: true, newMatches: 2 },
+    { requiresListMerge: false, newMatches: 0 },
+    { requiresListMerge: true, newMatches: 1 },
+  ]),
+  { requiresListMerge: true, newMatches: 3 },
+  "all-season mode preserves list semantics and exact counts across multiple season queues",
+);
+assert.equal(shouldAcceptMatchTimelineEvent(null, "account-a"), true, "the first account-scoped event may establish page data");
+assert.equal(shouldAcceptMatchTimelineEvent("account-a", "account-a"), true, "the loaded account accepts its own event");
+assert.equal(
+  shouldAcceptMatchTimelineEvent("account-a", "account-b"),
+  false,
+  "an event from a different account cannot clear or mutate the loaded account pending queue",
+);
 
 const initialHydrationFilterKey = matchFiltersKey({ season: 22 });
 assert.equal(

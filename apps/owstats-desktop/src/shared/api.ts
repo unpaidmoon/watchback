@@ -15,6 +15,7 @@ import type {
   MatchFavoriteView,
   MatchFilters,
   MatchPage,
+  MatchTimelineRevision,
   MatchSummary,
   OnboardingStatus,
   Overview,
@@ -90,6 +91,10 @@ export function listMatchTimeline(filters: MatchFilters) {
 
 export function listMatchTimelinePage(filters: MatchFilters, cursor: MatchCursor | null = null, limit = 50) {
   return invoke<MatchPage>("list_match_timeline_page", { filters, cursor, limit });
+}
+
+export function getMatchTimelineRevision(season?: number) {
+  return invoke<MatchTimelineRevision>("get_match_timeline_revision", { season });
 }
 
 export function searchMatchPlayerOptions(query: string) {
