@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "reactRouterException": {
+    "id": "react-router-rsc-csrf-temporary-exception",
+    "exactVersions": {
+      "react-router": "7.18.2",
+      "react-router-dom": "7.18.2"
+    },
+    "allowedAdvisoryUrls": [
+      "https://github.com/advisories/GHSA-qwww-vcr4-c8h2"
+    ],
+    "expiresOn": "2026-09-02",
+    "rationale": "OWStats is a client-only HashRouter application and does not use React Router RSC or server APIs.",
+    "removalCondition": "Remove this exception when a stable patched React Router release is available, or before introducing any RSC/server Router API."
+  },
+  "reactRouterBoundary": {
+    "forbiddenModuleSpecifiers": [
+      "react-router/dom/server",
+      "react-router/rsc",
+      "react-router-dom/server"
+    ],
+    "forbiddenIdentifiers": [
+      "entry.rsc",
+      "RSCStaticRouter",
+      "routeRSCServerRequest",
+      "decodeAction",
+      "decodeFormState"
+    ]
+  }
+}

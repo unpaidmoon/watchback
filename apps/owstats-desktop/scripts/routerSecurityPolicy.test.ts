@@ -2,51 +2,68 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  detectRouterSecurityViolations,
+  isExecutableSourceFile,
+  isRootBuildConfig,
+} from "./routerSecurityPolicyDetector.mjs";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const packageJson = JSON.parse(await readFile(path.join(appRoot, "package.json"), "utf8")) as {
-  dependencies: Record<string, string>;
-};
-const packageLock = JSON.parse(await readFile(path.join(appRoot, "package-lock.json"), "utf8")) as {
-  packages: Record<string, { version?: string; dependencies?: Record<string, string> }>;
-};
-
-assert.equal(
-  packageJson.dependencies["react-router-dom"],
-  "7.18.2",
-  "React Router 临时安全例外只允许精确版本 7.18.2；升级时必须显式更新安全策略",
+const policy = JSON.parse(
+  await readFile(path.join(appRoot, "scripts", "dependencySecurityPolicy.json"), "utf8"),
 );
-assert.equal(packageLock.packages[""].dependencies?.["react-router-dom"], "7.18.2");
-assert.equal(packageLock.packages["node_modules/react-router-dom"].version, "7.18.2");
-assert.equal(packageLock.packages["node_modules/react-router-dom"].dependencies?.["react-router"], "7.18.2");
-assert.equal(packageLock.packages["node_modules/react-router"].version, "7.18.2");
+const exception = policy.reactRouterException;
+const packageJson = JSON.parse(await readFile(path.join(appRoot, "package.json"), "utf8"));
+const packageLock = JSON.parse(await readFile(path.join(appRoot, "package-lock.json"), "utf8"));
 
-async function sourceFiles(directory: string): Promise<string[]> {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files = await Promise.all(entries.map(async (entry) => {
-    const target = path.join(directory, entry.name);
-    if (entry.isDirectory()) return sourceFiles(target);
-    return /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name) ? [target] : [];
-  }));
-  return files.flat();
-}
+assert.equal(policy.schemaVersion, 1, "unsupported dependency security policy schema");
+assert.match(exception.expiresOn, /^\d{4}-\d{2}-\d{2}$/);
+assert.ok(exception.rationale.trim(), "security exception rationale is required");
+assert.ok(exception.removalCondition.trim(), "security exception removal condition is required");
 
-const forbidden = [
-  /from\s+["']react-router\/dom\/server["']/,
-  /from\s+["']react-router\/rsc(?:\/[^"']*)?["']/,
-  /from\s+["']react-router-dom\/server["']/,
-  /\bentry\.rsc\b/i,
-  /\bRSCStaticRouter\b/,
-  /\brouteRSCServerRequest\b/,
-  /\bdecodeAction\b/,
-  /\bdecodeFormState\b/,
-];
-
-for (const file of await sourceFiles(path.join(appRoot, "src"))) {
-  const source = await readFile(file, "utf8");
-  for (const pattern of forbidden) {
-    assert.doesNotMatch(source, pattern, `${path.relative(appRoot, file)} 引入了会使安全例外失效的 RSC/服务端 Router API`);
+for (const [dependency, version] of Object.entries(exception.exactVersions)) {
+  if (dependency === "react-router-dom") {
+    assert.equal(packageJson.dependencies[dependency], version, `${dependency} must remain exactly pinned`);
+    assert.equal(packageLock.packages[""].dependencies?.[dependency], version);
   }
+  assert.equal(packageLock.packages[`node_modules/${dependency}`].version, version);
+}
+assert.equal(
+  packageLock.packages["node_modules/react-router-dom"].dependencies?.["react-router"],
+  exception.exactVersions["react-router"],
+);
+
+const excludedScannerFiles = new Set([
+  "scripts/routerSecurityPolicyDetector.mjs",
+  "scripts/routerSecurityPolicyDetector.test.ts",
+]);
+
+async function collectExecutableFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return collectExecutableFiles(target);
+    return isExecutableSourceFile(entry.name) ? [target] : [];
+  }));
+  return nested.flat();
 }
 
-console.log("React Router 安全策略契约通过");
+const candidates = [
+  ...await collectExecutableFiles(path.join(appRoot, "src")),
+  ...await collectExecutableFiles(path.join(appRoot, "scripts")),
+];
+for (const entry of await readdir(appRoot, { withFileTypes: true })) {
+  if (entry.isFile() && isRootBuildConfig(entry.name)) candidates.push(path.join(appRoot, entry.name));
+}
+
+for (const file of candidates) {
+  const relative = path.relative(appRoot, file).replaceAll("\\", "/");
+  if (excludedScannerFiles.has(relative)) continue;
+  const violations = detectRouterSecurityViolations(
+    await readFile(file, "utf8"),
+    policy.reactRouterBoundary,
+  );
+  assert.deepEqual(violations, [], `${relative}: ${violations.join(", ")}`);
+}
+
+console.log(`React Router security policy passed (${candidates.length - excludedScannerFiles.size} files scanned)`);
