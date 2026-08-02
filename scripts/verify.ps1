@@ -133,6 +133,8 @@ function Invoke-TrackedCheckout {
     try {
       npm ci
       if ($LASTEXITCODE -ne 0) { throw 'archive npm ci 失败' }
+      node scripts/auditDependencies.mjs
+      if ($LASTEXITCODE -ne 0) { throw 'archive 生产依赖安全审计失败' }
       npm test
       if ($LASTEXITCODE -ne 0) { throw 'archive npm test 失败' }
       npm run build
@@ -170,6 +172,7 @@ Write-Host '[验证] 通过：安装目录数据发布边界'
 
 Push-Location $desktopRoot
 try {
+  Invoke-VerifyStep '生产依赖安全审计' { node scripts/auditDependencies.mjs }
   Invoke-VerifyStep '前端分层测试' { npm test }
   if ($SkipBuild) {
     Skip-VerifyStep '前端构建'

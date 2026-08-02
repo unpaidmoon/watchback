@@ -22,12 +22,17 @@ for (const required of [
 assert.doesNotMatch(workflow, /tauri build|OW_DASHEN_TOKEN|credential|chrome-dashen-profile|upload-artifact/i);
 
 for (const required of [
+  "Invoke-VerifyStep '生产依赖安全审计' { node scripts/auditDependencies.mjs }",
   "Invoke-VerifyStep '前端分层测试' { npm test }",
   "Invoke-VerifyStep '前端构建' { npm run build }",
   "Invoke-VerifyStep 'Rust 全量测试' { cargo test --tests }",
 ]) {
   assert.ok(verifyScript.includes(required), `verify.ps1 缺少：${required}`);
 }
+assert.ok(
+  verifyScript.includes("if ($LASTEXITCODE -ne 0) { throw 'archive 生产依赖安全审计失败' }"),
+  "tracked-only checkout 必须执行生产依赖安全审计",
+);
 
 assert.doesNotMatch(
   verifyScript,

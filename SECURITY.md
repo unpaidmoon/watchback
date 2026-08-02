@@ -76,11 +76,12 @@ Watchback 当前处于 Beta 阶段。安全修复只会提供给仍在维护的�
 
 | 公告 | 当前依赖 | 适用性 | 处置与复查 |
 | --- | --- | --- | --- |
-| [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2) | `react-router-dom` 7.18.x | 公告只影响 unstable RSC API；Watchback 是 Tauri SPA，源码、构建配置和依赖中均未使用 RSC 入口 | 暂不强制升级。React Router 8.3.0 同时要求 React 19.2.7+、Vite 7+、Node 22.22+，应作为独立平台升级验证；最迟 2026-09-02 复查 |
+| [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2) | 精确固定 `react-router-dom` 7.18.2 | 公告只影响 unstable RSC API；Watchback 是 Tauri SPA，源码和构建配置均未使用 RSC 入口。尝试降级到 7.11.0 会重新命中多条已修复的 XSS、开放重定向和 DoS 公告，因此不采用降级方案 | `routerSecurityPolicy.test.ts` 阻止引入 RSC API，`auditDependencies.mjs` 只允许这一条公告并阻断任何新增生产依赖漏洞；最迟 2026-09-02 复查 |
 
 若项目引入 React Server Components、`entry.rsc`、RSC 路由函数或服务端 action，
 此例外立即失效，必须先升级到已修复版本。依赖例外只解释扫描结果，不允许跳过
-`npm audit --omit=dev` 的人工审查，也不适用于后续出现的其他公告。
+`npm audit --omit=dev` 的审查，也不适用于后续出现的其他公告。仓库验证脚本会实际运行
+审计并解析完整结果；如果公告集合发生变化，它会失败，而不是永久忽略审计退出码。
 
 ## 响应与披露
 
