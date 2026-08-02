@@ -534,10 +534,10 @@ git rev-parse HEAD
 - [x] 身份、Router、对局动态刷新定向测试通过；
 - [x] `verify.ps1 -ChangedOnly` 通过；
 - [x] Tauri 开发版人工回归通过；
-- [ ] 提交后的完整 tracked-only 验证通过；
-- [ ] 两个工作树均干净；
-- [ ] 主分支通过 `git merge --ff-only` 合并；
-- [ ] 合并后 HEAD 与已验证功能分支 HEAD 一致。
+- [x] 提交后的完整 tracked-only 验证通过；
+- [x] 两个工作树均干净；
+- [x] 主分支通过 `git merge --ff-only` 合并；
+- [x] 合并后 HEAD 与已验证功能分支 HEAD 一致。
 
 ## 10. 实施记录
 
@@ -552,8 +552,9 @@ git rev-parse HEAD
 Router 门禁修复提交：c75dc4e
 文档重命名提交：03d3c38
 主分支集成提交：b0e4851
-最终功能分支 HEAD：待最终文档提交后记录
-最终 main HEAD：待快进合并后记录
+最终功能分支 HEAD：802ec9561b2bec256836af9e207312c91d390d8f
+快进合并后 main HEAD：802ec9561b2bec256836af9e207312c91d390d8f（与已验证功能分支一致）
+最终记录提交：本段完成状态由主分支后续文档提交记录
 
 身份定向测试：通过（Rust 单元测试与 phase8_real_fetch）
 Router 安全门禁：通过（策略、检测器及真实 npm audit 受控例外）
@@ -564,7 +565,7 @@ cargo clippy：通过
 cargo test：通过
 verify -ChangedOnly：通过
 开发版人工回归：Tauri 开发版成功启动；路由、前进后退、刷新及查询参数通过浏览器自动化冒烟验证。真实账号登录因无测试凭据未执行。
-tracked-only checkout：待最终完整验证
+tracked-only checkout：通过（纯净检出中的依赖安装、前端测试、生产构建与 Rust 全量测试均通过）
 
 冲突解决说明：`commands.rs` 保留主分支对局时间线 revision 命令与测试，同时保留功能分支账号身份同步实现，继续删除旧 BattleTag 重绑定命令。
 遗留问题：React Router 上游高危公告仍由限时策略例外管理；不得引入其 RSC/服务端 API。
