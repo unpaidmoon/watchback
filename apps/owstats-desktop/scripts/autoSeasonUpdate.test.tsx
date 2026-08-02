@@ -8,7 +8,6 @@ const html = renderToStaticMarkup(createElement(SeasonSyncWorkbench, {
   minimumSyncSeason: 15,
   seasonStatuses: [],
   credentialReady: true,
-  targetSyncAllowed: true,
   accountOperationBusy: false,
   syncingSeason: null,
   syncingMode: null,

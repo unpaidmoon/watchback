@@ -11,13 +11,12 @@ use crate::{
     quick_list_update_with_credentials_and_target_paths_base_url_observed,
     refresh_match_evaluations as refresh_evaluations, search_match_players,
     sync_season_with_credentials_and_target_paths_output_dir_with_mode_base_url,
-    AccountLoginResult, CareerAchievement, ClearPlayerTargetResult, CredentialLoginCancelResult,
-    DeepSeekKeyStatus, FilterOptions, FriendAnalyticsFilters, FriendDetail, ImportSummary,
-    LoginTargetStatus, MatchCursor, MatchDetailView, MatchFavoriteRequest, MatchFavoriteView,
-    MatchFilters, MatchPage, MatchSummary, OnboardingStatus, OnboardingStatusRequest,
-    PersonalReviewRequest, PersonalSeasonReview, PlayerGameAction, PlayerProfile,
-    PlayerSearchOption, RankingResponse, SeasonAnalysis, SeasonSyncResult, SyncRequest,
-    UserSettings,
+    AccountLoginResult, CareerAchievement, CredentialLoginCancelResult, DeepSeekKeyStatus,
+    FilterOptions, FriendAnalyticsFilters, FriendDetail, ImportSummary, MatchCursor,
+    MatchDetailView, MatchFavoriteRequest, MatchFavoriteView, MatchFilters, MatchPage,
+    MatchSummary, OnboardingStatus, OnboardingStatusRequest, PersonalReviewRequest,
+    PersonalSeasonReview, PlayerGameAction, PlayerProfile, PlayerSearchOption, RankingResponse,
+    SeasonAnalysis, SeasonSyncResult, SyncRequest, UserSettings,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -310,7 +309,6 @@ pub async fn add_account(
     app: AppHandle,
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
 ) -> Result<AccountLoginResult, String> {
     crate::diagnostics::record(
         crate::diagnostics::Level::Info,
@@ -338,25 +336,22 @@ pub async fn add_account(
             let credentials = capture.credentials.clone();
             let battle_tag = capture.battle_tag.clone();
             async move {
-                Ok(crate::login_target::authenticated_probe_with_base_url(
-                    &credentials,
-                    &battle_tag,
-                    DASHEN_ROOT_BASE,
+                Ok(
+                    crate::account_sync_identity::verify_credentials_with_base_url(
+                        &credentials,
+                        &battle_tag,
+                        DASHEN_ROOT_BASE,
+                    )
+                    .await,
                 )
-                .await)
             }
         },
     )
     .await
     .map_err(to_message)?;
-    if reconcile_published_login_target(
-        &accounts,
-        login_target_coordinator.inner(),
-        &result,
-        DASHEN_ROOT_BASE,
-    )
-    .await
-    .is_err()
+    if refresh_published_account_sync_identity(&accounts, &result, DASHEN_ROOT_BASE)
+        .await
+        .is_err()
     {
         crate::account_login::add_post_commit_warning(
             &mut result,
@@ -382,7 +377,6 @@ pub fn add_account_with_qr(
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     request_id: String,
 ) -> Result<crate::qr_login::QrLoginStartResult, crate::qr_login::QrLoginCommandError> {
     crate::diagnostics::record(
@@ -396,7 +390,6 @@ pub fn add_account_with_qr(
         accounts.inner().clone(),
         operation_coordinator.inner(),
         qr_coordinator.inner().clone(),
-        login_target_coordinator.inner().clone(),
         request_id,
     )
     .map_err(crate::qr_login::QrLoginCommandError::from_error);
@@ -448,7 +441,6 @@ pub async fn refresh_dashen_login_qr(
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
     qr_coordinator: State<'_, crate::qr_login::QrLoginCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     session_id: String,
     _request_id: String,
 ) -> Result<crate::qr_login::QrLoginStartResult, crate::qr_login::QrLoginCommandError> {
@@ -457,7 +449,6 @@ pub async fn refresh_dashen_login_qr(
         accounts.inner().clone(),
         operation_coordinator.inner(),
         qr_coordinator.inner().clone(),
-        login_target_coordinator.inner().clone(),
         session_id,
     )
     .await
@@ -492,9 +483,8 @@ pub fn get_active_dashen_login_qr(
     qr_coordinator.active_for_request(&request_id)
 }
 
-async fn reconcile_published_login_target(
+async fn refresh_published_account_sync_identity(
     accounts: &AccountContextManager,
-    coordinator: &crate::login_target::LoginTargetCoordinator,
     result: &AccountLoginResult,
     root_base_url: &str,
 ) -> Result<(), String> {
@@ -512,19 +502,18 @@ async fn reconcile_published_login_target(
     let account = accounts.snapshot_for(&account_id).map_err(to_message)?;
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
         .map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    let status = crate::login_target::reconcile_detected_target(
-        coordinator,
-        account.account_id(),
+    let battle_tag = result
+        .battle_tag
+        .as_deref()
+        .ok_or_else(|| "账号登录结果缺少 BattleTag，请重试。".to_string())?;
+    crate::account_sync_identity::refresh_with_base_url(
         &credentials,
-        result.battle_tag.as_deref(),
-        &target_path,
+        battle_tag,
+        &account.paths().player_target(),
         root_base_url,
     )
-    .await;
-    if status.state != "ready" {
-        return Err("post-commit target reconciliation failed".to_string());
-    }
+    .await
+    .map_err(to_message)?;
     let profile = crate::profile_card::refresh_for_account(&account, root_base_url).await;
     accounts
         .observe_authenticated_result(account.account_id(), profile)
@@ -544,7 +533,6 @@ pub fn switch_account(
     app: AppHandle,
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
     live_updates: State<'_, crate::live_season_update::LiveSeasonUpdateManager>,
     account_id: String,
@@ -569,7 +557,6 @@ pub fn switch_account(
         app,
         accounts.inner().clone(),
         operation_coordinator.inner().clone(),
-        login_target_coordinator.inner().clone(),
         background_sync.inner().clone(),
         live_updates.inner().clone(),
     );
@@ -581,7 +568,6 @@ pub fn switch_account(
 pub async fn remove_account(
     accounts: State<'_, AccountContextManager>,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
     account_id: String,
 ) -> Result<crate::RemoveAccountResult, String> {
@@ -594,7 +580,6 @@ pub async fn remove_account(
     let result = accounts
         .remove_account(&account_id, &chrono::Utc::now().to_rfc3339())
         .map_err(to_message)?;
-    clear_removed_account_target(&login_target_coordinator, &account_id, &result);
     crate::diagnostics::record(
         crate::diagnostics::Level::Info,
         "account",
@@ -607,116 +592,9 @@ pub async fn remove_account(
     Ok(result)
 }
 
-fn clear_removed_account_target(
-    coordinator: &crate::login_target::LoginTargetCoordinator,
-    account_id: &crate::account_store::AccountId,
-    result: &crate::RemoveAccountResult,
-) {
-    if result.removed {
-        coordinator.clear(account_id);
-    }
-}
-
 #[tauri::command]
 pub fn cancel_dashen_login(app: AppHandle) -> Result<CredentialLoginCancelResult, String> {
     crate::credentials::cancel_dashen_login(app).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn get_login_target_status(
-    accounts: State<'_, AccountContextManager>,
-    coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<LoginTargetStatus, String> {
-    let account = active_account(&accounts)?;
-    let credentials =
-        crate::credentials::read_optional_saved_credentials_for_account(account.paths())
-            .map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    Ok(coordinator.status_or_persisted(account.account_id(), credentials.as_ref(), &target_path))
-}
-
-#[tauri::command]
-pub async fn confirm_login_target_switch(
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<LoginTargetStatus, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    let account = active_account(&accounts)?;
-    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
-        .map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    Ok(crate::login_target::confirm_switch(
-        login_target_coordinator.inner(),
-        account.account_id(),
-        &credentials,
-        &target_path,
-        DASHEN_ROOT_BASE,
-    )
-    .await)
-}
-
-#[tauri::command]
-pub fn keep_current_player_target(
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<LoginTargetStatus, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    let account = active_account(&accounts)?;
-    login_target_coordinator
-        .keep_current(account.account_id())
-        .map_err(to_message)
-}
-
-#[tauri::command]
-pub async fn retry_login_target_binding(
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<LoginTargetStatus, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    let account = active_account(&accounts)?;
-    let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
-        .map_err(to_message)?;
-    let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    Ok(crate::login_target::retry_binding(
-        login_target_coordinator.inner(),
-        account.account_id(),
-        &credentials,
-        &target_path,
-        DASHEN_ROOT_BASE,
-    )
-    .await)
-}
-
-#[tauri::command]
-pub fn clear_player_target(
-    accounts: State<'_, AccountContextManager>,
-    operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_target_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
-) -> Result<ClearPlayerTargetResult, String> {
-    let _permit = operation_coordinator
-        .try_acquire_account_operation()
-        .map_err(str::to_string)?;
-    let account = active_account(&accounts)?;
-    let cleared = crate::player_target::clear_player_target_for_account(account.paths())
-        .map_err(to_message)?;
-    let source_role_id =
-        crate::credentials::read_optional_saved_credentials_for_account(account.paths())
-            .map_err(to_message)?
-            .as_ref()
-            .map(|credentials| credentials.role_id);
-    Ok(ClearPlayerTargetResult {
-        cleared,
-        target: login_target_coordinator.target_cleared(account.account_id(), source_role_id),
-    })
 }
 
 #[tauri::command]
@@ -743,7 +621,6 @@ pub async fn sync_season(
     accounts: State<'_, AccountContextManager>,
     request: SyncRequest,
     operation_coordinator: State<'_, crate::sync_coordinator::SyncCoordinator>,
-    login_coordinator: State<'_, crate::login_target::LoginTargetCoordinator>,
     background_sync: State<'_, crate::BackgroundSeasonSyncManager>,
     live_updates: State<'_, crate::live_season_update::LiveSeasonUpdateManager>,
 ) -> Result<SeasonSyncResult, String> {
@@ -766,13 +643,7 @@ pub async fn sync_season(
     let target_path = account.paths().player_target();
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())
         .map_err(to_message)?;
-    crate::login_target::ensure_sync_target_ready(
-        login_coordinator.inner(),
-        account.account_id(),
-        &credentials,
-        &target_path,
-    )
-    .map_err(to_message)?;
+    crate::account_sync_identity::ensure_ready(&credentials, &target_path).map_err(to_message)?;
     let db = account.database();
     let store = crate::SeasonSyncStore::new(db.clone());
     if store.active_job_count(request.season).map_err(to_message)? > 0 {
@@ -1148,92 +1019,4 @@ fn to_message(error: impl std::fmt::Display) -> String {
         &[("source", format!("{source}:{}", caller.line()))],
     );
     runtime_error_message(error)
-}
-
-#[cfg(test)]
-mod account_management_tests {
-    use super::*;
-    use crate::app_paths::SharedAppPaths;
-
-    #[tokio::test]
-    async fn published_login_updates_the_account_scoped_target_session() {
-        let temp = tempfile::tempdir().unwrap();
-        let manager =
-            AccountContextManager::load(<SharedAppPaths>::from_app_data_dir(temp.path())).unwrap();
-        let result = crate::account_login::publish_add_account(
-            &manager,
-            crate::account_login::LoginCapture {
-                credentials: crate::credential_store::DashenCredentials {
-                    role_id: 101101,
-                    token: "synthetic-account-token".to_string(),
-                    customer_token: None,
-                    dts: None,
-                    server: 1,
-                    saved_at: "2026-07-16T00:00:00Z".to_string(),
-                },
-                battle_tag: "Synthetic#1011".to_string(),
-            },
-        )
-        .unwrap();
-        let account_id = result
-            .account_id
-            .as_deref()
-            .and_then(|value| crate::account_store::AccountId::parse(value).ok())
-            .unwrap();
-        let account = manager.snapshot_for(&account_id).unwrap();
-        crate::player_target::save_player_target_for_path(
-            &account.paths().player_target(),
-            &crate::player_target::PlayerTarget {
-                input_bnet: "Synthetic#1011".to_string(),
-                resolved_bnet: Some("Synthetic#1011".to_string()),
-                customer_token: "synthetic-player-token".to_string(),
-                bound_at: "2026-07-16T00:00:00Z".to_string(),
-                source_role_id: Some(101101),
-            },
-        )
-        .unwrap();
-        let coordinator = crate::login_target::LoginTargetCoordinator::default();
-
-        let error =
-            reconcile_published_login_target(&manager, &coordinator, &result, "http://127.0.0.1:1")
-                .await
-                .unwrap_err();
-        assert_eq!(error, "post-commit profile refresh failed");
-
-        let status = coordinator.status(&account_id).unwrap();
-        assert_eq!(status.state, "ready");
-        assert!(status.sync_allowed);
-        assert_eq!(status.detected_bnet.as_deref(), Some("Synthetic#1011"));
-    }
-
-    #[test]
-    fn removing_one_account_clears_only_its_login_target_session() {
-        let coordinator = crate::login_target::LoginTargetCoordinator::default();
-        let first =
-            crate::account_store::AccountId::parse("11111111-1111-4111-8111-111111111111").unwrap();
-        let second =
-            crate::account_store::AccountId::parse("22222222-2222-4222-8222-222222222222").unwrap();
-        coordinator.target_cleared(&first, Some(101101));
-        coordinator.target_cleared(&second, Some(202202));
-        let removed = crate::RemoveAccountResult {
-            removed: true,
-            active_account_id: Some(second.as_str().into()),
-            message: "账号已退出。".into(),
-            reload_required: true,
-        };
-        clear_removed_account_target(&coordinator, &first, &removed);
-        assert!(coordinator.status(&first).is_none());
-        assert!(coordinator.status(&second).is_some());
-
-        coordinator.target_cleared(&first, Some(101101));
-        let not_removed = crate::RemoveAccountResult {
-            removed: false,
-            active_account_id: Some(first.as_str().into()),
-            message: "账号未退出。".into(),
-            reload_required: false,
-        };
-        clear_removed_account_target(&coordinator, &first, &not_removed);
-        assert!(coordinator.status(&first).is_some());
-        assert!(coordinator.status(&second).is_some());
-    }
 }

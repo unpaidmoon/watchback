@@ -437,10 +437,6 @@
   text-align: center;
 }
 
-.commandCenterSyncPanel .syncTargetStrip {
-  margin-top: 20px;
-}
-
 .commandCenterAccountPanel {
   display: flex;
   flex-direction: column;
@@ -575,10 +571,6 @@
   to { transform: rotate(360deg); }
 }
 
-.phase8TargetPlayerSummary strong {
-  overflow-wrap: anywhere;
-}
-
 .commandCenterAccountFacts {
   min-width: 0;
   display: flex;
@@ -709,12 +701,6 @@
 .phase6CommandCenter .phase6Eyebrow {
   color: var(--text-secondary);
   font-weight: 400;
-}
-
-.phase6CommandCenter .syncTargetStrip {
-  border-color: var(--glass-border);
-  background: rgba(250, 251, 247, 0.38);
-  box-shadow: none;
 }
 
 .phase6CommandCenter .phase6DataHealthGrid {
@@ -985,49 +971,6 @@
     padding: 12px;
   }
 
-}
-
-.syncTargetDecision {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.syncTargetDecision button {
-  min-height: 44px;
-}
-
-.syncTargetDecision > span {
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.syncTargetDecision > span.good {
-  color: var(--status-success);
-}
-
-.syncTargetDecision > span.warn {
-  color: var(--status-warning);
-}
-
-.syncTargetComparison {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-}
-
-.syncTargetComparison span {
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 620px) {
-  .syncTargetDecision {
-    justify-content: flex-start;
-  }
 }
 
 .phase6CommandCenter .accountManagerPanel {

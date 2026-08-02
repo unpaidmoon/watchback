@@ -2,7 +2,6 @@ import type {
   AccountLoginResult,
   AccountManagerStatus,
   AccountSummary,
-  LoginTargetStatus,
   OnboardingStatus,
   PlayerProfile,
   RemoveAccountResult,
@@ -12,7 +11,6 @@ export type DashboardSnapshot = {
   accountStatus: AccountManagerStatus;
   status: OnboardingStatus | null;
   profile: PlayerProfile | null;
-  targetStatus: LoginTargetStatus | null;
 };
 
 type AccountScopedDashboard = Omit<DashboardSnapshot, "accountStatus">;
@@ -44,7 +42,7 @@ export async function loadDashboardRequest(options: DashboardRequestOptions): Pr
   if (!accountStatus.activeAccountId) {
     return {
       kind: "ready",
-      snapshot: { accountStatus, status: null, profile: null, targetStatus: null },
+      snapshot: { accountStatus, status: null, profile: null },
     };
   }
 

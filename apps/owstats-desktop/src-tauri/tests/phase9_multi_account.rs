@@ -2033,11 +2033,6 @@ fn player_commands_resolve_exactly_one_active_snapshot_and_avoid_legacy_paths() 
         "get_onboarding_status",
         "get_personal_season_review",
         "get_player_profile",
-        "get_login_target_status",
-        "confirm_login_target_switch",
-        "keep_current_player_target",
-        "retry_login_target_binding",
-        "clear_player_target",
         "get_rankings",
         "get_season_analysis",
         "sync_season",
@@ -2058,25 +2053,18 @@ fn player_commands_resolve_exactly_one_active_snapshot_and_avoid_legacy_paths() 
 #[test]
 fn account_mutating_commands_acquire_permit_before_resolving_snapshot() {
     let source = include_str!("../src/commands.rs");
-    for command in [
-        "refresh_match_evaluations",
-        "confirm_login_target_switch",
-        "keep_current_player_target",
-        "retry_login_target_binding",
-        "clear_player_target",
-    ] {
-        let function = command_source(source, command);
-        let permit = function
-            .find("try_acquire_account_operation()")
-            .unwrap_or_else(|| panic!("{command} does not acquire the account-operation permit"));
-        let snapshot = function
-            .find("active_account(&accounts)?")
-            .unwrap_or_else(|| panic!("{command} does not resolve an account snapshot"));
-        assert!(
-            permit < snapshot,
-            "{command} resolves the account before holding the operation permit"
-        );
-    }
+    let command = "refresh_match_evaluations";
+    let function = command_source(source, command);
+    let permit = function
+        .find("try_acquire_account_operation()")
+        .unwrap_or_else(|| panic!("{command} does not acquire the account-operation permit"));
+    let snapshot = function
+        .find("active_account(&accounts)?")
+        .unwrap_or_else(|| panic!("{command} does not resolve an account snapshot"));
+    assert!(
+        permit < snapshot,
+        "{command} resolves the account before holding the operation permit"
+    );
 }
 
 fn command_source<'a>(source: &'a str, command: &str) -> &'a str {

@@ -155,28 +155,6 @@ export type RemoveAccountResult = {
   reloadRequired: boolean;
 };
 
-export type LoginTargetStatus = {
-  state: "ready" | "switchRequired" | "mismatchKept" | "bindFailed" | "unidentified" | "verificationRequired" | string;
-  detectedBnet: string | null;
-  currentBnet: string | null;
-  message: string;
-  syncAllowed: boolean;
-  canConfirmSwitch: boolean;
-  canRetry: boolean;
-};
-
-export type PlayerTargetStatus = {
-  state: "missing" | "bound" | string;
-  inputBnet?: string | null;
-  resolvedBnet?: string | null;
-  boundAt?: string | null;
-};
-
-export type ClearPlayerTargetResult = {
-  cleared: boolean;
-  target: LoginTargetStatus;
-};
-
 export type PlayerGameAction = {
   comment: string | null;
   sendHonorsCnt: number | null;

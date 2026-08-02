@@ -77,7 +77,7 @@ const secondStatus: AccountManagerStatus = { activeAccountId: secondAccount.acco
     listAccounts: () => accounts.promise,
     loadAccountScope: async () => {
       scopedLoads += 1;
-      return { status: null, profile: null, targetStatus: null };
+      return { status: null, profile: null };
     },
     onAccountStatus: () => {
       accountUpdates += 1;
@@ -91,25 +91,25 @@ const secondStatus: AccountManagerStatus = { activeAccountId: secondAccount.acco
 }
 
 {
-  const scoped = deferred<{ status: null; profile: null; targetStatus: null }>();
+  const scoped = deferred<{ status: null; profile: null }>();
   let reusableCache: unknown = "not-called";
   const resultPromise = loadDashboardRequest({
     requestGeneration: 3,
     isCurrent: () => true,
-    cachedSnapshot: { accountStatus: firstStatus, status: null, profile: null, targetStatus: null },
+    cachedSnapshot: { accountStatus: firstStatus, status: null, profile: null },
     listAccounts: async () => secondStatus,
     loadAccountScope: () => scoped.promise,
     onAccountStatus: (_status, cache) => {
       reusableCache = cache;
     },
   });
-  scoped.resolve({ status: null, profile: null, targetStatus: null });
+  scoped.resolve({ status: null, profile: null });
   assert.equal((await resultPromise).kind, "ready");
   assert.equal(reusableCache, null, "activeAccountId 不匹配时必须丢弃缓存");
 }
 
 {
-  const scoped = deferred<{ status: null; profile: null; targetStatus: null }>();
+  const scoped = deferred<{ status: null; profile: null }>();
   let generation = 4;
   let appliedAccountId = secondAccount.accountId;
   const oldRequest = loadDashboardRequest({
@@ -122,7 +122,7 @@ const secondStatus: AccountManagerStatus = { activeAccountId: secondAccount.acco
   });
   await Promise.resolve();
   generation = 5;
-  scoped.resolve({ status: null, profile: null, targetStatus: null });
+  scoped.resolve({ status: null, profile: null });
   const result = await oldRequest;
   if (result.kind === "ready") appliedAccountId = result.snapshot.accountStatus.activeAccountId ?? "";
   assert.equal(result.kind, "stale");

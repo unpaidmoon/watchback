@@ -1,7 +1,6 @@
 use crate::account_context::AccountContextManager;
 use crate::background_sync::BackgroundSeasonSyncManager;
 use crate::live_season_update::{LiveSeasonKey, LiveSeasonUpdateManager};
-use crate::login_target::LoginTargetCoordinator;
 use crate::sync_coordinator::SyncCoordinator;
 use crate::OwDatabase;
 use anyhow::Result;
@@ -13,7 +12,6 @@ pub(crate) fn spawn(
     app: AppHandle,
     accounts: AccountContextManager,
     operation_coordinator: SyncCoordinator,
-    login_target_coordinator: LoginTargetCoordinator,
     background_sync: BackgroundSeasonSyncManager,
     live_updates: LiveSeasonUpdateManager,
 ) {
@@ -42,7 +40,6 @@ pub(crate) fn spawn(
             &app,
             &accounts,
             &operation_coordinator,
-            &login_target_coordinator,
             &background_sync,
             &live_updates,
             &triggered_account_id,
@@ -66,7 +63,6 @@ async fn run_once(
     app: &AppHandle,
     accounts: &AccountContextManager,
     operation_coordinator: &SyncCoordinator,
-    login_target_coordinator: &LoginTargetCoordinator,
     background_sync: &BackgroundSeasonSyncManager,
     live_updates: &LiveSeasonUpdateManager,
     triggered_account_id: &crate::account_store::AccountId,
@@ -108,14 +104,7 @@ async fn run_once(
 
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())?;
     let target_path = account.paths().player_target();
-    if crate::login_target::ensure_sync_target_ready(
-        login_target_coordinator,
-        account.account_id(),
-        &credentials,
-        &target_path,
-    )
-    .is_err()
-    {
+    if crate::account_sync_identity::ensure_ready(&credentials, &target_path).is_err() {
         return Ok(false);
     }
 

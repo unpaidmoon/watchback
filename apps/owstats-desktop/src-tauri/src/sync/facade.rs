@@ -29,7 +29,7 @@ pub async fn quick_list_update_with_credentials_and_target_paths_base_url_observ
     let credentials = read_credentials(credential_path)?;
     let target = crate::player_target::read_player_target_for_path(target_path)?;
     if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
-        return Err(anyhow!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR));
+        return Err(anyhow!(crate::account_sync_identity::SYNC_IDENTITY_ERROR));
     }
     let request = crate::season_fetch::FullSeasonRequest {
         credentials: crate::dashen_client::DashenCredentials {
@@ -299,7 +299,7 @@ pub async fn sync_season_with_credentials_and_target_paths_output_dir_with_mode_
     let credentials = read_credentials(credential_path)?;
     let target = crate::player_target::read_player_target_for_path(target_path)?;
     if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
-        return Err(anyhow!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR));
+        return Err(anyhow!(crate::account_sync_identity::SYNC_IDENTITY_ERROR));
     }
     sync_account_season_with_request(
         db,

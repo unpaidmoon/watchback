@@ -1162,49 +1162,11 @@ select {
   color: var(--phase6-warn);
 }
 
-.phase8TargetPlayerSummary {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.phase8TargetPlayerSummary strong {
-  color: var(--phase6-ink);
-  font-size: 16px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.phase8TargetPlayerSummary p {
-  margin: 0;
-  color: var(--phase6-muted);
-  font-size: 12px;
-}
-
-.syncTargetStrip {
-  min-width: 0;
-  border: 1px solid rgb(219 229 240 / 0.9);
-  border-radius: var(--phase6-radius-sm);
-  background: rgb(255 255 255 / 0.82);
-}
-
-.syncTargetStrip {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(420px, 1.25fr);
-  gap: 20px;
-  align-items: center;
-  padding: 14px 16px;
-}
-
 .syncSecondaryActions {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 @media (max-width: 920px) {
-  .syncTargetStrip {
-    grid-template-columns: 1fr;
-  }
-
   .syncSecondaryActions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

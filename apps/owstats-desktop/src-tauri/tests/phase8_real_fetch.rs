@@ -1,8 +1,8 @@
 use futures_util::future::join_all;
-use owstats_desktop_lib::login_target::SYNC_TARGET_CONFIRMATION_ERROR;
+use owstats_desktop_lib::account_sync_identity::{refresh_with_base_url, SYNC_IDENTITY_ERROR};
+use owstats_desktop_lib::credential_store::DashenCredentials;
 use owstats_desktop_lib::player_target::{
-    clear_player_target_for_path, player_target_status_for_path, save_player_target_for_path,
-    PlayerTarget,
+    read_player_target_for_path, save_player_target_for_path, PlayerTarget,
 };
 use owstats_desktop_lib::{
     quick_list_update_with_credentials_and_target_paths_base_url,
@@ -18,54 +18,6 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-
-#[test]
-fn player_target_status_does_not_expose_customer_token() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join(".dashen_player_target.json");
-    save_player_target_for_path(
-        &path,
-        &PlayerTarget {
-            input_bnet: "Tester#12345".to_string(),
-            resolved_bnet: Some("Tester#12345".to_string()),
-            customer_token: "secret-customer-token".to_string(),
-            bound_at: "2026-07-03T00:00:00Z".to_string(),
-            source_role_id: None,
-        },
-    )
-    .unwrap();
-
-    let status = player_target_status_for_path(&path).unwrap();
-    let status_text = serde_json::to_string(&status).unwrap();
-
-    assert_eq!(status.state, "bound");
-    assert_eq!(status.input_bnet.as_deref(), Some("Tester#12345"));
-    assert!(!status_text.contains("secret-customer-token"));
-    assert!(!status_text.contains("customerToken"));
-}
-
-#[test]
-fn clearing_player_target_removes_saved_target() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join(".dashen_player_target.json");
-    save_player_target_for_path(
-        &path,
-        &PlayerTarget {
-            input_bnet: "Tester#12345".to_string(),
-            resolved_bnet: None,
-            customer_token: "secret-customer-token".to_string(),
-            bound_at: "2026-07-03T00:00:00Z".to_string(),
-            source_role_id: None,
-        },
-    )
-    .unwrap();
-
-    assert!(clear_player_target_for_path(&path).unwrap());
-    let status = player_target_status_for_path(&path).unwrap();
-
-    assert_eq!(status.state, "missing");
-    assert_eq!(status.input_bnet, None);
-}
 
 #[test]
 fn extracts_customer_token_from_search_payload() {
@@ -89,6 +41,81 @@ fn extracts_customer_token_from_search_payload() {
     assert_eq!(parsed.resolved_bnet.as_deref(), Some("Tester#12345"));
     assert_eq!(parsed.customer_token, "player-customer-token");
     assert_eq!(parsed.source_role_id, Some(123));
+}
+
+fn synthetic_credentials(role_id: i64) -> DashenCredentials {
+    DashenCredentials {
+        role_id,
+        token: "synthetic-account-token".to_string(),
+        customer_token: None,
+        dts: None,
+        server: 1,
+        saved_at: "2026-08-02T00:00:00Z".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn login_refresh_persists_only_the_verified_account_sync_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let identity_path = temp.path().join("sync-identity.json");
+    let server = spawn_recording_server(vec![
+        (
+            "/searchBnetAccount",
+            r#"{"code":0,"data":{"customerToken":"synthetic-player-token","bnetId":"Tester#12345","roleId":101}}"#,
+        ),
+        (
+            "/customer/queryCard",
+            r#"{"code":0,"data":{"battleTag":"Tester#12345","roleId":101}}"#,
+        ),
+    ]);
+
+    refresh_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &identity_path,
+        &server.base_url,
+    )
+    .await
+    .unwrap();
+
+    let identity = read_player_target_for_path(&identity_path).unwrap();
+    assert_eq!(identity.customer_token, "synthetic-player-token");
+    assert_eq!(identity.source_role_id, Some(101));
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn login_refresh_identity_mismatch_preserves_the_previous_sync_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let identity_path = temp.path().join("sync-identity.json");
+    save_player_target_for_path(
+        &identity_path,
+        &PlayerTarget {
+            input_bnet: "Existing#1000".to_string(),
+            resolved_bnet: Some("Existing#1000".to_string()),
+            customer_token: "existing-player-token".to_string(),
+            bound_at: "2026-08-01T00:00:00Z".to_string(),
+            source_role_id: Some(101),
+        },
+    )
+    .unwrap();
+    let server = spawn_recording_server(vec![(
+        "/searchBnetAccount",
+        r#"{"code":0,"data":{"customerToken":"different-player-token","bnetId":"Other#9999","roleId":101}}"#,
+    )]);
+
+    refresh_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &identity_path,
+        &server.base_url,
+    )
+    .await
+    .unwrap_err();
+
+    let identity = read_player_target_for_path(&identity_path).unwrap();
+    assert_eq!(identity.customer_token, "existing-player-token");
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -131,7 +158,7 @@ async fn desktop_target_sync_rejects_a_different_login_role_before_db_or_network
     .unwrap_err()
     .to_string();
 
-    assert_eq!(error, SYNC_TARGET_CONFIRMATION_ERROR);
+    assert_eq!(error, SYNC_IDENTITY_ERROR);
     assert!(
         server.requests.lock().unwrap().is_empty(),
         "rejected sync must not send an upstream request"

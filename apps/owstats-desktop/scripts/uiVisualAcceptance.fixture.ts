@@ -8,7 +8,6 @@ import type {
   PersonalSeasonReview,
   PlayerProfile,
   PlayerRow,
-  PlayerTargetStatus,
   RankingResponse,
   SeasonAnalysis,
 } from "../src/shared/types.ts";
@@ -496,13 +495,6 @@ export const fixturePlayerProfile = {
   refreshedAt: "2026-07-14 08:20",
 } satisfies PlayerProfile;
 
-export const fixturePlayerTargetStatus = {
-  state: "missing",
-  inputBnet: null,
-  resolvedBnet: null,
-  boundAt: null,
-} satisfies PlayerTargetStatus;
-
 export const fixtureCommandCenter = {
   accountLabel: "示例玩家",
   loginState: "ready",
@@ -763,7 +755,6 @@ export const allVisualFixtures = {
     visualState: fixtureCommandCenter,
     status: fixtureOnboarding,
     profile: fixturePlayerProfile,
-    targetStatus: fixturePlayerTargetStatus,
   },
 };
 

@@ -1,4 +1,3 @@
-use crate::models::PlayerTargetStatus;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -24,33 +23,6 @@ pub fn player_target_path_for_account(paths: &AccountPaths) -> PathBuf {
     paths.player_target()
 }
 
-pub fn get_player_target_status_for_account(paths: &AccountPaths) -> Result<PlayerTargetStatus> {
-    player_target_status_for_path(&paths.player_target())
-}
-
-pub fn clear_player_target_for_account(paths: &AccountPaths) -> Result<bool> {
-    clear_player_target_for_path(&paths.player_target())
-}
-
-pub fn player_target_status_for_path(path: &Path) -> Result<PlayerTargetStatus> {
-    if !path.exists() {
-        return Ok(missing_status());
-    }
-
-    let text = std::fs::read_to_string(path).with_context(|| "读取目标玩家失败")?;
-    let target: PlayerTarget = serde_json::from_str(&text).with_context(|| "解析目标玩家失败")?;
-    if target.customer_token.trim().is_empty() {
-        return Ok(missing_status());
-    }
-
-    Ok(PlayerTargetStatus {
-        state: "bound".to_string(),
-        input_bnet: Some(target.input_bnet),
-        resolved_bnet: target.resolved_bnet,
-        bound_at: Some(target.bound_at),
-    })
-}
-
 pub fn read_player_target_for_path(path: &Path) -> Result<PlayerTarget> {
     let text = std::fs::read_to_string(path).with_context(|| "请先绑定目标玩家")?;
     let target: PlayerTarget = serde_json::from_str(&text).with_context(|| "目标玩家记录不可用")?;
@@ -66,15 +38,6 @@ pub fn save_player_target_for_path(path: &Path, target: &PlayerTarget) -> Result
     }
     let text = serde_json::to_string_pretty(target)?;
     std::fs::write(path, text).with_context(|| "保存目标玩家失败")
-}
-
-pub fn clear_player_target_for_path(path: &Path) -> Result<bool> {
-    if path.exists() {
-        std::fs::remove_file(path).with_context(|| "清除目标玩家失败")?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
 }
 
 pub fn target_from_search_payload(
@@ -109,13 +72,4 @@ pub fn target_from_search_payload(
         bound_at: bound_at.to_string(),
         source_role_id: Some(source_role_id),
     })
-}
-
-fn missing_status() -> PlayerTargetStatus {
-    PlayerTargetStatus {
-        state: "missing".to_string(),
-        input_bnet: None,
-        resolved_bnet: None,
-        bound_at: None,
-    }
 }

@@ -9,6 +9,7 @@ pub mod account_login;
 pub mod account_migration;
 pub mod account_removal;
 pub mod account_store;
+pub mod account_sync_identity;
 pub mod ai_roast;
 mod analytics;
 pub mod app_paths;
@@ -28,7 +29,6 @@ mod importer;
 pub mod install_data_migration;
 mod live_season_update;
 pub mod login_flow;
-pub mod login_target;
 mod match_evaluation;
 mod match_favorites;
 mod models;
@@ -1058,7 +1058,6 @@ pub fn run() -> anyhow::Result<()> {
         .manage(background_manager)
         .manage(live_update_manager)
         .manage(player_query_service)
-        .manage(login_target::LoginTargetCoordinator::default())
         .setup(move |app| {
             let account_context = account_context::AccountContextManager::load(shared.clone())
                 .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
@@ -1108,9 +1107,6 @@ pub fn run() -> anyhow::Result<()> {
                 app.handle().clone(),
                 account_context,
                 startup_sync_coordinator.clone(),
-                app.state::<login_target::LoginTargetCoordinator>()
-                    .inner()
-                    .clone(),
                 startup_background_manager.clone(),
                 startup_live_update_manager.clone(),
             );
@@ -1164,11 +1160,6 @@ pub fn run() -> anyhow::Result<()> {
             commands::get_dashen_login_qr_snapshot,
             commands::get_active_dashen_login_qr,
             commands::cancel_dashen_login_qr,
-            commands::get_login_target_status,
-            commands::confirm_login_target_switch,
-            commands::keep_current_player_target,
-            commands::retry_login_target_binding,
-            commands::clear_player_target,
             commands::get_rankings,
             commands::get_season_analysis,
             commands::season_sync_status,

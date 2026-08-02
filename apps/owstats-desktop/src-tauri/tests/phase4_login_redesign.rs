@@ -1,4 +1,3 @@
-use owstats_desktop_lib::account_store::AccountId;
 use owstats_desktop_lib::browser_session::{build_browser_command, choose_debug_port};
 use owstats_desktop_lib::credential_store::{
     credential_status_for_path, save_credentials_atomic, DashenCredentials,
@@ -12,7 +11,6 @@ use owstats_desktop_lib::dashen_auth::{
     extract_role_id_for_battle_tag, is_signature_helper_missing, BattleTagExtraction,
     RoleIdExtraction,
 };
-use owstats_desktop_lib::login_target::LoginTargetCoordinator;
 
 #[test]
 fn browser_capture_is_separate_from_final_credential_persistence() {
@@ -91,19 +89,7 @@ fn product_login_handlers_only_expose_staged_account_flows() {
 }
 
 #[test]
-fn login_target_failure_preserves_synthetic_error_fragments() {
-    let coordinator = LoginTargetCoordinator::default();
-    let account_id = AccountId::parse("d59caecf-8e74-4b6c-b690-45e75f7fed9c").unwrap();
-    let source = "token=synthetic-login-token Authorization: Bearer synthetic-login-header cookie=synthetic-login-cookie";
-
-    let status = coordinator.replace_bind_failed(&account_id, 123456, "Synthetic#1234", source);
-
-    assert_eq!(status.state, "bindFailed");
-    assert_eq!(status.message, format!("自动绑定失败：{source}"),);
-}
-
-#[test]
-fn published_login_commands_reconcile_the_detected_sync_target() {
+fn published_login_commands_refresh_internal_account_sync_identity() {
     let source = include_str!("../src/commands.rs");
     let add_command = source
         .split("pub async fn add_account(")
@@ -111,9 +97,19 @@ fn published_login_commands_reconcile_the_detected_sync_target() {
         .and_then(|body| body.split("#[tauri::command]").next())
         .expect("add account command should exist");
     assert!(
-        add_command.contains("reconcile_published_login_target"),
-        "add_account must reconcile the captured BattleTag into the account-scoped sync target"
+        add_command.contains("refresh_published_account_sync_identity"),
+        "add_account must resolve the private customer token for the published account"
     );
+    for obsolete_command in [
+        "get_login_target_status",
+        "confirm_login_target_switch",
+        "keep_current_player_target",
+        "retry_login_target_binding",
+        "clear_player_target",
+    ] {
+        assert!(!source.contains(&format!("pub fn {obsolete_command}")));
+        assert!(!source.contains(&format!("pub async fn {obsolete_command}")));
+    }
 }
 
 #[test]

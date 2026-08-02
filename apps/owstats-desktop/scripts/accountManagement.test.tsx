@@ -18,13 +18,13 @@ const emptyDashboard = await loadDashboardRequest({
   listAccounts: async () => emptyAccountStatus,
   loadAccountScope: async () => {
     scopedLoadCount += 1;
-    return { status: null, profile: null, targetStatus: null };
+    return { status: null, profile: null };
   },
   onAccountStatus: () => undefined,
 });
 assert.deepEqual(emptyDashboard, {
   kind: "ready",
-  snapshot: { accountStatus: emptyAccountStatus, status: null, profile: null, targetStatus: null },
+  snapshot: { accountStatus: emptyAccountStatus, status: null, profile: null },
 });
 assert.equal(scopedLoadCount, 0, "没有活动账号时不得读取任何账号域数据");
 
@@ -37,9 +37,9 @@ let reusableCache: unknown = "not-called";
 await loadDashboardRequest({
   requestGeneration: 2,
   isCurrent: () => true,
-  cachedSnapshot: { accountStatus: { ...activeAccountStatus, activeAccountId: "account-a" }, status: null, profile: null, targetStatus: null },
+  cachedSnapshot: { accountStatus: { ...activeAccountStatus, activeAccountId: "account-a" }, status: null, profile: null },
   listAccounts: async () => activeAccountStatus,
-  loadAccountScope: async () => ({ status: null, profile: null, targetStatus: null }),
+  loadAccountScope: async () => ({ status: null, profile: null }),
   onAccountStatus: (_status, cache) => { reusableCache = cache; },
 });
 assert.equal(reusableCache, null, "活动账号改变后不得复用旧账号缓存");

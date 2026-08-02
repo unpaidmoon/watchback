@@ -445,7 +445,7 @@ fn request_for_account(
     let credentials = crate::credentials::read_saved_credentials_for_account(paths)?;
     let target = crate::player_target::read_player_target_for_path(&paths.player_target())?;
     if !crate::player_target::target_matches_login_role(&target, credentials.role_id) {
-        anyhow::bail!(crate::login_target::SYNC_TARGET_CONFIRMATION_ERROR);
+        anyhow::bail!(crate::account_sync_identity::SYNC_IDENTITY_ERROR);
     }
     Ok(FullSeasonRequest {
         credentials: DashenCredentials {

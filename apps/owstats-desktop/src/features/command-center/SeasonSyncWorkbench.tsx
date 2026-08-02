@@ -9,7 +9,6 @@ export type SeasonSyncWorkbenchProps = {
   minimumSyncSeason: number;
   seasonStatuses: SeasonDataStatus[];
   credentialReady: boolean;
-  targetSyncAllowed: boolean;
   accountOperationBusy: boolean;
   syncingSeason: number | null;
   syncingMode: SyncMode | null;
@@ -54,7 +53,6 @@ export function SeasonSyncWorkbench({
   minimumSyncSeason,
   seasonStatuses,
   credentialReady,
-  targetSyncAllowed,
   accountOperationBusy,
   syncingSeason,
   syncingMode,
@@ -78,7 +76,6 @@ export function SeasonSyncWorkbench({
   const selectedHasData = seasonStatuses.some((item) => item.season === selectedSeason && item.matchCount > 0);
   const gateCopy = seasonSyncGateCopy(
     credentialReady,
-    targetSyncAllowed,
     accountOperationBusy,
     isSyncing,
     selectedHasData,
@@ -125,7 +122,7 @@ export function SeasonSyncWorkbench({
           className="primaryButton seasonSyncButton"
           type="button"
           onClick={() => onFullFetch(selectedSeason)}
-          disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null || selectedBackgroundBusy}
+          disabled={!credentialReady || accountOperationBusy || syncingSeason !== null || selectedBackgroundBusy}
         >
           <RefreshCw size={18} />
           {isSelectedFullFetch ? "全量抓取中…" : "全量抓取"}
@@ -205,7 +202,7 @@ export function SeasonSyncWorkbench({
                       onClick={() => background?.retryable
                         ? onRetryBackground(seasonStatus.season)
                         : runSeasonQuickUpdate(seasonStatus.season, onQuickUpdate)}
-                      disabled={!credentialReady || !targetSyncAllowed || accountOperationBusy || syncingSeason !== null || backgroundBusy}
+                      disabled={!credentialReady || accountOperationBusy || syncingSeason !== null || backgroundBusy}
                     >
                       {background?.retryable ? "重试" : rowSyncing && syncingMode === "quickUpdate" ? "更新中…" : backgroundBusy ? "后台处理中" : "更新"}
                     </button>

@@ -13,7 +13,12 @@ const textExtensions = new Set([".cjs", ".css", ".html", ".json", ".js", ".md", 
 function trackedFiles(root) {
   try {
     const output = execFileSync("git", ["-C", root, "ls-files", "-z"], { encoding: "buffer" });
-    const files = output.toString("utf8").split("\0").filter(Boolean).map((path) => resolve(root, path));
+    const files = output
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean)
+      .map((path) => resolve(root, path))
+      .filter(existsSync);
     return files.length ? files : walk(root);
   } catch {
     return walk(root);

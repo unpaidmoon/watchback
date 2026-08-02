@@ -1,7 +1,6 @@
 
 export function seasonSyncGateCopy(
   credentialReady: boolean,
-  targetSyncAllowed: boolean,
   accountOperationBusy: boolean,
   isSyncing: boolean,
   hasData: boolean,
@@ -15,12 +14,9 @@ export function seasonSyncGateCopy(
   if (!credentialReady) {
     return { statusLabel: "需要登录", syncHint: "登录后可同步" };
   }
-  if (!targetSyncAllowed) {
-    return { statusLabel: "目标待确认", syncHint: "确认当前目标后可同步" };
-  }
   return {
     statusLabel: hasData ? "本地数据可用" : "无本地数据",
-    syncHint: "当前目标可同步",
+    syncHint: "当前账号可同步",
   };
 }
 

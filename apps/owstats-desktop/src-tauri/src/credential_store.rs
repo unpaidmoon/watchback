@@ -52,7 +52,7 @@ pub fn credential_status_for_path(path: &Path) -> Result<CredentialStatus> {
         message: if !complete {
             "本地凭证不完整，请在指挥台添加账号以更新登录。".to_string()
         } else {
-            "已保存网易大神登录凭证，请绑定 BattleTag 后同步赛季数据。".to_string()
+            "已保存网易大神登录凭证，可以同步赛季数据。".to_string()
         },
         exposes_secret: false,
         role_id,

@@ -11,7 +11,6 @@ use crate::browser_session::{
 };
 use crate::credentials::{fetch_credentials_from_browser_with_cancel, BrowserLoginOutcome};
 use crate::login_flow::{LoginPhase, LoginProgressReporter};
-use crate::login_target::LoginTargetCoordinator;
 use crate::models::AccountLoginResult;
 use crate::sync_coordinator::OperationPermit;
 use anyhow::{anyhow, Result};
@@ -649,7 +648,6 @@ struct ChromiumQrLoginAdapter {
     app: AppHandle,
     accounts: AccountContextManager,
     coordinator: QrLoginCoordinator,
-    login_target_coordinator: LoginTargetCoordinator,
     session_id: Uuid,
     resources: BrowserLoginSessionOwner,
     cdp: CdpPageOwner,
@@ -660,22 +658,12 @@ impl QrLoginAdapter for ChromiumQrLoginAdapter {
         let app = self.app.clone();
         let accounts = self.accounts.clone();
         let coordinator = self.coordinator.clone();
-        let login_target_coordinator = self.login_target_coordinator.clone();
         let session_id = self.session_id;
         let resources = self.resources.clone();
         let cdp = self.cdp.clone();
-        Box::pin(async move {
-            run_login(
-                app,
-                accounts,
-                coordinator,
-                login_target_coordinator,
-                session_id,
-                resources,
-                cdp,
-            )
-            .await
-        })
+        Box::pin(
+            async move { run_login(app, accounts, coordinator, session_id, resources, cdp).await },
+        )
     }
 
     fn shutdown(&self) -> QrLoginShutdownFuture {
@@ -714,7 +702,6 @@ pub fn start_login(
     accounts: AccountContextManager,
     operations: &crate::sync_coordinator::SyncCoordinator,
     coordinator: QrLoginCoordinator,
-    login_target_coordinator: LoginTargetCoordinator,
     request_id: String,
 ) -> Result<QrLoginStartResult> {
     let decision = coordinator.start_or_recover(request_id.clone(), operations)?;
@@ -728,14 +715,7 @@ pub fn start_login(
         }
         StartDecision::New { session_id, permit } => (session_id, permit),
     };
-    spawn_login(
-        app,
-        accounts,
-        operation_permit,
-        coordinator,
-        login_target_coordinator,
-        session_id,
-    );
+    spawn_login(app, accounts, operation_permit, coordinator, session_id);
     Ok(QrLoginStartResult {
         request_id,
         session_id: session_id.to_string(),
@@ -748,14 +728,12 @@ fn spawn_login(
     accounts: AccountContextManager,
     operation_permit: OperationPermit,
     coordinator: QrLoginCoordinator,
-    login_target_coordinator: LoginTargetCoordinator,
     session_id: Uuid,
 ) {
     let adapter: Arc<dyn QrLoginAdapter> = Arc::new(ChromiumQrLoginAdapter {
         app: app.clone(),
         accounts,
         coordinator: coordinator.clone(),
-        login_target_coordinator,
         session_id,
         resources: BrowserLoginSessionOwner::default(),
         cdp: CdpPageOwner::default(),
@@ -780,7 +758,6 @@ pub async fn refresh_with_successor(
     accounts: AccountContextManager,
     operations: &crate::sync_coordinator::SyncCoordinator,
     coordinator: QrLoginCoordinator,
-    login_target_coordinator: LoginTargetCoordinator,
     session_id: String,
 ) -> Result<QrLoginStartResult> {
     let (predecessor, request_id, generation) = coordinator.successor_context(&session_id)?;
@@ -802,14 +779,7 @@ pub async fn refresh_with_successor(
             reused: true,
         }),
         StartDecision::New { session_id, permit } => {
-            spawn_login(
-                app,
-                accounts,
-                permit,
-                coordinator,
-                login_target_coordinator,
-                session_id,
-            );
+            spawn_login(app, accounts, permit, coordinator, session_id);
             Ok(QrLoginStartResult {
                 request_id,
                 session_id: session_id.to_string(),
@@ -975,7 +945,6 @@ async fn run_login(
     app: AppHandle,
     accounts: AccountContextManager,
     coordinator: QrLoginCoordinator,
-    login_target_coordinator: LoginTargetCoordinator,
     session_id: Uuid,
     resources: BrowserLoginSessionOwner,
     cdp: CdpPageOwner,
@@ -1061,7 +1030,6 @@ async fn run_login(
                             &coordinator,
                             session_id,
                             generation,
-                            &login_target_coordinator,
                         )
                         .await
                     }
@@ -1136,7 +1104,7 @@ const QR_FAILURE_CODES: &[&str] = &[
     "qr_screenshot_failed",
     "qr_image_invalid",
     "qr_capture_timeout",
-    "credential_login_target_failed",
+    "credential_login_page_failed",
     "credential_login_connect_failed",
     "credential_token_evaluate_failed",
     "credential_token_request_timeout",
@@ -1173,7 +1141,6 @@ async fn publish_capture(
     coordinator: &QrLoginCoordinator,
     session_id: Uuid,
     generation: u64,
-    login_target_coordinator: &LoginTargetCoordinator,
 ) -> Result<AccountLoginResult> {
     reporter.report_qr(QrLoginPhase::Capturing, "正在验证登录信息…");
     let mut result = capture_verify_and_publish_add(
@@ -1195,12 +1162,14 @@ async fn publish_capture(
             let credentials = capture.credentials.clone();
             let battle_tag = capture.battle_tag.clone();
             async move {
-                Ok(crate::login_target::authenticated_probe_with_base_url(
-                    &credentials,
-                    &battle_tag,
-                    DASHEN_ROOT_BASE,
+                Ok(
+                    crate::account_sync_identity::verify_credentials_with_base_url(
+                        &credentials,
+                        &battle_tag,
+                        DASHEN_ROOT_BASE,
+                    )
+                    .await,
                 )
-                .await)
             }
         },
     )
@@ -1213,8 +1182,7 @@ async fn publish_capture(
         coordinator.mark_committed(session_id, result.clone());
     }
     reporter.report_qr(QrLoginPhase::Saving, "正在安全保存账号登录信息…");
-    // This is exactly the post-publication target reconciliation used by the visible flow.
-    if reconcile_target(accounts, login_target_coordinator, &result)
+    if refresh_account_sync_identity(accounts, &result)
         .await
         .is_err()
     {
@@ -1226,9 +1194,8 @@ async fn publish_capture(
     Ok(result)
 }
 
-async fn reconcile_target(
+async fn refresh_account_sync_identity(
     accounts: &AccountContextManager,
-    coordinator: &LoginTargetCoordinator,
     result: &AccountLoginResult,
 ) -> Result<()> {
     if !matches!(
@@ -1244,19 +1211,17 @@ async fn reconcile_target(
         .ok_or_else(|| anyhow!("账号登录结果不完整，请重试"))?;
     let account = accounts.snapshot_for(&account_id)?;
     let credentials = crate::credentials::read_saved_credentials_for_account(account.paths())?;
-    let target_path = crate::player_target::player_target_path_for_account(account.paths());
-    let status = crate::login_target::reconcile_detected_target(
-        coordinator,
-        account.account_id(),
+    let battle_tag = result
+        .battle_tag
+        .as_deref()
+        .ok_or_else(|| anyhow!("账号登录结果缺少 BattleTag，请重试"))?;
+    crate::account_sync_identity::refresh_with_base_url(
         &credentials,
-        result.battle_tag.as_deref(),
-        &target_path,
+        battle_tag,
+        &account.paths().player_target(),
         DASHEN_ROOT_BASE,
     )
-    .await;
-    if status.state != "ready" {
-        return Err(anyhow!("post-commit target reconciliation failed"));
-    }
+    .await?;
     let profile = crate::profile_card::refresh_for_account(&account, DASHEN_ROOT_BASE).await;
     accounts
         .observe_authenticated_result(account.account_id(), profile)

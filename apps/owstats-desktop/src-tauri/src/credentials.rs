@@ -275,7 +275,7 @@ where
 {
     let websocket_url = open_or_find_page(LOGIN_URL, port)
         .await
-        .map_err(|_| anyhow!("credential_login_target_failed"))?;
+        .map_err(|_| anyhow!("credential_login_page_failed"))?;
     let mut page = CdpPage::connect(&websocket_url)
         .await
         .map_err(|_| anyhow!("credential_login_connect_failed"))?;

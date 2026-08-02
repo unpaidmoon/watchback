@@ -26,8 +26,6 @@ import type {
   QrAccountLoginActiveResult,
   AccountOperationStatus,
   QrAccountLoginSnapshot,
-  LoginTargetStatus,
-  ClearPlayerTargetResult,
   PlayerSearchOption,
   RankingResponse,
   RemoveAccountResult,
@@ -187,40 +185,6 @@ export function cancelDashenLogin() {
   return invoke<{ cancelled: boolean; message: string }>("cancel_dashen_login");
 }
 
-export function getLoginTargetStatus() {
-  return invoke<LoginTargetStatus>("get_login_target_status");
-}
-
-export function confirmLoginTargetSwitch() {
-  return invoke<LoginTargetStatus>("confirm_login_target_switch");
-}
-
-export function keepCurrentPlayerTarget() {
-  return invoke<LoginTargetStatus>("keep_current_player_target");
-}
-
-export function retryLoginTargetBinding() {
-  return invoke<LoginTargetStatus>("retry_login_target_binding");
-}
-
-export function clearPlayerTarget() {
-  return invoke<ClearPlayerTargetResult>("clear_player_target");
-}
-
-export type LoginTargetRecoveryAction = "confirm" | "keep" | "retry" | "clear";
-
-export async function recoverLoginTarget(action: LoginTargetRecoveryAction): Promise<LoginTargetStatus> {
-  switch (action) {
-    case "confirm":
-      return confirmLoginTargetSwitch();
-    case "keep":
-      return keepCurrentPlayerTarget();
-    case "retry":
-      return retryLoginTargetBinding();
-    case "clear":
-      return (await clearPlayerTarget()).target;
-  }
-}
 
 export function getRankings(season?: number) {
   return invoke<RankingResponse>("get_rankings", { season });

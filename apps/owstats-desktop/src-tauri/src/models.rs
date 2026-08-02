@@ -638,34 +638,6 @@ pub struct SyncProgress {
     pub latest_errors: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PlayerTargetStatus {
-    pub state: String,
-    pub input_bnet: Option<String>,
-    pub resolved_bnet: Option<String>,
-    pub bound_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct LoginTargetStatus {
-    pub state: String,
-    pub detected_bnet: Option<String>,
-    pub current_bnet: Option<String>,
-    pub message: String,
-    pub sync_allowed: bool,
-    pub can_confirm_switch: bool,
-    pub can_retry: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ClearPlayerTargetResult {
-    pub cleared: bool,
-    pub target: LoginTargetStatus,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonalReviewRequest {
