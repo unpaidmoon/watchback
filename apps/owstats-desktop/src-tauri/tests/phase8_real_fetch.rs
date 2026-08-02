@@ -1,5 +1,8 @@
 use futures_util::future::join_all;
-use owstats_desktop_lib::account_sync_identity::{refresh_with_base_url, SYNC_IDENTITY_ERROR};
+use owstats_desktop_lib::account_login::CredentialProbeOutcome;
+use owstats_desktop_lib::account_sync_identity::{
+    refresh_with_base_url, verify_credentials_with_base_url, SYNC_IDENTITY_ERROR,
+};
 use owstats_desktop_lib::credential_store::DashenCredentials;
 use owstats_desktop_lib::player_target::{
     read_player_target_for_path, save_player_target_for_path, PlayerTarget,
@@ -82,6 +85,312 @@ async fn login_refresh_persists_only_the_verified_account_sync_identity() {
     assert_eq!(identity.customer_token, "synthetic-player-token");
     assert_eq!(identity.source_role_id, Some(101));
     assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn login_probe_rejects_search_identity_without_role_id() {
+    let server = spawn_recording_server(vec![(
+        "/searchBnetAccount",
+        r#"{"code":0,"data":{"customerToken":"synthetic-player-token","bnetId":"Tester#12345"}}"#,
+    )]);
+
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &server.base_url,
+    )
+    .await;
+
+    assert_eq!(outcome, CredentialProbeOutcome::Rejected);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn login_probe_authenticates_only_a_fully_verified_identity() {
+    let server = spawn_recording_server(vec![
+        (
+            "/searchBnetAccount",
+            r#"{"code":0,"data":{"customerToken":"synthetic-player-token","bnetId":"Tester#12345","roleId":"101"}}"#,
+        ),
+        (
+            "/customer/queryCard",
+            r#"{"code":0,"data":{"battleTag":"tester＃12345","role_id":101}}"#,
+        ),
+    ]);
+
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        " Tester#12345 ",
+        &server.base_url,
+    )
+    .await;
+
+    assert_eq!(
+        outcome,
+        CredentialProbeOutcome::Authenticated { role_id: 101 }
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn login_refresh_rejects_incomplete_or_conflicting_identity_without_overwriting() {
+    let cases = [
+        (
+            "search role missing",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345"}}"#,
+            )],
+            1,
+        ),
+        (
+            "search role differs",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":202}}"#,
+            )],
+            1,
+        ),
+        (
+            "search role aliases conflict",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101,"role_id":202}}"#,
+            )],
+            1,
+        ),
+        (
+            "search customer token missing",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":0,"data":{"bnetId":"Tester#12345","roleId":101}}"#,
+            )],
+            1,
+        ),
+        (
+            "search BattleTag missing",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":0,"data":{"customerToken":"new-token","roleId":101}}"#,
+            )],
+            1,
+        ),
+        (
+            "search BattleTag differs",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Other#9999","roleId":101}}"#,
+            )],
+            1,
+        ),
+        (
+            "card role missing",
+            vec![
+                (
+                    "/searchBnetAccount",
+                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+                ),
+                (
+                    "/customer/queryCard",
+                    r#"{"code":0,"data":{"battleTag":"Tester#12345"}}"#,
+                ),
+            ],
+            2,
+        ),
+        (
+            "card role differs",
+            vec![
+                (
+                    "/searchBnetAccount",
+                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+                ),
+                (
+                    "/customer/queryCard",
+                    r#"{"code":0,"data":{"battleTag":"Tester#12345","roleId":202}}"#,
+                ),
+            ],
+            2,
+        ),
+        (
+            "card role aliases conflict",
+            vec![
+                (
+                    "/searchBnetAccount",
+                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+                ),
+                (
+                    "/customer/queryCard",
+                    r#"{"code":0,"data":{"battleTag":"Tester#12345","roleId":101,"role_id":202}}"#,
+                ),
+            ],
+            2,
+        ),
+        (
+            "card BattleTag missing",
+            vec![
+                (
+                    "/searchBnetAccount",
+                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+                ),
+                (
+                    "/customer/queryCard",
+                    r#"{"code":0,"data":{"displayName":"Tester","roleId":101}}"#,
+                ),
+            ],
+            2,
+        ),
+        (
+            "card BattleTags conflict",
+            vec![
+                (
+                    "/searchBnetAccount",
+                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+                ),
+                (
+                    "/customer/queryCard",
+                    r#"{"code":0,"data":{"battleTag":"Tester#12345","bnetId":"Other#9999","roleId":101}}"#,
+                ),
+            ],
+            2,
+        ),
+        (
+            "search business failure",
+            vec![(
+                "/searchBnetAccount",
+                r#"{"code":500,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+            )],
+            1,
+        ),
+        (
+            "card business failure",
+            vec![
+                (
+                    "/searchBnetAccount",
+                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
+                ),
+                (
+                    "/customer/queryCard",
+                    r#"{"code":500,"data":{"battleTag":"Tester#12345","roleId":101}}"#,
+                ),
+            ],
+            2,
+        ),
+    ];
+
+    for (case, routes, expected_requests) in cases {
+        assert_probe_rejected(case, routes.clone(), expected_requests).await;
+        assert_refresh_failure_preserves_identity(case, routes, expected_requests).await;
+    }
+}
+
+#[tokio::test]
+async fn login_probe_classifies_authorization_and_temporary_failures() {
+    for status in ["401 Unauthorized", "403 Forbidden"] {
+        let server = spawn_status_server(status, 1);
+        let outcome = verify_credentials_with_base_url(
+            &synthetic_credentials(101),
+            "Tester#12345",
+            &server.base_url,
+        )
+        .await;
+        assert_eq!(outcome, CredentialProbeOutcome::Rejected, "{status}");
+    }
+
+    let server = spawn_status_server("503 Service Unavailable", 1);
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &server.base_url,
+    )
+    .await;
+    assert_eq!(outcome, CredentialProbeOutcome::TransientFailure);
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let unavailable_base_url = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &unavailable_base_url,
+    )
+    .await;
+    assert_eq!(outcome, CredentialProbeOutcome::TransientFailure);
+}
+
+#[tokio::test]
+async fn login_probe_classifies_timeout_as_temporary_failure() {
+    let server = spawn_timeout_server();
+
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &server.base_url,
+    )
+    .await;
+
+    assert_eq!(outcome, CredentialProbeOutcome::TransientFailure);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+async fn assert_refresh_failure_preserves_identity(
+    case: &str,
+    routes: Vec<(&'static str, &'static str)>,
+    expected_requests: usize,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let identity_path = temp.path().join("sync-identity.json");
+    save_player_target_for_path(
+        &identity_path,
+        &PlayerTarget {
+            input_bnet: "Existing#1000".to_string(),
+            resolved_bnet: Some("Existing#1000".to_string()),
+            customer_token: "existing-player-token".to_string(),
+            bound_at: "2026-08-01T00:00:00Z".to_string(),
+            source_role_id: Some(101),
+        },
+    )
+    .unwrap();
+    let server = spawn_recording_server(routes);
+
+    refresh_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &identity_path,
+        &server.base_url,
+    )
+    .await
+    .unwrap_err();
+
+    let identity = read_player_target_for_path(&identity_path).unwrap();
+    assert_eq!(identity.customer_token, "existing-player-token", "{case}");
+    assert_eq!(identity.input_bnet, "Existing#1000", "{case}");
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        expected_requests,
+        "{case}"
+    );
+}
+
+async fn assert_probe_rejected(
+    case: &str,
+    routes: Vec<(&'static str, &'static str)>,
+    expected_requests: usize,
+) {
+    let server = spawn_recording_server(routes);
+
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &server.base_url,
+    )
+    .await;
+
+    assert_eq!(outcome, CredentialProbeOutcome::Rejected, "{case}");
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        expected_requests,
+        "{case}"
+    );
 }
 
 #[tokio::test]
@@ -2203,6 +2512,36 @@ fn spawn_status_server(status: &'static str, requests_to_serve: usize) -> Record
                 format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             let _ = stream.write_all(response.as_bytes());
         }
+    });
+    RecordingServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
+}
+
+fn spawn_timeout_server() -> RecordingServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buffer = [0_u8; 8192];
+        let Ok(read) = stream.read(&mut buffer) else {
+            return;
+        };
+        captured.lock().unwrap().push(RecordedRequest {
+            first_line: String::from_utf8_lossy(&buffer[..read])
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+            headers: String::new(),
+            body: String::new(),
+        });
+        thread::sleep(Duration::from_secs(25));
     });
     RecordingServer {
         base_url: format!("http://{addr}"),
