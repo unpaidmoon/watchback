@@ -4,9 +4,9 @@
 
 实施分支：`codex/project-improvements`
 
-实施工作树：`D:\Codex\OW_data\owstats-local-implementation`
+实施位置：功能分支独立工作树
 
-目标主分支工作树：`D:\Codex\OW_data\owstats-local`
+目标位置：主分支工作树
 
 ## 1. 目标
 
@@ -100,7 +100,7 @@ require("react-router/dom/server");
 在功能分支工作树执行：
 
 ```powershell
-Set-Location D:\Codex\OW_data\owstats-local-implementation
+# 在功能分支工作树根目录执行
 git status --short --branch
 git rev-parse HEAD
 git rev-parse main
@@ -267,7 +267,7 @@ npm audit --omit=dev --json
 确保阶段 B 至 E 已分别提交且工作树干净，然后执行：
 
 ```powershell
-Set-Location D:\Codex\OW_data\owstats-local-implementation
+# 在功能分支工作树根目录执行
 git merge --no-ff main
 ```
 
@@ -361,7 +361,7 @@ cargo test --test phase4_login_redesign
 ### H.2 完整工作树验证
 
 ```powershell
-Set-Location D:\Codex\OW_data\owstats-local-implementation
+# 回到功能分支工作树根目录
 .\scripts\verify.ps1 -ChangedOnly
 ```
 
@@ -379,7 +379,7 @@ Set-Location D:\Codex\OW_data\owstats-local-implementation
 启动合并后的开发版：
 
 ```powershell
-Set-Location D:\Codex\OW_data\owstats-local-implementation\apps\owstats-desktop
+Set-Location apps\owstats-desktop
 npm run tauri:dev
 ```
 
@@ -455,7 +455,7 @@ git commit
 ### K.2 快进合并
 
 ```powershell
-Set-Location D:\Codex\OW_data\owstats-local
+# 在主分支工作树根目录执行
 git status --short --branch
 git merge --ff-only codex/project-improvements
 ```
@@ -516,60 +516,60 @@ git rev-parse HEAD
 
 ## 9. 完成定义
 
-- [ ] 主分支与功能分支 SHA 已重新确认；
-- [ ] 身份字段缺失和不一致测试先失败后通过；
-- [ ] 搜索结果必须具备一致 BattleTag 与 `roleId`；
-- [ ] 资料卡必须具备一致 BattleTag 与 `roleId`；
-- [ ] 失败路径不会发布账号或覆盖内部同步身份；
-- [ ] Router 门禁覆盖静态导入、动态导入和 `require`；
-- [ ] Router 门禁扫描源码、脚本和构建配置；
-- [ ] 安全例外元数据集中且带到期日期；
-- [ ] BattleTag 方案文档已按主题重命名；
-- [ ] 最新 `main` 已合入功能分支；
-- [ ] `commands.rs` 冲突正确解决；
-- [ ] 对局动态刷新命令、DTO、API 和测试完整保留；
-- [ ] 旧 BattleTag 用户态入口、API、命令和模型保持删除；
-- [ ] 自动合并文件完成语义复核；
-- [ ] 无冲突标记和 diff 空白错误；
-- [ ] 身份、Router、对局动态刷新定向测试通过；
-- [ ] `verify.ps1 -ChangedOnly` 通过；
-- [ ] Tauri 开发版人工回归通过；
+- [x] 主分支与功能分支 SHA 已重新确认；
+- [x] 身份字段缺失和不一致测试先失败后通过；
+- [x] 搜索结果必须具备一致 BattleTag 与 `roleId`；
+- [x] 资料卡必须具备一致 BattleTag 与 `roleId`；
+- [x] 失败路径不会发布账号或覆盖内部同步身份；
+- [x] Router 门禁覆盖静态导入、动态导入和 `require`；
+- [x] Router 门禁扫描源码、脚本和构建配置；
+- [x] 安全例外元数据集中且带到期日期；
+- [x] BattleTag 方案文档已按主题重命名；
+- [x] 最新 `main` 已合入功能分支；
+- [x] `commands.rs` 冲突正确解决；
+- [x] 对局动态刷新命令、DTO、API 和测试完整保留；
+- [x] 旧 BattleTag 用户态入口、API、命令和模型保持删除；
+- [x] 自动合并文件完成语义复核；
+- [x] 无冲突标记和 diff 空白错误；
+- [x] 身份、Router、对局动态刷新定向测试通过；
+- [x] `verify.ps1 -ChangedOnly` 通过；
+- [x] Tauri 开发版人工回归通过；
 - [ ] 提交后的完整 tracked-only 验证通过；
 - [ ] 两个工作树均干净；
 - [ ] 主分支通过 `git merge --ff-only` 合并；
 - [ ] 合并后 HEAD 与已验证功能分支 HEAD 一致。
 
-## 10. 实施记录模板
+## 10. 实施记录
 
 ```text
-实施日期：
-实施人员：
-实施前功能分支 HEAD：
-实施前 main HEAD：
-共同基点：
+实施日期：2026-08-03
+实施人员：Codex（子任务并行审计与修复）
+实施前功能分支 HEAD：d0afbf5
+实施前 main HEAD：e966a91
+共同基点：e660203
 
-身份验证修复提交：
-Router 门禁修复提交：
-文档重命名提交：
-主分支集成提交：
-最终功能分支 HEAD：
-最终 main HEAD：
+身份验证修复提交：36a6f31
+Router 门禁修复提交：c75dc4e
+文档重命名提交：03d3c38
+主分支集成提交：b0e4851
+最终功能分支 HEAD：待最终文档提交后记录
+最终 main HEAD：待快进合并后记录
 
-身份定向测试：
-Router 安全门禁：
-对局动态刷新定向测试：
-npm run check：
-cargo fmt：
-cargo clippy：
-cargo test：
-verify -ChangedOnly：
-开发版人工回归：
-tracked-only checkout：
+身份定向测试：通过（Rust 单元测试与 phase8_real_fetch）
+Router 安全门禁：通过（策略、检测器及真实 npm audit 受控例外）
+对局动态刷新定向测试：通过（前端缓存、实时刷新及 Rust revision 测试）
+npm run check：通过
+cargo fmt：通过
+cargo clippy：通过
+cargo test：通过
+verify -ChangedOnly：通过
+开发版人工回归：Tauri 开发版成功启动；路由、前进后退、刷新及查询参数通过浏览器自动化冒烟验证。真实账号登录因无测试凭据未执行。
+tracked-only checkout：待最终完整验证
 
-冲突解决说明：
-遗留问题：
-回滚提交：
-下一次 React Router 例外复查日期：
+冲突解决说明：`commands.rs` 保留主分支对局时间线 revision 命令与测试，同时保留功能分支账号身份同步实现，继续删除旧 BattleTag 重绑定命令。
+遗留问题：React Router 上游高危公告仍由限时策略例外管理；不得引入其 RSC/服务端 API。
+回滚提交：不适用；如需回滚，应按上述独立提交使用 `git revert`。
+下一次 React Router 例外复查日期：2026-09-02（到期后门禁自动失败）
 ```
 
 ## 11. 合并后的影响
