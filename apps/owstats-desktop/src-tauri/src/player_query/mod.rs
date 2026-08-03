@@ -273,7 +273,7 @@ mod tests {
                     anyhow::bail!("synthetic authenticated search failure")
                 }
                 Ok(
-                    json!({"code": 0, "data": {"battleTag": battle_tag, "accountKey": "memory-only"}}),
+                    json!({"code": 0, "data": {"battleTag": battle_tag, "accountKey": "synthetic-account-key"}}),
                 )
             })
         }

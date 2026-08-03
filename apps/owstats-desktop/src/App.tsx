@@ -104,7 +104,7 @@ function PlayerQueryFeatureRoutes({ queryIntent, onQueryPlayer }: { queryIntent:
     for (const eventName of ["sync-progress", "season-background-progress", "season-background-completed", "credential-login-progress"]) {
       void listen(eventName, () => { void refreshRuntime().catch(() => undefined); }).then((unlisten) => {
         if (disposed) unlisten(); else unlisteners.push(unlisten);
-      });
+      }).catch(() => undefined);
     }
     return () => {
       disposed = true;

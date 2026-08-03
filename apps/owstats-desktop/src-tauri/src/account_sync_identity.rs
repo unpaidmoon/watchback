@@ -67,27 +67,35 @@ async fn resolve_verified_identity(
         .await
         .map_err(VerifiedIdentityFailure::from_upstream)?;
     ensure_business_success(&payload, "读取账号同步身份")
-        .map_err(VerifiedIdentityFailure::rejected)?;
+        .map_err(|error| VerifiedIdentityFailure::from_business(&payload, error))?;
     ensure_role_matches(&payload, credentials.role_id, "同步身份与登录账号不一致")
         .map_err(VerifiedIdentityFailure::rejected)?;
+    ensure_target_key_aliases_agree(&payload).map_err(VerifiedIdentityFailure::rejected)?;
     let resolved_bnet = ensure_battle_tags_match(&payload, battle_tag, "同步身份与登录账号不一致")
-        .map_err(VerifiedIdentityFailure::rejected)?;
+        .map_err(|error| {
+            if has_battle_tag_evidence(&payload) {
+                VerifiedIdentityFailure::rejected(error)
+            } else {
+                VerifiedIdentityFailure::transient(error)
+            }
+        })?;
     let mut identity = target_from_search_payload(
         battle_tag,
         &payload,
         credentials.role_id,
         &Utc::now().to_rfc3339(),
     )
-    .map_err(VerifiedIdentityFailure::rejected)?;
+    .map_err(VerifiedIdentityFailure::transient)?;
     identity.resolved_bnet = Some(resolved_bnet);
     let card = client
         .query_card(&identity.customer_token)
         .await
         .map_err(VerifiedIdentityFailure::from_upstream)?;
-    ensure_business_success(&card, "验证账号资料卡").map_err(VerifiedIdentityFailure::rejected)?;
+    ensure_business_success(&card, "验证账号资料卡")
+        .map_err(|error| VerifiedIdentityFailure::from_business(&card, error))?;
     ensure_role_matches(&card, credentials.role_id, "资料卡与登录账号不一致")
         .map_err(VerifiedIdentityFailure::rejected)?;
-    ensure_battle_tags_match(&card, battle_tag, "资料卡与登录账号不一致")
+    ensure_optional_battle_tags_match(&card, battle_tag, "资料卡与登录账号不一致")
         .map_err(VerifiedIdentityFailure::rejected)?;
     Ok(identity)
 }
@@ -111,6 +119,19 @@ impl VerifiedIdentityFailure {
         match CredentialUseFailure::from_upstream_error(&error) {
             CredentialUseFailure::Unauthorized | CredentialUseFailure::Forbidden => Self::Rejected,
             CredentialUseFailure::Transient => Self::Transient(error),
+        }
+    }
+
+    fn from_business(payload: &serde_json::Value, error: anyhow::Error) -> Self {
+        let code = payload.get("code").and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
+        });
+        if matches!(code, Some(401 | 403)) {
+            Self::Rejected
+        } else {
+            Self::Transient(error)
         }
     }
 
@@ -149,12 +170,10 @@ fn ensure_role_matches(payload: &serde_json::Value, role_id: i64, message: &str)
         .get("data")
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| anyhow!(message.to_string()))?;
-    let mut found = false;
     for key in ["roleId", "role_id"] {
         let Some(value) = data.get(key) else {
             continue;
         };
-        found = true;
         let parsed = value
             .as_i64()
             .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()));
@@ -162,9 +181,62 @@ fn ensure_role_matches(payload: &serde_json::Value, role_id: i64, message: &str)
             return Err(anyhow!(message.to_string()));
         }
     }
-    if !found {
-        return Err(anyhow!(message.to_string()));
+    Ok(())
+}
+
+fn ensure_target_key_aliases_agree(payload: &serde_json::Value) -> Result<()> {
+    let data = payload
+        .get("data")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow!("同步身份响应缺少数据"))?;
+    let mut observed: Option<&str> = None;
+    for key in ["accountKey", "customerToken", "customer_token"] {
+        let Some(value) = data
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if observed.is_some_and(|existing| existing != value) {
+            return Err(anyhow!("同步身份目标标识冲突"));
+        }
+        observed = Some(value);
     }
+    Ok(())
+}
+
+fn ensure_optional_battle_tags_match(
+    payload: &serde_json::Value,
+    battle_tag: &str,
+    message: &str,
+) -> Result<()> {
+    let data = payload
+        .get("data")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow!(message.to_string()))?;
+    for key in [
+        "bnetId",
+        "bnet",
+        "battleTag",
+        "battletag",
+        "BattleTag",
+        "name",
+    ] {
+        let Some(candidate) = data
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|candidate| looks_like_battle_tag(candidate))
+        else {
+            continue;
+        };
+        if !same_battle_tag(candidate, battle_tag) {
+            return Err(anyhow!(message.to_string()));
+        }
+    }
+
     Ok(())
 }
 
@@ -213,6 +285,28 @@ fn ensure_battle_tags_match(
         matched.get_or_insert_with(|| candidate.to_string());
     }
     matched.ok_or_else(|| anyhow!(message.to_string()))
+}
+
+fn has_battle_tag_evidence(payload: &serde_json::Value) -> bool {
+    payload
+        .get("data")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|data| {
+            [
+                "bnetId",
+                "bnet",
+                "battleTag",
+                "battletag",
+                "BattleTag",
+                "name",
+            ]
+            .iter()
+            .any(|key| {
+                data.get(*key)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(looks_like_battle_tag)
+            })
+        })
 }
 
 fn looks_like_battle_tag(value: &str) -> bool {

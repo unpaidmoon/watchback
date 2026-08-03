@@ -88,11 +88,17 @@ async fn login_refresh_persists_only_the_verified_account_sync_identity() {
 }
 
 #[tokio::test]
-async fn login_probe_rejects_search_identity_without_role_id() {
-    let server = spawn_recording_server(vec![(
-        "/searchBnetAccount",
-        r#"{"code":0,"data":{"customerToken":"synthetic-player-token","bnetId":"Tester#12345"}}"#,
-    )]);
+async fn login_probe_accepts_supported_identity_contract_without_role_echoes() {
+    let server = spawn_recording_server(vec![
+        (
+            "/searchBnetAccount",
+            r#"{"code":0,"data":{"accountKey":"synthetic-player-token","battleTag":"Tester#12345"}}"#,
+        ),
+        (
+            "/customer/queryCard",
+            r#"{"code":0,"data":{"icon":"synthetic-icon","level":42,"gameTime":3600}}"#,
+        ),
+    ]);
 
     let outcome = verify_credentials_with_base_url(
         &synthetic_credentials(101),
@@ -101,8 +107,11 @@ async fn login_probe_rejects_search_identity_without_role_id() {
     )
     .await;
 
-    assert_eq!(outcome, CredentialProbeOutcome::Rejected);
-    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        outcome,
+        CredentialProbeOutcome::Authenticated { role_id: 101 }
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -133,16 +142,8 @@ async fn login_probe_authenticates_only_a_fully_verified_identity() {
 }
 
 #[tokio::test]
-async fn login_refresh_rejects_incomplete_or_conflicting_identity_without_overwriting() {
+async fn login_refresh_rejects_conflicting_identity_without_overwriting() {
     let cases = [
-        (
-            "search role missing",
-            vec![(
-                "/searchBnetAccount",
-                r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345"}}"#,
-            )],
-            1,
-        ),
         (
             "search role differs",
             vec![(
@@ -160,42 +161,12 @@ async fn login_refresh_rejects_incomplete_or_conflicting_identity_without_overwr
             1,
         ),
         (
-            "search customer token missing",
-            vec![(
-                "/searchBnetAccount",
-                r#"{"code":0,"data":{"bnetId":"Tester#12345","roleId":101}}"#,
-            )],
-            1,
-        ),
-        (
-            "search BattleTag missing",
-            vec![(
-                "/searchBnetAccount",
-                r#"{"code":0,"data":{"customerToken":"new-token","roleId":101}}"#,
-            )],
-            1,
-        ),
-        (
             "search BattleTag differs",
             vec![(
                 "/searchBnetAccount",
                 r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Other#9999","roleId":101}}"#,
             )],
             1,
-        ),
-        (
-            "card role missing",
-            vec![
-                (
-                    "/searchBnetAccount",
-                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
-                ),
-                (
-                    "/customer/queryCard",
-                    r#"{"code":0,"data":{"battleTag":"Tester#12345"}}"#,
-                ),
-            ],
-            2,
         ),
         (
             "card role differs",
@@ -226,20 +197,6 @@ async fn login_refresh_rejects_incomplete_or_conflicting_identity_without_overwr
             2,
         ),
         (
-            "card BattleTag missing",
-            vec![
-                (
-                    "/searchBnetAccount",
-                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
-                ),
-                (
-                    "/customer/queryCard",
-                    r#"{"code":0,"data":{"displayName":"Tester","roleId":101}}"#,
-                ),
-            ],
-            2,
-        ),
-        (
             "card BattleTags conflict",
             vec![
                 (
@@ -253,34 +210,54 @@ async fn login_refresh_rejects_incomplete_or_conflicting_identity_without_overwr
             ],
             2,
         ),
-        (
-            "search business failure",
-            vec![(
-                "/searchBnetAccount",
-                r#"{"code":500,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
-            )],
-            1,
-        ),
-        (
-            "card business failure",
-            vec![
-                (
-                    "/searchBnetAccount",
-                    r#"{"code":0,"data":{"customerToken":"new-token","bnetId":"Tester#12345","roleId":101}}"#,
-                ),
-                (
-                    "/customer/queryCard",
-                    r#"{"code":500,"data":{"battleTag":"Tester#12345","roleId":101}}"#,
-                ),
-            ],
-            2,
-        ),
     ];
 
     for (case, routes, expected_requests) in cases {
         assert_probe_rejected(case, routes.clone(), expected_requests).await;
         assert_refresh_failure_preserves_identity(case, routes, expected_requests).await;
     }
+}
+
+#[tokio::test]
+async fn login_probe_treats_incomplete_and_unknown_business_responses_as_temporary() {
+    let cases = [
+        r#"{"code":0,"data":{"battleTag":"Tester#12345"}}"#,
+        r#"{"code":0,"data":{"accountKey":"new-token"}}"#,
+        r#"{"code":500,"data":{"accountKey":"new-token","battleTag":"Tester#12345"}}"#,
+    ];
+
+    for response in cases {
+        let server = spawn_recording_server(vec![("/searchBnetAccount", response)]);
+        let outcome = verify_credentials_with_base_url(
+            &synthetic_credentials(101),
+            "Tester#12345",
+            &server.base_url,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            CredentialProbeOutcome::TransientFailure,
+            "{response}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn login_probe_rejects_conflicting_target_key_aliases() {
+    let server = spawn_recording_server(vec![(
+        "/searchBnetAccount",
+        r#"{"code":0,"data":{"accountKey":"first-token","customerToken":"other-token","battleTag":"Tester#12345"}}"#,
+    )]);
+
+    let outcome = verify_credentials_with_base_url(
+        &synthetic_credentials(101),
+        "Tester#12345",
+        &server.base_url,
+    )
+    .await;
+
+    assert_eq!(outcome, CredentialProbeOutcome::Rejected);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

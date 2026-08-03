@@ -13,3 +13,6 @@ const sensitive = scanRoot(fixturePath("sensitive-key"));
 assert.equal(sensitive.length, 1);
 assert.equal(sensitive[0].rule, "sensitive-key");
 assert.equal(JSON.stringify(sensitive).includes("synthetic-secret"), false);
+const accountKey = scanRoot(fixturePath("account-key"));
+assert.equal(accountKey.length, 1);
+assert.equal(accountKey[0].rule, "sensitive-key");

@@ -275,6 +275,7 @@ fn is_sensitive_key(key: &str) -> bool {
         "apikey",
         "dts",
         "credential",
+        "accountkey",
     ]
     .iter()
     .any(|candidate| normalized.contains(candidate))
@@ -283,6 +284,8 @@ fn is_sensitive_key(key: &str) -> bool {
 fn redact_assignments(mut value: String) -> String {
     for label in [
         "authorization",
+        "accountkey",
+        "account_key",
         "customer_token",
         "api_key",
         "apikey",

@@ -177,7 +177,7 @@ export function OnboardingPage() {
         return;
       }
       unlistenSync = handler;
-    });
+    }).catch(() => undefined);
     void listen<CredentialLoginProgress>("credential-login-progress", (event) => {
       if (!disposed) {
         setLoginProgress(event.payload);
@@ -188,7 +188,7 @@ export function OnboardingPage() {
         return;
       }
       unlistenLogin = handler;
-    });
+    }).catch(() => undefined);
     for (const eventName of [
       "season-background-progress",
       "season-background-completed",
@@ -212,7 +212,7 @@ export function OnboardingPage() {
           return;
         }
         backgroundUnlisteners.push(handler);
-      });
+      }).catch(() => undefined);
     }
     return () => {
       disposed = true;

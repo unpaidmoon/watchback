@@ -51,14 +51,16 @@ pub fn target_from_search_payload(
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| anyhow!("未找到目标玩家"))?;
     let customer_token = data
-        .get("customerToken")
+        .get("accountKey")
+        .or_else(|| data.get("customerToken"))
         .or_else(|| data.get("customer_token"))
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("搜索结果缺少玩家标识"))?;
     let resolved_bnet = data
-        .get("bnetId")
+        .get("battleTag")
+        .or_else(|| data.get("bnetId"))
         .or_else(|| data.get("name"))
         .and_then(serde_json::Value::as_str)
         .map(str::trim)

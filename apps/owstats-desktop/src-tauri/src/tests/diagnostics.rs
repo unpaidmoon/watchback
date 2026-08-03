@@ -3,6 +3,11 @@ use super::*;
 #[test]
 fn sensitive_fields_and_inline_assignments_are_redacted() {
     assert!(is_sensitive_key("customer_token"));
+    assert!(is_sensitive_key("accountKey"));
+    assert_eq!(
+        sanitize_value("request failed accountKey=abc123, status=500"),
+        "request failed accountKey=[REDACTED], status=500"
+    );
     assert_eq!(
         sanitize_value("request failed token=abc123 season=23"),
         "request failed token=[REDACTED]"

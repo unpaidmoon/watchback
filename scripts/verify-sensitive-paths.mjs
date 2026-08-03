@@ -55,7 +55,7 @@ function findingsForText(text, relativePath, scanFixtureRoot) {
   const findings = [];
   const rules = [
     ["absolute-path", /(?:D:[\\/]Codex[\\/]|C:[\\/]Users[\\/]|\/@fs\/)/g],
-    ["sensitive-key", /["'](?:customer[_-]?token|access[_-]?token|token|cookie|authorization|credential|storage)["']\s*:\s*["'](?!\*\*\*REDACTED\*\*\*)[^"']+/gi],
+    ["sensitive-key", /["'](?:account[_-]?key|customer[_-]?token|access[_-]?token|token|cookie|authorization|credential|storage)["']\s*:\s*["'](?!\*\*\*REDACTED\*\*\*)[^"']+/gi],
   ];
   for (const [rule, pattern] of rules) {
     if (rule === "sensitive-key" && basename(relativePath) === "package-lock.json") continue;
