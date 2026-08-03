@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 pub const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 pub const DEEPSEEK_CREDENTIAL_TARGET: &str = "OWStatsLocal/DeepSeekApiKey";
 pub const DEEPSEEK_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const BUNDLED_DEEPSEEK_API_KEY: &str = "sk-0641143b3e13450bb8a17a145a1e14e4";
+include!(concat!(env!("OUT_DIR"), "/bundled_deepseek_api_key.rs"));
 
 pub trait DeepSeekCredentialStore: Send + Sync {
     fn read(&self) -> Result<Option<String>>;
@@ -83,7 +83,7 @@ impl DeepSeekKeyManager {
             build_http_client()?,
             DEFAULT_DEEPSEEK_BASE_URL,
             Arc::new(WindowsDeepSeekCredentialStore),
-            Some(BUNDLED_DEEPSEEK_API_KEY),
+            BUNDLED_DEEPSEEK_API_KEY,
         )
     }
 
