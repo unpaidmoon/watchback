@@ -48,7 +48,7 @@ import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFronten
 import { isCurrentSeasonEvent } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, OnboardingStatus, PlayerGameAction, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.5.0";
 const browserPreviewLoginHint = "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
 
 let dashboardCache: DashboardSnapshot | null = null;
