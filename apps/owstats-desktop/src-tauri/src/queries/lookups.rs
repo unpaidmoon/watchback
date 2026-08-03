@@ -254,6 +254,7 @@ fn manual_arena_map_names() -> &'static [(&'static str, &'static str)] {
     &[
         ("576460752303428183", "泰晤士区"),
         ("576460752303428209", "火药桶矿井"),
+        ("576460752303428488", "火药桶矿井"),
         ("576460752303428223", "绿洲城 - 花园"),
         ("576460752303429014", "绿洲城 - 大学"),
         ("576460752303428469", "五行大学 - 水学院"),
@@ -287,6 +288,14 @@ mod tests {
     #[test]
     fn resolves_samoa_arena_map_name() {
         assert_eq!(manual_arena_map_name("576460752303428437"), Some("萨摩亚"));
+    }
+
+    #[test]
+    fn resolves_powder_keg_mine_alias_map_name() {
+        assert_eq!(
+            manual_arena_map_name("576460752303428488"),
+            Some("火药桶矿井")
+        );
     }
 }
 
