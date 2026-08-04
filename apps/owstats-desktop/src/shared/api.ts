@@ -35,7 +35,18 @@ import type {
   SeasonBackgroundStatus,
   SeasonSyncResult,
   UserSettings,
+  UpdateCheckResult,
+  UpdateDownloadSource,
 } from "./types";
+
+export const checkAppUpdate = () =>
+  invoke<UpdateCheckResult>("check_app_update");
+
+export const getAppVersion = () =>
+  invoke<string>("get_app_version");
+
+export const openUpdateDownload = (source: UpdateDownloadSource) =>
+  invoke<void>("open_update_download", { source });
 
 export const listAccounts = () => invoke<AccountManagerStatus>("list_accounts");
 

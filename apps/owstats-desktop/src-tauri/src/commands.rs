@@ -5,6 +5,7 @@ use crate::ai_roast::coordinator::{
 };
 use crate::deepseek_key::DeepSeekKeyManager;
 use crate::importer::existing_import_summary;
+use crate::update_check::{UpdateCheckResult, UpdateChecker, UpdateDownloadSource};
 use crate::PublishedInstallData;
 use crate::{
     get_friend_detail as query_friend_detail, get_match_detail, list_filter_options, list_matches,
@@ -24,6 +25,24 @@ use tauri::{ipc::Channel, AppHandle, Emitter, State};
 
 const PROJECT_REPOSITORY_URL: &str = "https://github.com/fengpianpianne/watchback";
 const PRODUCT_FEEDBACK_URL: &str = "https://watchback.featurebase.app/zh-CN";
+
+#[tauri::command]
+pub async fn check_app_update(
+    checker: State<'_, UpdateChecker>,
+) -> Result<UpdateCheckResult, String> {
+    Ok(checker.check_once().await)
+}
+
+#[tauri::command]
+pub fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+pub fn open_update_download(source: UpdateDownloadSource) -> Result<(), String> {
+    tauri_plugin_opener::open_url(crate::update_check::download_url(source), None::<&str>)
+        .map_err(to_message)
+}
 
 #[tauri::command]
 pub fn record_frontend_diagnostic(kind: String, message: String) {

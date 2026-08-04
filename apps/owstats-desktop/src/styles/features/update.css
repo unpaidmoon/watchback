@@ -1,0 +1,233 @@
+.updateAnnouncementBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgb(0 0 0 / 0.58);
+  backdrop-filter: blur(4px);
+  animation: updateAnnouncementFadeIn var(--motion-fast) var(--ease-standard);
+}
+
+.updateAnnouncementDialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, auto) auto auto;
+  gap: var(--space-4);
+  overflow: hidden;
+  padding: var(--space-6);
+  border: 1px solid var(--phase6-line);
+  border-radius: var(--radius-primary);
+  background: var(--phase6-panel-solid);
+  color: var(--phase6-ink);
+  box-shadow: 0 24px 72px rgb(0 0 0 / 0.34);
+  backdrop-filter: var(--phase6-glass-blur);
+  animation: updateAnnouncementEnter 220ms var(--ease-standard);
+}
+
+.updateAnnouncementHeader {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.updateAnnouncementIcon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--data-primary) 12%, var(--phase6-panel-solid));
+  color: var(--data-primary);
+}
+
+.updateAnnouncementHeading {
+  min-width: 0;
+}
+
+.updateAnnouncementEyebrow {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--phase6-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.updateAnnouncementHeading h2,
+.updateAnnouncementContent h3,
+.updateAnnouncementMeta,
+.updateAnnouncementError {
+  margin: 0;
+}
+
+.updateAnnouncementHeading h2 {
+  overflow-wrap: anywhere;
+  font-size: 21px;
+  line-height: 1.35;
+}
+
+.updateAnnouncementClose {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--phase6-muted);
+  cursor: pointer;
+}
+
+.updateAnnouncementClose:hover {
+  border-color: var(--phase6-line);
+  background: var(--phase6-subtle);
+  color: var(--phase6-ink);
+}
+
+.updateAnnouncementMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--phase6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.updateAnnouncementMeta strong {
+  color: var(--data-primary);
+}
+
+.updateAnnouncementContent {
+  min-height: 0;
+  max-height: min(340px, 45vh);
+  overflow-y: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--phase6-line);
+  border-radius: var(--radius-secondary);
+  background: color-mix(in srgb, var(--phase6-subtle) 72%, transparent);
+}
+
+.updateAnnouncementContent h3 {
+  font-size: 14px;
+}
+
+.updateAnnouncementContent ul {
+  margin: var(--space-3) 0 0;
+  padding-left: 1.4em;
+}
+
+.updateAnnouncementContent li {
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+.updateAnnouncementContent li + li {
+  margin-top: var(--space-2);
+}
+
+.updateAnnouncementError {
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--status-danger) 36%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--status-danger-bg);
+  color: var(--status-danger-strong);
+}
+
+.updateAnnouncementActions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.updateAnnouncementDownloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.updateDownloadButton,
+.updateAnnouncementLater {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
+}
+
+.updateDownloadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid var(--phase6-line);
+  background: var(--phase6-subtle);
+  color: var(--phase6-ink);
+}
+
+.updateDownloadButton-github {
+  border-color: var(--action-primary);
+  background: var(--action-primary);
+  color: var(--action-on-primary);
+}
+
+.updateDownloadButton:hover:not(:disabled),
+.updateAnnouncementLater:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--data-primary) 10%, var(--phase6-panel-solid));
+  border-color: color-mix(in srgb, var(--data-primary) 45%, var(--phase6-line));
+  color: var(--phase6-ink);
+}
+
+.updateDownloadButton:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.updateAnnouncementLater {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--phase6-muted);
+}
+
+:root[data-theme="dark"] .updateAnnouncementError {
+  background: color-mix(in srgb, var(--status-danger) 14%, var(--phase6-panel-solid));
+  color: color-mix(in srgb, var(--status-danger) 58%, white);
+}
+
+@keyframes updateAnnouncementFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes updateAnnouncementEnter {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 620px) {
+  .updateAnnouncementDialog {
+    padding: var(--space-4);
+  }
+
+  .updateAnnouncementActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .updateAnnouncementDownloads,
+  .updateDownloadButton,
+  .updateAnnouncementLater {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .updateAnnouncementBackdrop,
+  .updateAnnouncementDialog {
+    animation: none;
+  }
+}

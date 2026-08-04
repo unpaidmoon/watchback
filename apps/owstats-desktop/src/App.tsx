@@ -11,6 +11,8 @@ import { RouteFocusManager } from "./shared/page-shell/RouteFocusManager";
 import { phase6NavItems } from "./shared/phase6Shell";
 import { buildReviewHref, legacyReviewRedirectHref, parsePositiveSeasonParam } from "./features/review/reviewNavigation";
 import { LiveMatchTimelineRoot } from "./features/matches/liveMatchTimelineEventAdapter";
+import { UpdateAnnouncementDialog } from "./features/update/UpdateAnnouncementDialog";
+import { useStartupUpdateCheck } from "./features/update/useStartupUpdateCheck";
 
 const watchbackMarkUrl = new URL("../assets/brand/watchback/watchback-mark.svg", import.meta.url).href;
 const FriendDetailPage = lazy(() => import("./pages/FriendDetailPage").then((module) => ({ default: module.FriendDetailPage })));
@@ -163,6 +165,7 @@ export function App() {
   const navigate = useNavigate();
   const queryIntentId = useRef(0);
   const [queryIntent, setQueryIntent] = useState<PlayerQueryIntent | null>(null);
+  const startupUpdate = useStartupUpdateCheck();
   const queryPlayer = useCallback((battleTag: string) => {
     setQueryIntent({ id: ++queryIntentId.current, battleTag });
     navigate("/player-query");
@@ -210,6 +213,13 @@ export function App() {
           </Suspense>
         </div>
       </main>
+      {startupUpdate.announcement && startupUpdate.currentVersion ? (
+        <UpdateAnnouncementDialog
+          announcement={startupUpdate.announcement}
+          currentVersion={startupUpdate.currentVersion}
+          onDismiss={startupUpdate.dismiss}
+        />
+      ) : null}
     </>
   );
 }

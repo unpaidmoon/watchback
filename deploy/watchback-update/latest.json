@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "latestVersion": "0.5.2",
+  "publishedAt": "2026-08-04",
+  "title": "Watchback v0.5.2",
+  "notes": [
+    "加入程序内检查更新与更新公告功能"
+  ]
+}

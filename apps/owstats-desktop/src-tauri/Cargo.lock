@@ -2419,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "owstats-desktop"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2429,6 +2429,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rusqlite",
  "rustix",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

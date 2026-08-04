@@ -57,7 +57,8 @@ fn keys(store: Arc<KeyStore>) -> DeepSeekKeyManager {
     DeepSeekKeyManager::with_store(reqwest::Client::new(), "http://127.0.0.1:9", store).unwrap()
 }
 fn client(url: &str) -> DeepSeekRoastClient {
-    DeepSeekRoastClient::with_client(reqwest::Client::new(), url, Duration::from_secs(3)).unwrap()
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    DeepSeekRoastClient::with_client(client, url, Duration::from_secs(3)).unwrap()
 }
 
 fn database(name: &str) -> Result<(tempfile::TempDir, OwDatabase)> {

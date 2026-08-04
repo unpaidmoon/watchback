@@ -44,6 +44,7 @@ pub mod season_fetch;
 mod settings;
 mod sync;
 mod sync_coordinator;
+pub mod update_check;
 
 pub use ai_roast::coordinator::AiRoastGenerationResult;
 pub use analytics::{get_friend_analytics, get_friend_detail, get_season_analysis};
@@ -1058,6 +1059,7 @@ pub fn run() -> anyhow::Result<()> {
         .manage(background_manager)
         .manage(live_update_manager)
         .manage(player_query_service)
+        .manage(update_check::UpdateChecker::new())
         .setup(move |app| {
             let account_context = account_context::AccountContextManager::load(shared.clone())
                 .map_err(|error| anyhow::anyhow!("无法初始化账号管理: {error}"))?;
@@ -1126,6 +1128,9 @@ pub fn run() -> anyhow::Result<()> {
         .manage(qr_login::QrLoginCoordinator::default())
         .invoke_handler(tauri::generate_handler![
             commands::record_frontend_diagnostic,
+            commands::check_app_update,
+            commands::get_app_version,
+            commands::open_update_download,
             commands::get_overview,
             commands::open_product_feedback,
             commands::open_project_repository,

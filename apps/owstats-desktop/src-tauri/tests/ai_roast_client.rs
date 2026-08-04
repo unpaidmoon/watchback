@@ -273,7 +273,8 @@ fn body(request: &str) -> Value {
     serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap()
 }
 fn client(url: &str, timeout: Duration) -> DeepSeekRoastClient {
-    DeepSeekRoastClient::with_client(Client::new(), url, timeout).unwrap()
+    let client = Client::builder().no_proxy().build().unwrap();
+    DeepSeekRoastClient::with_client(client, url, timeout).unwrap()
 }
 
 #[test]

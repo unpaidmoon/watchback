@@ -213,18 +213,17 @@ mod tests {
         format!("http://{address}/synthetic")
     }
 
+    fn local_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
     #[tokio::test]
     async fn unexpected_redirect_returns_context_and_status_without_panicking() {
         let endpoint = spawn_response_server("302 Found", "");
-        let error = get_json_with_retry(
-            &reqwest::Client::new(),
-            &endpoint,
-            &[],
-            "synthetic sync redirect",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+        let error = get_json_with_retry(&local_client(), &endpoint, &[], "synthetic sync redirect")
+            .await
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("synthetic sync redirect"));
         assert!(error.contains("unexpected HTTP status 302 Found"));
@@ -233,15 +232,11 @@ mod tests {
     #[tokio::test]
     async fn malformed_json_error_includes_context_and_original_decode_display() {
         let endpoint = spawn_response_server("200 OK", "not-json");
-        let error = get_json_with_retry(
-            &reqwest::Client::new(),
-            &endpoint,
-            &[],
-            "synthetic malformed JSON",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+        let error =
+            get_json_with_retry(&local_client(), &endpoint, &[], "synthetic malformed JSON")
+                .await
+                .unwrap_err()
+                .to_string();
 
         assert!(error.contains("synthetic malformed JSON"));
         assert!(error.contains("error decoding response body"));

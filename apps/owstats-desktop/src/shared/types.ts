@@ -12,6 +12,27 @@ export type Overview = {
   importSummary: ImportSummary | null;
 };
 
+export type UpdateCheckStatus =
+  | "updateAvailable"
+  | "upToDate"
+  | "disabled"
+  | "unavailable";
+
+export type UpdateAnnouncement = {
+  latestVersion: string;
+  publishedAt: string;
+  title: string;
+  notes: string[];
+};
+
+export type UpdateCheckResult = {
+  status: UpdateCheckStatus;
+  currentVersion: string;
+  announcement: UpdateAnnouncement | null;
+};
+
+export type UpdateDownloadSource = "github" | "baidu" | "quark";
+
 export type MatchFilters = {
   season?: number;
   hero?: string;

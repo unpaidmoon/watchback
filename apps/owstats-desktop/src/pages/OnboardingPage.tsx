@@ -14,6 +14,7 @@ import {
   addAccount,
   cancelDashenLogin,
   getOnboardingStatus,
+  getAppVersion,
   getUserSettings,
   getSeasonSyncStatus,
   getPlayerProfile,
@@ -48,7 +49,6 @@ import { clearAccountScopedFrontendCaches } from "../shared/accountScopedFronten
 import { isCurrentSeasonEvent } from "../shared/seasonSyncEvents";
 import { PageHeader } from "../shared/page-shell";
 import type { AccountManagerStatus, AccountSummary, CredentialLoginProgress, OnboardingStatus, PlayerGameAction, PlayerProfile, SeasonBackgroundEvent, SeasonBackgroundStatus, SyncMode, SyncProgress, UserSettings } from "../shared/types";
-const APP_VERSION = "0.5.0";
 const browserPreviewLoginHint = "当前浏览器预览无法连接桌面后端，请在 Tauri 应用中使用登录和同步功能。";
 
 let dashboardCache: DashboardSnapshot | null = null;
@@ -759,7 +759,7 @@ export function OnboardingPage() {
           onCompleted={completeQrAccountLogin}
           onUseExistingLogin={async () => { await runAddAccount(); }}
         />
-        <VersionDialog open={versionDialogOpen} onClose={closeVersionDialog} />
+        {versionDialogOpen ? <VersionDialog onClose={closeVersionDialog} /> : null}
         {gameActionDialogOpen && gameAction ? (
           <ProfileGameActionDialog action={gameAction} onClose={closeGameActionDialog} />
         ) : null}
@@ -779,11 +779,34 @@ function SettingsPlaceholder({ icon, label, onClick, disabled = false }: { icon:
   );
 }
 
-function VersionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function VersionDialog({ onClose }: { onClose: () => void }) {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!open) return;
+    if (!hasDesktopBackend()) {
+      setVersion(null);
+      setLoading(false);
+      return;
+    }
+    let disposed = false;
+    setVersion(null);
+    setLoading(true);
+    void getAppVersion()
+      .then((value) => {
+        if (!disposed) setVersion(value);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!disposed) setLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -797,16 +820,17 @@ function VersionDialog({ open, onClose }: { open: boolean; onClose: () => void }
       document.removeEventListener("keydown", onKeyDown);
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [open, onClose]);
+  }, [onClose]);
 
-  if (!open) return null;
   return (
     <div className="versionDialogBackdrop" role="presentation" onMouseDown={onClose}>
       <section className="versionDialog" role="dialog" aria-modal="true" aria-labelledby="version-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
         <BadgeInfo aria-hidden="true" size={24} />
         <div>
           <h3 id="version-dialog-title">版本号</h3>
-          <p className="versionDialogNumber">{APP_VERSION}</p>
+          <p className="versionDialogNumber" aria-live="polite">
+            {loading ? "正在读取版本" : version ?? "版本信息不可用"}
+          </p>
         </div>
         <button ref={closeButtonRef} className="iconButton versionDialogClose" type="button" aria-label="关闭版本号弹窗" onClick={onClose}>
           <X aria-hidden="true" size={20} />
